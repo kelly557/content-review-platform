@@ -11,6 +11,7 @@ import {
   MenuUnfoldOutlined,
   UserOutlined,
   SettingOutlined,
+  TagsOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
@@ -57,6 +58,8 @@ const ALL_NAV: NavNode[] = [
     ],
   },
   { key: 'admin', path: '/admin/users', label: '系统管理', icon: <TeamOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
+  { key: 'tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
+  { key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
 ]
 
 export default function AppLayout() {

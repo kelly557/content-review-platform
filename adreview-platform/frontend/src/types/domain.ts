@@ -226,7 +226,7 @@ export interface WorkflowTemplate {
   code: string
   name: string
   description?: string | null
-  definition: { stages: Array<{ key: string; name: string; role: string; mode: string }> }
+  definition: { stages?: Array<{ key: string; name: string; role: string; mode: string }>; review_process?: string }
   is_active: boolean
 }
 
@@ -586,7 +586,153 @@ export interface HumanReviewConfig {
   is_enabled: boolean
   risk_levels: RiskLevel[]
   review_rule_id: number | null
-  notify_plan_id: number | null
   created_at: string
   updated_at: string | null
 }
+
+// ─── Tag management (flat multi-dimensional, metadata-only) ───────────────
+
+export type TagDomain =
+  | 'politics'
+  | 'porn'
+  | 'violence'
+  | 'ads_law'
+  | 'medical'
+  | 'finance'
+  | 'minor'
+  | 'privacy'
+  | 'ip'
+  | 'gambling'
+  | 'fraud'
+  | 'custom'
+
+export type TagCategory =
+  | 'figure'
+  | 'event'
+  | 'organization'
+  | 'symbol'
+  | 'claim'
+  | 'slogan'
+  | 'scene'
+  | 'product'
+  | 'price'
+  | 'absolute_term'
+  | 'credential'
+  | 'custom'
+
+export type TagStatus = 'draft' | 'active' | 'deprecated'
+export type TagSource = 'platform' | 'enterprise' | 'imported'
+
+export interface Tag {
+  id: string
+  code: string
+  name: string
+  name_en?: string | null
+  description?: string | null
+  domain: TagDomain
+  category: TagCategory
+  jurisdictions: string[]
+  industries: string[]
+  channels: string[]
+  knowledge_refs: string[]
+  evidence_refs: string[]
+  source: TagSource
+  status: TagStatus
+  version: number
+  created_at: string
+  updated_at?: string | null
+}
+
+export interface TagSummary {
+  id: string
+  code: string
+  name: string
+  name_en?: string | null
+  domain: TagDomain
+  category: TagCategory
+  jurisdictions: string[]
+  industries: string[]
+  channels: string[]
+  source: TagSource
+  status: TagStatus
+  updated_at?: string | null
+}
+
+export interface TagCreate {
+  code?: string
+  name: string
+  name_en?: string
+  description?: string
+  domain: TagDomain
+  category: TagCategory
+  jurisdictions?: string[]
+  industries?: string[]
+  channels?: string[]
+  knowledge_refs?: string[]
+  evidence_refs?: string[]
+  source?: TagSource
+  status?: TagStatus
+}
+
+export interface TagUpdate {
+  name?: string
+  name_en?: string | null
+  description?: string | null
+  domain?: TagDomain
+  category?: TagCategory
+  jurisdictions?: string[]
+  industries?: string[]
+  channels?: string[]
+  knowledge_refs?: string[]
+  evidence_refs?: string[]
+  status?: TagStatus
+}
+
+export const TAG_DOMAIN_OPTIONS: { value: TagDomain; label: string; cn: string }[] = [
+  { value: 'politics', label: 'politics', cn: '涉政' },
+  { value: 'porn', label: 'porn', cn: '涉黄' },
+  { value: 'violence', label: 'violence', cn: '涉暴' },
+  { value: 'ads_law', label: 'ads_law', cn: '广告法' },
+  { value: 'medical', label: 'medical', cn: '医药' },
+  { value: 'finance', label: 'finance', cn: '金融' },
+  { value: 'minor', label: 'minor', cn: '未成年人' },
+  { value: 'privacy', label: 'privacy', cn: '隐私' },
+  { value: 'ip', label: 'ip', cn: '知识产权' },
+  { value: 'gambling', label: 'gambling', cn: '赌博' },
+  { value: 'fraud', label: 'fraud', cn: '欺诈' },
+  { value: 'custom', label: 'custom', cn: '自定义' },
+]
+
+export const TAG_CATEGORY_OPTIONS: { value: TagCategory; label: string; cn: string }[] = [
+  { value: 'figure', label: 'figure', cn: '人物' },
+  { value: 'event', label: 'event', cn: '事件' },
+  { value: 'organization', label: 'organization', cn: '组织' },
+  { value: 'symbol', label: 'symbol', cn: '符号/标识' },
+  { value: 'claim', label: 'claim', cn: '宣称/话术' },
+  { value: 'slogan', label: 'slogan', cn: '口号' },
+  { value: 'scene', label: 'scene', cn: '场景/画面' },
+  { value: 'product', label: 'product', cn: '产品/SKU' },
+  { value: 'price', label: 'price', cn: '价格表述' },
+  { value: 'absolute_term', label: 'absolute_term', cn: '绝对化用语' },
+  { value: 'credential', label: 'credential', cn: '资质/批文' },
+  { value: 'custom', label: 'custom', cn: '自定义' },
+]
+
+export const TAG_STATUS_OPTIONS: { value: TagStatus; label: string; color: string }[] = [
+  { value: 'active', label: '已启用', color: 'green' },
+  { value: 'draft', label: '草稿', color: 'default' },
+  { value: 'deprecated', label: '已停用', color: 'default' },
+]
+
+export const TAG_SOURCE_OPTIONS: { value: TagSource; label: string }[] = [
+  { value: 'platform', label: '平台内置' },
+  { value: 'enterprise', label: '企业自建' },
+  { value: 'imported', label: '导入' },
+]
+
+export const TAG_JURISDICTION_OPTIONS: { value: string; label: string }[] = [
+  { value: 'cn', label: '中国大陆' },
+  { value: 'us', label: '美国' },
+  { value: 'eu', label: '欧盟' },
+  { value: 'global', label: '全球' },
+]

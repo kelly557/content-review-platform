@@ -21,6 +21,8 @@ const CustomTextsPage = lazy(() => import('@/pages/strategy/CustomTextsPage'))
 const ServiceRuleConfigPage = lazy(() => import('@/pages/strategy/ServiceRuleConfigPage'))
 const SceneConfigPage = lazy(() => import('@/pages/strategy/SceneConfigPage'))
 const StrategyRuleConfigPage = lazy(() => import('@/pages/strategy/StrategyRuleConfigPage'))
+const TagsPage = lazy(() => import('@/pages/tags/TagsPage'))
+const HumanReviewRulesPage = lazy(() => import('@/pages/strategy/HumanReviewRulesPage'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
 function Fallback() {
@@ -63,6 +65,11 @@ export default function AppRoutes() {
 
             <Route element={<ProtectedRoute allow={['admin']} />}>
               <Route path="/admin/users" element={<UsersAdminPage />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allow={['admin', 'mlr']} />}>
+              <Route path="/tags" element={<TagsPage />} />
+              <Route path="/human-review-rules" element={<HumanReviewRulesPage />} />
             </Route>
           </Route>
         </Route>
