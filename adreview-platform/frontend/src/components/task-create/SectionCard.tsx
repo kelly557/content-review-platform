@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties, ReactNode, RefCallback } from 'react'
 import { Typography } from 'antd'
 import { palette, radius, shadow, font } from '@/lib/theme'
 
@@ -15,6 +15,8 @@ export interface SectionCardProps {
   style?: CSSProperties
   bodyPadding?: number | string
   accentBar?: boolean
+  stepRef?: RefCallback<HTMLDivElement>
+  isActive?: boolean
 }
 
 export default function SectionCard({
@@ -26,16 +28,21 @@ export default function SectionCard({
   style,
   bodyPadding = 24,
   accentBar = false,
+  stepRef,
+  isActive = false,
 }: SectionCardProps) {
   return (
     <section
+      ref={stepRef}
       style={{
         background: palette.surface,
-        border: `1px solid ${palette.border}`,
+        border: `1px solid ${isActive ? palette.accent : palette.border}`,
+        borderLeft: isActive ? `3px solid ${palette.accent}` : undefined,
         borderRadius: radius.lg,
         boxShadow: shadow.card,
         overflow: 'hidden',
         position: 'relative',
+        transition: 'border-color 200ms ease, border-left 200ms ease',
         ...style,
       }}
     >

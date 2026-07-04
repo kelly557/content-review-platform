@@ -31,9 +31,9 @@ export const materialsApi = {
       })
       .then((r) => r.data)
   },
-  submit(materialId: number) {
+  submit(materialId: number, payload?: { task_name?: string }) {
     return api
-      .post<Material>(`/materials/${materialId}/submit`, {})
+      .post<Material>(`/materials/${materialId}/submit`, payload || {})
       .then((r) => r.data)
   },
   downloadUrl(materialId: number, versionId: number) {

@@ -70,3 +70,4 @@ class MaterialSubmitRequest(BaseModel):
     """Submit a new version for review, optionally starting a workflow instance."""
 
     note: Optional[str] = None
+    task_name: Optional[str] = Field(default=None, max_length=255)

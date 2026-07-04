@@ -50,6 +50,7 @@ async def start_instance(
     template: WorkflowTemplate,
     initiator: User,
     force_human_rules: list[str] | None = None,
+    task_name: str | None = None,
 ) -> WorkflowInstance:
     definition = template.definition or {}
     stages: list[dict] = definition.get("stages", [])
@@ -81,7 +82,7 @@ async def start_instance(
 
     first = stages[0]
     review_type = _type_for_stage(first)
-    task_title = _render_task_title(material.title, first.get("name", first["key"]), review_type)
+    task_title = task_name if task_name else _render_task_title(material.title, first.get("name", first["key"]), review_type)
 
     task = ReviewTask(
         material_id=material.id,

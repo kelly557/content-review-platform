@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { App, Button, Typography } from 'antd'
+import { App, Button, Input, Typography } from 'antd'
 import { RocketOutlined } from '@ant-design/icons'
 import { materialsApi } from '@/api/materials'
 import { packagesApi } from '@/api/materialPackages'
 import StrategyForm, { type StrategyFormValues } from '@/components/task-create/StrategyForm'
 import UploadArea, { type UploadItem } from '@/components/task-create/UploadArea'
 import MaterialPicker from '@/components/task-create/MaterialPicker'
-import PackagePicker from '@/components/task-create/PackagePicker'
+import PackageCreator from '@/components/task-create/PackageCreator'
 import AnalysisPanel, {
   type ParsedFileItem,
   type ParsedPickedItem,
@@ -15,6 +15,7 @@ import AnalysisPanel, {
 import PageHero from '@/components/task-create/PageHero'
 import SectionCard from '@/components/task-create/SectionCard'
 import { StepIndicator } from '@/components/task-create/StepIndicator'
+import StepProgress from '@/components/task-create/StepProgress'
 import { useAuthStore } from '@/store'
 import type { MaterialType } from '@/types/domain'
 import { palette, font } from '@/lib/theme'
@@ -76,7 +77,13 @@ export default function CreateTaskPage() {
 
   const [strategyForm, setStrategyForm] = useState<StrategyFormValues>({})
   const [submitting, setSubmitting] = useState(false)
-  const [selectedPackageId, setSelectedPackageId] = useState<number | null>(null)
+  const [currentStep, setCurrentStep] = useState(0)
+  const stepRefs = useRef<(HTMLDivElement | null)[]>([])
+  const [taskName, setTaskName] = useState('')
+  const [packageName, setPackageName] = useState('')
+  const [packageDescription, setPackageDescription] = useState('')
+  const [packageType, setPackageType] = useState<MaterialType>('image')
+  const [packageMaterialIds, setPackageMaterialIds] = useState<number[]>([])
 
   const isPackageTab = type === 'package'
   const currentBackendType: MaterialType = useMemo(
@@ -146,13 +153,70 @@ export default function CreateTaskPage() {
     [pickedIds, pickedCache],
   )
 
+  const steps = useMemo(() => {
+    if (isPackageTab) {
+      return [
+        { key: 'package', label: '创建素材包', completed: packageName.trim() !== '' && packageMaterialIds.length > 0 },
+        { key: 'config', label: '审核配置', completed: false },
+      ]
+    }
+    return [
+      { key: 'mode', label: '创建方式', completed: uploadItems.length > 0 || pickedIds.length > 0 },
+      { key: 'material', label: '素材', completed: uploadItems.length > 0 || pickedIds.length > 0 },
+      { key: 'config', label: '审核配置', completed: false },
+    ]
+  }, [isPackageTab, uploadItems.length, pickedIds.length, packageName, packageMaterialIds.length])
+
+  const handleStepClick = (index: number) => {
+    const ref = stepRefs.current[index]
+    if (ref) {
+      ref.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setCurrentStep(index)
+    }
+  }
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const index = stepRefs.current.indexOf(entry.target as HTMLDivElement)
+            if (index !== -1) setCurrentStep(index)
+          }
+        })
+      },
+      { rootMargin: '-20% 0px -60% 0px', threshold: 0.1 },
+    )
+
+    stepRefs.current.forEach((ref) => {
+      if (ref) observer.observe(ref)
+    })
+
+    return () => observer.disconnect()
+  }, [steps.length])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight' && currentStep < steps.length - 1) {
+        handleStepClick(currentStep + 1)
+      } else if (e.key === 'ArrowLeft' && currentStep > 0) {
+        handleStepClick(currentStep - 1)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [currentStep, steps.length])
+
   const onTypeChange = (next: string) => {
     setType(next as TabKind)
     setUploadItems([])
     setPickedIds([])
     setPickedCache({})
     setSelectedMaterialDetail(undefined)
-    setSelectedPackageId(null)
+    setPackageName('')
+    setPackageDescription('')
+    setPackageType('image')
+    setPackageMaterialIds([])
   }
 
   const onSourceChange = (next: SourceMode) => {
@@ -173,15 +237,17 @@ export default function CreateTaskPage() {
 
   const effectiveCount = useMemo(
     () => {
-      if (isPackageTab) return selectedPackageId ? 1 : 0
+      if (isPackageTab) return packageMaterialIds.length > 0 ? 1 : 0
       return sourceMode === 'upload' ? uploadItems.length : pickedIds.length
     },
-    [isPackageTab, sourceMode, uploadItems, pickedIds, selectedPackageId],
+    [isPackageTab, sourceMode, uploadItems, pickedIds, packageMaterialIds],
   )
 
   const validateBeforeSubmit = (): { ok: true; count: number } | { ok: false; reason: string } => {
+    if (!taskName.trim()) return { ok: false, reason: '请输入任务名称' }
     if (isPackageTab) {
-      if (!selectedPackageId) return { ok: false, reason: '请选择一个素材包' }
+      if (!packageName.trim()) return { ok: false, reason: '请输入素材包名称' }
+      if (packageMaterialIds.length === 0) return { ok: false, reason: '请至少选择一个素材' }
       return { ok: true, count: 1 }
     }
     if (effectiveCount === 0) return { ok: false, reason: '请先选择或上传至少 1 个素材' }
@@ -219,7 +285,7 @@ export default function CreateTaskPage() {
       const file = new File([blob], 'text.txt', { type: 'text/plain' })
       await materialsApi.uploadVersion(created.id, file, item.textBody)
     }
-    await materialsApi.submit(created.id)
+    await materialsApi.submit(created.id, { task_name: taskName })
     return created.id
   }
 
@@ -227,7 +293,7 @@ export default function CreateTaskPage() {
     const cur = await materialsApi.get(mid)
     const mergedTags = { ...(cur.tags || {}), ...buildTags() }
     await materialsApi.update(mid, { tags: mergedTags })
-    await materialsApi.submit(mid)
+    await materialsApi.submit(mid, { task_name: taskName })
     return mid
   }
 
@@ -239,8 +305,14 @@ export default function CreateTaskPage() {
     }
     setSubmitting(true)
     try {
-      if (isPackageTab && selectedPackageId) {
-        await packagesApi.submit(selectedPackageId)
+      if (isPackageTab) {
+        const createdPackage = await packagesApi.create({
+          name: packageName,
+          description: packageDescription || undefined,
+          material_type: packageType,
+          material_ids: packageMaterialIds,
+        })
+        await packagesApi.submit(createdPackage.id, { task_name: taskName })
         message.success('已提交素材包审核任务')
         navigate('/tasks')
         return
@@ -287,6 +359,35 @@ export default function CreateTaskPage() {
         subtitle="选择素材类型、设置审核策略，让 AI 与人工协作把关每一条投放内容。"
         onBack={() => navigate('/tasks')}
       />
+
+      <div
+        style={{
+          marginBottom: 24,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: font.sans,
+            fontSize: 13,
+            fontWeight: 500,
+            color: palette.ink,
+            marginBottom: 8,
+          }}
+        >
+          任务名称 <span style={{ color: palette.danger }}>*</span>
+        </div>
+        <Input
+          value={taskName}
+          onChange={(e) => setTaskName(e.target.value)}
+          placeholder="请输入任务名称"
+          maxLength={255}
+          style={{
+            borderRadius: 6,
+            borderColor: palette.border,
+            fontSize: 14,
+          }}
+        />
+      </div>
 
       {/* 类型选择（编辑风 tabs） */}
       <div
@@ -341,6 +442,13 @@ export default function CreateTaskPage() {
         })}
       </div>
 
+      <StepProgress
+        steps={steps}
+        currentStep={currentStep}
+        onStepClick={handleStepClick}
+        style={{ marginBottom: 24 }}
+      />
+
       {/* 主体：左右对齐两栏 */}
       <div
         style={{
@@ -354,22 +462,30 @@ export default function CreateTaskPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {isPackageTab ? (
             <>
-              {/* 素材包模式：Step 01 = 选择素材包 */}
+              {/* 素材包模式：Step 01 = 创建素材包 */}
               <SectionCard
                 eyebrow="Step 01"
-                title="选择素材包"
-                description="选择一个预建的素材包来创建审核任务。"
+                title="创建素材包"
+                description="填写素材包信息并选择要包含的素材。"
                 accentBar
                 extra={
                   <Text style={{ fontSize: 12, color: palette.inkSubtle }}>
-                    已选 {selectedPackageId ? '1' : '0'} 个素材包
+                    已选 {packageMaterialIds.length} 个素材
                   </Text>
                 }
+                stepRef={(el) => { stepRefs.current[0] = el }}
+                isActive={currentStep === 0}
               >
-                <PackagePicker
-                  type="image"
-                  selectedId={selectedPackageId}
-                  onChange={setSelectedPackageId}
+                <PackageCreator
+                  packageName={packageName}
+                  onPackageNameChange={setPackageName}
+                  packageDescription={packageDescription}
+                  onPackageDescriptionChange={setPackageDescription}
+                  packageType={packageType}
+                  onPackageTypeChange={setPackageType}
+                  selectedMaterialIds={packageMaterialIds}
+                  onSelectedMaterialIdsChange={setPackageMaterialIds}
+                  maxCount={BULK_LIMIT}
                 />
               </SectionCard>
 
@@ -378,6 +494,8 @@ export default function CreateTaskPage() {
                 eyebrow="Step 02"
                 title="审核配置"
                 description="为本次任务选择策略、流程与投放场景。"
+                stepRef={(el) => { stepRefs.current[1] = el }}
+                isActive={currentStep === 1}
               >
                 {canPickStrategy ? (
                   <StrategyForm value={strategyForm} onChange={setStrategyForm} />
@@ -401,6 +519,8 @@ export default function CreateTaskPage() {
                     当前选中 <span style={{ color: palette.ink, fontWeight: 600 }}>{effectiveCount}</span> 个
                   </Text>
                 }
+                stepRef={(el) => { stepRefs.current[0] = el }}
+                isActive={currentStep === 0}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                   <StepIndicator
@@ -434,6 +554,8 @@ export default function CreateTaskPage() {
                     最多 {BULK_LIMIT} 个
                   </Text>
                 }
+                stepRef={(el) => { stepRefs.current[1] = el }}
+                isActive={currentStep === 1}
               >
                 {sourceMode === 'upload' ? (
                   <UploadArea
@@ -459,6 +581,8 @@ export default function CreateTaskPage() {
                 eyebrow="Step 03"
                 title="审核配置"
                 description="为本次任务选择策略、流程与投放场景。"
+                stepRef={(el) => { stepRefs.current[2] = el }}
+                isActive={currentStep === 2}
               >
                 {canPickStrategy ? (
                   <StrategyForm value={strategyForm} onChange={setStrategyForm} />

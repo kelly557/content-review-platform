@@ -247,7 +247,7 @@ async def submit_material(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"unknown workflow template: {template_code}",
         )
-    await start_instance(db, material, template, user)
+    await start_instance(db, material, template, user, task_name=body.task_name)
     await db.commit()
     # Re-query to ensure all fields are loaded for response serialization
     material = await db.scalar(
