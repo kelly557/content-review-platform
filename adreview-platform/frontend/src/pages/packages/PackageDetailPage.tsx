@@ -4,7 +4,6 @@ import {
   Breadcrumb,
   Card,
   Col,
-  Form,
   List,
   Row,
   Space,
@@ -42,7 +41,7 @@ import {
 } from '@/types/domain'
 import PreviewEditor from '@/components/task-detail/PreviewEditor'
 import AgentReviewPanel from '@/components/task-detail/AgentReviewPanel'
-import HumanActionPanel, { type DecisionFormValues } from '@/components/task-detail/HumanActionPanel'
+import HumanActionPanel from '@/components/task-detail/HumanActionPanel'
 import { colors } from '@/styles/theme'
 
 const { Text } = Typography
@@ -59,7 +58,6 @@ export default function PackageDetailPage() {
   const [versionMap, setVersionMap] = useState<Record<number, MaterialVersion>>({})
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
   const [users, setUsers] = useState<User[]>([])
-  const [decisionForm] = Form.useForm<DecisionFormValues>()
   const [isDirty, setIsDirty] = useState(false)
 
   const packageId = routeId ? Number(routeId) : undefined
@@ -138,17 +136,20 @@ export default function PackageDetailPage() {
     doSwitch()
   }
 
-  const onDecide = async (decision: ReviewDecision) => {
+  const onDecide = async (
+    decision: ReviewDecision,
+    _tagIds: string[],
+    note?: string,
+    commentBody?: string,
+  ) => {
     if (!currentTask) return
     if (!currentTask.assignments.find((a) => a.assignee_id === user?.id && a.decision === 'pending')) {
       message.warning('当前阶段没有您的待办')
       return
     }
-    const values = await decisionForm.validateFields().catch(() => ({} as DecisionFormValues))
-    await reviewsApi.decide(currentTask.id, decision, values.note, values.comment_body)
+    await reviewsApi.decide(currentTask.id, decision, note, commentBody)
     message.success('已提交决定')
     setIsDirty(false)
-    decisionForm.resetFields()
     if (packageId) fetchPackage(packageId)
   }
 
@@ -447,12 +448,11 @@ export default function PackageDetailPage() {
                   >
                     <HumanActionPanel
                       canDecide={canDecide}
-                      decisionForm={decisionForm}
                       users={users}
                       currentUserId={user?.id}
                       onTransfer={onTransfer}
                       onAddReviewer={onAddReviewer}
-                      onDecide={(d) => onDecide(d)}
+                      onDecide={onDecide}
                       onDirtyChange={setIsDirty}
                     />
                   </div>

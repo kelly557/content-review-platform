@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   App,
   Button,
   Col,
   Drawer,
   Empty,
-  Form,
   Row,
   Space,
   Tag,
@@ -34,7 +33,8 @@ import {
 import TaskListPanel from '@/components/task-detail/TaskListPanel'
 import PreviewEditor from '@/components/task-detail/PreviewEditor'
 import AgentReviewPanel from '@/components/task-detail/AgentReviewPanel'
-import HumanActionPanel, { type DecisionFormValues } from '@/components/task-detail/HumanActionPanel'
+import HumanActionPanel from '@/components/task-detail/HumanActionPanel'
+import { colors } from '@/styles/theme'
 
 const { Title, Text } = Typography
 
@@ -74,17 +74,16 @@ export default function TaskDetailPage() {
   const [availableTags, setAvailableTags] = useState<TagSummary[]>([])
   const [annotationRefreshKey, setAnnotationRefreshKey] = useState(0)
   const [annotationCount, setAnnotationCount] = useState(0)
-  const [decisionForm] = Form.useForm<DecisionFormValues>()
   const [isDirty, setIsDirty] = useState(false)
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false)
   const [triggeringMachineReview, setTriggeringMachineReview] = useState(false)
+  const rightPanelRef = useRef<HTMLDivElement>(null)
 
   const taskId = routeId ? Number(routeId) : undefined
 
   const fetchTask = async (id: number) => {
     const t = await reviewsApi.task(id)
     setTask(t)
-    decisionForm.resetFields()
     setIsDirty(false)
     const m = await materialsApi.get(t.material_id)
     setMaterial(m)
@@ -120,6 +119,36 @@ export default function TaskDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId])
 
+  useEffect(() => {
+    if (!taskId) return
+    if (task?.review_type !== 'machine') return
+    const status = task?.machine_status
+    if (status !== 'pending' && status !== 'running') return
+
+    let cancelled = false
+    let count = 0
+    const tick = async () => {
+      if (cancelled) return
+      if (count++ >= 15) return
+      try {
+        const fresh = await reviewsApi.task(taskId)
+        if (cancelled) return
+        setTask(fresh)
+        const next = fresh.machine_status
+        if (next === 'pending' || next === 'running') {
+          setTimeout(tick, 2000)
+        }
+      } catch {
+        /* ignore polling errors */
+      }
+    }
+    const timer = setTimeout(tick, 2000)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [taskId, task?.review_type, task?.machine_status])
+
   const switchTask = (nextId: number) => {
     if (nextId === taskId) return
     const doSwitch = () => navigate(`/tasks/${nextId}`)
@@ -136,17 +165,20 @@ export default function TaskDetailPage() {
     doSwitch()
   }
 
-  const onDecide = async (decision: ReviewDecision, tagIds: string[]) => {
+  const onDecide = async (
+    decision: ReviewDecision,
+    tagIds: string[],
+    note?: string,
+    commentBody?: string,
+  ) => {
     if (!task) return
     if (!task.assignments.find((a) => a.assignee_id === user?.id && a.decision === 'pending')) {
       message.warning('当前阶段没有您的待办')
       return
     }
-    const values = await decisionForm.validateFields().catch(() => ({} as DecisionFormValues))
-    await reviewsApi.decide(task.id, decision, values.note, values.comment_body, tagIds)
+    await reviewsApi.decide(task.id, decision, note, commentBody, tagIds)
     message.success('已提交决定')
     setIsDirty(false)
-    decisionForm.resetFields()
     fetchTask(task.id)
   }
 
@@ -201,9 +233,16 @@ export default function TaskDetailPage() {
     return <Empty description="加载中" />
   }
 
-  const canDecide = !!task.assignments.find(
+  const hasPendingAssignment = !!task.assignments.find(
     (a) => a.assignee_id === user?.id && a.decision === 'pending',
   )
+  const isMachineWithResult =
+    task.review_type === 'machine' &&
+    (task.machine_status === 'completed' || task.machine_status === 'failed')
+  const reviewerRoles = ['admin', 'reviewer', 'mlr']
+  const canDecide =
+    hasPendingAssignment ||
+    (isMachineWithResult && !!user && reviewerRoles.includes(user.role))
 
   const decisionTagColor =
     task.final_decision === 'approved'
@@ -219,16 +258,17 @@ export default function TaskDetailPage() {
 
     return (
       <div
+        ref={rightPanelRef}
         style={{
           height: '100%',
           display: 'flex',
           flexDirection: 'column',
           minHeight: 0,
-          background: '#fff',
-          borderLeft: '1px solid #E2E8F0',
+          background: colors.surface,
+          borderLeft: `1px solid ${colors.border}`,
         }}
       >
-        <div style={{ flex: isMachineReview ? '1 1 100%' : '0 0 60%', minHeight: 0, borderBottom: isMachineReview ? 'none' : '1px solid #E2E8F0', overflow: 'auto' }}>
+        <div style={{ flex: isMachineReview ? '1 1 100%' : '0 0 60%', minHeight: 0, borderBottom: isMachineReview ? 'none' : `1px solid ${colors.border}`, overflow: 'auto' }}>
           <AgentReviewPanel
             result={task.agent_review}
             task={task}
@@ -236,11 +276,10 @@ export default function TaskDetailPage() {
             triggering={triggeringMachineReview}
           />
         </div>
-        {!isMachineReview && (
-          <div style={{ flex: '0 0 40%', minHeight: 0, overflow: 'auto', background: '#F8FAFC' }}>
+        {(!isMachineReview || task.machine_status === 'completed' || task.machine_status === 'failed') ? (
+          <div style={{ flex: '0 0 40%', minHeight: 0, overflow: 'auto', background: colors.surface2 }}>
             <HumanActionPanel
               canDecide={canDecide}
-              decisionForm={decisionForm}
               users={users}
               currentUserId={user?.id}
               availableTags={availableTags}
@@ -251,7 +290,7 @@ export default function TaskDetailPage() {
               onDirtyChange={setIsDirty}
             />
           </div>
-        )}
+        ) : null}
       </div>
     )
   }
@@ -283,14 +322,18 @@ export default function TaskDetailPage() {
         </Space>
 
         <Space>
-          {layoutMode !== 'triple' && (
-            <Button
-              icon={<RobotOutlined />}
-              onClick={() => setRightDrawerOpen(true)}
-            >
-              AI 结论 & 处理动作
-            </Button>
-          )}
+          <Button
+            icon={<RobotOutlined />}
+            onClick={() => {
+              if (layoutMode === 'triple') {
+                rightPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              } else {
+                setRightDrawerOpen(true)
+              }
+            }}
+          >
+            AI 结论 & 处理动作
+          </Button>
           <Text type="secondary" style={{ fontSize: 12 }}>
             #{task.id} · 创建于 {new Date(task.created_at).toLocaleString('zh-CN')}
           </Text>
@@ -305,7 +348,7 @@ export default function TaskDetailPage() {
                 style={{
                   height: '100%',
                   background: '#fff',
-                  border: '1px solid #E2E8F0',
+                  border: `1px solid ${colors.border}`,
                   borderRadius: 8,
                   overflow: 'hidden',
                   display: 'flex',
@@ -320,8 +363,8 @@ export default function TaskDetailPage() {
               <div
                 style={{
                   height: '100%',
-                  background: '#fff',
-                  border: '1px solid #E2E8F0',
+                  background: colors.surface,
+                  border: `1px solid ${colors.border}`,
                   borderRadius: 8,
                   overflow: 'hidden',
                   display: 'flex',
@@ -353,7 +396,7 @@ export default function TaskDetailPage() {
                 style={{
                   height: '100%',
                   background: '#fff',
-                  border: '1px solid #E2E8F0',
+                  border: `1px solid ${colors.border}`,
                   borderRadius: 8,
                   overflow: 'hidden',
                   display: 'flex',
@@ -369,7 +412,7 @@ export default function TaskDetailPage() {
                 style={{
                   height: '100%',
                   background: '#fff',
-                  border: '1px solid #E2E8F0',
+                  border: `1px solid ${colors.border}`,
                   borderRadius: 8,
                   overflow: 'hidden',
                   display: 'flex',
@@ -396,7 +439,7 @@ export default function TaskDetailPage() {
             style={{
               height: '100%',
               background: '#fff',
-              border: '1px solid #E2E8F0',
+              border: `1px solid ${colors.border}`,
               borderRadius: 8,
               overflow: 'hidden',
               display: 'flex',

@@ -31,12 +31,16 @@ export interface DecisionFormValues {
 
 interface Props {
   canDecide: boolean
-  decisionForm: import('antd').FormInstance<DecisionFormValues>
   users: User[]
   currentUserId?: number
   onTransfer: (toUserId: number) => Promise<void> | void
   onAddReviewer: (toUserId: number) => Promise<void> | void
-  onDecide: (decision: ReviewDecision, tagIds: string[]) => Promise<void> | void
+  onDecide: (
+    decision: ReviewDecision,
+    tagIds: string[],
+    note?: string,
+    commentBody?: string,
+  ) => Promise<void> | void
   onDirtyChange?: (dirty: boolean) => void
   availableTags?: TagSummary[]
   existingTagIds?: string[]
@@ -46,7 +50,6 @@ const MAX_TAG_SELECT = 20
 
 export default function HumanActionPanel({
   canDecide,
-  decisionForm,
   users,
   currentUserId,
   onTransfer,
@@ -56,6 +59,7 @@ export default function HumanActionPanel({
   availableTags = [],
   existingTagIds = [],
 }: Props) {
+  const [decisionForm] = Form.useForm<DecisionFormValues>()
   const [transferOpen, setTransferOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [transferTarget, setTransferTarget] = useState<number | null>(null)
@@ -65,7 +69,8 @@ export default function HumanActionPanel({
 
   useEffect(() => {
     setSelectedTagIds(existingTagIds)
-  }, [existingTagIds.join('|')])
+    decisionForm.setFieldValue('tag_ids', existingTagIds)
+  }, [existingTagIds.join('|'), decisionForm])
 
   const userOptions = users
     .filter((u) => u.id !== currentUserId)
@@ -94,12 +99,13 @@ export default function HumanActionPanel({
     [availableTags],
   )
 
-  const handleDecide = (decision: ReviewDecision) => {
+  const handleDecide = async (decision: ReviewDecision) => {
     if (selectedTagIds.length > MAX_TAG_SELECT) {
       Modal.error({ title: `最多标注 ${MAX_TAG_SELECT} 个标签`, icon: null })
       return
     }
-    onDecide(decision, selectedTagIds)
+    const values = await decisionForm.validateFields().catch(() => ({} as DecisionFormValues))
+    await onDecide(decision, selectedTagIds, values.note, values.comment_body)
   }
 
   return (
@@ -121,7 +127,6 @@ export default function HumanActionPanel({
           layout="vertical"
           disabled={!canDecide}
           onValuesChange={() => onDirtyChange?.(true)}
-          initialValues={{ tag_ids: existingTagIds }}
         >
           <Form.Item label="备注" name="note">
             <Input.TextArea

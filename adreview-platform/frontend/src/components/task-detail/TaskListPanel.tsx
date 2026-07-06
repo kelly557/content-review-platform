@@ -1,17 +1,21 @@
-import { useEffect, useState } from 'react'
-import { Badge, List, Pagination, Radio, Spin, Tag, Tooltip, Typography } from 'antd'
+import { useEffect, useMemo, useState } from 'react'
+import { Badge, List, Pagination, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import { reviewsApi } from '@/api/reviews'
 import {
   DECISION_LABELS,
+  TAG_DOMAIN_OPTIONS,
   TYPE_LABELS,
   type AgentReviewResult,
   type AgentRiskLevel,
   type ReviewTask,
   type ReviewType,
+  type TagDomain,
 } from '@/types/domain'
 import { RISK_COLOR, truncate } from '@/lib/risk'
+import { colors } from '@/styles/theme'
 
 const { Text } = Typography
+const { CheckableTag } = Tag
 
 interface Props {
   currentTaskId?: number
@@ -19,8 +23,6 @@ interface Props {
 }
 
 const PAGE_SIZE = 20
-
-type FilterMode = 'pending' | 'machine' | 'human' | 'completed'
 
 const MAX_VISIBLE_TAGS = 3
 const QUOTE_TRUNCATE = 60
@@ -37,41 +39,71 @@ function dedupe(arr: string[]): string[] {
   return out
 }
 
+/**
+ * Heuristic mapping from a mock-detection hit to a tag domain.
+ * The backend's `DetectionRule.label_cn` (e.g. "医疗广告违规") carries
+ * domain semantics; we map via simple keyword scan.
+ */
+function inferDomainFromLabel(labelCn: string | undefined): TagDomain | null {
+  if (!labelCn) return null
+  const lc = labelCn
+  if (/政治|涉政|领导人/.test(lc)) return 'politics'
+  if (/色情|涉黄|低俗|性感/.test(lc)) return 'porn'
+  if (/暴力|血腥|恐怖|暴恐/.test(lc)) return 'violence'
+  if (/广告|绝对化|极限用语|承诺|资质/.test(lc)) return 'ads_law'
+  if (/医疗|医药|药品|保健/.test(lc)) return 'medical'
+  if (/金融|理财|投资|贷款|保险|信用卡/.test(lc)) return 'finance'
+  if (/未成年|儿童|小学生/.test(lc)) return 'minor'
+  if (/隐私|身份证|手机号|住址|个人信息/.test(lc)) return 'privacy'
+  if (/商标|版权|品牌|logo|知识产权/.test(lc)) return 'ip'
+  if (/赌博|博彩|彩票|赌/.test(lc)) return 'gambling'
+  if (/欺诈|诈骗|刷单|兼职/.test(lc)) return 'fraud'
+  if (/敏感/.test(lc)) return 'custom'
+  return null
+}
+
 export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
   const [items, setItems] = useState<ReviewTask[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
-  const [filterMode, setFilterMode] = useState<FilterMode>('pending')
+  const [domainFilter, setDomainFilter] = useState<TagDomain | undefined>(undefined)
 
   useEffect(() => {
     setLoading(true)
-    const params: { page: number; size: number; pending?: boolean; scope: 'mine' } = {
-      page,
-      size: PAGE_SIZE,
-      scope: 'mine',
-    }
-
-    if (filterMode === 'pending') {
-      params.pending = true
-    }
-
     reviewsApi
-      .myTasks(params)
+      .myTasks({ page, size: PAGE_SIZE, pending: true, scope: 'mine' })
       .then((res) => {
-        let filtered = res.items
-        if (filterMode === 'machine') {
-          filtered = res.items.filter((t) => t.review_type === 'machine')
-        } else if (filterMode === 'human') {
-          filtered = res.items.filter((t) => t.review_type === 'human')
-        } else if (filterMode === 'completed') {
-          filtered = res.items.filter((t) => t.final_decision !== 'pending')
-        }
-        setItems(filtered)
-        setTotal(filterMode === 'pending' ? res.total : filtered.length)
+        setItems(res.items)
+        setTotal(res.total)
       })
       .finally(() => setLoading(false))
-  }, [page, filterMode])
+  }, [page])
+
+  // For each domain, count how many tasks have at least one matching hit.
+  const domainCounts = useMemo(() => {
+    const counts: Record<TagDomain, number> = {} as Record<TagDomain, number>
+    for (const t of items) {
+      const hits = t.agent_review?.hits ?? []
+      const seen = new Set<TagDomain>()
+      for (const h of hits) {
+        const dom = inferDomainFromLabel(h.label_cn)
+        if (dom) seen.add(dom)
+      }
+      for (const dom of seen) {
+        counts[dom] = (counts[dom] ?? 0) + 1
+      }
+    }
+    return counts
+  }, [items])
+
+  const visibleItems = useMemo(() => {
+    if (!domainFilter) return items
+    return items.filter((t) => {
+      const hits = t.agent_review?.hits ?? []
+      return hits.some((h) => inferDomainFromLabel(h.label_cn) === domainFilter)
+    })
+  }, [items, domainFilter])
 
   const renderRiskLevelTag = (review: AgentReviewResult | null | undefined) => {
     if (!review) {
@@ -97,7 +129,7 @@ export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
       <div
         style={{
           padding: '12px 16px',
-          borderBottom: '1px solid #E2E8F0',
+          borderBottom: `1px solid ${colors.border}`,
           display: 'flex',
           flexDirection: 'column',
           gap: 8,
@@ -105,29 +137,41 @@ export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Text strong>审核任务</Text>
-          <Badge count={total} showZero color="#0369A1" overflowCount={99} />
+          <Badge count={total} showZero color={colors.accent} overflowCount={99} />
         </div>
-        <Radio.Group
-          value={filterMode}
-          onChange={(e) => {
-            setFilterMode(e.target.value)
-            setPage(1)
-          }}
-          size="small"
-          optionType="button"
-          buttonStyle="solid"
-        >
-          <Radio.Button value="pending">待处理</Radio.Button>
-          <Radio.Button value="machine">机审</Radio.Button>
-          <Radio.Button value="human">人审</Radio.Button>
-          <Radio.Button value="completed">已完成</Radio.Button>
-        </Radio.Group>
+        <Space size={4} wrap>
+          <CheckableTag
+            checked={!domainFilter}
+            onChange={(checked) => checked && setDomainFilter(undefined)}
+          >
+            全部
+          </CheckableTag>
+          {TAG_DOMAIN_OPTIONS.map((d) => {
+            const n = domainCounts[d.value] ?? 0
+            const disabled = n === 0 && domainFilter !== d.value
+            return (
+              <CheckableTag
+                key={d.value}
+                checked={domainFilter === d.value}
+                onChange={(checked) =>
+                  setDomainFilter(checked ? d.value : undefined)
+                }
+                style={{ opacity: disabled ? 0.5 : 1 }}
+              >
+                {d.cn}
+                <span style={{ marginLeft: 4, color: colors.mutedSoft, fontSize: 11 }}>
+                  {n}
+                </span>
+              </CheckableTag>
+            )
+          })}
+        </Space>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
         <Spin spinning={loading}>
           <List
-            dataSource={items}
+            dataSource={visibleItems}
             locale={{ emptyText: '暂无任务' }}
             renderItem={(t) => {
               const active = t.id === currentTaskId
@@ -142,16 +186,16 @@ export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
                   onClick={() => onSelect(t.id)}
                   style={{
                     padding: '12px 16px',
-                    borderBottom: '1px solid #F1F5F9',
-                    borderLeft: active ? '3px solid #0369A1' : '3px solid transparent',
-                    background: active ? '#F0F9FF' : 'transparent',
+                    borderBottom: `1px solid ${colors.divider}`,
+                    borderLeft: active ? `3px solid ${colors.accent}` : '3px solid transparent',
+                    background: active ? colors.accentSoft : 'transparent',
                     cursor: 'pointer',
                   }}
                 >
                   <div
                     style={{
                       fontWeight: active ? 600 : 500,
-                      color: '#0F172A',
+                      color: colors.primary,
                       marginBottom: 6,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -205,10 +249,10 @@ export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
                         style={{
                           marginTop: 6,
                           fontSize: 12,
-                          color: '#475569',
-                          borderLeft: '3px solid #DC2626',
+                          color: colors.textSecondary,
+                          borderLeft: `3px solid ${colors.destructive}`,
                           paddingLeft: 8,
-                          background: '#FEF2F2',
+                          background: colors.dangerSoft,
                           padding: '4px 8px',
                           lineHeight: 1.5,
                           display: 'flex',
@@ -238,7 +282,7 @@ export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
                     style={{
                       marginTop: 6,
                       fontSize: 11,
-                      color: '#94A3B8',
+                      color: colors.mutedSoft,
                       textAlign: 'right',
                     }}
                   >
@@ -252,7 +296,7 @@ export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
       </div>
 
       {total > PAGE_SIZE && (
-        <div style={{ borderTop: '1px solid #E2E8F0', padding: '8px 12px', textAlign: 'center' }}>
+        <div style={{ borderTop: `1px solid ${colors.border}`, padding: '8px 12px', textAlign: 'center' }}>
           <Pagination
             current={page}
             pageSize={PAGE_SIZE}
