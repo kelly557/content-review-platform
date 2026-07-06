@@ -4,6 +4,7 @@ import { CheckCircleOutlined } from '@ant-design/icons'
 import { annotationsApi } from '@/api/reviews'
 import { useAuthStore } from '@/store'
 import type { Annotation } from '@/types/domain'
+import { colors } from '@/styles/theme'
 
 const { Text } = Typography
 
@@ -67,7 +68,7 @@ export default function AnnotationList({ versionId, refreshKey, onJumpToImage }:
         <Badge
           count={unresolvedCount}
           showZero
-          color={unresolvedCount > 0 ? '#DC2626' : '#94A3B8'}
+          color={unresolvedCount > 0 ? colors.destructive : colors.mutedSoft}
           style={{ backgroundColor: 'transparent' }}
         />
       </Space>
@@ -84,11 +85,11 @@ export default function AnnotationList({ versionId, refreshKey, onJumpToImage }:
               return (
                 <List.Item
                   style={{
-                    border: '1px solid #E2E8F0',
+                    border: `1px solid ${colors.border}`,
                     borderRadius: 6,
                     padding: 12,
                     marginBottom: 8,
-                    background: a.resolved ? '#F8FAFC' : '#fff',
+                    background: a.resolved ? colors.surface2 : colors.surface,
                     display: 'block',
                   }}
                   actions={
@@ -119,9 +120,9 @@ export default function AnnotationList({ versionId, refreshKey, onJumpToImage }:
                         type="secondary"
                         style={{
                           fontSize: 12,
-                          borderLeft: '3px solid #0369A1',
+                          borderLeft: `3px solid ${colors.accent}`,
                           paddingLeft: 8,
-                          background: '#F0F9FF',
+                          background: colors.accentSoft,
                           padding: '4px 8px',
                         }}
                       >

@@ -2,6 +2,7 @@ import { Alert, Button, Empty, Space, Statistic, Tabs, Tag, Typography } from 'a
 import { AlertOutlined, FileSearchOutlined, PlayCircleOutlined, TagOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import type { AgentReviewResult, ReviewTask } from '@/types/domain'
 import { RISK_COLOR, suggestAction } from '@/lib/risk'
+import { colors } from '@/styles/theme'
 
 const { Text } = Typography
 
@@ -65,7 +66,7 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
           <Statistic
             title="命中条数"
             value={hits.length}
-            valueStyle={{ fontSize: 22, color: hits.length > 0 ? '#DC2626' : '#0F172A' }}
+            valueStyle={{ fontSize: 22, color: hits.length > 0 ? colors.destructive : colors.primary }}
           />
         </Space>
 
@@ -96,8 +97,8 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
         {summary && (
           <div
             style={{
-              border: '1px solid #E2E8F0',
-              background: '#F8FAFC',
+              border: `1px solid ${colors.border}`,
+              background: colors.surface2,
               borderRadius: 6,
               padding: 10,
               fontSize: 13,
@@ -137,10 +138,10 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
                       <div
                         key={i}
                         style={{
-                          border: '1px solid #E2E8F0',
+                          border: `1px solid ${colors.border}`,
                           borderRadius: 6,
                           padding: 10,
-                          background: '#fff',
+                          background: colors.surface,
                         }}
                       >
                         <Space size={6} wrap>
@@ -155,10 +156,10 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
                             style={{
                               marginTop: 6,
                               fontSize: 13,
-                              color: '#475569',
-                              borderLeft: '3px solid #DC2626',
+                              color: colors.textSecondary,
+                              borderLeft: `3px solid ${colors.destructive}`,
                               paddingLeft: 8,
-                              background: '#FEF2F2',
+                              background: colors.dangerSoft,
                               padding: '4px 8px',
                             }}
                           >
@@ -190,7 +191,7 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
                           alignItems: 'center',
                           justifyContent: 'space-between',
                           padding: '6px 8px',
-                          border: '1px solid #E2E8F0',
+                          border: `1px solid ${colors.border}`,
                           borderRadius: 4,
                           fontSize: 13,
                         }}
@@ -203,7 +204,7 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
                             阈值 {r.threshold}
                           </Text>
                         </Space>
-                        <Text style={{ fontSize: 12, color: r.matched ? '#DC2626' : '#94A3B8' }}>
+                        <Text style={{ fontSize: 12, color: r.matched ? colors.destructive : colors.mutedSoft }}>
                           {r.matched ? '已触发' : '未触发'}
                         </Text>
                       </div>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, Empty, Input, Modal, Space, Spin, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import type { Annotation } from '@/types/domain'
+import { colors } from '@/styles/theme'
 
 const { Paragraph, Text } = Typography
 
@@ -103,13 +104,13 @@ export default function TextPreview({ versionId, textBody, readOnly, onChanged }
           ref={containerRef}
           onMouseUp={onMouseUp}
           style={{
-            background: '#fff',
-            border: '1px solid #E2E8F0',
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
             borderRadius: 6,
             padding: 16,
             lineHeight: 1.8,
             fontSize: 14,
-            color: '#0F172A',
+            color: colors.primary,
             whiteSpace: 'pre-wrap',
             userSelect: 'text',
             minHeight: 200,
@@ -124,27 +125,27 @@ export default function TextPreview({ versionId, textBody, readOnly, onChanged }
           <Text strong>已添加的文字批注</Text>
           <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {annotations.map((a) => (
-              <div
-                key={a.id}
-                style={{
-                  border: '1px solid #E2E8F0',
-                  borderRadius: 6,
-                  padding: 12,
-                  background: '#F8FAFC',
-                }}
-              >
-                <Paragraph
-                  type="secondary"
+                <div
+                  key={a.id}
                   style={{
-                    margin: 0,
-                    marginBottom: 4,
-                    fontSize: 12,
-                    borderLeft: '3px solid #0369A1',
-                    paddingLeft: 8,
-                    background: '#F0F9FF',
-                    padding: '4px 8px',
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: 6,
+                    padding: 12,
+                    background: colors.surface2,
                   }}
                 >
+                  <Paragraph
+                    type="secondary"
+                    style={{
+                      margin: 0,
+                      marginBottom: 4,
+                      fontSize: 12,
+                      borderLeft: `3px solid ${colors.accent}`,
+                      paddingLeft: 8,
+                      background: colors.accentSoft,
+                      padding: '4px 8px',
+                    }}
+                  >
                   “{a.quote}”
                 </Paragraph>
                 <div>{a.body}</div>
@@ -168,9 +169,9 @@ export default function TextPreview({ versionId, textBody, readOnly, onChanged }
               type="secondary"
               style={{
                 margin: 0,
-                borderLeft: '3px solid #0369A1',
+                borderLeft: `3px solid ${colors.accent}`,
                 paddingLeft: 8,
-                background: '#F0F9FF',
+                background: colors.accentSoft,
                 padding: '6px 10px',
               }}
             >

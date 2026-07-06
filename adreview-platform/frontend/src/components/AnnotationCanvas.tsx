@@ -1,5 +1,6 @@
 import { useRef, useState, type CSSProperties } from 'react'
 import { Button, Input, Modal, Space } from 'antd'
+import { accentRgba, colors } from '@/styles/theme'
 
 export interface CanvasAnnotation {
   body: string
@@ -115,8 +116,8 @@ export default function AnnotationCanvas({ src, annotations, onCreate, readOnly 
                 top: `${a.y * 100}%`,
                 width: `${a.w * 100}%`,
                 height: `${a.h * 100}%`,
-                border: '2px solid #0369A1',
-                background: 'rgba(3,105,161,0.12)',
+                border: `2px solid ${colors.accent}`,
+                background: accentRgba(0.12),
                 pointerEvents: 'none',
                 borderRadius: 2,
               }}
@@ -132,7 +133,7 @@ export default function AnnotationCanvas({ src, annotations, onCreate, readOnly 
               top: `${liveRect.y * 100}%`,
               width: `${liveRect.w * 100}%`,
               height: `${liveRect.h * 100}%`,
-              border: '2px dashed #0369A1',
+              border: `2px dashed ${colors.accent}`,
               pointerEvents: 'none',
             }}
           />
@@ -159,7 +160,7 @@ export default function AnnotationCanvas({ src, annotations, onCreate, readOnly 
             placeholder="对圈选区域的反馈..."
             autoFocus
           />
-          <div style={{ fontSize: 12, color: '#64748B' }}>
+          <div style={{ fontSize: 12, color: colors.muted }}>
             区域: {pending && `${(pending.rect.w * 100).toFixed(1)}% × ${(pending.rect.h * 100).toFixed(1)}%`}
           </div>
         </Space>

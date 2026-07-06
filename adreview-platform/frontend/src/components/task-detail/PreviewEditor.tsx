@@ -11,6 +11,7 @@ import {
 import ImagePreview from './ImagePreview'
 import TextPreview from './TextPreview'
 import AnnotationList from './AnnotationList'
+import { colors } from '@/styles/theme'
 import type { MaterialType, ReviewTask } from '@/types/domain'
 
 const { Text } = Typography
@@ -51,7 +52,7 @@ export default function PreviewEditor({
   const renderPreview = () => {
     if (!downloadUrl && materialType !== 'text') {
       return (
-        <div style={{ padding: 32, textAlign: 'center', color: '#64748B' }}>
+        <div style={{ padding: 32, textAlign: 'center', color: colors.muted }}>
           暂无可预览的素材
         </div>
       )
@@ -110,7 +111,7 @@ export default function PreviewEditor({
           <iframe
             src={downloadUrl}
             title={materialTitle}
-            style={{ width: '100%', height: 'calc(100% - 90px)', border: 'none', background: '#F8FAFC' }}
+            style={{ width: '100%', height: 'calc(100% - 90px)', border: 'none', background: colors.surface2 }}
           />
         </div>
       )
@@ -129,7 +130,7 @@ export default function PreviewEditor({
           <video
             controls
             src={downloadUrl}
-            style={{ width: '100%', maxHeight: '70vh', background: '#000', borderRadius: 6 }}
+            style={{ width: '100%', maxHeight: '70vh', background: colors.foreground, borderRadius: 6 }}
           />
         </div>
       )
@@ -143,7 +144,7 @@ export default function PreviewEditor({
       <div
         style={{
           padding: '8px 12px',
-          borderBottom: '1px solid #E2E8F0',
+          borderBottom: `1px solid ${colors.border}`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -218,7 +219,7 @@ export default function PreviewEditor({
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{renderPreview()}</div>
 
       {!supportsAnnotation && (
-        <div style={{ borderTop: '1px solid #E2E8F0', padding: '6px 12px', background: '#F8FAFC' }}>
+        <div style={{ borderTop: `1px solid ${colors.border}`, padding: '6px 12px', background: colors.surface2 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
             当前素材类型不支持圈选/选区批注，请使用右侧评论。
           </Text>
