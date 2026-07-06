@@ -5,7 +5,7 @@ import mimetypes
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -233,6 +233,7 @@ async def download_version(
 async def submit_material(
     material_id: int,
     body: MaterialSubmitRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Material:
@@ -258,6 +259,23 @@ async def submit_material(
         )
     await start_instance(db, material, template, user, task_name=body.task_name, skip_machine_review=body.skip_machine_review)
     await db.commit()
+
+    # FastAPI-safe scheduling of the machine review. `asyncio.create_task` inside
+    # the workflow engine fires before the response is sent, but Starlette can
+    # drop it when the handler returns, so the review never actually runs.
+    # BackgroundTasks runs after the response is sent to the client, guaranteeing
+    # the AI scan executes. The route layer only schedules if this is the first
+    # machine stage (skip_machine_review=False is already checked in start_instance).
+    if not body.skip_machine_review:
+        from app.models.review import ReviewTask as _RT, MachineStatus as _MS
+        from sqlalchemy import select as _sa_select
+        rt = await db.scalar(
+            _sa_select(_RT).where(_RT.material_id == material_id).order_by(_RT.id.desc()).limit(1)
+        )
+        if rt and rt.machine_status == _MS.PENDING:
+            from app.services.workflow_engine import _run_machine_review_async
+            background_tasks.add_task(_run_machine_review_async, rt.id, None)
+
     # Re-query to ensure all fields are loaded for response serialization
     material = await db.scalar(
         select(Material)

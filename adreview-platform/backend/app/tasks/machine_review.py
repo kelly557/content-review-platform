@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.core.logging import get_logger
 from app.models.human_review_config import HumanReviewConfig, RiskLevel
 from app.models.review import MachineStatus, ReviewTask, ReviewType
-from app.models.workflow import WorkflowInstance, WorkflowNode
+from app.models.workflow import WorkflowInstance, WorkflowNode, WorkflowTemplate
 
 log = get_logger(__name__)
 
@@ -46,6 +46,14 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
             .options(selectinload(WorkflowInstance.nodes))
         )
         instance = instance_result.scalar_one()
+
+        # Avoid lazy-loading `instance.template` in the async context
+        # (triggers greenlet_spawn errors). Load the template explicitly.
+        template_result = await db.execute(
+            select(WorkflowTemplate).where(WorkflowTemplate.id == instance.template_id)
+        )
+        template = template_result.scalar_one()
+        instance._template_cache = template
 
         stage_config = _get_stage_config(instance, task.stage_key)
         services = stage_config.get("services", ["text_detection_pro"])
@@ -84,7 +92,10 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
 
 def _get_stage_config(instance: WorkflowInstance, stage_key: str) -> Dict[str, Any]:
     """Extract config for a given stage from the workflow template definition."""
-    definition = instance.template.definition if hasattr(instance, "template") else {}
+    template = getattr(instance, "_template_cache", None)
+    if template is None:
+        template = getattr(instance, "template", None)
+    definition = template.definition if template is not None else {}
     stages = definition.get("stages", [])
     for stage in stages:
         if stage.get("key") == stage_key:
@@ -103,7 +114,7 @@ async def call_mock_detection(service_code: str, version_id: int) -> List[Dict[s
         {"label": "political_content", "label_cn": "政治敏感", "risk": "高风险"},
     ]
 
-    num_hits = random.randint(0, 3)
+    num_hits = random.choice([1, 2, 3])
     hits = []
     for _ in range(num_hits):
         chosen = random.choice(mock_labels)
@@ -113,13 +124,48 @@ async def call_mock_detection(service_code: str, version_id: int) -> List[Dict[s
             "label": chosen["label"],
             "label_cn": chosen["label_cn"],
             "score": round(random.uniform(0.6, 0.99), 2),
-            "quote": f"模拟命中片段 #{random.randint(1, 100)}",
+            "quote": _pick_quote_for_version(version_id),
             "bbox": None,
             "page": None,
             "timestamp_ms": None,
         })
 
     return hits
+
+
+def _pick_quote_for_version(version_id: int) -> str:
+    """Best-effort: fetch the material version's text_body and slice a window.
+
+    Falls back to a deterministic-looking fake quote when the version is missing
+    or has no text body (e.g. video / image materials).
+    """
+    import asyncio
+
+    async def _inner() -> str:
+        from app.db.session import SessionLocal
+        from app.models.material import MaterialVersion
+
+        try:
+            async with SessionLocal() as db:
+                v = await db.get(MaterialVersion, version_id)
+                body = getattr(v, "text_body", None) if v else None
+                if body and len(body) >= 10:
+                    snippet = body.strip().replace("\n", " ")
+                    if len(snippet) <= 30:
+                        return f"“{snippet}”"
+                    start = random.randint(0, max(0, len(snippet) - 30))
+                    return f"“{snippet[start:start + random.randint(10, 30)]}…”"
+        except Exception:
+            pass
+        return f"“模拟命中片段 #{version_id}-{random.randint(1, 99)}”"
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            return f"“模拟命中片段 #{version_id}-{random.randint(1, 99)}”"
+        return loop.run_until_complete(_inner())
+    except Exception:
+        return f"“模拟命中片段 #{version_id}-{random.randint(1, 99)}”"
 
 
 def aggregate_risk_level(hits: List[Dict[str, Any]]) -> str:
@@ -163,9 +209,9 @@ def _generate_mock_rule_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]
 
 
 async def _simulate_network_delay() -> None:
-    """Simulate network delay for mock service."""
+    """Simulate short network delay for the mock service."""
     import asyncio
-    await asyncio.sleep(random.uniform(0.5, 2.0))
+    await asyncio.sleep(random.uniform(0.1, 0.4))
 
 
 async def should_escalate_to_human(

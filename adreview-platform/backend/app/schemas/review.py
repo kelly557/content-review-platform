@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from app.models.material import MaterialStatus, MaterialType
 from app.models.review import ReviewDecision, ReviewType, MachineStatus
@@ -130,6 +130,7 @@ class ReviewTaskOut(ORMBase):
     material_type: Optional[MaterialType] = None
     material_status: Optional[MaterialStatus] = None
 
+    @computed_field
     @property
     def agent_review(self) -> Optional[AgentReviewResult]:
         if self.review_type == ReviewType.MACHINE and self.machine_result and self.machine_completed_at:
