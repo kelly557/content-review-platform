@@ -252,7 +252,7 @@ export default function MaterialDetailPage() {
       )}
 
       <Modal
-        title="选择审核流程"
+        title="选择人工审核规则"
         open={submitOpen}
         onCancel={() => setSubmitOpen(false)}
         onOk={async () => {
@@ -265,9 +265,9 @@ export default function MaterialDetailPage() {
       >
         <Space direction="vertical" style={{ width: '100%' }}>
           {templates.length === 0 ? (
-            <Text type="secondary">暂无可用审核流（将仅标记为已提交）</Text>
+            <Text type="secondary">暂无可用人工审核规则（将仅标记为已提交）</Text>
           ) : (
-            <Form.Item label="审核流">
+            <Form.Item label="人工审核规则">
               <Select
                 placeholder="-- 无（仅标记为已提交）--"
                 allowClear

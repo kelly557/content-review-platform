@@ -10,7 +10,7 @@ import {
   type MaterialType,
   type PackageStatus,
 } from '@/types/domain'
-import { palette, font } from '@/lib/theme'
+import { colors } from '@/styles/theme'
 
 export interface PackagePickerProps {
   type?: MaterialType
@@ -89,10 +89,8 @@ export default function PackagePicker({ type, selectedId, onChange }: PackagePic
         />
         <span
           style={{
-            color: palette.inkMuted,
+            color: colors.secondary,
             fontSize: 12,
-            fontFamily: font.sans,
-            letterSpacing: '0.05em',
           }}
         >
           {type ? `仅展示 ${TYPE_LABELS[type]} 类型的草稿素材包` : '展示所有草稿状态的素材包'}
@@ -109,8 +107,8 @@ export default function PackagePicker({ type, selectedId, onChange }: PackagePic
         locale={{ emptyText: <Empty description="暂无可选素材包" /> }}
         scroll={{ y: 360 }}
         style={{
-          border: `1px solid ${palette.border}`,
-          borderRadius: 8,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 6,
           overflow: 'hidden',
         }}
       />

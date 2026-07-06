@@ -4,7 +4,7 @@ import type { TableRowSelection } from 'antd/es/table/interface'
 import { SearchOutlined } from '@ant-design/icons'
 import { materialsApi } from '@/api/materials'
 import { STATUS_LABELS, TYPE_LABELS, type MaterialListItem, type MaterialType } from '@/types/domain'
-import { palette, font } from '@/lib/theme'
+import { colors } from '@/styles/theme'
 
 export interface MaterialPickerProps {
   type: MaterialType
@@ -78,10 +78,8 @@ export default function MaterialPicker({ type, selectedIds, onChange, maxCount =
         />
         <span
           style={{
-            color: palette.inkMuted,
+            color: colors.secondary,
             fontSize: 12,
-            fontFamily: font.sans,
-            letterSpacing: '0.05em',
           }}
         >
           已选 {selectedIds.length} / {maxCount} · 仅展示 {TYPE_LABELS[type]} 类型的草稿/已驳回素材
@@ -98,8 +96,8 @@ export default function MaterialPicker({ type, selectedIds, onChange, maxCount =
         locale={{ emptyText: <Empty description="暂无可选素材" /> }}
         scroll={{ y: 360 }}
         style={{
-          border: `1px solid ${palette.border}`,
-          borderRadius: 8,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 6,
           overflow: 'hidden',
         }}
       />

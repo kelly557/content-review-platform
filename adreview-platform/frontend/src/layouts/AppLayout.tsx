@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Layout, Menu, Avatar, Dropdown, Space, Typography, Button, Tag, App, type MenuProps } from 'antd'
+import { Layout, Menu, Avatar, Dropdown, Space, Typography, Button, Tag, type MenuProps } from 'antd'
 import {
   DashboardOutlined,
   FileImageOutlined,
@@ -11,7 +11,7 @@ import {
   MenuUnfoldOutlined,
   UserOutlined,
   SettingOutlined,
-  TagsOutlined,
+  ClusterOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
@@ -30,40 +30,97 @@ type NavChild = {
   label: string
 }
 
-type NavNode = {
-  key: string
-  path: string
-  label: string
-  icon: React.ReactNode
-  roles: string[]
-  children?: NavChild[]
-}
+type NavNode =
+  | {
+      kind: 'leaf'
+      key: string
+      path: string
+      label: string
+      icon: React.ReactNode
+      roles: string[]
+    }
+  | {
+      kind: 'group'
+      key: string
+      path: string
+      label: string
+      icon: React.ReactNode
+      roles: string[]
+      children: NavChild[]
+    }
 
-const ALL_NAV: NavNode[] = [
-  { key: 'dashboard', path: '/dashboard', label: '工作台', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
-  { key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
-  { key: 'tasks', path: '/tasks', label: '审核任务', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
-  { key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
+const NAV_SECTIONS: Array<{
+  type: 'group'
+  key: string
+  label: string
+  items: NavNode[]
+}> = [
   {
-    key: 'strategies',
-    path: '/strategies',
-    label: '策略中心',
-    icon: <SettingOutlined style={{ fontSize: ICON_SIZE }} />,
-    roles: ['admin', 'mlr'],
-    children: [
-      { key: 'strategies-list', path: '/strategies', label: '策略管理' },
-      { key: 'strategies-scene', path: '/strategies/scene-config', label: '场景管理' },
-      { key: 'strategies-image', path: '/strategies/custom-image', label: '自定义图片' },
-      { key: 'strategies-text', path: '/strategies/custom-text', label: '自定义文本' },
+    type: 'group',
+    key: 'workspace',
+    label: '工作区',
+    items: [
+      { kind: 'leaf', key: 'dashboard', path: '/dashboard', label: '工作台', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
+      { kind: 'leaf', key: 'tasks', path: '/tasks', label: '审核任务', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
+      { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
     ],
   },
-  { key: 'admin', path: '/admin/users', label: '系统管理', icon: <TeamOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
-  { key: 'tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
-  { key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
+  {
+    type: 'group',
+    key: 'strategy',
+    label: '策略中心',
+    items: [
+      {
+        kind: 'group',
+        key: 'strategies',
+        path: '/strategies',
+        label: '审核策略',
+        icon: <SettingOutlined style={{ fontSize: ICON_SIZE }} />,
+        roles: ['admin', 'mlr'],
+        children: [
+          { key: 'strategies-list', path: '/strategies', label: '策略列表' },
+          { key: 'strategies-image', path: '/strategies/rules-by-type/image', label: '图片审核规则' },
+          { key: 'strategies-text', path: '/strategies/rules-by-type/text', label: '文本审核规则' },
+          { key: 'strategies-audio', path: '/strategies/rules-by-type/audio', label: '语音审核规则' },
+          { key: 'strategies-doc', path: '/strategies/rules-by-type/doc', label: '文档审核规则' },
+          { key: 'strategies-video', path: '/strategies/rules-by-type/video', label: '视频审核规则' },
+          { key: 'strategies-custom-image', path: '/strategies/custom-image', label: '自定义图片库' },
+          { key: 'strategies-custom-text', path: '/strategies/custom-text', label: '自定义词库' },
+        ],
+      },
+      { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核规则', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
+    ],
+  },
+  {
+    type: 'group',
+    key: 'analytics',
+    label: '数据分析',
+    items: [
+      { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
+    ],
+  },
+  {
+    type: 'group',
+    key: 'system',
+    label: '系统管理',
+    items: [
+      {
+        kind: 'group',
+        key: 'admin',
+        path: '/admin/users',
+        label: '用户管理',
+        icon: <TeamOutlined style={{ fontSize: ICON_SIZE }} />,
+        roles: ['admin'],
+        children: [
+          { key: 'admin-users', path: '/admin/users', label: '用户列表' },
+          { key: 'admin-tags', path: '/tags', label: '标签管理' },
+        ],
+      },
+    ],
+  },
 ]
 
 export default function AppLayout() {
-  const { message } = App.useApp()
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout } = useAuthStore()
@@ -82,47 +139,79 @@ export default function AppLayout() {
     return null
   }
 
-  const items: MenuItem[] = ALL_NAV.filter((n) => n.roles.includes(user.role)).map((n) => {
-    if (!n.children) {
-      return {
-        key: n.path,
-        icon: n.icon,
-        label: <Link to={n.path}>{n.label}</Link>,
+  const filterByRole = (items: NavNode[]): NavNode[] =>
+    items.filter((n) => n.roles.includes(user.role))
+
+  const visibleSections = NAV_SECTIONS
+    .map((section) => ({ ...section, items: filterByRole(section.items) }))
+    .filter((section) => section.items.length > 0)
+
+  const items: MenuItem[] = []
+  visibleSections.forEach((section, idx) => {
+    if (idx > 0) {
+      items.push({ type: 'divider' })
+    }
+    items.push({
+      key: `__group_${section.key}`,
+      type: 'group',
+      label: (
+        <span
+          style={{
+            color: '#94A3B8',
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: 0.5,
+            paddingLeft: 4,
+          }}
+        >
+          {sidebarCollapsed ? '' : section.label}
+        </span>
+      ),
+    })
+    section.items.forEach((node) => {
+      if (node.kind === 'leaf') {
+        items.push({
+          key: node.path,
+          icon: node.icon,
+          label: <Link to={node.path}>{node.label}</Link>,
+        })
+      } else {
+        items.push({
+          key: node.key,
+          icon: node.icon,
+          label: node.label,
+          children: node.children.map((c) => ({
+            key: c.path,
+            label: <Link to={c.path}>{c.label}</Link>,
+          })),
+        })
       }
-    }
-    return {
-      key: n.key,
-      icon: n.icon,
-      label: n.label,
-      children: n.children.map((c) => ({
-        key: c.path,
-        label:
-          c.path === '#soon' ? (
-            <span
-              onClick={() => message.info(`${c.label} - 即将上线`)}
-              style={{ cursor: 'pointer' }}
-            >
-              {c.label}
-            </span>
-          ) : (
-            <Link to={c.path}>{c.label}</Link>
-          ),
-      })),
-    }
+    })
   })
 
-  const allPaths = ALL_NAV.filter((n) => n.roles.includes(user.role)).flatMap((n) =>
-    n.children ? n.children.map((c) => c.path) : [n.path],
+  const allPaths = visibleSections.flatMap((section) =>
+    section.items.flatMap((node) => {
+      if (node.kind === 'leaf') return [node.path]
+      return [node.key, ...node.children.map((c) => c.path)]
+    }),
   )
   const candidates = allPaths
-    .filter((k) => k !== '#soon')
     .sort((a, b) => b.length - a.length)
+    .filter((k) => !k.startsWith('__'))
   const activeKey =
-    candidates.find((k) => location.pathname === k || location.pathname.startsWith(`${k}/`)) ||
-    '/dashboard'
+    candidates.find(
+      (k) =>
+        location.pathname === k ||
+        (k.startsWith('/') && location.pathname.startsWith(`${k}/`)),
+    ) || '/dashboard'
 
-  const openKeys = ALL_NAV.filter((n) => n.children && n.roles.includes(user.role))
-    .filter((n) => location.pathname.startsWith(n.path))
+  const openKeys = visibleSections
+    .flatMap((section) => section.items)
+    .filter((n): n is Extract<NavNode, { kind: 'group' }> => n.kind === 'group')
+    .filter((n) => {
+      if (location.pathname.startsWith(n.path)) return true
+      return n.children.some((c) => location.pathname.startsWith(c.path))
+    })
     .map((n) => n.key)
 
   const dropdownItems: MenuProps['items'] = [
@@ -159,8 +248,12 @@ export default function AppLayout() {
             justifyContent: 'center',
             color: '#fff',
             fontWeight: 600,
-            fontSize: 16,
+            fontSize: sidebarCollapsed ? 13 : 15,
             borderBottom: '1px solid #1E293B',
+            padding: '0 12px',
+            textAlign: 'center',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
           }}
         >
           {sidebarCollapsed ? '内审' : '内容安全审核管理平台'}
@@ -171,7 +264,7 @@ export default function AppLayout() {
           selectedKeys={[activeKey]}
           defaultOpenKeys={openKeys}
           items={items}
-          style={{ borderRight: 0 }}
+          style={{ borderRight: 0, paddingTop: 8 }}
         />
       </Sider>
       <Layout>

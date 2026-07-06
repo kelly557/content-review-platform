@@ -1,6 +1,7 @@
 """Tag service — CRUD only."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 from sqlalchemy import and_, func, or_, select
@@ -29,7 +30,7 @@ async def list_tags(
     q: Optional[str] = None,
 ) -> Tuple[List[Tag], int]:
     stmt = select(Tag)
-    conds = []
+    conds = [Tag.deleted_at.is_(None)]
     if domain:
         conds.append(Tag.domain == domain)
     if category:
@@ -67,8 +68,11 @@ async def list_tags(
     return list(rows), int(total)
 
 
-async def get_tag(db: AsyncSession, tag_id: str) -> Optional[Tag]:
-    return await db.get(Tag, tag_id)
+async def get_tag(db: AsyncSession, tag_id: str, *, include_deleted: bool = False) -> Optional[Tag]:
+    tag = await db.get(Tag, tag_id)
+    if tag and not include_deleted and tag.deleted_at is not None:
+        return None
+    return tag
 
 
 async def get_tag_by_code(db: AsyncSession, code: str) -> Optional[Tag]:
@@ -112,5 +116,7 @@ async def update_tag(db: AsyncSession, tag: Tag, body: TagUpdate) -> Tag:
 
 
 async def delete_tag(db: AsyncSession, tag: Tag) -> None:
-    await db.delete(tag)
+    tag.deleted_at = datetime.utcnow()
+    tag.status = TagStatus.DEPRECATED
+    tag.version = (tag.version or 1) + 1
     await db.flush()

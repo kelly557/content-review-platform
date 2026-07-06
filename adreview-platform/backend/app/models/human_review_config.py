@@ -3,7 +3,6 @@
 - is_enabled: 是否开启人机审核
 - risk_levels: 哪些机审风险等级的结果会流入人审 (高/中/低/无)
 - review_rule_id: 人审审核规则（流程模板）
-- notify_plan_id: 回调通知方案
 """
 from __future__ import annotations
 
@@ -11,7 +10,7 @@ import enum
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -36,7 +35,6 @@ class HumanReviewConfig(Base):
     review_rule_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("workflow_templates.id"), nullable=True
     )
-    notify_plan_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), nullable=False

@@ -15,6 +15,7 @@ from app.models.user import User, UserRole
 from app.models.workflow import WorkflowTemplate
 from app.models.detection_rule import DetectionRule
 from app.models.human_review_config import HumanReviewConfig
+from app.models.tag import Tag, TagCategory, TagDomain, TagSource, TagStatus
 
 
 DEFAULT_TEMPLATES = [
@@ -339,6 +340,7 @@ async def main() -> None:
         await _upsert_wordsets(db)
         await _upsert_detection_rules(db)
         await _upsert_human_review_configs(db)
+        await _upsert_tags(db)
         await _upsert_user(db, "admin@adreview.example.com", "系统管理员", UserRole.ADMIN, settings.app_secret + "-admin")
         await _upsert_user(db, "reviewer@adreview.example.com", "审核员 Alice", UserRole.REVIEWER, "reviewer123")
         await _upsert_user(db, "mlr@adreview.example.com", "MLR 专家 Bob", UserRole.MLR, "mlr12345")
@@ -364,9 +366,48 @@ async def _upsert_human_review_configs(db: AsyncSession) -> None:
                     is_enabled=False,
                     risk_levels="",
                     review_rule_id=None,
-                    notify_plan_id=None,
                 )
             )
+
+
+DEFAULT_TAGS = [
+    {"code": "tag_politics_figure", "name": "政治人物", "domain": TagDomain.POLITICS, "category": TagCategory.FIGURE},
+    {"code": "tag_politics_event", "name": "政治事件", "domain": TagDomain.POLITICS, "category": TagCategory.EVENT},
+    {"code": "tag_porn_image", "name": "色情图像", "domain": TagDomain.PORN, "category": TagCategory.SCENE},
+    {"code": "tag_violence_scene", "name": "暴力场景", "domain": TagDomain.VIOLENCE, "category": TagCategory.SCENE},
+    {"code": "tag_ads_absolute", "name": "绝对化用语", "domain": TagDomain.ADS_LAW, "category": TagCategory.ABSOLUTE_TERM},
+    {"code": "tag_ads_credential", "name": "缺失资质", "domain": TagDomain.ADS_LAW, "category": TagCategory.CREDENTIAL},
+    {"code": "tag_medical_claim", "name": "医疗宣称", "domain": TagDomain.MEDICAL, "category": TagCategory.CLAIM},
+    {"code": "tag_finance_promise", "name": "金融承诺", "domain": TagDomain.FINANCE, "category": TagCategory.SLOGAN},
+    {"code": "tag_minor_image", "name": "未成年人形象", "domain": TagDomain.MINOR, "category": TagCategory.FIGURE},
+    {"code": "tag_privacy_leak", "name": "隐私泄露", "domain": TagDomain.PRIVACY, "category": TagCategory.SCENE},
+    {"code": "tag_ip_logo", "name": "品牌 logo", "domain": TagDomain.IP, "category": TagCategory.SYMBOL},
+    {"code": "tag_fraud_claim", "name": "欺诈话术", "domain": TagDomain.FRAUD, "category": TagCategory.CLAIM},
+]
+
+
+async def _upsert_tags(db: AsyncSession) -> None:
+    """种一批 active 标签，供审核员在人工标注面板选用。"""
+    for spec in DEFAULT_TAGS:
+        existing = (
+            await db.execute(select(Tag).where(Tag.code == spec["code"]))
+        ).scalars().first()
+        if existing:
+            continue
+        db.add(
+            Tag(
+                code=spec["code"],
+                name=spec["name"],
+                domain=spec["domain"],
+                category=spec["category"],
+                jurisdictions=["cn"],
+                industries=[],
+                channels=[],
+                source=TagSource.PLATFORM,
+                status=TagStatus.ACTIVE,
+                version=1,
+            )
+        )
 
 
 if __name__ == "__main__":

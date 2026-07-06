@@ -1,19 +1,32 @@
-import { useState } from 'react'
-import { Alert, Button, Form, Input, Modal, Select, Space, Typography } from 'antd'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Alert,
+  Button,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Tag as AntdTag,
+  Typography,
+} from 'antd'
 import {
   CheckOutlined,
   CloseOutlined,
   SwapOutlined,
+  TagsOutlined,
   UndoOutlined,
   UsergroupAddOutlined,
 } from '@ant-design/icons'
-import type { ReviewDecision, User } from '@/types/domain'
+import type { ReviewDecision, TagSummary, User } from '@/types/domain'
+import { TAG_DOMAIN_OPTIONS } from '@/types/domain'
 
 const { Text } = Typography
 
 export interface DecisionFormValues {
   note?: string
   comment_body?: string
+  tag_ids?: string[]
 }
 
 interface Props {
@@ -21,15 +34,15 @@ interface Props {
   decisionForm: import('antd').FormInstance<DecisionFormValues>
   users: User[]
   currentUserId?: number
-  /** Open transfer dialog */
   onTransfer: (toUserId: number) => Promise<void> | void
-  /** Open add-reviewer dialog */
   onAddReviewer: (toUserId: number) => Promise<void> | void
-  /** Submit a decision */
-  onDecide: (decision: ReviewDecision) => Promise<void> | void
-  /** Indicates form has dirty values (used by parent to warn on task switch). */
+  onDecide: (decision: ReviewDecision, tagIds: string[]) => Promise<void> | void
   onDirtyChange?: (dirty: boolean) => void
+  availableTags?: TagSummary[]
+  existingTagIds?: string[]
 }
+
+const MAX_TAG_SELECT = 20
 
 export default function HumanActionPanel({
   canDecide,
@@ -40,15 +53,54 @@ export default function HumanActionPanel({
   onAddReviewer,
   onDecide,
   onDirtyChange,
+  availableTags = [],
+  existingTagIds = [],
 }: Props) {
   const [transferOpen, setTransferOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [transferTarget, setTransferTarget] = useState<number | null>(null)
   const [addTarget, setAddTarget] = useState<number | null>(null)
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
+  const [domainFilter, setDomainFilter] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    setSelectedTagIds(existingTagIds)
+  }, [existingTagIds.join('|')])
 
   const userOptions = users
     .filter((u) => u.id !== currentUserId)
     .map((u) => ({ value: u.id, label: `${u.full_name} (${u.email}) · ${u.role}` }))
+
+  const tagOptions = useMemo(() => {
+    const filtered = domainFilter
+      ? availableTags.filter((t) => t.domain === domainFilter)
+      : availableTags
+    return filtered.map((t) => ({
+      value: t.id,
+      label: t.name,
+      domain: t.domain,
+      code: t.code,
+    }))
+  }, [availableTags, domainFilter])
+
+  const tagOptionsAll = useMemo(
+    () =>
+      availableTags.map((t) => ({
+        value: t.id,
+        label: t.name,
+        domain: t.domain,
+        code: t.code,
+      })),
+    [availableTags],
+  )
+
+  const handleDecide = (decision: ReviewDecision) => {
+    if (selectedTagIds.length > MAX_TAG_SELECT) {
+      Modal.error({ title: `最多标注 ${MAX_TAG_SELECT} 个标签`, icon: null })
+      return
+    }
+    onDecide(decision, selectedTagIds)
+  }
 
   return (
     <div style={{ padding: 16 }}>
@@ -69,6 +121,7 @@ export default function HumanActionPanel({
           layout="vertical"
           disabled={!canDecide}
           onValuesChange={() => onDirtyChange?.(true)}
+          initialValues={{ tag_ids: existingTagIds }}
         >
           <Form.Item label="备注" name="note">
             <Input.TextArea
@@ -85,12 +138,83 @@ export default function HumanActionPanel({
             />
           </Form.Item>
 
+          <Form.Item
+            label={
+              <Space size={6}>
+                <TagsOutlined />
+                <span>标签标注</span>
+                <AntdTag color="blue" style={{ margin: 0 }}>
+                  {selectedTagIds.length}/{MAX_TAG_SELECT}
+                </AntdTag>
+              </Space>
+            }
+            tooltip="从标签管理中选用；与本任务标签一一对应"
+          >
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Space size={4} wrap>
+                <AntdTag.CheckableTag
+                  checked={!domainFilter}
+                  onChange={(checked) => checked && setDomainFilter(undefined)}
+                >
+                  全部
+                </AntdTag.CheckableTag>
+                {TAG_DOMAIN_OPTIONS.map((d) => (
+                  <AntdTag.CheckableTag
+                    key={d.value}
+                    checked={domainFilter === d.value}
+                    onChange={(checked) =>
+                      setDomainFilter(checked ? d.value : undefined)
+                    }
+                  >
+                    {d.cn}
+                  </AntdTag.CheckableTag>
+                ))}
+              </Space>
+              <Select
+                mode="multiple"
+                showSearch
+                allowClear
+                placeholder="搜索标签名称或 code"
+                optionFilterProp="label"
+                value={selectedTagIds}
+                onChange={(v) => {
+                  const next = Array.isArray(v) ? v.slice(0, MAX_TAG_SELECT) : []
+                  setSelectedTagIds(next as string[])
+                  decisionForm.setFieldValue('tag_ids', next)
+                  onDirtyChange?.(true)
+                }}
+                options={tagOptions}
+                style={{ width: '100%' }}
+                disabled={!canDecide || availableTags.length === 0}
+                tagRender={(props) => {
+                  const opt = tagOptionsAll.find((o) => o.value === props.value)
+                  return (
+                    <AntdTag
+                      color="blue"
+                      closable={props.closable}
+                      onClose={props.onClose}
+                      style={{ marginRight: 4 }}
+                    >
+                      {opt?.label ?? String(props.value)}
+                    </AntdTag>
+                  )
+                }}
+                notFoundContent={
+                  availableTags.length === 0 ? '暂无可用标签' : '无匹配标签'
+                }
+              />
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                数据与「标签管理」页一致；已停用 / 已删除标签不会出现在此处。
+              </Text>
+            </Space>
+          </Form.Item>
+
           <Space wrap>
             <Button
               type="primary"
               icon={<CheckOutlined />}
               disabled={!canDecide}
-              onClick={() => onDecide('approved')}
+              onClick={() => handleDecide('approved')}
             >
               通过
             </Button>
@@ -98,14 +222,14 @@ export default function HumanActionPanel({
               danger
               icon={<CloseOutlined />}
               disabled={!canDecide}
-              onClick={() => onDecide('rejected')}
+              onClick={() => handleDecide('rejected')}
             >
               驳回
             </Button>
             <Button
               icon={<UndoOutlined />}
               disabled={!canDecide}
-              onClick={() => onDecide('returned')}
+              onClick={() => handleDecide('returned')}
             >
               退回
             </Button>
@@ -125,6 +249,12 @@ export default function HumanActionPanel({
             </Button>
           </Space>
         </Form>
+
+        {availableTags.length === 0 && (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            暂未拉取到可用标签，请在「标签管理」创建标签。
+          </Text>
+        )}
       </Space>
 
       <Modal

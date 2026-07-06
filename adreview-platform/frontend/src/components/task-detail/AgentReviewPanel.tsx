@@ -1,33 +1,54 @@
-import { Empty, Space, Statistic, Tabs, Tag, Typography } from 'antd'
-import { AlertOutlined, FileSearchOutlined, TagOutlined, ThunderboltOutlined } from '@ant-design/icons'
-import type { AgentReviewResult, AgentRiskLevel } from '@/types/domain'
+import { Alert, Button, Empty, Space, Statistic, Tabs, Tag, Typography } from 'antd'
+import { AlertOutlined, FileSearchOutlined, PlayCircleOutlined, TagOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import type { AgentReviewResult, ReviewTask } from '@/types/domain'
+import { RISK_COLOR, suggestAction } from '@/lib/risk'
 
 const { Text } = Typography
 
 interface Props {
   result: AgentReviewResult | null | undefined
+  task?: ReviewTask
+  onTriggerMachineReview?: () => void
+  triggering?: boolean
 }
 
-const RISK_COLOR: Record<AgentRiskLevel, string> = {
-  高风险: 'red',
-  中风险: 'orange',
-  低风险: 'gold',
-  无风险: 'green',
-}
+export default function AgentReviewPanel({ result, task, onTriggerMachineReview, triggering }: Props) {
+  const canTrigger = task && task.review_type === 'machine' && task.machine_status === 'pending'
 
-export default function AgentReviewPanel({ result }: Props) {
   if (!result) {
     return (
       <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="后端尚未提供 Agent 审核结果"
-        />
+        {canTrigger ? (
+          <div style={{ textAlign: 'center', padding: '40px 16px' }}>
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="AI 审核尚未执行"
+            />
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              loading={triggering}
+              onClick={onTriggerMachineReview}
+              style={{ marginTop: 16 }}
+            >
+              执行 AI 审核
+            </Button>
+          </div>
+        ) : (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="后端尚未提供 Agent 审核结果"
+          />
+        )}
       </div>
     )
   }
 
   const { risk_level, hits, rule_hits, strategy, summary, finished_at } = result
+  const suggestion = suggestAction(risk_level)
+  const uniqueServiceNames = Array.from(
+    new Set(hits.map((h) => h.service_name || h.service_code).filter(Boolean) as string[]),
+  )
 
   return (
     <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
@@ -47,6 +68,30 @@ export default function AgentReviewPanel({ result }: Props) {
             valueStyle={{ fontSize: 22, color: hits.length > 0 ? '#DC2626' : '#0F172A' }}
           />
         </Space>
+
+        <Alert
+          type={suggestion.tone}
+          showIcon
+          message={suggestion.label}
+          description={
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <span>{suggestion.reason}</span>
+              {uniqueServiceNames.length > 0 && (
+                <Space size={4} wrap>
+                  <Text type="secondary" style={{ fontSize: 12 }}>命中服务：</Text>
+                  {uniqueServiceNames.slice(0, 4).map((s) => (
+                    <Tag key={s} style={{ margin: 0 }}>
+                      {s}
+                    </Tag>
+                  ))}
+                  {uniqueServiceNames.length > 4 && (
+                    <Tag style={{ margin: 0 }}>+{uniqueServiceNames.length - 4}</Tag>
+                  )}
+                </Space>
+              )}
+            </Space>
+          }
+        />
 
         {summary && (
           <div

@@ -14,7 +14,6 @@ class HumanReviewConfigOut(ORMBase):
     is_enabled: bool
     risk_levels: List[RiskLevel]
     review_rule_id: Optional[int]
-    notify_plan_id: Optional[int]
     created_at: datetime
     updated_at: Optional[datetime]
 
@@ -23,7 +22,6 @@ class HumanReviewConfigUpdate(BaseModel):
     is_enabled: Optional[bool] = None
     risk_levels: Optional[List[RiskLevel]] = None
     review_rule_id: Optional[int] = None
-    notify_plan_id: Optional[int] = None
 
     @field_validator("risk_levels")
     @classmethod

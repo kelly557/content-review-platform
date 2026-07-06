@@ -117,7 +117,14 @@ class Tag(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=False), onupdate=func.now(), nullable=True
     )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=False), nullable=True, index=True
+    )
 
     __table_args__ = (
         Index("ix_tag_domain_category", "domain", "category"),
     )
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None

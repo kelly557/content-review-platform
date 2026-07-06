@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.models.material import MaterialStatus, MaterialType
 from app.models.review import ReviewDecision, ReviewType, MachineStatus
 from app.schemas.common import ORMBase
 
@@ -46,6 +47,14 @@ class ReviewDecisionRequest(BaseModel):
     decision: ReviewDecision
     note: Optional[str] = None
     comment_body: Optional[str] = None  # optional stage-level comment
+    tag_ids: List[str] = Field(default_factory=list, max_length=20)
+
+
+class ReviewAssignmentTagOut(ORMBase):
+    id: int
+    tag_id: str
+    tag_snapshot: Dict[str, Any]
+    created_at: datetime
 
 
 class ReviewCommentOut(ORMBase):
@@ -63,6 +72,7 @@ class ReviewAssignmentOut(ORMBase):
     decision: ReviewDecision
     note: Optional[str]
     decided_at: Optional[datetime]
+    tags: List[ReviewAssignmentTagOut] = Field(default_factory=list)
 
 
 class AgentHit(BaseModel):
@@ -117,6 +127,8 @@ class ReviewTaskOut(ORMBase):
     completed_at: Optional[datetime]
     assignments: List[ReviewAssignmentOut] = Field(default_factory=list)
     comments: List[ReviewCommentOut] = Field(default_factory=list)
+    material_type: Optional[MaterialType] = None
+    material_status: Optional[MaterialStatus] = None
 
     @property
     def agent_review(self) -> Optional[AgentReviewResult]:
@@ -129,6 +141,12 @@ class ReviewTaskOut(ORMBase):
                 summary=self.machine_result.get("summary"),
             )
         return None
+
+
+class BulkDecideRequest(BaseModel):
+    task_ids: List[int]
+    decision: ReviewDecision
+    note: Optional[str] = None
 
 
 class WorkflowNodeOut(ORMBase):
@@ -161,6 +179,33 @@ class WorkflowTemplateOut(ORMBase):
     description: Optional[str]
     definition: Dict[str, Any]
     is_active: bool
+
+
+class WorkflowStagePayload(BaseModel):
+    """Stage shape accepted on create/update.
+
+    ``key`` and ``type`` are filled by the backend; the client only
+    supplies ``name``, ``role`` and ``mode``.
+    """
+
+    name: str = Field(min_length=1, max_length=64)
+    role: str = Field(min_length=1, max_length=32)
+    mode: str = Field(default="single", max_length=16)
+
+
+class WorkflowTemplateCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    is_active: bool = True
+    stages: List[WorkflowStagePayload] = Field(min_length=1)
+
+
+class WorkflowTemplateUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    is_active: Optional[bool] = None
+    stages: Optional[List[WorkflowStagePayload]] = Field(default=None, min_length=1)
 
 
 class TransferRequest(BaseModel):

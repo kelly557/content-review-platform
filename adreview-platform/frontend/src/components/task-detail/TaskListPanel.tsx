@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Badge, List, Pagination, Radio, Spin, Tag, Typography } from 'antd'
+import { Badge, List, Pagination, Radio, Spin, Tag, Tooltip, Typography } from 'antd'
 import { reviewsApi } from '@/api/reviews'
-import { DECISION_LABELS, type ReviewTask, type ReviewType } from '@/types/domain'
+import {
+  DECISION_LABELS,
+  TYPE_LABELS,
+  type AgentReviewResult,
+  type AgentRiskLevel,
+  type ReviewTask,
+  type ReviewType,
+} from '@/types/domain'
+import { RISK_COLOR, truncate } from '@/lib/risk'
 
 const { Text } = Typography
 
@@ -13,6 +21,21 @@ interface Props {
 const PAGE_SIZE = 20
 
 type FilterMode = 'pending' | 'machine' | 'human' | 'completed'
+
+const MAX_VISIBLE_TAGS = 3
+const QUOTE_TRUNCATE = 60
+
+function dedupe(arr: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const s of arr) {
+    if (!s) continue
+    if (seen.has(s)) continue
+    seen.add(s)
+    out.push(s)
+  }
+  return out
+}
 
 export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
   const [items, setItems] = useState<ReviewTask[]>([])
@@ -50,23 +73,23 @@ export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
       .finally(() => setLoading(false))
   }, [page, filterMode])
 
-  const renderReviewTypeTag = (reviewType: ReviewType) => {
-    if (reviewType === 'machine') {
-      return <Tag color="blue">机审</Tag>
+  const renderRiskLevelTag = (review: AgentReviewResult | null | undefined) => {
+    if (!review) {
+      return <Tag color="default" style={{ margin: 0 }}>待审核</Tag>
     }
-    return <Tag color="orange">人审</Tag>
+    const level: AgentRiskLevel = review.risk_level
+    return (
+      <Tag color={RISK_COLOR[level]} style={{ margin: 0 }}>
+        {level}
+      </Tag>
+    )
   }
 
-  const renderMachineStatusTag = (task: ReviewTask) => {
-    if (task.review_type !== 'machine' || !task.machine_status) return null
-    const statusMap: Record<string, { color: string; label: string }> = {
-      pending: { color: 'default', label: '待执行' },
-      running: { color: 'processing', label: '执行中' },
-      completed: { color: 'success', label: '已完成' },
-      failed: { color: 'error', label: '失败' },
+  const renderReviewTypeTag = (reviewType: ReviewType) => {
+    if (reviewType === 'machine') {
+      return <Tag color="blue" style={{ margin: 0 }}>机审</Tag>
     }
-    const cfg = statusMap[task.machine_status] || { color: 'default', label: task.machine_status }
-    return <Tag color={cfg.color}>{cfg.label}</Tag>
+    return <Tag color="orange" style={{ margin: 0 }}>人审</Tag>
   }
 
   return (
@@ -108,6 +131,12 @@ export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
             locale={{ emptyText: '暂无任务' }}
             renderItem={(t) => {
               const active = t.id === currentTaskId
+              const review = t.agent_review ?? null
+              const hits = review?.hits ?? []
+              const uniqueLabels = dedupe(hits.map((h) => h.label_cn))
+              const firstQuoteHit = hits.find((h) => h.quote)
+              const firstQuote = firstQuoteHit?.quote ?? null
+              const firstScore = firstQuoteHit?.score ?? null
               return (
                 <div
                   onClick={() => onSelect(t.id)}
@@ -132,19 +161,88 @@ export default function TaskListPanel({ currentTaskId, onSelect }: Props) {
                   >
                     {t.title}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      {renderReviewTypeTag(t.review_type)}
-                      {renderMachineStatusTag(t)}
-                    </div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {new Date(t.created_at).toLocaleDateString('zh-CN')}
-                    </Text>
-                  </div>
-                  <div style={{ marginTop: 4 }}>
-                    <Tag color="processing" style={{ margin: 0, fontSize: 11 }}>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                    {renderRiskLevelTag(review)}
+                    {renderReviewTypeTag(t.review_type)}
+                    {t.material_type && (
+                      <Tag style={{ margin: 0 }}>{TYPE_LABELS[t.material_type]}</Tag>
+                    )}
+                    <Tag
+                      color={t.final_decision === 'pending' ? 'processing' : 'default'}
+                      style={{ margin: 0 }}
+                    >
                       {DECISION_LABELS[t.final_decision]}
                     </Tag>
+                  </div>
+
+                  {uniqueLabels.length > 0 && (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      {uniqueLabels.slice(0, MAX_VISIBLE_TAGS).map((label) => (
+                        <Tag key={label} color="red" style={{ margin: 0, fontSize: 11 }}>
+                          {label}
+                        </Tag>
+                      ))}
+                      {uniqueLabels.length > MAX_VISIBLE_TAGS && (
+                        <Tag style={{ margin: 0, fontSize: 11 }}>
+                          +{uniqueLabels.length - MAX_VISIBLE_TAGS}
+                        </Tag>
+                      )}
+                    </div>
+                  )}
+
+                  {firstQuote && (
+                    <Tooltip title={firstQuote} placement="topLeft">
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontSize: 12,
+                          color: '#475569',
+                          borderLeft: '3px solid #DC2626',
+                          paddingLeft: 8,
+                          background: '#FEF2F2',
+                          padding: '4px 8px',
+                          lineHeight: 1.5,
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                        }}
+                      >
+                        <span
+                          style={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          “{truncate(firstQuote, QUOTE_TRUNCATE)}”
+                        </span>
+                        {firstScore !== null && (
+                          <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
+                            {(firstScore * 100).toFixed(0)}%
+                          </Text>
+                        )}
+                      </div>
+                    </Tooltip>
+                  )}
+
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 11,
+                      color: '#94A3B8',
+                      textAlign: 'right',
+                    }}
+                  >
+                    {new Date(t.created_at).toLocaleString('zh-CN')}
                   </div>
                 </div>
               )

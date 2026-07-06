@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { ReviewTask, ReviewDecision, Page, Annotation } from '@/types/domain'
+import type { ReviewTask, ReviewDecision, Page, Annotation, MaterialType, ReviewType, MachineStatus } from '@/types/domain'
 
 export const reviewsApi = {
   myTasks(params?: {
@@ -7,18 +7,43 @@ export const reviewsApi = {
     size?: number
     pending?: boolean
     scope?: 'assigned' | 'mine' | 'all'
+    q?: string
+    material_type?: MaterialType
+    review_type?: ReviewType
+    status?: ReviewDecision
+    machine_status?: MachineStatus
+    sort_by?: string
+    sort_order?: 'asc' | 'desc'
+    created_after?: string
+    created_before?: string
   }) {
     return api.get<Page<ReviewTask>>('/reviews/tasks', { params }).then((r) => r.data)
   },
   task(id: number) {
     return api.get<ReviewTask>(`/reviews/tasks/${id}`).then((r) => r.data)
   },
-  decide(taskId: number, decision: ReviewDecision, note?: string, commentBody?: string) {
+  decide(
+    taskId: number,
+    decision: ReviewDecision,
+    note?: string,
+    commentBody?: string,
+    tagIds: string[] = [],
+  ) {
     return api
       .post<ReviewTask>(`/reviews/tasks/${taskId}/decide`, {
         decision,
         note,
         comment_body: commentBody,
+        tag_ids: tagIds,
+      })
+      .then((r) => r.data)
+  },
+  bulkDecide(taskIds: number[], decision: ReviewDecision, note?: string) {
+    return api
+      .post<{ success: number; failed: number; failed_ids: number[] }>('/reviews/tasks/bulk-decide', {
+        task_ids: taskIds,
+        decision,
+        note,
       })
       .then((r) => r.data)
   },
@@ -30,6 +55,11 @@ export const reviewsApi = {
   addReviewer(taskId: number, userId: number, note?: string) {
     return api
       .post(`/reviews/tasks/${taskId}/add-reviewer`, { user_id: userId, note })
+      .then((r) => r.data)
+  },
+  triggerMachineReview(taskId: number) {
+    return api
+      .post<{ message: string; task_id: number }>(`/reviews/tasks/${taskId}/trigger-machine-review`)
       .then((r) => r.data)
   },
 }

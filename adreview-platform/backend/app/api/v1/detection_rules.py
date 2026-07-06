@@ -228,7 +228,6 @@ def _hr_out(cfg: HumanReviewConfig) -> HumanReviewConfigOut:
             "is_enabled": cfg.is_enabled,
             "risk_levels": levels,
             "review_rule_id": cfg.review_rule_id,
-            "notify_plan_id": cfg.notify_plan_id,
             "created_at": cfg.created_at,
             "updated_at": cfg.updated_at,
         }
@@ -278,8 +277,6 @@ async def update_human_review(
         if not wt:
             raise HTTPException(status_code=400, detail="审核规则不存在")
         cfg.review_rule_id = body.review_rule_id
-    if body.notify_plan_id is not None:
-        cfg.notify_plan_id = body.notify_plan_id
     await db.flush()
     await db.refresh(cfg)
     await db.commit()

@@ -60,6 +60,22 @@ export interface MaterialCreatePayload {
   metadata?: Record<string, unknown>
 }
 
+export interface ReviewAssignmentTagSnapshot {
+  id: string
+  code: string
+  name: string
+  domain: string
+  category: string
+  status?: string
+}
+
+export interface ReviewAssignmentTag {
+  id: number
+  tag_id: string
+  tag_snapshot: ReviewAssignmentTagSnapshot
+  created_at: string
+}
+
 export interface ReviewAssignment {
   id: number
   task_id: number
@@ -67,6 +83,7 @@ export interface ReviewAssignment {
   decision: ReviewDecision
   note?: string | null
   decided_at?: string | null
+  tags?: ReviewAssignmentTag[]
 }
 
 export interface ReviewComment {
@@ -95,6 +112,8 @@ export interface ReviewTask {
   assignments: ReviewAssignment[]
   comments: ReviewComment[]
   agent_review?: AgentReviewResult | null
+  material_type?: MaterialType | null
+  material_status?: MaterialStatus | null
 }
 
 export type AgentRiskLevel = '高风险' | '中风险' | '低风险' | '无风险'
@@ -221,13 +240,42 @@ export interface WorkflowInstance {
   nodes: WorkflowNode[]
 }
 
+export interface WorkflowStage {
+  key: string
+  name: string
+  type: 'human' | 'machine'
+  role: string
+  mode: 'single' | 'joint'
+}
+
 export interface WorkflowTemplate {
   id: number
   code: string
   name: string
   description?: string | null
-  definition: { stages?: Array<{ key: string; name: string; role: string; mode: string }>; review_process?: string }
+  definition: { stages?: WorkflowStage[]; review_process?: string }
   is_active: boolean
+}
+
+export interface WorkflowStagePayload {
+  name: string
+  role: string
+  mode: 'single' | 'joint'
+}
+
+export interface WorkflowTemplateCreate {
+  code: string
+  name: string
+  description?: string
+  is_active?: boolean
+  stages: WorkflowStagePayload[]
+}
+
+export interface WorkflowTemplateUpdate {
+  name?: string
+  description?: string
+  is_active?: boolean
+  stages?: WorkflowStagePayload[]
 }
 
 export interface OverviewStats {
@@ -289,6 +337,36 @@ export const PACKAGE_STATUS_COLORS: Record<PackageStatus, string> = {
   submitted: 'processing',
   in_review: 'processing',
   completed: 'success',
+}
+
+export interface TaskStatusConfig {
+  label: string
+  color: string
+  icon: string
+}
+
+export const TASK_STATUS_CONFIG: Record<string, TaskStatusConfig> = {
+  pending: { label: '待处理', color: 'blue', icon: 'ClockCircleOutlined' },
+  machine_running: { label: '机审中', color: 'cyan', icon: 'RobotOutlined' },
+  machine_completed: { label: '机审完成', color: 'green', icon: 'CheckCircleOutlined' },
+  machine_failed: { label: '机审失败', color: 'red', icon: 'ExclamationCircleOutlined' },
+  in_review: { label: '人审中', color: 'orange', icon: 'UserOutlined' },
+  approved: { label: '已通过', color: 'success', icon: 'CheckCircleOutlined' },
+  rejected: { label: '已驳回', color: 'error', icon: 'CloseCircleOutlined' },
+  returned: { label: '已退回', color: 'warning', icon: 'RollbackOutlined' },
+}
+
+export function getTaskStatus(task: ReviewTask): string {
+  if (task.final_decision !== 'pending') {
+    return task.final_decision
+  }
+  if (task.review_type === 'machine') {
+    if (task.machine_status === 'running') return 'machine_running'
+    if (task.machine_status === 'completed') return 'machine_completed'
+    if (task.machine_status === 'failed') return 'machine_failed'
+    return 'pending'
+  }
+  return 'in_review'
 }
 
 

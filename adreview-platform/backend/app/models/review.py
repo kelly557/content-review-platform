@@ -5,11 +5,35 @@ import enum
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    TypeDecorator,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+
+
+class _JSONType(TypeDecorator):
+    """JSONB on Postgres, JSON on SQLite (test)."""
+
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(JSONB())
+        return dialect.type_descriptor(JSON())
 
 
 class ReviewDecision(str, enum.Enum):
@@ -95,3 +119,40 @@ class ReviewAssignment(Base):
 
     task = relationship("ReviewTask", back_populates="assignments")
     assignee = relationship("User", back_populates="review_assignments", foreign_keys=[assignee_id])
+    tag_links: Mapped[List["ReviewAssignmentTag"]] = relationship(
+        back_populates="assignment", cascade="all, delete-orphan"
+    )
+
+    @property
+    def tags(self) -> List["ReviewAssignmentTag"]:
+        return list(self.tag_links or [])
+
+
+class ReviewAssignmentTag(Base):
+    """Tag label annotated by a reviewer on their assignment decision.
+
+    ``tag_snapshot`` is a JSONB copy of the Tag at decision time
+    (``{id, code, name, domain, category, status}``) so historical
+    annotations remain readable even if the source Tag is later
+    deprecated or soft-deleted.
+    """
+
+    __tablename__ = "review_assignment_tags"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    assignment_id: Mapped[int] = mapped_column(
+        ForeignKey("review_assignments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tag_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    tag_snapshot: Mapped[dict] = mapped_column(_JSONType, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), server_default=func.now(), nullable=False
+    )
+
+    assignment = relationship("ReviewAssignment", back_populates="tag_links")
+
+    __table_args__ = (
+        Index("ix_rat_assignment_tag", "assignment_id", "tag_id", unique=True),
+    )

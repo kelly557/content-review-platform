@@ -4,7 +4,7 @@ import type { TableRowSelection } from 'antd/es/table/interface'
 import { DeleteOutlined, SearchOutlined } from '@ant-design/icons'
 import { materialsApi } from '@/api/materials'
 import { STATUS_LABELS, TYPE_LABELS, type MaterialListItem, type MaterialType } from '@/types/domain'
-import { palette, font } from '@/lib/theme'
+import { colors } from '@/styles/theme'
 
 const { TextArea } = Input
 
@@ -105,34 +105,28 @@ export default function PackageCreator({
       <div>
         <div
           style={{
-            fontFamily: font.sans,
             fontSize: 13,
             fontWeight: 500,
-            color: palette.ink,
+            color: colors.foreground,
             marginBottom: 8,
           }}
         >
-          包名称 <span style={{ color: palette.danger }}>*</span>
+          包名称 <span style={{ color: colors.destructive }}>*</span>
         </div>
         <Input
           value={packageName}
           onChange={(e) => onPackageNameChange(e.target.value)}
           placeholder="请输入素材包名称"
           maxLength={255}
-          style={{
-            borderRadius: 6,
-            borderColor: palette.border,
-          }}
         />
       </div>
 
       <div>
         <div
           style={{
-            fontFamily: font.sans,
             fontSize: 13,
             fontWeight: 500,
-            color: palette.ink,
+            color: colors.foreground,
             marginBottom: 8,
           }}
         >
@@ -144,24 +138,19 @@ export default function PackageCreator({
           placeholder="请输入素材包描述（可选）"
           rows={3}
           maxLength={500}
-          style={{
-            borderRadius: 6,
-            borderColor: palette.border,
-          }}
         />
       </div>
 
       <div>
         <div
           style={{
-            fontFamily: font.sans,
             fontSize: 13,
             fontWeight: 500,
-            color: palette.ink,
+            color: colors.foreground,
             marginBottom: 8,
           }}
         >
-          素材类型 <span style={{ color: palette.danger }}>*</span>
+          素材类型 <span style={{ color: colors.destructive }}>*</span>
         </div>
         <Select
           value={packageType}
@@ -174,10 +163,9 @@ export default function PackageCreator({
       <div>
         <div
           style={{
-            fontFamily: font.sans,
             fontSize: 13,
             fontWeight: 500,
-            color: palette.ink,
+            color: colors.foreground,
             marginBottom: 8,
           }}
         >
@@ -196,10 +184,8 @@ export default function PackageCreator({
           />
           <span
             style={{
-              color: palette.inkMuted,
+              color: colors.secondary,
               fontSize: 12,
-              fontFamily: font.sans,
-              letterSpacing: '0.05em',
             }}
           >
             已选 {selectedMaterialIds.length} / {maxCount} · 仅展示 {TYPE_LABELS[packageType]} 类型的草稿/已驳回素材
@@ -216,8 +202,8 @@ export default function PackageCreator({
           locale={{ emptyText: <Empty description="暂无可选素材" /> }}
           scroll={{ y: 360 }}
           style={{
-            border: `1px solid ${palette.border}`,
-            borderRadius: 8,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 6,
             overflow: 'hidden',
           }}
         />
@@ -227,10 +213,9 @@ export default function PackageCreator({
         <div>
           <div
             style={{
-              fontFamily: font.sans,
               fontSize: 13,
               fontWeight: 500,
-              color: palette.ink,
+              color: colors.foreground,
               marginBottom: 8,
             }}
           >
@@ -238,8 +223,8 @@ export default function PackageCreator({
           </div>
           <div
             style={{
-              border: `1px solid ${palette.border}`,
-              borderRadius: 8,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
               padding: 12,
               maxHeight: 200,
               overflowY: 'auto',
@@ -257,13 +242,13 @@ export default function PackageCreator({
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       padding: '8px 12px',
-                      background: palette.surfaceAlt,
+                      background: colors.muted,
                       borderRadius: 6,
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <span style={{ color: palette.inkMuted, fontSize: 12 }}>#{item.id}</span>
-                      <span style={{ color: palette.ink, fontSize: 13 }}>{item.title}</span>
+                      <span style={{ color: colors.secondary, fontSize: 12 }}>#{item.id}</span>
+                      <span style={{ color: colors.foreground, fontSize: 13 }}>{item.title}</span>
                       <Tag color={item.status === 'draft' ? 'default' : 'error'}>
                         {STATUS_LABELS[item.status as keyof typeof STATUS_LABELS]}
                       </Tag>
@@ -275,7 +260,7 @@ export default function PackageCreator({
                       onClick={() =>
                         onSelectedMaterialIdsChange(selectedMaterialIds.filter((id) => id !== item.id))
                       }
-                      style={{ color: palette.inkMuted }}
+                      style={{ color: colors.secondary }}
                     />
                   </div>
                 ))}

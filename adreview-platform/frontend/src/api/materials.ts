@@ -8,6 +8,21 @@ import type {
   WorkflowTemplate,
 } from '@/types/domain'
 
+export interface BatchUploadItemResult {
+  index: number
+  ok: boolean
+  filename?: string | null
+  material?: Material | null
+  error?: string | null
+}
+
+export interface BatchUploadResponse {
+  total: number
+  succeeded: number
+  failed: number
+  items: BatchUploadItemResult[]
+}
+
 export const materialsApi = {
   list(params?: { page?: number; size?: number; status?: string; q?: string; mine?: boolean; material_type?: string }) {
     return api.get<Page<MaterialListItem>>('/materials', { params }).then((r) => r.data)
@@ -31,7 +46,27 @@ export const materialsApi = {
       })
       .then((r) => r.data)
   },
-  submit(materialId: number, payload?: { task_name?: string }) {
+  batchUpload(
+    files: File[],
+    onProgress?: (percent: number) => void,
+  ): Promise<BatchUploadResponse> {
+    const fd = new FormData()
+    files.forEach((f) => fd.append('files', f, f.name))
+    return api
+      .post<BatchUploadResponse>('/materials/uploads', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (e) => {
+          if (!onProgress || !e.total) return
+          const pct = Math.min(99, Math.round((e.loaded * 100) / e.total))
+          onProgress(pct)
+        },
+      })
+      .then((r) => {
+        onProgress?.(100)
+        return r.data
+      })
+  },
+  submit(materialId: number, payload?: { task_name?: string; skip_machine_review?: boolean }) {
     return api
       .post<Material>(`/materials/${materialId}/submit`, payload || {})
       .then((r) => r.data)
