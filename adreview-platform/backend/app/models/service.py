@@ -35,6 +35,7 @@ class Service(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_rule_package: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     category_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("service_categories.id"), nullable=True, index=True
     )

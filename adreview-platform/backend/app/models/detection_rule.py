@@ -29,6 +29,9 @@ class DetectionRule(Base):
     scope_text: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     custom_wordset_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("word_sets.id"), nullable=True)
+    audit_point_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("audit_points.id"), nullable=True, index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), nullable=False

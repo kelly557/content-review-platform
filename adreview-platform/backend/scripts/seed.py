@@ -1,7 +1,7 @@
 """Seed initial data: roles represented via users + default workflow templates + default strategy + service catalog."""
 import asyncio
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -16,6 +16,8 @@ from app.models.workflow import WorkflowTemplate
 from app.models.detection_rule import DetectionRule
 from app.models.human_review_config import HumanReviewConfig
 from app.models.tag import Tag, TagCategory, TagDomain, TagSource, TagStatus
+from app.models.audit_item import AuditItem
+from app.models.audit_point import AuditPoint, AuditPointRisk
 
 
 DEFAULT_TEMPLATES = [
@@ -178,23 +180,52 @@ async def _upsert_categories(db: AsyncSession) -> None:
 
 
 DEFAULT_SERVICES: list[dict] = [
-    {"code": "chat_detection_pro", "name": "私聊互动内容检测_专业版", "scope": ServiceScope.BUSINESS, "is_active": True, "category_code": "business"},
-    {"code": "ad_compliance_detection_pro", "name": "广告法合规检测_专业版", "scope": ServiceScope.SPECIAL, "is_active": False, "category_code": "special"},
+    {"code": "ad_compliance_detection_pro", "name": "广告法合规检测_专业版", "scope": ServiceScope.SPECIAL, "is_active": True, "category_code": "special"},
     {"code": "text_audit_pro", "name": "文本审核_专业版", "scope": ServiceScope.BUSINESS, "is_active": True, "category_code": "business"},
     {"code": "general_content_audit", "name": "通用内容审核", "scope": ServiceScope.GENERAL, "is_active": True, "category_code": "general"},
-    {"code": "llm_query_moderation", "name": "大语言模型输入文字检测", "scope": ServiceScope.AIGC, "is_active": False, "category_code": "aigc"},
-    {"code": "llm_response_moderation", "name": "大语言模型生成文字检测", "scope": ServiceScope.AIGC, "is_active": False, "category_code": "aigc"},
-    {"code": "ai_art_detection", "name": "AIGC英文检测", "scope": ServiceScope.AIGC, "is_active": False, "category_code": "aigc"},
-    {"code": "text_aigc_detector", "name": "AI生成文本鉴别", "scope": ServiceScope.AIGC, "is_active": False, "category_code": "aigc"},
-    {"code": "comment_detection", "name": "公聊评论内容检测", "scope": ServiceScope.BUSINESS, "is_active": False, "category_code": "business"},
-    {"code": "nickname_detection", "name": "用户昵称检测", "scope": ServiceScope.BUSINESS, "is_active": False, "category_code": "business"},
-    {"code": "chat_detection", "name": "私聊互动内容检测", "scope": ServiceScope.BUSINESS, "is_active": False, "category_code": "business"},
-    {"code": "ad_compliance_detection", "name": "广告法合规检测", "scope": ServiceScope.SPECIAL, "is_active": False, "category_code": "special"},
-    {"code": "comment_multilingual_pro", "name": "国际业务多语言检测", "scope": ServiceScope.SPECIAL, "is_active": False, "category_code": "special"},
-    {"code": "pgc_detection", "name": "PGC通用物料检测", "scope": ServiceScope.SPECIAL, "is_active": False, "category_code": "special"},
-    {"code": "bailian_query_check", "name": "百炼文字输入检测", "scope": ServiceScope.BAILIAN, "is_active": False, "category_code": "bailian"},
-    {"code": "bailian_response_check", "name": "百炼文字输出检测", "scope": ServiceScope.BAILIAN, "is_active": False, "category_code": "bailian"},
+    {"code": "image_audit_pro", "name": "图片通用审核_专业版", "scope": ServiceScope.GENERAL, "is_active": True, "category_code": "general"},
+    {"code": "audio_audit_pro", "name": "语音审核_专业版", "scope": ServiceScope.GENERAL, "is_active": True, "category_code": "general"},
+    {"code": "document_audit_pro", "name": "文档审核_专业版", "scope": ServiceScope.GENERAL, "is_active": True, "category_code": "general"},
+    {"code": "video_audit_pro", "name": "视频审核_专业版", "scope": ServiceScope.GENERAL, "is_active": True, "category_code": "general"},
 ]
+
+
+async def _purge_removed_services(db: AsyncSession) -> None:
+    """Delete services whose code is no longer in DEFAULT_SERVICES.
+
+    Cascades FK cleanup on detection_rules / human_review_configs /
+    audit_points / audit_items and prunes stale service codes from
+    strategies.definition.services[].
+    """
+    allowed_codes = {s["code"] for s in DEFAULT_SERVICES}
+    result = await db.execute(select(Service.code))
+    existing_codes = {row[0] for row in result.all()}
+    stale_codes = existing_codes - allowed_codes
+    if not stale_codes:
+        return
+    await db.execute(
+        delete(DetectionRule).where(DetectionRule.service_code.in_(stale_codes))
+    )
+    await db.execute(
+        delete(HumanReviewConfig).where(
+            HumanReviewConfig.service_code.in_(stale_codes)
+        )
+    )
+    await db.execute(
+        delete(AuditPoint).where(AuditPoint.package_code.in_(stale_codes))
+    )
+    await db.execute(
+        delete(AuditItem).where(AuditItem.package_code.in_(stale_codes))
+    )
+    strategies = await db.execute(select(Strategy))
+    for strat in strategies.scalars():
+        definition = strat.definition or {}
+        services = list(definition.get("services") or [])
+        cleaned = [c for c in services if c not in stale_codes]
+        if cleaned != services:
+            strat.definition = {**definition, "services": cleaned}
+    await db.execute(delete(Service).where(Service.code.in_(stale_codes)))
+    print(f"purged stale services: {sorted(stale_codes)}")
 
 
 async def _upsert_services(db: AsyncSession) -> None:
@@ -329,6 +360,302 @@ async def _upsert_detection_rules(db: AsyncSession) -> None:
             db.add(DetectionRule(service_code=service_code, **r))
 
 
+# ---------- AuditItem / AuditPoint seed ----------
+#
+# Rule hierarchy under DEFAULT_SERVICES:
+#   service  = rules package (is_rule_package=True via column default)
+#   item     = audit_item (mid-level grouping, e.g. 涉政 / 暴恐)
+#   point    = audit_point (fine-grained detection config)
+#
+# Per-item points are organised in TWO groups so the rule config page
+# can render two tables side by side:
+#   - "main": 通用 + 图中文字 OCR (_tii)              ── 细分场景配置
+#   - "lib":  图库 / 词库                              ── 自定义配置图库/词库
+#
+# Both groups follow the same naming convention shown in the design
+# screenshot: `<item>_<sub>` (main) and `<item>_<sub>_lib` (custom).
+
+# Each tuple: (item_code, name_cn, aliases)
+DEFAULT_AUDIT_ITEMS: dict[str, dict[str, tuple[str, list[str]]]] = {
+    "ad_compliance_detection_pro": {
+        "pt_water_mark": ("水印", ["水印", "logo", "watermark"]),
+        "pt_qr_code":    ("二维码", ["二维码", "qrcode", "QR码", "小程序码"]),
+        "pt_drainage":   ("引流", ["引流", "联系方式", "兼职招聘", "办证", "投资理财"]),
+    },
+    "image_audit_pro": {
+        "img_politics":   ("涉政",   ["涉政", "政治敏感", "politics"]),
+        "img_porn":       ("涉黄",   ["涉黄", "色情", "porn", "低俗"]),
+        "img_violence":   ("涉暴",   ["涉暴", "暴力", "血腥", "violence"]),
+        "img_prohibited": ("违禁",   ["违禁", "毒品", "赌博", "prohibited"]),
+        "img_terrorism":  ("暴恐",   ["暴恐", "恐怖", "terrorism"]),
+        "img_ad":         ("广告",   ["广告", "advertisement"]),
+        "img_adlaw":      ("广告法", ["广告法", "极限用语", "adlaw"]),
+        "img_religion":   ("宗教",   ["宗教", "religion"]),
+        "img_special":    ("专项",   ["专项", "special"]),
+    },
+    "text_audit_pro": {
+        "tx_politics":         ("涉政",       ["涉政", "政治敏感", "politics"]),
+        "tx_terrorism":        ("暴恐",       ["暴恐", "恐怖", "terrorism"]),
+        "tx_porn":             ("色情",       ["色情", "低俗", "porn"]),
+        "tx_advertising":      ("广告法",     ["广告法", "极限用语"]),
+        "tx_abuse":            ("辱骂",       ["辱骂", "谩骂", "abuse"]),
+        "tx_vulgar":           ("低俗",       ["低俗", "vulgar"]),
+        "tx_minor_protection": ("未成年保护", ["未成年", "minor"]),
+        "tx_values":           ("价值观",     ["价值观", "values"]),
+        "tx_illegal":          ("违法违规",   ["违法", "illegal"]),
+        "tx_privacy":          ("隐私信息",   ["隐私", "个人信息", "privacy"]),
+        "tx_promptattack":     ("prompt攻击", ["prompt", "jailbreak"]),
+    },
+    "audio_audit_pro": {
+        "au_politics":   ("涉政",     ["涉政", "politics"]),
+        "au_porn":       ("色情",     ["色情", "porn"]),
+        "au_violence":   ("暴恐",     ["暴恐", "terrorism"]),
+        "au_adlaw":      ("广告法",   ["广告法", "adlaw"]),
+        "au_abuse":      ("辱骂",     ["辱骂", "abuse"]),
+        "au_minor":      ("未成年保护", ["未成年", "minor"]),
+        "au_illegal":    ("违法违规", ["违法", "illegal"]),
+    },
+    "document_audit_pro": {
+        "doc_image":     ("图片内容",   ["图片内容", "图片审核"]),
+        "doc_text":      ("文本内容",   ["文本内容", "文本审核"]),
+        "doc_sensitive": ("敏感信息",   ["敏感", "sensitive"]),
+        "doc_illegal":   ("违法违规",   ["违法", "illegal"]),
+    },
+    "video_audit_pro": {
+        "vid_frame":     ("画面内容",   ["画面内容", "图片审核"]),
+        "vid_audio":     ("音轨内容",   ["音轨内容", "语音审核"]),
+        "vid_subtitle":  ("字幕内容",   ["字幕内容", "文本审核"]),
+        "vid_illegal":   ("违法违规",   ["违法", "illegal"]),
+    },
+}
+
+
+# Each tuple: (item_code, point_code, label_cn, scope_text, medium, high, risk_level)
+# `kind` ∈ {"main", "lib"} controls which config-page table it lands in.
+DEFAULT_AUDIT_POINTS: list[tuple[str, str, str, str, str, float, float, str]] = [
+    # ---------------- ad_compliance_detection_pro ----------------
+    ("ad_compliance_detection_pro", "pt_water_mark", "pt_logotoSocialNetwork", "画面中常见网络社交平台水印",  "画面中常见网络社交平台水印",          50.0, 80.0, "中风险"),
+    ("ad_compliance_detection_pro", "pt_water_mark", "pt_logotoSocialNetwork_lib", "自定义水印图库",   "自定义图库用于命中返回该行标签",       50.0, 80.0, "中风险"),
+    ("ad_compliance_detection_pro", "pt_qr_code",    "pt_qrCode",                "画面中疑似二维码",        "画面中含二维码",                     50.0, 80.0, "中风险"),
+    ("ad_compliance_detection_pro", "pt_qr_code",    "pt_qrCode_lib",            "自定义二维码图库",         "自定义图库用于命中返回该行标签",       50.0, 80.0, "中风险"),
+    ("ad_compliance_detection_pro", "pt_drainage",   "pt_toDirectContact_tii",   "图中文字联系方式引流",     "图中文字含网址/手机号/微信等联系方式", 60.0, 90.0, "高风险"),
+    ("ad_compliance_detection_pro", "pt_drainage",   "pt_toSocialNetwork_tii",   "图中文字社交平台引流",     "图中文字含社交平台引流信息",          60.0, 90.0, "高风险"),
+    ("ad_compliance_detection_pro", "pt_drainage",   "pt_toShortVideos_tii",     "图中文字短视频平台引流",   "图中文字含短视频平台引流信息",        60.0, 90.0, "高风险"),
+    ("ad_compliance_detection_pro", "pt_drainage",   "pt_investment_tii",        "图中文字投资理财引流",     "图中文字含投资理财引流",             60.0, 90.0, "高风险"),
+    ("ad_compliance_detection_pro", "pt_drainage",   "pt_recruitment_tii",       "图中文字兼职招聘引流",     "图中文字含兼职招聘引流",             60.0, 90.0, "高风险"),
+    ("ad_compliance_detection_pro", "pt_drainage",   "pt_certificate_tii",       "图中文字办证套现引流",     "图中文字含办证套现引流",             60.0, 90.0, "高风险"),
+    ("ad_compliance_detection_pro", "pt_drainage",   "pt_toDirectContact_tii_lib","词库联系方式引流",        "词库用于命中返回该行标签",            55.0, 85.0, "高风险"),
+    ("ad_compliance_detection_pro", "pt_drainage",   "pt_toSocialNetwork_tii_lib","词库社交平台引流",        "词库用于命中返回该行标签",            55.0, 85.0, "高风险"),
+    # ---------------- image_audit_pro ----------------
+    ("image_audit_pro", "img_politics",   "politics_general",     "涉政通用",       "涉政通用：政治人物、政治事件、政治符号",          60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_politics",   "politics_general_lib", "自定义涉政图库", "自定义涉政图库：词库用于命中返回该行标签",        55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_porn",       "porn_general",         "涉黄通用",       "涉黄通用：裸露、色情、低俗",                       55.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_porn",       "porn_general_tii",     "图中色情 OCR",   "图中文字色情 OCR 识别",                            55.0, 80.0, "中风险"),
+    ("image_audit_pro", "img_porn",       "porn_general_tii_lib", "词库色情关键词", "词库色情 OCR 关键词",                              50.0, 75.0, "中风险"),
+    ("image_audit_pro", "img_porn",       "porn_general_lib",     "自定义涉黄图库", "自定义涉黄图库",                                   50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_violence",   "violence_general",     "涉暴通用",       "涉暴通用：血腥、暴力、武器",                       60.0, 90.0, "高风险"),
+    ("image_audit_pro", "img_violence",   "violence_general_lib", "自定义涉暴图库", "自定义涉暴图库",                                   50.0, 80.0, "高风险"),
+    # ---- img_prohibited — 截图同款 4-name 模式 (主 + _tii + _lib + _tii_lib) ----
+    ("image_audit_pro", "img_prohibited", "contraband_drug",        "违禁药品（画面）",     "画面疑似毒品、药品",                          50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_drug_tii",    "违禁药品（图中文字）", "图中文字疑似描述毒品、违禁品、禁限售等",      50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_drug_lib",    "违禁药品图库",         "图库：选择图库用于命中返回 contraband_drug",   50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_drug_tii_lib","违禁药品词库",         "词库：选择词库用于命中返回 contraband_drug",   50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_gamble",        "违禁赌博（画面）",     "画面疑似赌博物品",                            50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_gamble_tii",    "违禁赌博（图中文字）", "图中文字疑似描述赌博行为",                    50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_gamble_lib",    "违禁赌博图库",         "图库：选择图库用于命中返回 contraband_gamble", 50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_gamble_tii_lib","违禁赌博词库",         "词库：选择词库用于命中返回 contraband_gamble", 50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_weapon",        "违禁器具（画面）",     "画面疑似违禁器具、管制物品",                  50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_weapon_tii",    "违禁器具（图中文字）", "图中文字疑似描述违禁器具、管制物品",          50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_weapon_lib",    "违禁器具图库",         "图库：选择图库用于命中返回 contraband_weapon", 50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_prohibited", "contraband_weapon_tii_lib","违禁器具词库",         "词库：选择词库用于命中返回 contraband_weapon", 50.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_terrorism",  "terrorism_general",    "暴恐通用",       "暴恐通用：极端组织符号、爆炸物、恐袭内容",         60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_terrorism",  "terrorism_general_lib","自定义暴恐图库", "自定义暴恐图库",                                   55.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_ad",         "ad_general",           "广告通用",       "广告通用：画面含第三方广告或品牌",                 50.0, 75.0, "中风险"),
+    ("image_audit_pro", "img_ad",         "ad_general_lib",       "自定义广告图库", "自定义广告图库",                                   50.0, 75.0, "中风险"),
+    ("image_audit_pro", "img_adlaw",      "adlaw_general",        "广告法通用",     "广告法通用：极限用语、虚假承诺",                   55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_adlaw",      "adlaw_general_tii",    "图中广告法 OCR", "图中文字广告法违规 OCR",                           55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_adlaw",      "adlaw_general_tii_lib","词库广告法词",   "词库广告法违规关键词",                             50.0, 75.0, "中风险"),
+    ("image_audit_pro", "img_adlaw",      "adlaw_general_lib",    "自定义广告法图", "自定义广告法图库",                                 50.0, 75.0, "中风险"),
+    ("image_audit_pro", "img_religion",   "religion_general",     "宗教通用",       "宗教通用：宗教符号、宗教极端内容",                 50.0, 75.0, "中风险"),
+    ("image_audit_pro", "img_religion",   "religion_general_lib", "自定义宗教图库", "自定义宗教图库",                                   45.0, 70.0, "低风险"),
+    ("image_audit_pro", "img_special",    "special_general",      "专项通用",       "专项通用：专项检查任务标识的内容",                 50.0, 75.0, "中风险"),
+    ("image_audit_pro", "img_special",    "special_general_lib",  "自定义专项图库", "自定义专项图库",                                   45.0, 70.0, "低风险"),
+    # ---------------- text_audit_pro ----------------
+    ("text_audit_pro", "tx_politics",         "tx_politics",        "涉政",                "涉政违规内容",                60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_terrorism",        "tx_terrorism",       "暴恐",                "暴恐违规内容",                60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_porn",             "tx_porn",            "色情",                "色情违规内容",                60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_advertising",      "tx_advertising",     "广告法",              "广告法违规内容",              55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_abuse",            "tx_abuse",           "辱骂",                "辱骂或人身攻击",              55.0, 80.0, "中风险"),
+    ("text_audit_pro", "tx_vulgar",           "tx_vulgar",          "低俗",                "低俗内容",                    55.0, 80.0, "中风险"),
+    ("text_audit_pro", "tx_minor_protection", "tx_minor_protection","未成年保护",          "未成年人保护违规",            55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_values",           "tx_values",          "价值观",              "价值观违规",                  55.0, 80.0, "中风险"),
+    ("text_audit_pro", "tx_illegal",          "tx_illegal",         "违法违规",            "违法违规",                    60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_privacy",          "tx_privacy_pii",     "PII 检测",            "PII 检测：身份证/手机/银行卡", 60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_privacy",          "tx_privacy_contact", "联系方式检测",        "联系方式检测：地址/邮箱/微信", 55.0, 80.0, "中风险"),
+    ("text_audit_pro", "tx_promptattack",     "tx_promptattack_basic","基础越狱指令",      "基础越狱指令识别",          70.0, 90.0, "高风险"),
+    ("text_audit_pro", "tx_promptattack",     "tx_promptattack_adv", "高级越狱指令",        "高级越狱指令识别",            65.0, 85.0, "高风险"),
+    # ---------------- audio_audit_pro ----------------
+    ("audio_audit_pro", "au_politics", "au_politics_general",  "语音涉政",       "语音中涉政表述",              60.0, 85.0, "高风险"),
+    ("audio_audit_pro", "au_porn",     "au_porn_general",      "语音色情",       "语音中含色情表述",            60.0, 85.0, "高风险"),
+    ("audio_audit_pro", "au_violence", "au_violence_general",  "语音暴恐",       "语音中含暴恐表述",            60.0, 85.0, "高风险"),
+    ("audio_audit_pro", "au_adlaw",    "au_adlaw_general",     "语音广告法",     "语音中广告法违规词",          55.0, 80.0, "高风险"),
+    ("audio_audit_pro", "au_abuse",    "au_abuse_general",     "语音辱骂",       "语音中辱骂内容",              55.0, 80.0, "中风险"),
+    ("audio_audit_pro", "au_minor",    "au_minor_general",     "语音未成年保护", "语音中未成年保护违规",        55.0, 80.0, "高风险"),
+    ("audio_audit_pro", "au_illegal",  "au_illegal_general",   "语音违法违规",   "语音中违法违规表述",          60.0, 85.0, "高风险"),
+    # ---------------- document_audit_pro ----------------
+    ("document_audit_pro", "doc_image",     "doc_image_general", "文档图片审核",   "文档中嵌入图片内容审核",      55.0, 80.0, "中风险"),
+    ("document_audit_pro", "doc_text",      "doc_text_general",  "文档文本审核",   "文档中文本内容审核",          55.0, 80.0, "中风险"),
+    ("document_audit_pro", "doc_sensitive", "doc_sensitive",     "文档敏感信息",   "文档中敏感信息检测",          60.0, 85.0, "高风险"),
+    ("document_audit_pro", "doc_illegal",   "doc_illegal",       "文档违法违规",   "文档中违法违规内容",          60.0, 85.0, "高风险"),
+    # ---------------- video_audit_pro ----------------
+    ("video_audit_pro", "vid_frame",     "vid_frame_general", "视频画面审核",  "视频画面内容审核",          55.0, 80.0, "中风险"),
+    ("video_audit_pro", "vid_audio",     "vid_audio_general", "视频音轨审核",  "视频音轨内容审核",          55.0, 80.0, "中风险"),
+    ("video_audit_pro", "vid_subtitle",  "vid_subtitle",      "视频字幕审核",  "视频字幕内容审核",          55.0, 80.0, "中风险"),
+    ("video_audit_pro", "vid_illegal",   "vid_illegal",       "视频违法违规",  "视频违法违规内容",          60.0, 85.0, "高风险"),
+]
+
+
+async def _upsert_audit_items(db: AsyncSession) -> int:
+    """Upsert DEFAULT_AUDIT_ITEMS into audit_items. Idempotent."""
+    created = 0
+    for package_code, items in DEFAULT_AUDIT_ITEMS.items():
+        for item_code, (name_cn, aliases) in items.items():
+            existing = await db.execute(
+                select(AuditItem).where(
+                    AuditItem.package_code == package_code,
+                    AuditItem.code == item_code,
+                )
+            )
+            row = existing.scalar_one_or_none()
+            if row:
+                row.name_cn = name_cn
+                row.aliases = aliases
+                row.is_enabled = True
+            else:
+                db.add(
+                    AuditItem(
+                        package_code=package_code,
+                        code=item_code,
+                        name_cn=name_cn,
+                        aliases=aliases,
+                        sort_order=0,
+                        is_enabled=True,
+                    )
+                )
+                created += 1
+    if created > 0:
+        await db.flush()
+    return created
+
+
+async def _upsert_audit_points(db: AsyncSession) -> int:
+    """Upsert DEFAULT_AUDIT_POINTS into audit_points. Idempotent."""
+    created = 0
+
+    # Pre-fetch item_id by (package_code, item_code) so we can attach points.
+    items_result = await db.execute(select(AuditItem))
+    items = list(items_result.scalars())
+    item_by_key: dict[tuple[str, str], int] = {
+        (it.package_code, it.code): it.id for it in items if it.id is not None
+    }
+
+    for (
+        package_code,
+        item_code,
+        point_code,
+        label_cn,
+        scope_text,
+        medium,
+        high,
+        risk_str,
+    ) in DEFAULT_AUDIT_POINTS:
+        item_id = item_by_key.get((package_code, item_code))
+        if item_id is None:
+            continue
+
+        existing = await db.execute(
+            select(AuditPoint).where(
+                AuditPoint.package_code == package_code,
+                AuditPoint.code == point_code,
+            )
+        )
+        row = existing.scalar_one_or_none()
+        risk_enum = AuditPointRisk(risk_str)
+        if row:
+            row.item_id = item_id
+            row.label = point_code
+            row.label_cn = label_cn
+            row.description = scope_text
+            row.scope_text = scope_text
+            row.medium_threshold = medium
+            row.high_threshold = high
+            row.risk_level = risk_enum
+            row.is_enabled = True
+        else:
+            db.add(
+                AuditPoint(
+                    package_code=package_code,
+                    item_id=item_id,
+                    code=point_code,
+                    label=point_code,
+                    label_cn=label_cn,
+                    description=scope_text,
+                    scope_text=scope_text,
+                    medium_threshold=medium,
+                    high_threshold=high,
+                    risk_level=risk_enum,
+                    is_enabled=True,
+                    sort_order=0,
+                )
+            )
+            created += 1
+    if created > 0:
+        await db.flush()
+    return created
+
+
+async def _purge_orphan_audit_data(db: AsyncSession) -> tuple[int, int]:
+    """Delete audit_items / audit_points not in DEFAULT_AUDIT_ITEMS / DEFAULT_AUDIT_POINTS.
+
+    Keeps audit_items that match a DEFAULT_AUDIT_ITEMS key (package, code)
+    and audit_points that match a DEFAULT_AUDIT_POINTS key (package, code).
+    Anything extra is from a previous schema and is removed.
+    """
+    item_whitelist = {
+        (pkg, code) for pkg, items in DEFAULT_AUDIT_ITEMS.items() for code in items
+    }
+    point_whitelist = {
+        (pkg, pc) for (pkg, _ic, pc, *_rest) in DEFAULT_AUDIT_POINTS
+    }
+
+    items_result = await db.execute(select(AuditItem))
+    all_items = list(items_result.scalars())
+    items_to_delete = [
+        it for it in all_items if (it.package_code, it.code) not in item_whitelist
+    ]
+    points_result = await db.execute(select(AuditPoint))
+    all_points = list(points_result.scalars())
+    points_to_delete = [
+        p for p in all_points if (p.package_code, p.code) not in point_whitelist
+    ]
+
+    # Clear any detection_rules FK bridging to orphan audit_points.
+    orphan_point_ids = {p.id for p in points_to_delete if p.id is not None}
+    if orphan_point_ids:
+        await db.execute(
+            DetectionRule.__table__.update()
+            .where(DetectionRule.audit_point_id.in_(orphan_point_ids))
+            .values(audit_point_id=None)
+        )
+
+    for p in points_to_delete:
+        await db.delete(p)
+    for it in items_to_delete:
+        await db.delete(it)
+    await db.flush()
+    return len(items_to_delete), len(points_to_delete)
+
+
 async def main() -> None:
     async with SessionLocal() as db:
         await _upsert_templates(db)
@@ -337,8 +664,14 @@ async def main() -> None:
         await db.flush()
         await _upsert_services(db)
         await db.flush()
+        await _purge_removed_services(db)
+        await db.flush()
         await _upsert_wordsets(db)
         await _upsert_detection_rules(db)
+        await db.flush()
+        items_created = await _upsert_audit_items(db)
+        points_created = await _upsert_audit_points(db)
+        items_purged, points_purged = await _purge_orphan_audit_data(db)
         await _upsert_human_review_configs(db)
         await _upsert_tags(db)
         await _upsert_user(db, "admin@adreview.example.com", "系统管理员", UserRole.ADMIN, settings.app_secret + "-admin")
@@ -346,7 +679,10 @@ async def main() -> None:
         await _upsert_user(db, "mlr@adreview.example.com", "MLR 专家 Bob", UserRole.MLR, "mlr12345")
         await _upsert_user(db, "submitter@adreview.example.com", "提交者 Carol", UserRole.SUBMITTER, "submitter123")
         await db.commit()
-        print("seed complete.")
+        print(
+            f"seed complete. audit_items={items_created} created (orphans purged={items_purged}) "
+            f"audit_points={points_created} created (orphans purged={points_purged})"
+        )
 
 
 async def _upsert_human_review_configs(db: AsyncSession) -> None:
