@@ -10,8 +10,10 @@ import {
   Switch,
   Modal,
   App,
-  Popconfirm,
   Empty,
+  Dropdown,
+  Typography,
+  type MenuProps,
   type TableColumnsType,
 } from 'antd'
 import {
@@ -24,6 +26,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   CheckOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -34,6 +37,8 @@ import {
   type Strategy,
   type StrategyValidateResult,
 } from '@/types/domain'
+
+const { Text } = Typography
 
 const DEFAULT_TOOLTIP =
   '默认策略在以下任一情况发生时生效执行：未配置策略；所有策略均未启用；所有策略均未达到生效时间。'
@@ -151,12 +156,12 @@ export default function StrategyListPage() {
     }
   }
 
-const columns: TableColumnsType<Strategy> = useMemo(
+  const columns: TableColumnsType<Strategy> = useMemo(
     () => [
       {
         title: '策略名称',
         dataIndex: 'name',
-        width: '16%',
+        width: '14%',
         render: (text: string, record) =>
           record.scope === 'default' ? (
             <span style={{ color: '#0369A1', fontWeight: 500 }}>{text}</span>
@@ -167,20 +172,13 @@ const columns: TableColumnsType<Strategy> = useMemo(
       {
         title: '策略 ID',
         dataIndex: 'code',
-        width: '10%',
+        width: '8%',
         render: (v: string) => <span style={{ color: '#64748B' }}>{v}</span>,
       },
       {
-        title: (
-          <Space size={4}>
-            生效状态
-            <Tooltip title="生效中 = 已启用 且 当前时间在生效时段内">
-              <QuestionCircleOutlined style={{ color: '#94A3B8', cursor: 'help' }} />
-            </Tooltip>
-          </Space>
-        ),
+        title: '生效状态',
         dataIndex: 'is_active',
-        width: '10%',
+        width: '8%',
         render: (_: boolean, record) => {
           const active = isCurrentlyActive(record)
           return active ? (
@@ -199,7 +197,7 @@ const columns: TableColumnsType<Strategy> = useMemo(
       {
         title: '生效时段',
         dataIndex: 'effective_from',
-        width: '20%',
+        width: '14%',
         render: (_: unknown, record) => {
           if (record.scope === 'default') {
             return (
@@ -215,9 +213,37 @@ const columns: TableColumnsType<Strategy> = useMemo(
         },
       },
       {
+        title: '已选规则',
+        dataIndex: 'rule_summary',
+        width: '18%',
+        render: (_: unknown, record) => {
+          const defs = (record.definition ?? {}) as { services?: string[] }
+          const services = Array.isArray(defs.services) ? defs.services : []
+          if (record.scope === 'default') {
+            return (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                默认策略不可配置
+              </Text>
+            )
+          }
+          if (services.length === 0) {
+            return (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                <span style={{ color: '#D97706' }}>未配置</span>
+              </Text>
+            )
+          }
+          return (
+            <Space size={4} wrap>
+              <Tag color="blue">{services.length} 项</Tag>
+            </Space>
+          )
+        },
+      },
+      {
         title: '是否启用',
         dataIndex: 'is_active',
-        width: '8%',
+        width: '7%',
         render: (v: boolean, record) => (
           <Switch
             checked={v}
@@ -230,7 +256,7 @@ const columns: TableColumnsType<Strategy> = useMemo(
       {
         title: '最近编辑时间',
         dataIndex: 'updated_at',
-        width: '12%',
+        width: '11%',
         render: (v: string | null) =>
           v ? (
             <span style={{ color: '#020617' }}>{dayjs(v).format('YYYY.MM.DD HH:mm')}</span>
@@ -241,7 +267,7 @@ const columns: TableColumnsType<Strategy> = useMemo(
       {
         title: '优先级',
         dataIndex: 'priority',
-        width: '8%',
+        width: '6%',
         render: (p: number) => {
           const color = p === 0 ? 'red' : p === 1 ? 'volcano' : p === 2 ? 'gold' : 'default'
           return <Tag color={color}>{strategyPriorityLabel(p)}</Tag>
@@ -249,10 +275,46 @@ const columns: TableColumnsType<Strategy> = useMemo(
       },
       {
         title: '操作',
-        width: '20%',
+        width: '14%',
         fixed: 'right',
         render: (_: unknown, record) => {
           const isDefault = record.scope === 'default'
+          const moreItems: NonNullable<MenuProps['items']> = []
+          if (!isDefault) {
+            moreItems.push({
+              key: 'by-type',
+              icon: <AppstoreOutlined />,
+              label: '按类型管理',
+              onClick: () =>
+                navigate(`/strategies/rules-by-type/image?strategy=${record.id}`),
+            })
+          }
+          if (!isDefault && isAdmin) {
+            moreItems.push({
+              key: 'duplicate',
+              icon: <CopyOutlined />,
+              label: '复制',
+              onClick: () => onDuplicate(record),
+            })
+          }
+          if (!isDefault && isAdmin) {
+            moreItems.push({ type: 'divider' })
+            moreItems.push({
+              key: 'delete',
+              icon: <DeleteOutlined />,
+              label: <span style={{ color: '#DC2626' }}>删除</span>,
+              onClick: () => {
+                Modal.confirm({
+                  title: '确认删除该策略？',
+                  content: '删除后无法撤销。',
+                  okText: '删除',
+                  okType: 'danger',
+                  cancelText: '取消',
+                  onOk: () => onDelete(record),
+                })
+              },
+            })
+          }
           return (
             <Space size={12} wrap>
               <a onClick={() => onValidate(record)}>验证</a>
@@ -261,29 +323,15 @@ const columns: TableColumnsType<Strategy> = useMemo(
                   <EditOutlined /> 编辑
                 </a>
               )}
-              {!isDefault && isAdmin && (
-                <a onClick={() => onDuplicate(record)}>
-                  <CopyOutlined /> 复制
-                </a>
-              )}
               {!isDefault && (
                 <a onClick={() => navigate(`/strategies/${record.id}/rule-config`)}>
-                  审核范围
+                  规则配置
                 </a>
               )}
-              {!isDefault && isAdmin && (
-                <Popconfirm
-                  title="确认删除该策略？"
-                  description="删除后无法撤销。"
-                  okText="删除"
-                  okType="danger"
-                  cancelText="取消"
-                  onConfirm={() => onDelete(record)}
-                >
-                  <a style={{ color: '#DC2626' }}>
-                    <DeleteOutlined /> 删除
-                  </a>
-                </Popconfirm>
+              {moreItems.length > 0 && (
+                <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+                  <a>更多 ▾</a>
+                </Dropdown>
               )}
             </Space>
           )

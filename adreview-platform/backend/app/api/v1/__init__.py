@@ -13,6 +13,7 @@ from app.api.v1 import (
     service_categories,
     services,
     strategies,
+    tags,
     users,
     workflows,
     wordsets,
@@ -34,3 +35,4 @@ api_router.include_router(imagesets.router)
 api_router.include_router(detection_rules.router)
 api_router.include_router(detection_rules.hr_router)
 api_router.include_router(material_packages.router)
+api_router.include_router(tags.router)

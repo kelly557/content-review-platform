@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   App,
+  Breadcrumb,
+  Card,
   Col,
   Form,
   List,
@@ -38,12 +40,10 @@ import {
   type User,
   type MaterialType,
 } from '@/types/domain'
-import PageHero from '@/components/task-create/PageHero'
-import SectionCard from '@/components/task-create/SectionCard'
 import PreviewEditor from '@/components/task-detail/PreviewEditor'
 import AgentReviewPanel from '@/components/task-detail/AgentReviewPanel'
 import HumanActionPanel, { type DecisionFormValues } from '@/components/task-detail/HumanActionPanel'
-import { palette, font, shadow } from '@/lib/theme'
+import { colors } from '@/styles/theme'
 
 const { Text } = Typography
 
@@ -171,7 +171,6 @@ export default function PackageDetailPage() {
     return materialsApi.downloadUrl(currentTask.material_id, currentVersion.id)
   }, [currentTask, currentVersion])
 
-  // 审核状态汇总
   const statusSummary = useMemo(() => {
     if (!pkg) return { approved: 0, rejected: 0, pending: 0, noTask: 0, total: 0 }
     let approved = 0
@@ -203,11 +202,9 @@ export default function PackageDetailPage() {
       label: DECISION_LABELS[task.final_decision],
       color: (task.final_decision === 'approved'
         ? 'success'
-        : task.final_decision === 'rejected'
+        : task.final_decision === 'rejected' || task.final_decision === 'returned'
           ? 'error'
-          : task.final_decision === 'returned'
-            ? 'warning'
-            : 'processing') as 'success' | 'error' | 'warning' | 'processing',
+          : 'processing') as 'success' | 'error' | 'processing',
     }
   }
 
@@ -224,34 +221,34 @@ export default function PackageDetailPage() {
     : 0
 
   return (
-    <div
-      style={{
-        width: '100%',
-        background: palette.bg,
-        margin: '-20px',
-        padding: 20,
-        minHeight: 'calc(100vh - 64px)',
-      }}
-    >
-      <PageHero
-        eyebrow="Section · Material Package"
-        title={pkg.name}
-        subtitle={`素材包 · ${pkg.items.length} 个素材 · 创建于 ${new Date(pkg.created_at).toLocaleString('zh-CN')}`}
-        onBack={() => navigate('/tasks')}
-        rightExtra={
-          <Space size={6}>
-            <Tag style={{ borderRadius: 999, padding: '2px 10px' }}>
-              {TYPE_LABELS[pkg.material_type as MaterialType] || pkg.material_type}
-            </Tag>
-            <Tag
-              color="blue"
-              style={{ borderRadius: 999, padding: '2px 10px' }}
-            >
-              {PACKAGE_STATUS_LABELS[pkg.status]}
-            </Tag>
-          </Space>
-        }
+    <div style={{ width: '100%' }}>
+      <Breadcrumb
+        items={[
+          { title: <a onClick={() => navigate('/tasks')}>审核任务</a> },
+          { title: pkg.name },
+        ]}
+        style={{ marginBottom: 16 }}
       />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 24,
+        }}
+      >
+        <Typography.Title level={3} style={{ margin: 0 }}>
+          {pkg.name}
+        </Typography.Title>
+        <Space size={6}>
+          <Tag>
+            {TYPE_LABELS[pkg.material_type as MaterialType] || pkg.material_type}
+          </Tag>
+          <Tag color="blue">
+            {PACKAGE_STATUS_LABELS[pkg.status]}
+          </Tag>
+        </Space>
+      </div>
 
       <div
         style={{
@@ -261,16 +258,11 @@ export default function PackageDetailPage() {
           alignItems: 'start',
         }}
       >
-        {/* 左栏 main */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {/* 01 基础信息 */}
-          <SectionCard
-            eyebrow="01"
+          <Card
             title="基础信息"
-            description="素材包的基本属性与审核范围。"
-            accentBar
             extra={
-              <Text style={{ fontSize: 12, color: palette.inkSubtle }}>
+              <Text style={{ fontSize: 12, color: colors.secondary }}>
                 #{pkg.id}
               </Text>
             }
@@ -294,15 +286,12 @@ export default function PackageDetailPage() {
                 </Col>
               )}
             </Row>
-          </SectionCard>
+          </Card>
 
-          {/* 02 素材列表 */}
-          <SectionCard
-            eyebrow="02"
+          <Card
             title="素材列表"
-            description="点击素材可查看其审核详情。"
             extra={
-              <Text style={{ fontSize: 12, color: palette.inkSubtle }}>
+              <Text style={{ fontSize: 12, color: colors.secondary }}>
                 共 {pkg.items.length} 个 · 已选 {selectedItemId ? 1 : 0}
               </Text>
             }
@@ -322,9 +311,9 @@ export default function PackageDetailPage() {
                       alignItems: 'center',
                       gap: 12,
                       padding: '12px 14px',
-                      borderBottom: `1px solid ${palette.border}`,
-                      borderLeft: active ? `3px solid ${palette.accent}` : '3px solid transparent',
-                      background: active ? palette.accentSoft : palette.surface,
+                      borderBottom: `1px solid ${colors.border}`,
+                      borderLeft: active ? `3px solid ${colors.accent}` : '3px solid transparent',
+                      background: active ? colors.muted : undefined,
                       borderRadius: active ? 6 : 0,
                       marginBottom: 4,
                       cursor: 'pointer',
@@ -333,7 +322,7 @@ export default function PackageDetailPage() {
                   >
                     <span
                       style={{
-                        color: active ? palette.accentInk : palette.inkMuted,
+                        color: active ? colors.accent : colors.secondary,
                         fontSize: 18,
                       }}
                     >
@@ -342,9 +331,8 @@ export default function PackageDetailPage() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
-                          fontFamily: font.sans,
                           fontWeight: active ? 600 : 500,
-                          color: palette.ink,
+                          color: colors.foreground,
                           fontSize: 14,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -355,8 +343,7 @@ export default function PackageDetailPage() {
                       </div>
                       <div
                         style={{
-                          fontFamily: font.sans,
-                          color: palette.inkSubtle,
+                          color: colors.secondary,
                           fontSize: 12,
                           marginTop: 2,
                         }}
@@ -364,44 +351,34 @@ export default function PackageDetailPage() {
                         #{item.id} · {TYPE_LABELS[(mat?.material_type || pkg.material_type) as MaterialType] || ''}
                       </div>
                     </div>
-                    <Tag color={status.color} style={{ borderRadius: 999 }}>
+                    <Tag color={status.color}>
                       {status.label}
                     </Tag>
                   </div>
                 )
               }}
             />
-          </SectionCard>
+          </Card>
 
-          {/* 03 当前素材：预览 + 审核面板 */}
-          <SectionCard
-            eyebrow="03"
+          <Card
             title="当前素材"
-            description={
-              currentMaterial
-                ? `正在审核：${currentMaterial.title}`
-                : '从上方列表选择一个素材'
-            }
-            accentBar
             extra={
               currentTask && (
-                <Text style={{ fontSize: 12, color: palette.inkSubtle }}>
+                <Text style={{ fontSize: 12, color: colors.secondary }}>
                   任务 #{currentTask.id} · {currentTask.stage_key}
                 </Text>
               )
             }
-            bodyPadding={0}
+            bodyStyle={{ padding: 0 }}
           >
             {currentMaterial ? (
               <div style={{ height: 720, display: 'flex', flexDirection: 'column' }}>
                 <Row gutter={0} style={{ flex: '1 1 auto', minHeight: 0 }}>
-                  {/* 预览 */}
                   <Col span={16} style={{ height: '100%' }}>
                     <div
                       style={{
                         height: '100%',
-                        borderRight: `1px solid ${palette.border}`,
-                        background: palette.surface,
+                        borderRight: `1px solid ${colors.border}`,
                         display: 'flex',
                         flexDirection: 'column',
                         minHeight: 0,
@@ -423,7 +400,7 @@ export default function PackageDetailPage() {
                           style={{
                             padding: 40,
                             textAlign: 'center',
-                            color: palette.inkSubtle,
+                            color: colors.secondary,
                             margin: 'auto',
                           }}
                         >
@@ -432,12 +409,10 @@ export default function PackageDetailPage() {
                       )}
                     </div>
                   </Col>
-                  {/* AI 审核 */}
                   <Col span={8} style={{ height: '100%' }}>
                     <div
                       style={{
                         height: '100%',
-                        background: palette.surface,
                         display: 'flex',
                         flexDirection: 'column',
                         minHeight: 0,
@@ -450,7 +425,7 @@ export default function PackageDetailPage() {
                           style={{
                             padding: 32,
                             textAlign: 'center',
-                            color: palette.inkSubtle,
+                            color: colors.secondary,
                             margin: 'auto',
                           }}
                         >
@@ -460,13 +435,12 @@ export default function PackageDetailPage() {
                     </div>
                   </Col>
                 </Row>
-                {/* 人工操作面板 */}
                 {currentTask && currentTask.review_type !== 'machine' && (
                   <div
                     style={{
                       flex: '0 0 280px',
-                      borderTop: `1px solid ${palette.border}`,
-                      background: palette.surfaceAlt,
+                      borderTop: `1px solid ${colors.border}`,
+                      background: colors.muted,
                       minHeight: 0,
                       overflow: 'auto',
                     }}
@@ -478,7 +452,7 @@ export default function PackageDetailPage() {
                       currentUserId={user?.id}
                       onTransfer={onTransfer}
                       onAddReviewer={onAddReviewer}
-                      onDecide={onDecide}
+                      onDecide={(d) => onDecide(d)}
                       onDirtyChange={setIsDirty}
                     />
                   </div>
@@ -489,27 +463,20 @@ export default function PackageDetailPage() {
                 style={{
                   padding: 60,
                   textAlign: 'center',
-                  color: palette.inkSubtle,
+                  color: colors.secondary,
                 }}
               >
                 请从上方素材列表选择一个素材开始审核
               </div>
             )}
-          </SectionCard>
+          </Card>
         </div>
 
-        {/* 右栏 overview (sticky) */}
         <div style={{ position: 'sticky', top: 80, display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {/* 素材包概览：检测流程 */}
-          <SectionCard
-            eyebrow="Overview"
-            title="素材包概览"
-            description="从上传到出结果，整包一站式审核。"
-            accentBar
-          >
+          <Card title="素材包概览">
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <FlowStep
-                color={palette.accent}
+                color={colors.accent}
                 icon={<CloudUploadOutlined />}
                 title="上传素材"
                 desc="整套文案 / 图 / 视频一次上传到云端"
@@ -534,15 +501,9 @@ export default function PackageDetailPage() {
                 isLast
               />
             </div>
-          </SectionCard>
+          </Card>
 
-          {/* 审核状态汇总 */}
-          <SectionCard
-            eyebrow="Status"
-            title="审核状态汇总"
-            description="当前素材包的整体审核进度。"
-            accentBar
-          >
+          <Card title="审核状态汇总">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
                 <div
@@ -553,13 +514,12 @@ export default function PackageDetailPage() {
                     marginBottom: 6,
                   }}
                 >
-                  <Text style={{ fontFamily: font.sans, color: palette.inkMuted, fontSize: 13 }}>
+                  <Text style={{ color: colors.secondary, fontSize: 13 }}>
                     完成度
                   </Text>
                   <Text
                     style={{
-                      fontFamily: font.serif,
-                      color: palette.ink,
+                      color: colors.foreground,
                       fontSize: 20,
                       fontWeight: 600,
                     }}
@@ -570,7 +530,7 @@ export default function PackageDetailPage() {
                 <div
                   style={{
                     height: 6,
-                    background: palette.surfaceAlt,
+                    background: colors.muted,
                     borderRadius: 3,
                     overflow: 'hidden',
                   }}
@@ -579,7 +539,7 @@ export default function PackageDetailPage() {
                     style={{
                       width: `${completedRatio}%`,
                       height: '100%',
-                      background: palette.accent,
+                      background: colors.accent,
                       transition: 'width 200ms ease',
                     }}
                   />
@@ -594,27 +554,21 @@ export default function PackageDetailPage() {
                 }}
               >
                 <Stat label="通过" value={statusSummary.approved} color="#16A34A" />
-                <Stat label="驳回/退回" value={statusSummary.rejected} color={palette.danger} />
+                <Stat label="驳回/退回" value={statusSummary.rejected} color={colors.destructive} />
                 <Stat label="审核中" value={statusSummary.pending} color="#7C3AED" />
-                <Stat label="未提交" value={statusSummary.noTask} color={palette.inkSubtle} />
+                <Stat label="未提交" value={statusSummary.noTask} color={colors.secondary} />
               </div>
             </div>
-          </SectionCard>
+          </Card>
 
-          {/* 检测贴士 */}
-          <SectionCard
-            eyebrow="Tips"
-            title="检测贴士"
-            accentBar={false}
-          >
+          <Card title="检测贴士">
             <ul
               style={{
                 margin: 0,
                 paddingLeft: 18,
-                color: palette.inkMuted,
+                color: colors.secondary,
                 fontSize: 13,
                 lineHeight: 1.8,
-                fontFamily: font.sans,
               }}
             >
               <li>整包任一子项高风险，整包不能投放。</li>
@@ -622,7 +576,7 @@ export default function PackageDetailPage() {
               <li>每条文案 ≥ 10 字符才会作为一个检测项。</li>
               <li>支持 JPG / PNG / WebP / MP4 / MOV，按类型自动分组。</li>
             </ul>
-          </SectionCard>
+          </Card>
         </div>
       </div>
     </div>
@@ -634,11 +588,10 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
     <div>
       <div
         style={{
-          fontFamily: font.sans,
           fontSize: 11,
           letterSpacing: '0.16em',
           textTransform: 'uppercase',
-          color: palette.inkSubtle,
+          color: colors.secondary,
           marginBottom: 4,
         }}
       >
@@ -646,8 +599,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
       </div>
       <div
         style={{
-          fontFamily: font.sans,
-          color: palette.ink,
+          color: colors.foreground,
           fontSize: 14,
           fontWeight: 500,
         }}
@@ -663,8 +615,8 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
     <div
       style={{
         padding: '10px 12px',
-        background: palette.surfaceAlt,
-        borderRadius: 8,
+        background: colors.muted,
+        borderRadius: 6,
         display: 'flex',
         flexDirection: 'column',
         gap: 2,
@@ -672,17 +624,14 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
     >
       <div
         style={{
-          fontFamily: font.sans,
           fontSize: 11,
-          color: palette.inkMuted,
-          letterSpacing: '0.05em',
+          color: colors.secondary,
         }}
       >
         {label}
       </div>
       <div
         style={{
-          fontFamily: font.serif,
           fontSize: 22,
           fontWeight: 600,
           color,
@@ -728,7 +677,6 @@ function FlowStep({
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: 16,
-            boxShadow: shadow.soft,
           }}
         >
           {icon}
@@ -738,7 +686,7 @@ function FlowStep({
             style={{
               flex: 1,
               width: 2,
-              background: palette.border,
+              background: colors.border,
               margin: '4px 0',
             }}
           />
@@ -747,10 +695,9 @@ function FlowStep({
       <div style={{ paddingTop: 4, paddingBottom: isLast ? 0 : 18, flex: 1, minWidth: 0 }}>
         <div
           style={{
-            fontFamily: font.serif,
             fontSize: 15,
             fontWeight: 600,
-            color: palette.ink,
+            color: colors.foreground,
             marginBottom: 2,
           }}
         >
@@ -758,9 +705,8 @@ function FlowStep({
         </div>
         <div
           style={{
-            fontFamily: font.sans,
             fontSize: 12,
-            color: palette.inkMuted,
+            color: colors.secondary,
             lineHeight: 1.6,
           }}
         >

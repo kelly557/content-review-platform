@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import mimetypes
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -17,6 +18,8 @@ from app.models.material import Material, MaterialStatus, MaterialType, Material
 from app.models.user import User
 from app.schemas.common import Page
 from app.schemas.material import (
+    MaterialBatchUploadItem,
+    MaterialBatchUploadResponse,
     MaterialCreate,
     MaterialListItem,
     MaterialOut,
@@ -25,6 +28,12 @@ from app.schemas.material import (
     MaterialVersionOut,
 )
 from app.services import audit, storage
+from app.services.upload_inference import (
+    MAX_BATCH_FILES,
+    infer_material_type,
+    infer_mime_from_filename,
+    infer_title,
+)
 from app.services.workflow_engine import get_template_by_code, start_instance
 
 router = APIRouter(prefix="/materials", tags=["materials"])
@@ -247,7 +256,7 @@ async def submit_material(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"unknown workflow template: {template_code}",
         )
-    await start_instance(db, material, template, user)
+    await start_instance(db, material, template, user, task_name=body.task_name, skip_machine_review=body.skip_machine_review)
     await db.commit()
     # Re-query to ensure all fields are loaded for response serialization
     material = await db.scalar(
@@ -262,3 +271,173 @@ def _version_to_out(v: MaterialVersion) -> MaterialVersionOut:
     out = MaterialVersionOut.model_validate(v)
     out.download_url = f"/api/v1/materials/{v.material_id}/versions/{v.id}/download"
     return out
+
+
+@router.post(
+    "/uploads",
+    response_model=MaterialBatchUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def batch_upload_materials(
+    files: list[UploadFile] = File(..., description=f"1..{MAX_BATCH_FILES} files"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MaterialBatchUploadResponse:
+    """Upload 1..N files in one request.
+
+    Each file becomes a new Material + MaterialVersion (v1). Mime/extension are
+    used to infer ``material_type``; title defaults to the filename stem.
+    Per-file failures (mime not allowed, oversize, storage error, db error)
+    are recorded in ``items[].error`` without blocking the rest.
+    """
+    if user.role.value not in {"submitter", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="only submitter/admin can upload materials",
+        )
+    if not files:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no files provided")
+    if len(files) > MAX_BATCH_FILES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"max {MAX_BATCH_FILES} files per batch",
+        )
+
+    items: list[MaterialBatchUploadItem] = []
+    succeeded = 0
+    failed = 0
+
+    for index, file in enumerate(files):
+        filename = file.filename or ""
+        mime = (file.content_type or "").lower() or None
+        item_result: MaterialBatchUploadItem
+        try:
+            if mime and mime not in settings.storage_allowed_mime:
+                raise HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail=f"mime {mime} not allowed",
+                )
+
+            material_type = infer_material_type(mime, filename)
+            if material_type is None:
+                guessed = infer_mime_from_filename(filename)
+                if guessed:
+                    mime = guessed
+                    if mime not in settings.storage_allowed_mime:
+                        raise HTTPException(
+                            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                            detail=f"mime {mime} not allowed",
+                        )
+                    material_type = infer_material_type(mime, filename)
+            if material_type is None:
+                raise HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail=f"unsupported type for file {filename or 'upload.bin'}",
+                )
+
+            # Save file to storage first (no DB dependency). If this fails we
+            # have not touched the DB yet, so nothing to roll back.
+            try:
+                key, size, sha = storage.save_upload(
+                    -1, 1, filename or "upload.bin", file.file
+                )
+            except storage.StorageError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+                )
+
+            # Each file gets its own outer transaction: commit on success,
+            # rollback on failure. Committing closes the transaction so the
+            # next iteration starts fresh.
+            try:
+                material = Material(
+                    title=infer_title(filename, index + 1),
+                    material_type=material_type,
+                    tags={},
+                    extra_metadata={},
+                    submitter_id=user.id,
+                )
+                db.add(material)
+                await db.flush()
+
+                # Move the file from the placeholder key to the real key.
+                real_key = storage._safe_key(material.id, 1, filename or "upload.bin")
+                real_path = settings.storage_root / "uploads" / real_key
+                real_path.parent.mkdir(parents=True, exist_ok=True)
+                src_path = settings.storage_root / "uploads" / key
+                if src_path != real_path:
+                    shutil.move(str(src_path), str(real_path))
+                key = real_key
+
+                version = MaterialVersion(
+                    material_id=material.id,
+                    version_no=1,
+                    storage_key=key,
+                    original_filename=filename or "upload.bin",
+                    mime_type=mime or mimetypes.guess_type(filename or "")[0] or "application/octet-stream",
+                    file_size=size,
+                    checksum=sha,
+                    created_by_id=user.id,
+                )
+                db.add(version)
+                await db.flush()
+                material.current_version_id = version.id
+
+                await audit.write_audit(
+                    db, actor=user, action="material.create",
+                    entity_type="material", entity_id=material.id,
+                    payload={"type": material_type.value, "via": "batch_upload"},
+                )
+                await audit.write_audit(
+                    db, actor=user, action="material.version.upload",
+                    entity_type="material", entity_id=material.id,
+                    payload={"version_id": version.id, "size": size},
+                )
+
+                await db.commit()
+
+                material = await db.scalar(
+                    select(Material)
+                    .where(Material.id == material.id)
+                    .options(selectinload(Material.versions))
+                )
+                item_result = MaterialBatchUploadItem(
+                    index=index,
+                    ok=True,
+                    filename=filename or None,
+                    material=MaterialOut.model_validate(material),
+                )
+                succeeded += 1
+            except Exception:
+                if db.in_transaction():
+                    await db.rollback()
+                # Best-effort cleanup of the on-disk file for this item.
+                try:
+                    storage.delete_object(key)
+                except Exception:  # noqa: BLE001
+                    pass
+                raise
+        except HTTPException as exc:
+            item_result = MaterialBatchUploadItem(
+                index=index,
+                ok=False,
+                filename=filename or None,
+                error=str(exc.detail),
+            )
+            failed += 1
+        except Exception as exc:  # noqa: BLE001
+            item_result = MaterialBatchUploadItem(
+                index=index,
+                ok=False,
+                filename=filename or None,
+                error=f"db_error: {exc.__class__.__name__}",
+            )
+            failed += 1
+        items.append(item_result)
+
+    return MaterialBatchUploadResponse(
+        total=len(files),
+        succeeded=succeeded,
+        failed=failed,
+        items=items,
+    )

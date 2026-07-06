@@ -10,11 +10,27 @@ import {
   Form,
   Modal,
   App,
+  Drawer,
+  Upload,
+  Progress,
+  List,
+  Typography,
+  Alert,
   type TableColumnsType,
+  type UploadProps,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import {
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  CloudUploadOutlined,
+  InboxOutlined,
+  DeleteOutlined,
+  CheckCircleFilled,
+  CloseCircleFilled,
+} from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { materialsApi } from '@/api/materials'
+import { materialsApi, type BatchUploadResponse } from '@/api/materials'
 import { useAuthStore } from '@/store'
 import {
   STATUS_LABELS,
@@ -25,8 +41,21 @@ import {
   type MaterialType,
 } from '@/types/domain'
 
+const { Dragger } = Upload
+const { Text } = Typography
+
 const STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }))
 const TYPE_OPTIONS = Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label }))
+const MAX_BATCH_FILES = 20
+const ACCEPT =
+  '.jpg,.jpeg,.png,.webp,.gif,.mp4,.mov,.pdf,.txt,.md,image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,application/pdf,text/plain'
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
 
 export default function MaterialsListPage() {
   const { message } = App.useApp()
@@ -41,6 +70,13 @@ export default function MaterialsListPage() {
   const [filters, setFilters] = useState<{ q?: string; status?: MaterialStatus; type?: MaterialType }>({})
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm] = Form.useForm<{ title: string; material_type: MaterialType; description?: string }>()
+
+  // Batch upload state
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchFiles, setBatchFiles] = useState<File[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [batchResult, setBatchResult] = useState<BatchUploadResponse | null>(null)
 
   const isSubmitter = user?.role === 'submitter' || user?.role === 'admin'
 
@@ -116,6 +152,67 @@ export default function MaterialsListPage() {
     },
   ]
 
+  const draggerProps: UploadProps = {
+    multiple: true,
+    accept: ACCEPT,
+    showUploadList: false,
+    beforeUpload: (file, fileList) => {
+      const incoming = fileList ?? [file]
+      setBatchFiles((prev) => {
+        const all = [...prev]
+        incoming.forEach((f) => {
+          if (all.length >= MAX_BATCH_FILES) return
+          if (!all.some((x) => x.name === f.name && x.size === f.size)) {
+            all.push(f as File)
+          }
+        })
+        return all.slice(0, MAX_BATCH_FILES)
+      })
+      return false
+    },
+  }
+
+  const removeFile = (idx: number) => {
+    setBatchFiles((arr) => arr.filter((_, i) => i !== idx))
+  }
+
+  const clearAll = () => {
+    setBatchFiles([])
+    setBatchResult(null)
+    setProgress(0)
+  }
+
+  const closeBatch = () => {
+    if (uploading) return
+    setBatchOpen(false)
+    setTimeout(clearAll, 200)
+  }
+
+  const startBatch = async () => {
+    if (batchFiles.length === 0) {
+      message.warning('请先添加文件')
+      return
+    }
+    setUploading(true)
+    setProgress(0)
+    setBatchResult(null)
+    try {
+      const res = await materialsApi.batchUpload(batchFiles, setProgress)
+      setBatchResult(res)
+      if (res.succeeded > 0) {
+        message.success(`已创建 ${res.succeeded} 个素材${res.failed > 0 ? `，${res.failed} 个失败` : ''}`)
+        fetch()
+      } else {
+        message.error('全部上传失败，请检查文件类型或大小')
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '上传失败'
+      message.error(msg)
+    } finally {
+      setUploading(false)
+    }
+  }
+
   return (
     <Card
       title="素材库"
@@ -123,9 +220,14 @@ export default function MaterialsListPage() {
         <Space>
           <Button icon={<ReloadOutlined />} onClick={fetch}>刷新</Button>
           {isSubmitter && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-              新建素材
-            </Button>
+            <>
+              <Button icon={<CloudUploadOutlined />} onClick={() => setBatchOpen(true)}>
+                批量上传
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                新建素材
+              </Button>
+            </>
           )}
         </Space>
       }
@@ -210,6 +312,161 @@ export default function MaterialsListPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Drawer
+        title="批量上传素材"
+        width={560}
+        open={batchOpen}
+        onClose={closeBatch}
+        destroyOnClose
+        extra={
+          <Space>
+            <Button onClick={clearAll} disabled={uploading || batchFiles.length === 0}>
+              清空
+            </Button>
+            <Button
+              type="primary"
+              icon={<CloudUploadOutlined />}
+              onClick={startBatch}
+              disabled={uploading || batchFiles.length === 0}
+            >
+              {uploading ? `上传中 ${progress}%` : `开始上传 (${batchFiles.length})`}
+            </Button>
+          </Space>
+        }
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={`支持拖入图片/视频/PDF/文本，单批最多 ${MAX_BATCH_FILES} 个文件，单个不超过 512 MB`}
+        />
+
+        {!batchResult && (
+          <Dragger {...draggerProps} disabled={uploading || batchFiles.length >= MAX_BATCH_FILES}>
+            <p className="ant-upload-drag-icon">
+              <InboxOutlined />
+            </p>
+            <p className="ant-upload-text">点击或拖拽文件到此区域</p>
+            <p className="ant-upload-hint">
+              支持单次选择多个不同类型文件，每个文件将作为独立素材入库
+            </p>
+          </Dragger>
+        )}
+
+        {uploading && (
+          <Progress percent={progress} status="active" style={{ marginTop: 16 }} />
+        )}
+
+        {batchFiles.length > 0 && !uploading && !batchResult && (
+          <List
+            size="small"
+            style={{ marginTop: 16 }}
+            header={<Text type="secondary">待上传 ({batchFiles.length}/{MAX_BATCH_FILES})</Text>}
+            dataSource={batchFiles}
+            renderItem={(f, idx) => (
+              <List.Item
+                actions={[
+                  <Button
+                    key="rm"
+                    type="link"
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={() => removeFile(idx)}
+                  >
+                    移除
+                  </Button>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={
+                    <Text style={{ fontSize: 13 }} ellipsis>
+                      {f.name}
+                    </Text>
+                  }
+                  description={
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      {formatBytes(f.size)} · {f.type || 'unknown'}
+                    </Text>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        )}
+
+        {batchResult && (
+          <Space direction="vertical" style={{ width: '100%', marginTop: 16 }} size="middle">
+            <Alert
+              type={batchResult.failed === 0 ? 'success' : batchResult.succeeded === 0 ? 'error' : 'warning'}
+              showIcon
+              message={
+                <Text strong>
+                  成功 {batchResult.succeeded} / 失败 {batchResult.failed} / 共 {batchResult.total}
+                </Text>
+              }
+              description={
+                batchResult.succeeded > 0
+                  ? '新素材已自动加入素材库'
+                  : '所有文件均未通过校验'
+              }
+            />
+
+            <List
+              size="small"
+              header={<Text type="secondary">详细结果</Text>}
+              dataSource={batchResult.items}
+              renderItem={(item) => (
+                <List.Item>
+                  <List.Item.Meta
+                    avatar={
+                      item.ok ? (
+                        <CheckCircleFilled style={{ color: '#16A34A' }} />
+                      ) : (
+                        <CloseCircleFilled style={{ color: '#DC2626' }} />
+                      )
+                    }
+                    title={
+                      <Text style={{ fontSize: 13 }}>
+                        {item.filename || `file-${item.index + 1}`}
+                      </Text>
+                    }
+                    description={
+                      item.ok ? (
+                        <Space size={4}>
+                          <Tag color="blue">{TYPE_LABELS[item.material?.material_type as MaterialType]}</Tag>
+                          <Text type="secondary" style={{ fontSize: 11 }}>
+                            ID #{item.material?.id}
+                          </Text>
+                          <a
+                            style={{ fontSize: 12 }}
+                            onClick={() => {
+                              if (item.material) navigate(`/materials/${item.material.id}`)
+                            }}
+                          >
+                            查看
+                          </a>
+                        </Space>
+                      ) : (
+                        <Text type="danger" style={{ fontSize: 12 }}>
+                          {item.error}
+                        </Text>
+                      )
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+
+            <Space>
+              <Button onClick={clearAll}>再传一批</Button>
+              <Button type="primary" onClick={closeBatch}>
+                完成
+              </Button>
+            </Space>
+          </Space>
+        )}
+      </Drawer>
     </Card>
   )
 }

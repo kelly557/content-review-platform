@@ -2,7 +2,7 @@ import { Tag, Typography } from 'antd'
 import { FileOutlined } from '@ant-design/icons'
 import type { MaterialType } from '@/types/domain'
 import { STATUS_LABELS, TYPE_LABELS } from '@/types/domain'
-import { palette, font } from '@/lib/theme'
+import { colors } from '@/styles/theme'
 
 const { Text } = Typography
 
@@ -68,7 +68,7 @@ export default function AnalysisPanel({
         style={{
           padding: '32px 16px',
           textAlign: 'center',
-          color: palette.inkMuted,
+          color: colors.secondary,
         }}
       >
         <div
@@ -78,13 +78,13 @@ export default function AnalysisPanel({
             height: 48,
             margin: '0 auto 12px',
             borderRadius: '50%',
-            border: `1px dashed ${palette.borderStrong}`,
+            border: `1px dashed ${colors.border}`,
           }}
         />
-        <Text style={{ color: palette.inkMuted, fontSize: 13, display: 'block' }}>
+        <Text style={{ color: colors.secondary, fontSize: 13, display: 'block' }}>
           {mode === 'upload' ? '上传素材后，结果将出现在此' : '选择素材后，详情将出现在此'}
         </Text>
-        <Text style={{ color: palette.inkSubtle, fontSize: 12, display: 'block', marginTop: 4 }}>
+        <Text style={{ color: colors.secondary, fontSize: 12, display: 'block', marginTop: 4 }}>
           实时本地解析 · 不上传服务器
         </Text>
       </div>
@@ -101,11 +101,9 @@ export default function AnalysisPanel({
             <article
               key={it.key}
               style={{
-                border: `1px solid ${palette.border}`,
-                borderRadius: 10,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
                 padding: 16,
-                background: palette.surface,
-                position: 'relative',
               }}
             >
               <div
@@ -118,23 +116,20 @@ export default function AnalysisPanel({
               >
                 <span
                   style={{
-                    fontFamily: font.serif,
                     fontSize: 12,
-                    color: palette.inkSubtle,
+                    color: colors.secondary,
                     fontVariantNumeric: 'tabular-nums',
-                    letterSpacing: '0.05em',
                   }}
                 >
                   {String(idx + 1).padStart(2, '0')}
                 </span>
-                <FileOutlined style={{ color: palette.inkMuted }} />
+                <FileOutlined style={{ color: colors.secondary }} />
                 <Text
                   strong
                   style={{
                     flex: 1,
                     wordBreak: 'break-all',
-                    color: palette.ink,
-                    fontFamily: font.serif,
+                    color: colors.foreground,
                     fontSize: 14,
                   }}
                 >
@@ -144,8 +139,7 @@ export default function AnalysisPanel({
                   <span
                     style={{
                       fontSize: 11,
-                      color: palette.inkMuted,
-                      letterSpacing: '0.1em',
+                      color: colors.secondary,
                       textTransform: 'uppercase',
                     }}
                   >
@@ -161,7 +155,7 @@ export default function AnalysisPanel({
               <div
                 style={{
                   fontSize: 12,
-                  color: palette.inkMuted,
+                  color: colors.secondary,
                   marginBottom: 10,
                   display: 'flex',
                   gap: 12,
@@ -181,18 +175,17 @@ export default function AnalysisPanel({
                 <blockquote
                   style={{
                     margin: 0,
-                    background: palette.surfaceAlt,
-                    borderLeft: `2px solid ${palette.accent}`,
+                    background: colors.muted,
+                    borderLeft: `2px solid ${colors.accent}`,
                     borderRadius: 4,
                     padding: '10px 12px',
                     maxHeight: 180,
                     overflow: 'auto',
                     fontSize: 12,
                     lineHeight: 1.7,
-                    color: palette.ink,
+                    color: colors.foreground,
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
-                    fontFamily: font.serif,
                   }}
                 >
                   {it.textBody.length > 200
@@ -208,20 +201,17 @@ export default function AnalysisPanel({
           <article
             key={p.id}
             style={{
-              border: `1px solid ${palette.border}`,
-              borderRadius: 10,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
               padding: 16,
-              background: palette.surface,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <span
                 style={{
-                  fontFamily: font.serif,
                   fontSize: 12,
-                  color: palette.inkSubtle,
+                  color: colors.secondary,
                   fontVariantNumeric: 'tabular-nums',
-                  letterSpacing: '0.05em',
                 }}
               >
                 #{String(p.id).padStart(3, '0')}
@@ -231,8 +221,7 @@ export default function AnalysisPanel({
                 style={{
                   flex: 1,
                   wordBreak: 'break-all',
-                  color: palette.ink,
-                  fontFamily: font.serif,
+                  color: colors.foreground,
                   fontSize: 14,
                 }}
               >
@@ -248,7 +237,7 @@ export default function AnalysisPanel({
             <div
               style={{
                 fontSize: 12,
-                color: palette.inkMuted,
+                color: colors.secondary,
                 display: 'flex',
                 gap: 12,
                 flexWrap: 'wrap',

@@ -18,9 +18,13 @@ const StrategyListPage = lazy(() => import('@/pages/strategy/StrategyListPage'))
 const CreateStrategyPage = lazy(() => import('@/pages/strategy/CreateStrategyPage'))
 const CustomImagesPage = lazy(() => import('@/pages/strategy/CustomImagesPage'))
 const CustomTextsPage = lazy(() => import('@/pages/strategy/CustomTextsPage'))
+const StrategyRulesByTypePage = lazy(
+  () => import('@/pages/strategy/StrategyRulesByTypePage'),
+)
 const ServiceRuleConfigPage = lazy(() => import('@/pages/strategy/ServiceRuleConfigPage'))
-const SceneConfigPage = lazy(() => import('@/pages/strategy/SceneConfigPage'))
 const StrategyRuleConfigPage = lazy(() => import('@/pages/strategy/StrategyRuleConfigPage'))
+const TagsPage = lazy(() => import('@/pages/tags/TagsPage'))
+const HumanReviewRulesPage = lazy(() => import('@/pages/strategy/HumanReviewRulesPage'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
 function Fallback() {
@@ -52,17 +56,25 @@ export default function AppRoutes() {
 
             <Route element={<ProtectedRoute allow={['admin', 'mlr']} />}>
               <Route path="/strategies" element={<StrategyListPage />} />
+              <Route
+                path="/strategies/rules-by-type/:mediaType"
+                element={<StrategyRulesByTypePage />}
+              />
               <Route path="/strategies/new" element={<CreateStrategyPage />} />
               <Route path="/strategies/:id/edit" element={<CreateStrategyPage />} />
               <Route path="/strategies/rules/:serviceCode" element={<ServiceRuleConfigPage />} />
               <Route path="/strategies/custom-image" element={<CustomImagesPage />} />
               <Route path="/strategies/custom-text" element={<CustomTextsPage />} />
-              <Route path="/strategies/scene-config" element={<SceneConfigPage />} />
               <Route path="/strategies/:id/rule-config" element={<StrategyRuleConfigPage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['admin']} />}>
               <Route path="/admin/users" element={<UsersAdminPage />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allow={['admin', 'mlr']} />}>
+              <Route path="/tags" element={<TagsPage />} />
+              <Route path="/human-review-rules" element={<HumanReviewRulesPage />} />
             </Route>
           </Route>
         </Route>

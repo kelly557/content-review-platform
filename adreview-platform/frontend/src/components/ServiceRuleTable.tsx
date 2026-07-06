@@ -10,25 +10,35 @@ import {
   Button,
   Modal,
   Form,
+  Tooltip,
   Popconfirm,
   type TableColumnsType,
 } from 'antd'
-import { SearchOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons'
+import {
+  SearchOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  SettingOutlined,
+} from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { Link, useLocation } from 'react-router-dom'
 import { servicesApi } from '@/api/services'
 import { serviceCategoriesApi } from '@/api/serviceCategories'
+import { detectionRulesApi } from '@/api/detectionRules'
 import type {
   Service,
   ServiceScope,
   ServiceCategory,
   ServiceCreatePayload,
+  DetectionRule,
 } from '@/types/domain'
 
 const RULE_SUPPORTED_CODES = new Set<string>([
   'ad_compliance_detection_pro',
   'text_audit_pro',
 ])
+
+const RULE_PREVIEW_LIMIT = 3
 
 interface Props {
   value?: string[]
@@ -37,7 +47,13 @@ interface Props {
   categoryName?: string
   emptyHint?: string
   onCategoryCountChange?: (count: number) => void
+  onVisibleItems?: (
+    codes: string[],
+    items: Array<{ code: string; category_id: number | null }>,
+  ) => void
 }
+
+type RuleSummary = Pick<DetectionRule, 'label' | 'label_cn' | 'description' | 'is_enabled'>
 
 export default function ServiceRuleTable({
   value = [],
@@ -46,6 +62,7 @@ export default function ServiceRuleTable({
   categoryName,
   emptyHint = '本类规则尚未启用',
   onCategoryCountChange,
+  onVisibleItems,
 }: Props) {
   const { message } = App.useApp()
   const location = useLocation()
@@ -57,6 +74,9 @@ export default function ServiceRuleTable({
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm] = Form.useForm()
   const [creating, setCreating] = useState(false)
+
+  const [rulesPreview, setRulesPreview] = useState<Record<string, RuleSummary[]>>({})
+  const [rulesLoading, setRulesLoading] = useState(false)
 
   const fetchCategories = async () => {
     try {
@@ -91,6 +111,47 @@ export default function ServiceRuleTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, categoryIds?.join('|')])
 
+  useEffect(() => {
+    let cancelled = false
+    if (items.length === 0) {
+      setRulesPreview({})
+      return () => {
+        cancelled = true
+      }
+    }
+    setRulesLoading(true)
+    Promise.all(
+      items.map(async (svc) => {
+        try {
+          const rules = await detectionRulesApi.list(svc.code)
+          const summary: RuleSummary[] = rules
+            .filter((r) => r.is_enabled)
+            .slice(0, RULE_PREVIEW_LIMIT)
+            .map((r) => ({
+              label: r.label,
+              label_cn: r.label_cn,
+              description: r.description,
+              is_enabled: r.is_enabled,
+            }))
+          return [svc.code, summary] as const
+        } catch {
+          return [svc.code, [] as RuleSummary[]] as const
+        }
+      }),
+    ).then((entries) => {
+      if (cancelled) return
+      const map: Record<string, RuleSummary[]> = {}
+      entries.forEach(([code, summary]) => {
+        map[code] = summary
+      })
+      setRulesPreview(map)
+      setRulesLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [items])
+
   const itemCodes = useMemo(() => new Set(items.map((s) => s.code)), [items])
   const selectedInCategory = useMemo(
     () => value.filter((code) => itemCodes.has(code)).length,
@@ -99,6 +160,14 @@ export default function ServiceRuleTable({
   useEffect(() => {
     onCategoryCountChange?.(selectedInCategory)
   }, [selectedInCategory, onCategoryCountChange])
+
+  useEffect(() => {
+    if (!onVisibleItems) return
+    onVisibleItems(
+      items.map((s) => s.code),
+      items.map((s) => ({ code: s.code, category_id: s.category_id ?? null })),
+    )
+  }, [items, onVisibleItems])
 
   const onCreateRule = async () => {
     const values = await createForm.validateFields().catch(() => null)
@@ -155,7 +224,7 @@ export default function ServiceRuleTable({
     {
       title: '名称',
       dataIndex: 'name',
-      width: '35%',
+      width: '20%',
       render: (v: string, row) => (
         <Space>
           <span style={{ color: '#020617' }}>{v}</span>
@@ -164,15 +233,65 @@ export default function ServiceRuleTable({
       ),
     },
     {
+      title: '描述',
+      dataIndex: 'description',
+      width: '20%',
+      render: (v: string | null) =>
+        v ? (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ tooltip: v }}>
+            {v}
+          </Typography.Text>
+        ) : (
+          <span style={{ color: '#94A3B8' }}>--</span>
+        ),
+    },
+    {
+      title: '检测规则',
+      dataIndex: 'rules_preview',
+      width: '24%',
+      render: (_v, row) => {
+        const list = rulesPreview[row.code] ?? []
+        if (rulesLoading && list.length === 0) {
+          return <span style={{ color: '#94A3B8', fontSize: 12 }}>加载中…</span>
+        }
+        if (list.length === 0) {
+          return <span style={{ color: '#94A3B8', fontSize: 12 }}>暂无规则</span>
+        }
+        return (
+          <Space size={4} wrap>
+            {list.map((r) => (
+              <Tooltip key={r.label} title={r.description ?? r.label_cn}>
+                <Tag color="processing" style={{ marginInlineEnd: 0 }}>
+                  {r.label_cn || r.label}
+                </Tag>
+              </Tooltip>
+            ))}
+            {RULE_SUPPORTED_CODES.has(row.code) && (
+              <Tooltip title="查看 / 配置完整检测点">
+                <Link
+                  to={`/strategies/rules/${row.code}`}
+                  state={{ from: location.pathname, fromStep: 1 }}
+                  style={{ fontSize: 12 }}
+                >
+                  更多 ›
+                </Link>
+              </Tooltip>
+            )}
+          </Space>
+        )
+      },
+    },
+    {
       title: '场景',
       dataIndex: 'scope',
-      width: '12%',
-      render: (v: ServiceScope | null) => (v ? <Tag>{v}</Tag> : <span style={{ color: '#94A3B8' }}>--</span>),
+      width: '8%',
+      render: (v: ServiceScope | null) =>
+        v ? <Tag>{v}</Tag> : <span style={{ color: '#94A3B8' }}>--</span>,
     },
     {
       title: '更新时间',
       dataIndex: 'updated_at',
-      width: '18%',
+      width: '14%',
       render: (v: string | null) =>
         v ? (
           <span style={{ color: '#020617', fontVariantNumeric: 'tabular-nums' }}>
@@ -185,7 +304,7 @@ export default function ServiceRuleTable({
     {
       title: '操作',
       dataIndex: 'actions',
-      width: '35%',
+      width: '14%',
       render: (_v, row) => {
         return (
           <Space size={4} wrap>
@@ -195,13 +314,17 @@ export default function ServiceRuleTable({
                 state={{ from: location.pathname, fromStep: 1 }}
                 style={{ color: '#0369A1' }}
               >
-                管理检测规则
+                <SettingOutlined /> 管理
               </Link>
             ) : (
-              <span style={{ color: '#94A3B8', cursor: 'not-allowed' }}>管理检测规则</span>
+              <Tooltip title="该规则暂不支持检测点配置">
+                <span style={{ color: '#94A3B8', cursor: 'not-allowed' }}>
+                  <SettingOutlined /> 管理
+                </span>
+              </Tooltip>
             )}
             <span style={{ color: '#E2E8F0' }}>|</span>
-            {row.is_custom && (
+            {row.is_custom ? (
               <Popconfirm
                 title="确认删除此自定义规则？"
                 onConfirm={() => onDeleteRule(row)}
@@ -213,6 +336,12 @@ export default function ServiceRuleTable({
                   删除
                 </Button>
               </Popconfirm>
+            ) : (
+              <Tooltip title="系统规则不可删除">
+                <Button type="link" size="small" disabled icon={<DeleteOutlined />}>
+                  删除
+                </Button>
+              </Tooltip>
             )}
           </Space>
         )
@@ -263,6 +392,7 @@ export default function ServiceRuleTable({
         columns={columns}
         pagination={false}
         size="middle"
+        scroll={{ x: 'max-content' }}
         locale={{
           emptyText: <Typography.Text type="secondary">{emptyHint}</Typography.Text>,
         }}

@@ -70,3 +70,20 @@ class MaterialSubmitRequest(BaseModel):
     """Submit a new version for review, optionally starting a workflow instance."""
 
     note: Optional[str] = None
+    task_name: Optional[str] = Field(default=None, max_length=255)
+    skip_machine_review: bool = Field(default=False, description="Skip automatic machine review, require manual trigger")
+
+
+class MaterialBatchUploadItem(ORMBase):
+    index: int
+    ok: bool
+    filename: Optional[str] = None
+    material: Optional[MaterialOut] = None
+    error: Optional[str] = None
+
+
+class MaterialBatchUploadResponse(BaseModel):
+    total: int
+    succeeded: int
+    failed: int
+    items: List[MaterialBatchUploadItem]

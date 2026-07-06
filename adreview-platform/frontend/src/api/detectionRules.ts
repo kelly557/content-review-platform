@@ -52,7 +52,6 @@ export const detectionRulesApi = {
       is_enabled?: boolean
       risk_levels?: RiskLevel[]
       review_rule_id?: number | null
-      notify_plan_id?: number | null
     },
   ) {
     return api

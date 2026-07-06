@@ -57,3 +57,4 @@ class MaterialPackageListItem(ORMBase):
 class MaterialPackageSubmitRequest(BaseModel):
     workflow_template_code: Optional[str] = None
     force_human_rules: Optional[List[str]] = None
+    task_name: Optional[str] = Field(default=None, max_length=255)

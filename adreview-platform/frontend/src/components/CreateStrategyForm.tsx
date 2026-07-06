@@ -9,59 +9,22 @@ import {
   Steps,
   Typography,
   App,
-  Tabs,
-  Tag,
-  Badge,
   Modal,
   Select,
 } from 'antd'
-import { ArrowLeftOutlined, CopyOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, CopyOutlined, LinkOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { strategiesApi } from '@/api/strategies'
-import { serviceCategoriesApi } from '@/api/serviceCategories'
-import type { ServiceCategory, Strategy } from '@/types/domain'
-import ServiceRuleTable from './ServiceRuleTable'
+import {
+  type CategoryKey,
+} from './strategy/constants'
+import StrategyTypeTabs from './strategy/StrategyTypeTabs'
+import type { Strategy } from '@/types/domain'
 
 const { Text } = Typography
 
 type DurationMode = 'always' | 'range'
-
-type CategoryKey = 'image' | 'text' | 'audio' | 'doc' | 'video'
-
-interface CategoryDef {
-  key: CategoryKey
-  label: string
-  categoryNames: string[]
-}
-
-const CATEGORIES: CategoryDef[] = [
-  {
-    key: 'image',
-    label: '图片审核',
-    categoryNames: ['业务场景', '特殊场景', 'AIGC场景'],
-  },
-  {
-    key: 'text',
-    label: '文本审核',
-    categoryNames: ['通用场景', '业务场景', 'AIGC场景', '百炼场景'],
-  },
-  {
-    key: 'audio',
-    label: '语音审核',
-    categoryNames: [],
-  },
-  {
-    key: 'doc',
-    label: '文档审核',
-    categoryNames: [],
-  },
-  {
-    key: 'video',
-    label: '视频审核',
-    categoryNames: [],
-  },
-]
 
 interface BasicFormValues {
   name: string
@@ -75,6 +38,14 @@ interface Props {
   initial?: Strategy
   initialStep?: 0 | 1
   onCancel?: () => void
+}
+
+const MEDIA_TYPE_LABEL_MAP: Record<CategoryKey, string> = {
+  image: '图片',
+  text: '文本',
+  audio: '语音',
+  doc: '文档',
+  video: '视频',
 }
 
 export default function CreateStrategyForm({
@@ -94,48 +65,17 @@ export default function CreateStrategyForm({
   )
   const [submitting, setSubmitting] = useState(false)
   const [selectedServices, setSelectedServices] = useState<string[]>([])
-  const [activeCategory, setActiveCategory] = useState<CategoryKey>('image')
   const [hydrated, setHydrated] = useState(mode === 'create')
   const [saveResult, setSaveResult] = useState<{
     open: boolean
     strategyId?: number
     fromCreate: boolean
+    name?: string
   }>({ open: false, fromCreate: mode === 'create' })
   const [copyModalOpen, setCopyModalOpen] = useState(false)
   const [sourceStrategies, setSourceStrategies] = useState<Strategy[]>([])
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null)
   const [copying, setCopying] = useState(false)
-  const [categories, setCategories] = useState<ServiceCategory[]>([])
-  const [counts, setCounts] = useState<Record<CategoryKey, number>>({
-    image: 0,
-    text: 0,
-    audio: 0,
-    doc: 0,
-    video: 0,
-  })
-
-  useEffect(() => {
-    let cancelled = false
-    serviceCategoriesApi
-      .list({ size: 200 })
-      .then((data) => {
-        if (cancelled) return
-        setCategories(data.items.filter((c) => c.is_active))
-      })
-      .catch(() => {
-        // ignore
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const resolveCategoryIds = (names: string[]): number[] => {
-    if (!names.length) return []
-    return names
-      .map((n) => categories.find((c) => c.name === n)?.id)
-      .filter((id): id is number => typeof id === 'number')
-  }
 
   useEffect(() => {
     if (mode !== 'edit' || !initial) return
@@ -200,6 +140,7 @@ export default function CreateStrategyForm({
           open: true,
           strategyId: savedStrategy.id,
           fromCreate: false,
+          name: savedStrategy.name,
         })
         return
       }
@@ -213,13 +154,14 @@ export default function CreateStrategyForm({
         effective_until:
           values.durationMode === 'range' && values.range?.[1]
             ? values.range[1].toISOString()
-            : null,
+              : null,
       })
       message.success('已创建策略')
       setSaveResult({
         open: true,
         strategyId: savedStrategy.id,
         fromCreate: true,
+        name: savedStrategy.name,
       })
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: unknown } } }
@@ -237,16 +179,17 @@ export default function CreateStrategyForm({
   }
 
   const onContinueEdit = () => {
-    const strategyId = saveResult.strategyId
+    const idVal = saveResult.strategyId
     const fromCreate = saveResult.fromCreate
     setSaveResult({
       open: false,
-      strategyId,
+      strategyId: idVal,
       fromCreate,
+      name: saveResult.name,
     })
 
-    if (fromCreate && strategyId) {
-      navigate(`/strategies/${strategyId}/edit`, { state: { step: 1 }, replace: true })
+    if (fromCreate && idVal) {
+      navigate(`/strategies/${idVal}/edit`, { state: { step: 1 }, replace: true })
       return
     }
     setStep(1)
@@ -257,6 +200,7 @@ export default function CreateStrategyForm({
       open: false,
       strategyId: prev.strategyId,
       fromCreate: prev.fromCreate,
+      name: prev.name,
     }))
     navigate('/strategies', { state: { refresh: true } })
   }
@@ -409,44 +353,9 @@ export default function CreateStrategyForm({
             width: '100%',
           }}
         >
-            <Tabs
-              type="line"
-              activeKey={activeCategory}
-              onChange={(k) => setActiveCategory(k as CategoryKey)}
-              destroyOnHidden={false}
-              items={CATEGORIES.map((cat) => {
-              const selectedInCat = counts[cat.key] ?? 0
-              const categoryIds = resolveCategoryIds(cat.categoryNames)
-              return {
-                key: cat.key,
-                label: (
-                  <Space size={6} wrap align="center">
-                    <span>{cat.label}</span>
-                    {selectedInCat > 0 ? (
-                      <Badge
-                        count={selectedInCat}
-                        showZero={false}
-                        style={{ backgroundColor: '#0369A1', color: '#fff' }}
-                        title={`本类已选 ${selectedInCat} 项`}
-                      />
-                    ) : null}
-                  </Space>
-                ),
-                children: (
-                  <ServiceRuleTable
-                    key={cat.key}
-                    value={selectedServices}
-                    onChange={setSelectedServices}
-                    categoryIds={categoryIds}
-                    categoryName={cat.categoryNames[0]}
-                    emptyHint={`${cat.label} - 暂无规则`}
-                    onCategoryCountChange={(n) =>
-                      setCounts((prev) => (prev[cat.key] === n ? prev : { ...prev, [cat.key]: n }))
-                    }
-                  />
-                ),
-              }
-            })}
+          <StrategyTypeTabs
+            value={selectedServices}
+            onChange={setSelectedServices}
           />
 
           <div
@@ -458,16 +367,9 @@ export default function CreateStrategyForm({
             }}
           >
             <Text type="secondary">本步合计已选：</Text>
-            <Tag color="blue">{selectedServices.length} 项</Tag>
-            {CATEGORIES.map((cat) => {
-              const n = counts[cat.key] ?? 0
-              if (n === 0) return null
-              return (
-                <Tag key={cat.key} color="default">
-                  {cat.label} {n}
-                </Tag>
-              )
-            })}
+            <Text strong style={{ color: '#0369A1' }}>
+              {selectedServices.length} 项
+            </Text>
           </div>
         </div>
       )}
@@ -519,8 +421,38 @@ export default function CreateStrategyForm({
         okText="完成"
         cancelText="继续编辑"
         onOk={onFinishSave}
+        footer={(_, { OkBtn, CancelBtn }) => (
+          <Space wrap>
+            {saveResult.strategyId && (
+              <>
+                <Link to={`/strategies/${saveResult.strategyId}/rule-config`}>
+                  <Button icon={<LinkOutlined />}>规则配置</Button>
+                </Link>
+                {(['image', 'text', 'audio', 'doc', 'video'] as CategoryKey[]).map((k) => (
+                  <Link
+                    key={k}
+                    to={`/strategies/rules-by-type/${k}?strategy=${saveResult.strategyId}`}
+                  >
+                    <Button>
+                      按类型管理：{MEDIA_TYPE_LABEL_MAP[k]}
+                    </Button>
+                  </Link>
+                ))}
+              </>
+            )}
+            <CancelBtn />
+            <OkBtn />
+          </Space>
+        )}
       >
-        <p>策略已保存成功。你可以继续编辑策略内容，或点击完成返回策略列表。</p>
+        <p>
+          策略「{saveResult.name ?? ''}」已保存成功。你可以继续编辑策略内容，或点击完成返回策略列表。
+        </p>
+        <p>
+          <Text type="secondary">
+            可点击对应按钮前往该策略的检测规则配置，或按审核类型管理已选规则。
+          </Text>
+        </p>
       </Modal>
 
       <Modal

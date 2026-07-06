@@ -50,6 +50,8 @@ async def start_instance(
     template: WorkflowTemplate,
     initiator: User,
     force_human_rules: list[str] | None = None,
+    task_name: str | None = None,
+    skip_machine_review: bool = False,
 ) -> WorkflowInstance:
     definition = template.definition or {}
     stages: list[dict] = definition.get("stages", [])
@@ -81,7 +83,7 @@ async def start_instance(
 
     first = stages[0]
     review_type = _type_for_stage(first)
-    task_title = _render_task_title(material.title, first.get("name", first["key"]), review_type)
+    task_title = task_name if task_name else _render_task_title(material.title, first.get("name", first["key"]), review_type)
 
     task = ReviewTask(
         material_id=material.id,
@@ -102,10 +104,10 @@ async def start_instance(
         action="workflow.start",
         entity_type="workflow_instance",
         entity_id=instance.id,
-        payload={"template": template.code, "material_id": material.id, "force_human_rules": force_human_rules or []},
+        payload={"template": template.code, "material_id": material.id, "force_human_rules": force_human_rules or [], "skip_machine_review": skip_machine_review},
     )
 
-    if review_type == "machine":
+    if review_type == "machine" and not skip_machine_review:
         from app.tasks.machine_review import run_machine_review
         import asyncio
         asyncio.create_task(_run_machine_review_async(task.id, force_human_rules))

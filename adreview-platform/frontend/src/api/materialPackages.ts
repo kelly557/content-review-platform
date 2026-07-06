@@ -46,6 +46,7 @@ export const packagesApi = {
     payload?: {
       workflow_template_code?: string
       force_human_rules?: string[]
+      task_name?: string
     },
   ) {
     return api

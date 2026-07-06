@@ -185,7 +185,7 @@ npm run dev                       # http://localhost:5173
 ```
 
 - **Material / MaterialVersion**：每次上传/重新提交生成**不可变版本快照**（`MaterialVersion.version_no` 单调递增），保证审核与回溯总能绑定到具体版本。
-- **WorkflowInstance + Node**：流程实例按模板生成节点；`mode ∈ {single, joint, all}` 决定会签/或签/全签语义。
+- **WorkflowInstance + Node**：人工审核规则实例按模板生成节点；`mode ∈ {single, joint, all}` 决定会签/或签/全签语义。
 - **Annotation**：圈注坐标归一化（0..1）以适配不同尺寸图像/视频帧；`page`/`frame`/`timestamp_ms` 用于 PDF 与视频。
 - **AuditEvent**：所有状态变化均写入 append-only 审计日志，支撑合规与回溯。
 
@@ -198,7 +198,7 @@ npm run dev                       # http://localhost:5173
 | 素材 | `GET/POST /materials` · `GET/PATCH /materials/{id}` · `POST /materials/{id}/versions`（上传） · `GET /materials/{id}/versions/{v}/download` · `POST /materials/{id}/submit` | submitter/admin |
 | 审核任务 | `GET /reviews/tasks` · `GET /reviews/tasks/{id}` · `POST /reviews/tasks/{id}/decide` · `.../transfer` · `.../add-reviewer` | reviewer/mlr/admin |
 | 批注 | `GET/POST /annotations` · `PATCH /annotations/{id}/resolve` | 全部 |
-| 流程 | `GET /workflows/templates` · `GET /workflows/instances/{id}` | 全部 |
+| 人工审核规则 | `GET /workflows/templates` · `GET /workflows/instances/{id}` | 全部 |
 | 报表 | `GET /reports/overview` · `GET /reports/audit/export.csv` | reviewer/mlr/admin |
 
 > 完整 OpenAPI 见 `/docs` 或 `openapi.json`。

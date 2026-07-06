@@ -20,11 +20,13 @@ import {
 import { ArrowLeftOutlined, QuestionCircleOutlined, SaveOutlined, EditOutlined } from '@ant-design/icons'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { detectionRulesApi } from '@/api/detectionRules'
+import { workflowsApi } from '@/api/workflows'
 import type {
   DetectionRule,
   HumanReviewConfig,
   RiskLevel,
   WordSetOption,
+  WorkflowTemplate,
 } from '@/types/domain'
 
 const { Sider: SiderComp, Content: ContentComp } = Layout
@@ -72,10 +74,10 @@ export default function ServiceRuleConfigPage() {
     is_enabled: boolean
     risk_levels: RiskLevel[]
     review_rule_id: number | null
-    notify_plan_id: number | null
   } | null>(null)
   const [hrLoading, setHrLoading] = useState(false)
   const [hrSaving, setHrSaving] = useState(false)
+  const [humanReviewRules, setHumanReviewRules] = useState<WorkflowTemplate[]>([])
 
   const [editing, setEditing] = useState(false)
   const [pendingReset, setPendingReset] = useState<DraftRule[] | null>(null)
@@ -103,16 +105,25 @@ export default function ServiceRuleConfigPage() {
         is_enabled: data.is_enabled,
         risk_levels: data.risk_levels,
         review_rule_id: data.review_rule_id,
-        notify_plan_id: data.notify_plan_id,
       })
     } finally {
       setHrLoading(false)
     }
   }
 
+  const fetchHumanReviewRules = async () => {
+    try {
+      const list = await workflowsApi.list({ prefix: 'hr_' })
+      setHumanReviewRules(list)
+    } catch {
+      setHumanReviewRules([])
+    }
+  }
+
   useEffect(() => {
     fetch()
     fetchHr()
+    fetchHumanReviewRules()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code])
 
@@ -121,7 +132,6 @@ export default function ServiceRuleConfigPage() {
     !!hrDraft &&
     (hrDraft.is_enabled !== hr.is_enabled ||
       hrDraft.review_rule_id !== hr.review_rule_id ||
-      hrDraft.notify_plan_id !== hr.notify_plan_id ||
       hrDraft.risk_levels.length !== hr.risk_levels.length ||
       hrDraft.risk_levels.some((r, i) => r !== hr.risk_levels[i]))
 
@@ -133,7 +143,6 @@ export default function ServiceRuleConfigPage() {
         is_enabled: hrDraft.is_enabled,
         risk_levels: hrDraft.risk_levels,
         review_rule_id: hrDraft.review_rule_id,
-        notify_plan_id: hrDraft.notify_plan_id,
       })
       message.success('已保存')
       fetchHr()
@@ -591,15 +600,7 @@ export default function ServiceRuleConfigPage() {
             style={{ marginBottom: 16, background: '#EFF6FF', border: '1px solid #BAE6FD' }}
             message={
               <ol style={{ margin: 0, paddingLeft: 18, color: '#0369A1' }}>
-                <li>在此处您可以配置是否开启人机审核服务，开启之后，您调用该 Service 符合条件的机审结果或直接进入人工审核环节。</li>
-                <li>
-                  人工审核服务是需要单独开通的收费服务，接入人机审核服务之前，请确认您已经知晓人工审核服务的收费规则，具体可以参见
-                  <a style={{ color: '#0369A1', textDecoration: 'underline', marginLeft: 4 }}>
-                    人工审核增强版介绍
-                  </a>
-                  。
-                </li>
-                <li>接入人机审核之前，您可以找商务同学沟通您的审核规则配置，以保证人工审核标准符合您的要求。</li>
+                <li>在此处可以配置是否开启人工审核，开启之后，符合条件的AI审核结果或直接进入人工审核环节。</li>
               </ol>
             }
           />
@@ -682,35 +683,22 @@ export default function ServiceRuleConfigPage() {
                   setHrDraft((d) => (d ? { ...d, review_rule_id: v ?? null } : d))
                 }
                 style={{ minWidth: 'clamp(200px, 100%, 320px)', flex: 1 }}
-                options={[
-                  { value: 1, label: '默认人审流程' },
-                  { value: 2, label: '快速人审流程' },
-                ]}
+                options={humanReviewRules.map((r) => ({
+                  value: r.id,
+                  label: `${r.name}（${r.definition?.stages?.length ?? 0} 阶段）`,
+                }))}
+                notFoundContent={
+                  <span style={{ color: '#94A3B8' }}>
+                    暂无可用人审规则，请先在「人工审核规则」页创建
+                  </span>
+                }
               />
             </Space>
 
             <Space size={12} align="center" wrap style={{ paddingLeft: 16 }}>
-              <Space size={6} align="center" style={{ minWidth: 110 }}>
-                <Text>回调通知方案</Text>
-                <QuestionCircleOutlined style={{ color: '#94A3B8', fontSize: 12 }} />
-              </Space>
-              <Select
-                placeholder="请选择"
-                allowClear
-                value={hrDraft?.notify_plan_id ?? undefined}
-                onChange={(v) =>
-                  setHrDraft((d) => (d ? { ...d, notify_plan_id: v ?? null } : d))
-                }
-                style={{ minWidth: 'clamp(200px, 100%, 320px)', flex: 1 }}
-                options={[
-                  { value: 1, label: '邮件通知' },
-                  { value: 2, label: '短信通知' },
-                  { value: 3, label: '站内信通知' },
-                ]}
-              />
-              <a style={{ color: '#0369A1' }} onClick={() => message.info('新增通知 - 即将上线')}>
-                没有想要的通知方案？可以去 新增通知
-              </a>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                已选择的审核规则会作为该 Service 触发人审后的审核模板与流转依据。
+              </Text>
             </Space>
           </div>
         </Spin>

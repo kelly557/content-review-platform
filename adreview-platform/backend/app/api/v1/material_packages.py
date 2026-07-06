@@ -270,7 +270,7 @@ async def submit_package(
                 detail=f"material '{material.title}' cannot be submitted (status: {material.status.value})",
             )
         await start_instance(
-            db, material, template, user, force_human_rules=body.force_human_rules
+            db, material, template, user, force_human_rules=body.force_human_rules, task_name=body.task_name
         )
 
     await db.flush()

@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Alert, Badge, Button, Space, Tabs, Tooltip, Typography } from 'antd'
+import { Alert, Badge, Button, Drawer, Space, Tooltip, Typography } from 'antd'
 import {
   AimOutlined,
+  CommentOutlined,
   ExpandOutlined,
   MinusOutlined,
   PlusOutlined,
@@ -22,6 +23,7 @@ interface Props {
   textBody?: string | null
   readOnly?: boolean
   annotationRefreshKey: number
+  annotationCount?: number
   onAnnotationChanged?: () => void
 }
 
@@ -37,11 +39,12 @@ export default function PreviewEditor({
   textBody,
   readOnly,
   annotationRefreshKey,
+  annotationCount,
   onAnnotationChanged,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<string>('preview')
   const [zoom, setZoom] = useState(1)
   const [fitWidth, setFitWidth] = useState(true)
+  const [annotationOpen, setAnnotationOpen] = useState(false)
 
   const supportsAnnotation = materialType === 'image' || materialType === 'text'
 
@@ -152,6 +155,17 @@ export default function PreviewEditor({
           {materialTitle}
         </Text>
         <Space size={4} wrap>
+          <Tooltip title="批注">
+            <Badge count={annotationCount ?? 0} size="small" offset={[-2, 2]}>
+              <Button
+                size="small"
+                icon={<CommentOutlined />}
+                onClick={() => setAnnotationOpen(true)}
+              >
+                批注
+              </Button>
+            </Badge>
+          </Tooltip>
           <Tooltip title="放大">
             <Button
               size="small"
@@ -201,40 +215,7 @@ export default function PreviewEditor({
         </Space>
       </div>
 
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
-        tabBarStyle={{ paddingLeft: 12, margin: 0 }}
-        items={[
-          {
-            key: 'preview',
-            label: '素材预览',
-            children: (
-              <div style={{ height: 'calc(100% - 46px)', overflow: 'auto' }}>
-                {renderPreview()}
-              </div>
-            ),
-          },
-          {
-            key: 'annotations',
-            label: (
-              <span>
-                批注列表 <Badge count={annotationRefreshKey >= 0 ? undefined : 0} />
-              </span>
-            ),
-            children: (
-              <div style={{ height: 'calc(100% - 46px)', overflow: 'auto' }}>
-                <AnnotationList
-                  versionId={task?.material_version_id ?? 0}
-                  refreshKey={annotationRefreshKey}
-                  onJumpToImage={() => setActiveTab('preview')}
-                />
-              </div>
-            ),
-          },
-        ]}
-      />
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{renderPreview()}</div>
 
       {!supportsAnnotation && (
         <div style={{ borderTop: '1px solid #E2E8F0', padding: '6px 12px', background: '#F8FAFC' }}>
@@ -243,6 +224,20 @@ export default function PreviewEditor({
           </Text>
         </div>
       )}
+
+      <Drawer
+        title="批注列表"
+        placement="right"
+        width={420}
+        open={annotationOpen}
+        onClose={() => setAnnotationOpen(false)}
+        styles={{ body: { padding: 0 } }}
+      >
+        <AnnotationList
+          versionId={task?.material_version_id ?? 0}
+          refreshKey={annotationRefreshKey}
+        />
+      </Drawer>
     </div>
   )
 }
