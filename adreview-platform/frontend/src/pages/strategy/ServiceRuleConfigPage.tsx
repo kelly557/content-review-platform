@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Layout,
-  Menu,
-  Tabs,
   Table,
   InputNumber,
   Switch,
@@ -10,151 +7,126 @@ import {
   Button,
   Space,
   Typography,
-  Alert,
-  Checkbox,
   App,
-  Spin,
-  type MenuProps,
   type TableColumnsType,
 } from 'antd'
-import { ArrowLeftOutlined, QuestionCircleOutlined, SaveOutlined, EditOutlined } from '@ant-design/icons'
+import {
+  ArrowLeftOutlined,
+  QuestionCircleOutlined,
+  SaveOutlined,
+  EditOutlined,
+} from '@ant-design/icons'
 import { useParams, Link, useLocation } from 'react-router-dom'
-import { detectionRulesApi } from '@/api/detectionRules'
-import { workflowsApi } from '@/api/workflows'
-import type {
-  DetectionRule,
-  HumanReviewConfig,
-  RiskLevel,
-  WordSetOption,
-  WorkflowTemplate,
-} from '@/types/domain'
+import { wordsetsApi } from '@/api/wordsets'
+import { auditItemsApi } from '@/api/auditItems'
+import { auditPointsApi } from '@/api/auditPoints'
+import type { AuditItem, AuditPoint, WordSet } from '@/types/domain'
 
-const { Sider: SiderComp, Content: ContentComp } = Layout
+type WordSetOption = WordSet
+
 const { Title, Text } = Typography
 
 const SERVICE_CODE = 'ad_compliance_detection_pro'
 
-const NAV_GROUPS: Array<{ key: string; label: string; services: string[] }> = [
-  { key: 'ad_flow', label: '广告引流检测', services: [SERVICE_CODE] },
-  { key: 'bad_content', label: '不良内容检测', services: [] },
-  { key: 'behavior', label: '行为内容检测', services: [] },
-  { key: 'object', label: '特定物体检测', services: [] },
-  { key: 'abuse', label: '谩骂内容检测', services: [] },
-  { key: 'ad_law', label: '广告法内容检测', services: [] },
-  { key: 'religion', label: '宗教内容检测', services: [] },
-  { key: 'mark', label: '特殊标识检测', services: [] },
-  { key: 'racism', label: '种族主义内容', services: [] },
-  { key: 'other', label: '其他', services: [] },
-]
+const PACKAGE_BY_MEDIA: Record<string, string> = {
+  image: 'image_audit_pro',
+  text: 'text_audit_pro',
+  audio: 'audio_audit_pro',
+  doc: 'document_audit_pro',
+  video: 'video_audit_pro',
+}
 
-interface DraftRule extends DetectionRule {
+interface DraftPoint extends AuditPoint {
   _dirty?: boolean
 }
 
 export default function ServiceRuleConfigPage() {
-  const { serviceCode } = useParams<{ serviceCode: string }>()
+  const { serviceCode, itemId, mediaType } = useParams<{
+    serviceCode?: string
+    itemId?: string
+    mediaType?: string
+  }>()
   const location = useLocation()
   const { message } = App.useApp()
-  const code = serviceCode ?? SERVICE_CODE
+
+  const nestedPackage =
+    mediaType && PACKAGE_BY_MEDIA[mediaType] ? PACKAGE_BY_MEDIA[mediaType] : null
+  const code = serviceCode ?? nestedPackage ?? SERVICE_CODE
+  const activeItemId =
+    itemId != null && !Number.isNaN(Number(itemId)) ? Number(itemId) : null
 
   const backState = (location.state ?? {}) as { from?: string; fromStep?: 0 | 1 }
-  const backTarget = backState.from ?? '/strategies'
+  const nestedBack =
+    mediaType && PACKAGE_BY_MEDIA[mediaType]
+      ? `/strategies/rules-by-type/${mediaType}`
+      : null
+  const backTarget = backState.from ?? nestedBack ?? '/strategies'
   const backStepState =
     backState.fromStep != null ? { step: backState.fromStep } : undefined
-  const backLabel = backState.from ? '返回策略审核规则' : '返回策略管理列表'
+  const backLabel = backState.from
+    ? '返回策略审核规则'
+    : nestedBack
+      ? '返回规则列表'
+      : '返回策略管理列表'
 
-  const [items, setItems] = useState<DraftRule[]>([])
+  const [points, setPoints] = useState<DraftPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [wordsetOptions, setWordsetOptions] = useState<WordSetOption[]>([])
-
-  const [tabKey, setTabKey] = useState<string>('range')
-  const [hr, setHr] = useState<HumanReviewConfig | null>(null)
-  const [hrDraft, setHrDraft] = useState<{
-    is_enabled: boolean
-    risk_levels: RiskLevel[]
-    review_rule_id: number | null
-  } | null>(null)
-  const [hrLoading, setHrLoading] = useState(false)
-  const [hrSaving, setHrSaving] = useState(false)
-  const [humanReviewRules, setHumanReviewRules] = useState<WorkflowTemplate[]>([])
+  const [activeItemName, setActiveItemName] = useState<string | null>(null)
 
   const [editing, setEditing] = useState(false)
-  const [pendingReset, setPendingReset] = useState<DraftRule[] | null>(null)
+  const [pendingReset, setPendingReset] = useState<DraftPoint[] | null>(null)
 
   const fetch = async () => {
     setLoading(true)
     try {
-      const [rules, wss] = await Promise.all([
-        detectionRulesApi.list(code),
-        detectionRulesApi.listWordsets(code),
+      const [allPoints, wss, aItems] = await Promise.all([
+        auditPointsApi.list(code),
+        wordsetsApi.list({ size: 200 }).then((p) => p.items).catch(() => [] as WordSetOption[]),
+        auditItemsApi.list(code).catch(() => [] as AuditItem[]),
       ])
-      setItems(rules.map((r) => ({ ...r, _dirty: false })))
+      setPoints(allPoints.map((p) => ({ ...p, _dirty: false })))
       setWordsetOptions(wss)
+      if (activeItemId != null) {
+        const found = aItems.find((i) => i.id === activeItemId)
+        setActiveItemName(found?.name_cn ?? null)
+      } else {
+        setActiveItemName(null)
+      }
     } finally {
       setLoading(false)
     }
   }
 
-  const fetchHr = async () => {
-    setHrLoading(true)
-    try {
-      const data = await detectionRulesApi.getHumanReview(code)
-      setHr(data)
-      setHrDraft({
-        is_enabled: data.is_enabled,
-        risk_levels: data.risk_levels,
-        review_rule_id: data.review_rule_id,
-      })
-    } finally {
-      setHrLoading(false)
-    }
-  }
-
-  const fetchHumanReviewRules = async () => {
-    try {
-      const list = await workflowsApi.list({ prefix: 'hr_' })
-      setHumanReviewRules(list)
-    } catch {
-      setHumanReviewRules([])
-    }
-  }
-
   useEffect(() => {
-    fetch()
-    fetchHr()
-    fetchHumanReviewRules()
+    if (!code) return
+    void fetch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code])
 
-  const hrDirty =
-    !!hr &&
-    !!hrDraft &&
-    (hrDraft.is_enabled !== hr.is_enabled ||
-      hrDraft.review_rule_id !== hr.review_rule_id ||
-      hrDraft.risk_levels.length !== hr.risk_levels.length ||
-      hrDraft.risk_levels.some((r, i) => r !== hr.risk_levels[i]))
+  const filteredPoints = useMemo(() => {
+    if (activeItemId == null) return points
+    return points.filter((p) => p.item_id === activeItemId)
+  }, [points, activeItemId])
 
-  const onSaveHr = async () => {
-    if (!hrDraft) return
-    setHrSaving(true)
-    try {
-      await detectionRulesApi.updateHumanReview(code, {
-        is_enabled: hrDraft.is_enabled,
-        risk_levels: hrDraft.risk_levels,
-        review_rule_id: hrDraft.review_rule_id,
-      })
-      message.success('已保存')
-      fetchHr()
-    } catch (e: unknown) {
-      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail ?? '保存失败')
-    } finally {
-      setHrSaving(false)
+  useEffect(() => {
+    if (activeItemId == null) {
+      setActiveItemName(null)
+      return
     }
-  }
+    auditItemsApi
+      .list(code)
+      .then((list) => {
+        const found = list.find((i) => i.id === activeItemId)
+        setActiveItemName(found?.name_cn ?? null)
+      })
+      .catch(() => setActiveItemName(null))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeItemId, code])
 
-  const dirty = items.some((i) => i._dirty)
+  const dirty = points.some((p) => p._dirty)
+
   const wordsetByAction = useMemo(() => {
     const map = new Map<string, WordSetOption[]>()
     for (const w of wordsetOptions) {
@@ -165,34 +137,34 @@ export default function ServiceRuleConfigPage() {
     return map
   }, [wordsetOptions])
 
-  const updateLocal = (id: number, patch: Partial<DraftRule>) => {
-    setItems((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, ...patch, _dirty: true } : it)),
+  const updateLocal = (id: number, patch: Partial<DraftPoint>) => {
+    setPoints((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, ...patch, _dirty: true } : p)),
     )
   }
 
   const validateAll = (): string | null => {
-    for (const r of items) {
-      if (r.medium_threshold >= r.high_threshold) {
-        return `「${r.label}」中风险分必须 < 高风险分`
+    for (const p of filteredPoints) {
+      if (p.medium_threshold >= p.high_threshold) {
+        return `「${p.label_cn || p.code}」中风险分必须 < 高风险分`
       }
-      if (r.medium_threshold < 0 || r.medium_threshold > 100) {
-        return `「${r.label}」中风险分需在 0-100 范围内`
+      if (p.medium_threshold < 0 || p.medium_threshold > 100) {
+        return `「${p.label_cn || p.code}」中风险分需在 0-100 范围内`
       }
-      if (r.high_threshold < 0 || r.high_threshold > 100) {
-        return `「${r.label}」高风险分需在 0-100 范围内`
+      if (p.high_threshold < 0 || p.high_threshold > 100) {
+        return `「${p.label_cn || p.code}」高风险分需在 0-100 范围内`
       }
     }
     return null
   }
 
   const enterEdit = () => {
-    setPendingReset(items.map((r) => ({ ...r })))
+    setPendingReset(points.map((p) => ({ ...p })))
     setEditing(true)
   }
 
   const cancelEdit = () => {
-    if (pendingReset) setItems(pendingReset)
+    if (pendingReset) setPoints(pendingReset)
     setPendingReset(null)
     setEditing(false)
   }
@@ -203,20 +175,20 @@ export default function ServiceRuleConfigPage() {
       message.error(err)
       return
     }
-    const dirtyItems = items.filter((i) => i._dirty)
+    const dirtyItems = points.filter((p) => p._dirty)
     if (dirtyItems.length === 0) {
       message.info('没有改动')
       return
     }
     setSaving(true)
     try {
-      for (const it of dirtyItems) {
-        await detectionRulesApi.update(code, it.label, {
-          medium_threshold: it.medium_threshold,
-          high_threshold: it.high_threshold,
-          scope_text: it.scope_text ?? '',
-          is_enabled: it.is_enabled,
-          custom_wordset_id: it.custom_wordset_id,
+      for (const p of dirtyItems) {
+        await auditPointsApi.update(code, p.id, {
+          medium_threshold: p.medium_threshold,
+          high_threshold: p.high_threshold,
+          scope_text: p.scope_text ?? '',
+          is_enabled: p.is_enabled,
+          custom_wordset_id: p.custom_wordset_id ?? undefined,
         })
       }
       message.success('已保存')
@@ -232,34 +204,43 @@ export default function ServiceRuleConfigPage() {
   }
 
   const onReset = async () => {
-    ModalShim.confirmReset(async () => {
+    if (window.confirm('确认恢复默认分值？将覆盖当前激活项的所有审核点的中/高风险分。')) {
       try {
-        await detectionRulesApi.reset(code)
+        await auditPointsApi.reset(code)
         message.success('已恢复默认分值')
-        fetch()
+        void fetch()
       } catch (e: unknown) {
         const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
         message.error(detail ?? '恢复失败')
       }
-    })
+    }
   }
 
-  const navItems: MenuProps['items'] = NAV_GROUPS.map((g) => ({
-    key: g.key,
-    label: g.label,
-    disabled: g.services.length === 0,
-  }))
+  // Split by whether the point is a "lib" (custom library/wordset entry).
+  const mainPoints = useMemo(
+    () => filteredPoints.filter((p) => !p.code.endsWith('_lib')),
+    [filteredPoints],
+  )
+  const libPoints = useMemo(
+    () => filteredPoints.filter((p) => p.code.endsWith('_lib')),
+    [filteredPoints],
+  )
 
-  const mainColumns: TableColumnsType<DraftRule> = [
+  const mainColumns: TableColumnsType<DraftPoint> = [
     {
       title: '标签值',
       dataIndex: 'label',
-      width: '14%',
+      width: '18%',
       render: (_v, row) => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ color: '#020617', fontWeight: 500 }}>{row.label_cn || row.label}</span>
-          <Text type="secondary" style={{ fontSize: 11, fontFamily: 'ui-monospace, monospace' }}>
-            {row.label}
+          <span style={{ color: '#020617', fontWeight: 500 }}>
+            {row.label_cn || row.label}
+          </span>
+          <Text
+            type="secondary"
+            style={{ fontSize: 11, fontFamily: 'ui-monospace, monospace' }}
+          >
+            {row.code}
           </Text>
         </div>
       ),
@@ -268,7 +249,9 @@ export default function ServiceRuleConfigPage() {
       title: '含义',
       dataIndex: 'description',
       width: '24%',
-      render: (v: string | null) => <span style={{ color: '#020617' }}>{v ?? '—'}</span>,
+      render: (v: string | null) => (
+        <span style={{ color: '#020617' }}>{v ?? '—'}</span>
+      ),
     },
     {
       title: (
@@ -278,7 +261,7 @@ export default function ServiceRuleConfigPage() {
         </Space>
       ),
       dataIndex: 'medium_threshold',
-      width: '18%',
+      width: '16%',
       render: (_v, row) => (
         <Space size={4}>
           <InputNumber
@@ -286,13 +269,17 @@ export default function ServiceRuleConfigPage() {
             max={100}
             step={0.01}
             value={row.medium_threshold}
-            onChange={(v) => updateLocal(row.id, { medium_threshold: Number(v ?? 0) })}
+            onChange={(v) =>
+              updateLocal(row.id, { medium_threshold: Number(v ?? 0) })
+            }
             style={{ width: 90 }}
             size="small"
-            aria-label={`${row.label_cn || row.label} 中风险分`}
+            aria-label={`${row.label_cn || row.code} 中风险分`}
             disabled={!editing}
           />
-          <Text type="secondary" style={{ fontSize: 12 }}>~ 79.99</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            ~ {(row.high_threshold - 0.01).toFixed(2)}
+          </Text>
         </Space>
       ),
     },
@@ -304,7 +291,7 @@ export default function ServiceRuleConfigPage() {
         </Space>
       ),
       dataIndex: 'high_threshold',
-      width: '18%',
+      width: '16%',
       render: (_v, row) => (
         <Space size={4}>
           <InputNumber
@@ -312,13 +299,17 @@ export default function ServiceRuleConfigPage() {
             max={100}
             step={0.01}
             value={row.high_threshold}
-            onChange={(v) => updateLocal(row.id, { high_threshold: Number(v ?? 0) })}
+            onChange={(v) =>
+              updateLocal(row.id, { high_threshold: Number(v ?? 0) })
+            }
             style={{ width: 90 }}
             size="small"
-            aria-label={`${row.label_cn || row.label} 高风险分`}
+            aria-label={`${row.label_cn || row.code} 高风险分`}
             disabled={!editing}
           />
-          <Text type="secondary" style={{ fontSize: 12 }}>~ 100.00</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            ~ 100.00
+          </Text>
         </Space>
       ),
     },
@@ -326,7 +317,9 @@ export default function ServiceRuleConfigPage() {
       title: '细分检测范围',
       dataIndex: 'scope_text',
       width: '16%',
-      render: (v: string | null) => <span style={{ color: '#020617' }}>{v ?? '—'}</span>,
+      render: (v: string | null) => (
+        <span style={{ color: '#020617' }}>{v ?? '—'}</span>
+      ),
     },
     {
       title: '检测状态',
@@ -337,7 +330,7 @@ export default function ServiceRuleConfigPage() {
           <Switch
             checked={active}
             onChange={(v) => updateLocal(row.id, { is_enabled: v })}
-            aria-label={`${row.label_cn || row.label} 检测状态`}
+            aria-label={`${row.label_cn || row.code} 检测状态`}
             size="small"
             disabled={!editing}
           />
@@ -349,16 +342,21 @@ export default function ServiceRuleConfigPage() {
     },
   ]
 
-  const customColumns: TableColumnsType<DraftRule> = [
+  const libColumns: TableColumnsType<DraftPoint> = [
     {
       title: '标签值',
       dataIndex: 'label',
       width: '20%',
       render: (_v, row) => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ color: '#020617', fontWeight: 500 }}>{row.label_cn || row.label}</span>
-          <Text type="secondary" style={{ fontSize: 11, fontFamily: 'ui-monospace, monospace' }}>
-            {row.label}_lib
+          <span style={{ color: '#020617', fontWeight: 500 }}>
+            {row.label_cn || row.label}
+          </span>
+          <Text
+            type="secondary"
+            style={{ fontSize: 11, fontFamily: 'ui-monospace, monospace' }}
+          >
+            {row.code}_lib
           </Text>
         </div>
       ),
@@ -367,7 +365,9 @@ export default function ServiceRuleConfigPage() {
       title: '含义',
       dataIndex: 'description',
       width: '32%',
-      render: (v: string | null) => <span style={{ color: '#020617' }}>{v ?? '—'}</span>,
+      render: (v: string | null) => (
+        <span style={{ color: '#020617' }}>{v ?? '—'}</span>
+      ),
     },
     {
       title: '图库/词库选配',
@@ -376,7 +376,9 @@ export default function ServiceRuleConfigPage() {
       render: (_v, row) => (
         <Space direction="vertical" size={4} style={{ width: '100%' }}>
           <Space size={8} wrap>
-            <Text type="secondary" style={{ fontSize: 12, minWidth: 40 }}>图库:</Text>
+            <Text type="secondary" style={{ fontSize: 12, minWidth: 40 }}>
+              图库：
+            </Text>
             <Select
               disabled
               placeholder="自定义图库 - 即将上线"
@@ -385,11 +387,15 @@ export default function ServiceRuleConfigPage() {
             />
           </Space>
           <Space size={8} wrap>
-            <Text type="secondary" style={{ fontSize: 12, minWidth: 40 }}>词库:</Text>
+            <Text type="secondary" style={{ fontSize: 12, minWidth: 40 }}>
+              词库：
+            </Text>
             <Select
               placeholder="选择词库用于命中返回该行标签"
               value={row.custom_wordset_id ?? undefined}
-              onChange={(v) => updateLocal(row.id, { custom_wordset_id: v ?? null })}
+              onChange={(v) =>
+                updateLocal(row.id, { custom_wordset_id: v ?? null })
+              }
               allowClear
               style={{ minWidth: 280 }}
               size="small"
@@ -419,7 +425,6 @@ export default function ServiceRuleConfigPage() {
     },
   ]
 
-
   return (
     <div className="service-rule-page">
       <Space style={{ marginBottom: 12 }} align="center">
@@ -431,293 +436,105 @@ export default function ServiceRuleConfigPage() {
         </Link>
       </Space>
 
-      <Title level={3} style={{ marginTop: 0, marginBottom: 16 }}>
-        审核范围配置
-      </Title>
-
-      <Tabs
-        activeKey={tabKey}
-        items={[
-          { key: 'range', label: '审核范围配置' },
-          { key: 'hmx', label: '人机审核配置' },
-        ]}
-        onChange={(k) => {
-          if (k === 'hmx') {
-            setTabKey('hmx')
-            if (!hr) fetchHr()
-            return
-          }
-          if (k === 'range') {
-            setTabKey('range')
-            return
-          }
-          message.info('该功能 - 即将上线')
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 16,
+          flexWrap: 'wrap',
+          gap: 12,
         }}
-      />
-
-      {tabKey === 'range' && (
-        <>
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16, background: '#EFF6FF', border: '1px solid #BAE6FD' }}
-            message={
-              <ol style={{ margin: 0, paddingLeft: 18, color: '#0369A1' }}>
-                <li>您可以根据需求调整检测范围，如果检测到对应的疑似内容，系统会返回对应的标签值。在全部关闭检测或对应检测项计算后均未发现异常时，系统会返回 &quot;nonLabel&quot;的标签。</li>
-                <li>您也可以基于自定义的图库/词库配置对应的检测标签。系统会将检测图片与您选定的自定义图库的图片进行相似比对；图片中的文字会与自定义词库的关键进行比对。有命中时，系统会返回对应的标签值。</li>
-                <li>配置修改对生产环境生效通常需要 2~5 分钟，请谨慎操作。</li>
-              </ol>
-            }
-          />
-          <Layout
-            className="service-rule-range-layout"
-            style={{
-              background: 'transparent',
-              border: '1px solid #E2E8F0',
-              borderRadius: 6,
-            }}
-          >
-            <SiderComp
-              width="clamp(160px, 14vw, 220px)"
-              breakpoint="md"
-              collapsedWidth={0}
-              trigger={null}
-              className="service-rule-range-sider"
-              style={{
-                background: '#F8FAFC',
-                borderRight: '1px solid #E2E8F0',
-              }}
-            >
-              <Menu
-                mode="inline"
-                selectedKeys={['ad_flow']}
-                items={navItems}
-                style={{ background: 'transparent', borderInlineEnd: 0 }}
-                onClick={({ key }) => {
-                  if (key !== 'ad_flow') message.info('该分类 - 即将上线')
-                }}
-              />
-            </SiderComp>
-            <ContentComp style={{ background: '#FFFFFF', padding: 20 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: 16,
-                  flexWrap: 'wrap',
-                  gap: 12,
-                }}
-              >
-                <Title level={4} style={{ margin: 0 }}>
-                  审核范围配置
-                </Title>
-                <Space wrap>
-                  {editing ? (
-                    <>
-                      <Button onClick={cancelEdit} disabled={saving}>
-                        取消
-                      </Button>
-                      <Button
-                        type="primary"
-                        icon={<SaveOutlined />}
-                        onClick={onSave}
-                        loading={saving}
-                        disabled={!dirty}
-                      >
-                        保存
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      type="primary"
-                      icon={<EditOutlined />}
-                      onClick={enterEdit}
-                    >
-                      编辑
-                    </Button>
-                  )}
-                </Space>
-              </div>
-
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: 12,
-                  flexWrap: 'wrap',
-                  gap: 12,
-                }}
-              >
-                <Text strong>细分场景配置</Text>
-                <Button size="small" onClick={onReset}>
-                  恢复默认分值
-                </Button>
-              </div>
-
-              <Table<DraftRule>
-                rowKey="id"
-                loading={loading}
-                dataSource={items}
-                columns={mainColumns}
-                pagination={false}
-                size="middle"
-                scroll={{ x: true }}
-              />
-
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginTop: 24,
-                  marginBottom: 12,
-                }}
-              >
-                <Text strong>自定义配置图库/词库</Text>
-              </div>
-
-              <Table<DraftRule>
-                rowKey="id"
-                loading={loading}
-                dataSource={items}
-                columns={customColumns}
-                pagination={false}
-                size="middle"
-                scroll={{ x: true }}
-              />
-            </ContentComp>
-          </Layout>
-        </>
-      )}
-
-      {tabKey === 'hmx' && (
-        <Spin spinning={hrLoading} style={{ marginTop: 16 }}>
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16, background: '#EFF6FF', border: '1px solid #BAE6FD' }}
-            message={
-              <ol style={{ margin: 0, paddingLeft: 18, color: '#0369A1' }}>
-                <li>在此处可以配置是否开启人工审核，开启之后，符合条件的AI审核结果或直接进入人工审核环节。</li>
-              </ol>
-            }
-          />
-          <div
-            style={{
-              border: '1px solid #E2E8F0',
-              borderRadius: 6,
-              padding: 'clamp(12px, 1.5vw, 20px)',
-              background: '#FFFFFF',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 20,
-              }}
-            >
-              <Text strong style={{ fontSize: 16 }}>人机审核</Text>
+      >
+        <Space size={8} align="center" wrap>
+          <Title level={3} style={{ margin: 0 }}>
+            审核范围配置
+          </Title>
+          {activeItemName && (
+            <Text type="secondary" style={{ fontSize: 14 }}>
+              · {activeItemName}
+            </Text>
+          )}
+        </Space>
+        <Space wrap>
+          {editing ? (
+            <>
+              <Button onClick={cancelEdit} disabled={saving}>
+                取消
+              </Button>
               <Button
                 type="primary"
                 icon={<SaveOutlined />}
-                onClick={onSaveHr}
-                loading={hrSaving}
-                disabled={!hrDirty}
+                onClick={onSave}
+                loading={saving}
+                disabled={!dirty}
               >
                 保存
               </Button>
-            </div>
+            </>
+          ) : (
+            <Button type="primary" icon={<EditOutlined />} onClick={enterEdit}>
+              编辑
+            </Button>
+          )}
+        </Space>
+      </div>
 
-            <Space size={12} align="center" style={{ marginBottom: 20, paddingLeft: 16 }}>
-              <Space size={6} align="center">
-                <Text>开启人机审核</Text>
-                <QuestionCircleOutlined style={{ color: '#94A3B8', fontSize: 12 }} />
-              </Space>
-              <Switch
-                checked={hrDraft?.is_enabled ?? false}
-                onChange={(v) =>
-                  setHrDraft((d) => (d ? { ...d, is_enabled: v } : d))
-                }
-                aria-label="开启人机审核"
-              />
-            </Space>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 12,
+          flexWrap: 'wrap',
+          gap: 12,
+        }}
+      >
+        <Text strong>细分场景配置</Text>
+        <Button size="small" onClick={onReset}>
+          恢复默认分值
+        </Button>
+      </div>
 
-            <Space size={12} align="center" wrap style={{ marginBottom: 20, paddingLeft: 16 }}>
-              <Space size={6} align="center">
-                <Text>流入人审内容</Text>
-                <QuestionCircleOutlined style={{ color: '#94A3B8', fontSize: 12 }} />
-              </Space>
-              {(['高风险', '中风险', '低风险', '无风险'] as RiskLevel[]).map((lvl) => (
-                <Checkbox
-                  key={lvl}
-                  checked={hrDraft?.risk_levels.includes(lvl) ?? false}
-                  onChange={(e) => {
-                    setHrDraft((d) => {
-                      if (!d) return d
-                      const next = e.target.checked
-                        ? Array.from(new Set([...d.risk_levels, lvl]))
-                        : d.risk_levels.filter((r) => r !== lvl)
-                      return { ...d, risk_levels: next }
-                    })
-                  }}
-                >
-                  {lvl}
-                </Checkbox>
-              ))}
-            </Space>
+      <Table<DraftPoint>
+        rowKey="id"
+        loading={loading}
+        dataSource={mainPoints}
+        columns={mainColumns}
+        pagination={false}
+        size="middle"
+        scroll={{ x: true }}
+        locale={{
+          emptyText:
+            activeItemId != null ? '该审核项下暂无细分场景' : '暂无规则',
+        }}
+      />
 
-            <Space size={12} align="center" wrap style={{ marginBottom: 16, paddingLeft: 16 }}>
-              <Space size={6} align="center" style={{ minWidth: 110 }}>
-                <Text>人审审核规则</Text>
-                <QuestionCircleOutlined style={{ color: '#94A3B8', fontSize: 12 }} />
-              </Space>
-              <Select
-                placeholder="请选择"
-                allowClear
-                value={hrDraft?.review_rule_id ?? undefined}
-                onChange={(v) =>
-                  setHrDraft((d) => (d ? { ...d, review_rule_id: v ?? null } : d))
-                }
-                style={{ minWidth: 'clamp(200px, 100%, 320px)', flex: 1 }}
-                options={humanReviewRules.map((r) => ({
-                  value: r.id,
-                  label: `${r.name}（${r.definition?.stages?.length ?? 0} 阶段）`,
-                }))}
-                notFoundContent={
-                  <span style={{ color: '#94A3B8' }}>
-                    暂无可用人审规则，请先在「人工审核规则」页创建
-                  </span>
-                }
-              />
-            </Space>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginTop: 24,
+          marginBottom: 12,
+        }}
+      >
+        <Text strong>自定义配置图库/词库</Text>
+      </div>
 
-            <Space size={12} align="center" wrap style={{ paddingLeft: 16 }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                已选择的审核规则会作为该 Service 触发人审后的审核模板与流转依据。
-              </Text>
-            </Space>
-          </div>
-        </Spin>
-      )}
-
-      <style>{`
-        @media (max-width: 768px) {
-          .service-rule-range-sider { display: none !important; }
-          .service-rule-range-layout { flex-direction: column !important; }
-        }
-      `}</style>
+      <Table<DraftPoint>
+        rowKey="id"
+        loading={loading}
+        dataSource={libPoints}
+        columns={libColumns}
+        pagination={false}
+        size="middle"
+        scroll={{ x: true }}
+        locale={{
+          emptyText:
+            activeItemId != null ? '该审核项下暂无自定义配置' : '暂无规则',
+        }}
+      />
     </div>
   )
-}
-
-// Simple confirm wrapper (avoid pulling in Modal.confirm into tree)
-const ModalShim = {
-  confirmReset: (onOk: () => void) => {
-    // eslint-disable-next-line no-alert
-    if (window.confirm('确认恢复默认分值？将覆盖所有规则的中/高风险分。')) onOk()
-  },
 }

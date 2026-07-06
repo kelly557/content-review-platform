@@ -255,7 +255,11 @@ export default function ServiceRuleTable({
           return <span style={{ color: '#94A3B8', fontSize: 12 }}>加载中…</span>
         }
         if (list.length === 0) {
-          return <span style={{ color: '#94A3B8', fontSize: 12 }}>暂无规则</span>
+          return (
+            <Tooltip title="本服务尚未关联任何检测规则；请新建检测点或到「服务配置」页面开启。">
+              <span style={{ color: '#94A3B8', fontSize: 12 }}>未配置检测点</span>
+            </Tooltip>
+          )
         }
         return (
           <Space size={4} wrap>

@@ -23,6 +23,10 @@ const StrategyRulesByTypePage = lazy(
 )
 const ServiceRuleConfigPage = lazy(() => import('@/pages/strategy/ServiceRuleConfigPage'))
 const StrategyRuleConfigPage = lazy(() => import('@/pages/strategy/StrategyRuleConfigPage'))
+const PackageItemsPage = lazy(() => import('@/pages/packages/PackageItemsPage'))
+const CreateAuditItemPage = lazy(() => import('@/pages/packages/CreateAuditItemPage'))
+const AuditPointsPage = lazy(() => import('@/pages/packages/AuditPointsPage'))
+const CreateAuditPointPage = lazy(() => import('@/pages/packages/CreateAuditPointPage'))
 const TagsPage = lazy(() => import('@/pages/tags/TagsPage'))
 const HumanReviewRulesPage = lazy(() => import('@/pages/strategy/HumanReviewRulesPage'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
@@ -59,13 +63,26 @@ export default function AppRoutes() {
               <Route
                 path="/strategies/rules-by-type/:mediaType"
                 element={<StrategyRulesByTypePage />}
-              />
+              >
+                <Route path=":itemId" element={<ServiceRuleConfigPage />} />
+                <Route path="new" element={<CreateAuditItemPage />} />
+              </Route>
               <Route path="/strategies/new" element={<CreateStrategyPage />} />
               <Route path="/strategies/:id/edit" element={<CreateStrategyPage />} />
               <Route path="/strategies/rules/:serviceCode" element={<ServiceRuleConfigPage />} />
               <Route path="/strategies/custom-image" element={<CustomImagesPage />} />
               <Route path="/strategies/custom-text" element={<CustomTextsPage />} />
               <Route path="/strategies/:id/rule-config" element={<StrategyRuleConfigPage />} />
+              <Route path="/packages/:code/items" element={<PackageItemsPage />} />
+              <Route path="/packages/:code/items/new" element={<CreateAuditItemPage />} />
+              <Route
+                path="/packages/:code/items/:itemId/points"
+                element={<AuditPointsPage />}
+              />
+              <Route
+                path="/packages/:code/items/:itemId/points/new"
+                element={<CreateAuditPointPage />}
+              />
             </Route>
 
             <Route element={<ProtectedRoute allow={['admin']} />}>

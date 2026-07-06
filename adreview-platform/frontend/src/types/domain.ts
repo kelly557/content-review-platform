@@ -643,6 +643,7 @@ export interface DetectionRule {
   scope_text: string | null
   is_enabled: boolean
   custom_wordset_id: number | null
+  audit_point_id: number | null
   created_at: string
   updated_at: string | null
 }
@@ -814,3 +815,97 @@ export const TAG_JURISDICTION_OPTIONS: { value: string; label: string }[] = [
   { value: 'eu', label: '欧盟' },
   { value: 'global', label: '全球' },
 ]
+
+export interface AuditItem {
+  id: number
+  package_code: string
+  code: string
+  name_cn: string
+  aliases: string[]
+  description: string | null
+  sort_order: number
+  is_enabled: boolean
+  point_count: number
+  created_at: string
+  updated_at: string | null
+}
+
+export interface AuditItemCreate {
+  code: string
+  name_cn: string
+  aliases?: string[]
+  description?: string
+  sort_order?: number
+  is_enabled?: boolean
+}
+
+export interface AuditItemUpdate {
+  name_cn?: string
+  aliases?: string[]
+  description?: string
+  sort_order?: number
+  is_enabled?: boolean
+}
+
+export type AuditPointRisk = '低风险' | '中风险' | '高风险'
+
+export interface AuditPoint {
+  id: number
+  package_code: string
+  item_id: number
+  code: string
+  label: string
+  label_cn: string
+  description: string | null
+  medium_threshold: number
+  high_threshold: number
+  scope_text: string | null
+  risk_level: AuditPointRisk
+  is_enabled: boolean
+  custom_wordset_id: number | null
+  sort_order: number
+  created_at: string
+  updated_at: string | null
+}
+
+export interface AuditPointCreate {
+  item_id: number
+  code: string
+  label: string
+  label_cn: string
+  description?: string
+  medium_threshold?: number
+  high_threshold?: number
+  scope_text?: string
+  risk_level?: AuditPointRisk
+  is_enabled?: boolean
+  custom_wordset_id?: number
+  sort_order?: number
+}
+
+export interface AuditPointUpdate {
+  label_cn?: string
+  description?: string
+  medium_threshold?: number
+  high_threshold?: number
+  scope_text?: string
+  risk_level?: AuditPointRisk
+  is_enabled?: boolean
+  custom_wordset_id?: number
+  sort_order?: number
+}
+
+export interface ItemSuggestion {
+  item_id: number
+  item_code: string
+  item_name_cn: string
+  score: number
+  matched_aliases: string[]
+  matched_terms: string[]
+}
+
+export interface SuggestResponse {
+  matches: ItemSuggestion[]
+  mock: boolean
+  engine: string
+}

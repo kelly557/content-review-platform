@@ -27,12 +27,12 @@ export const CATEGORIES: CategoryDef[] = [
   {
     key: 'image',
     label: MEDIA_TYPE_LABELS.image,
-    categoryNames: ['业务场景', '特殊场景', 'AIGC场景'],
+    categoryNames: ['特殊场景'],
   },
   {
     key: 'text',
     label: MEDIA_TYPE_LABELS.text,
-    categoryNames: ['通用场景', '业务场景', 'AIGC场景', '百炼场景'],
+    categoryNames: ['通用场景', '业务场景'],
   },
   {
     key: 'audio',
