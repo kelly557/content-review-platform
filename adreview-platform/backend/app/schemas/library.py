@@ -117,6 +117,8 @@ class LibraryItemOut(ORMBase):
     id: int
     library_id: int
     word: Optional[str] = None
+    trigger: Optional[str] = None
+    reply: Optional[str] = None
     original_filename: Optional[str] = None
     mime_type: Optional[str] = None
     file_size: Optional[int] = None

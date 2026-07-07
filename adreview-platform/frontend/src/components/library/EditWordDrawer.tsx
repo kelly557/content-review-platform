@@ -50,7 +50,7 @@ export default function EditWordDrawer({ open, library, onCancel, onSuccess }: P
   const uploadProps: UploadProps = {
     multiple: false,
     maxCount: 1,
-    accept: '.txt,text/plain',
+    accept: '.txt,.csv,text/plain,text/csv',
     showUploadList: false,
     beforeUpload: (f) => {
       if (f.size > MAX_FILE_BYTES) {

@@ -19,6 +19,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -36,6 +37,8 @@ class LibraryItem(Base):
         nullable=False,
     )
     word: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    trigger: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    reply: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     storage_key: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     original_filename: Mapped[Optional[str]] = mapped_column(
@@ -59,7 +62,7 @@ class LibraryItem(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "(word IS NOT NULL) OR (storage_key IS NOT NULL)",
+            "(word IS NOT NULL) OR (storage_key IS NOT NULL) OR (reply IS NOT NULL)",
             name="ck_library_items_kind_consistent",
         ),
         Index("ix_library_items_library_active", "library_id", "is_deleted"),

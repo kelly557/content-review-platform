@@ -33,21 +33,21 @@ import type {
   LibraryGroup,
   LibraryListItem,
 } from '@/types/domain'
-import { parseWordsFile } from '@/lib/libraryImport'
+import { parseReplyFile } from '@/lib/libraryImport'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
 
 const { Title } = Typography
 
-const MAX_WORDS = 1000
+const MAX_PAIRS = 1000
 
 interface CreateFormValues {
   name: string
   group_id: number
   description?: string
-  wordsText?: string
+  pairsText?: string
 }
 
-export default function WordLibraryListPage() {
+export default function ReplyLibraryListPage() {
   const { message } = App.useApp()
   const [groups, setGroups] = useState<LibraryGroup[]>([])
   const [filterGroupId, setFilterGroupId] = useState<number | null>(null)
@@ -72,7 +72,7 @@ export default function WordLibraryListPage() {
     setLoading(true)
     try {
       const data = await librariesApi.list({
-        type: 'word',
+        type: 'reply',
         group_id: filterGroupId ?? undefined,
         q: q || undefined,
         size: 50,
@@ -107,14 +107,14 @@ export default function WordLibraryListPage() {
   const submitCreate = async () => {
     const v = await createForm.validateFields().catch(() => null)
     if (!v) return
-    const words = (v.wordsText ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
-    if (words.length > MAX_WORDS) {
-      message.error(`单次最多 ${MAX_WORDS} 个词`)
-      return
-    }
+    const pairsText: string = v.pairsText ?? ''
+    const words: string[] = pairsText
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
     const payload: LibraryCreate = {
       name: v.name.trim(),
-      library_type: 'word',
+      library_type: 'reply',
       group_id: v.group_id,
       description: v.description,
       words,
@@ -122,7 +122,11 @@ export default function WordLibraryListPage() {
     setCreating(true)
     try {
       await librariesApi.create(payload)
-      message.success('已新建')
+      message.success(
+        words.length > 0
+          ? `已新建并添加 ${words.length} 条`
+          : '已新建',
+      )
       setCreateOpen(false)
       void fetchLibraries()
     } catch (e: unknown) {
@@ -142,7 +146,7 @@ export default function WordLibraryListPage() {
       render: (v: string, row) => (
         <Space size={6}>
           <Link
-            to={`/strategies/words/${row.id}`}
+            to={`/strategies/replies/${row.id}`}
             style={{ color: '#020617', fontWeight: 500 }}
           >
             {v}
@@ -158,7 +162,7 @@ export default function WordLibraryListPage() {
         <span style={{ color: '#475569' }}>{row.group_name ?? `#${row.group_id}`}</span>
       ),
     },
-    { title: '词数', dataIndex: 'item_count', width: '12%', align: 'right' },
+    { title: '条数', dataIndex: 'item_count', width: '12%', align: 'right' },
     {
       title: '最近修改',
       dataIndex: 'updated_at',
@@ -182,13 +186,13 @@ export default function WordLibraryListPage() {
       width: '12%',
       render: (_v, row) => (
         <Space size={4}>
-          <Link to={`/strategies/words/${row.id}`}>
+          <Link to={`/strategies/replies/${row.id}`}>
             <Button type="link" size="small" icon={<EditOutlined />}>
               编辑
             </Button>
           </Link>
           <Popconfirm
-            title="确认删除该词库？"
+            title="确认删除该代答库？"
             okText="删除"
             cancelText="取消"
             okButtonProps={{ danger: true }}
@@ -216,11 +220,11 @@ export default function WordLibraryListPage() {
         }}
       >
         <Title level={3} style={{ margin: 0 }}>
-          词库
+          代答库
         </Title>
         <Space wrap>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建词库
+            新建代答库
           </Button>
         </Space>
       </div>
@@ -250,7 +254,7 @@ export default function WordLibraryListPage() {
         </Space>
         <Space>
           <Input.Search
-            placeholder="搜索词库名称"
+            placeholder="搜索代答库名称"
             allowClear
             style={{ width: 260 }}
             onSearch={(v) => {
@@ -278,10 +282,10 @@ export default function WordLibraryListPage() {
         locale={{ emptyText: '当前筛选条件下暂无库,点击右上角新建' }}
       />
 
-            <Drawer
+      <Drawer
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title="新建词库"
+        title="新建代答库"
         width={520}
         extra={
           <Space>
@@ -317,12 +321,15 @@ export default function WordLibraryListPage() {
               { max: 128, message: '不超过 128 字' },
             ]}
           >
-            <Input maxLength={128} showCount placeholder="例如：双十一活动词" />
+            <Input maxLength={128} showCount placeholder="例如：售前欢迎语" />
           </Form.Item>
           <Form.Item name="description" label="说明">
             <Input.TextArea rows={2} maxLength={200} />
           </Form.Item>
-          <Form.Item name="wordsText" label="词条（可选,创建时可一并填入）">
+          <Form.Item
+            name="pairsText"
+            label="代答条目（可选,创建时可一并填入）"
+          >
             <Tabs
               defaultActiveKey="paste"
               items={[
@@ -330,23 +337,17 @@ export default function WordLibraryListPage() {
                   key: 'paste',
                   label: '直接粘贴',
                   children: (
-                    <Form.Item
-                      name="wordsText"
-                      noStyle
-                      rules={[
-                        {
-                          validator: async () =>
-                            Promise.resolve(),
-                        },
-                      ]}
-                    >
+                    <Form.Item name="pairsText" noStyle>
                       <Input.TextArea
                         rows={8}
-                        placeholder={'习近平\n领导人\n反动'}
+                        placeholder={'您好,客官|||您好,有什么可以帮您?\n发货时间|||24 小时内'}
                         disabled={creatingImport}
-                        onChange={(e) => {
-                          createForm.setFieldValue('wordsText', e.target.value)
-                        }}
+                        onChange={(e) =>
+                          createForm.setFieldValue(
+                            'pairsText',
+                            e.target.value,
+                          )
+                        }
                       />
                     </Form.Item>
                   ),
@@ -355,14 +356,18 @@ export default function WordLibraryListPage() {
                   key: 'upload',
                   label: '上传 .txt / .csv',
                   children: (
-                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Space
+                      direction="vertical"
+                      size={8}
+                      style={{ width: '100%' }}
+                    >
                       <Alert
                         type="info"
                         showIcon
-                        message="每行一词,.csv 用逗号分隔多个"
+                        message="每行 trigger + TAB/||| 与 reply 配对"
                         description={
                           <span>
-                            例：<code>习近平,领导人,反动</code> 三个词
+                            例：<code>{'您好,客官\t您好,有什么可以帮您?'}</code>
                           </span>
                         }
                       />
@@ -371,27 +376,27 @@ export default function WordLibraryListPage() {
                         beforeUpload={async (file) => {
                           setImporting(true)
                           try {
-                            const { words, errors } = await parseWordsFile(
+                            const { pairs, errors } = await parseReplyFile(
                               file as File,
                             )
-                            if (errors.length > 0 || words.length === 0) {
+                            if (errors.length > 0 || pairs.length === 0) {
                               message.error(
                                 errors[0] ?? '文件无有效数据',
                               )
                               return false
                             }
-                            if (words.length > MAX_WORDS) {
+                            if (pairs.length > MAX_PAIRS) {
                               message.error(
-                                `单次最多 ${MAX_WORDS} 个词,检测到 ${words.length}`,
+                                `单次最多 ${MAX_PAIRS} 对,检测到 ${pairs.length}`,
                               )
                               return false
                             }
-                            createForm.setFieldValue(
-                              'wordsText',
-                              words.join('\n'),
-                            )
+                            const text = pairs
+                              .map((p) => `${p.trigger}|||${p.reply}`)
+                              .join('\n')
+                            createForm.setFieldValue('pairsText', text)
                             message.success(
-                              `已导入 ${words.length} 个词,切换到直接粘贴 tab 可继续编辑`,
+                              `已导入 ${pairs.length} 对,切换到直接粘贴 tab 可继续编辑`,
                             )
                             return false
                           } catch (e) {
@@ -435,7 +440,6 @@ export default function WordLibraryListPage() {
           void fetchLibraries()
         }}
       />
-
-          </div>
+    </div>
   )
 }

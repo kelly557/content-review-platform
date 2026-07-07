@@ -280,6 +280,7 @@ async def create_library(
                 body.library_type == LibraryType.IMAGE
                 and IMAGE_CODE_RE.match(body.code)
             )
+            or (body.library_type == LibraryType.REPLY and body.code.startswith("lib_r_"))
             or GENERIC_CODE_RE.match(body.code)
         )
         if not ok:
@@ -289,7 +290,12 @@ async def create_library(
             raise HTTPException(status_code=409, detail="code 已存在")
         code = body.code
     else:
-        prefix = "lib_w_" if body.library_type == LibraryType.WORD else "lib_i_"
+        if body.library_type == LibraryType.WORD:
+            prefix = "lib_w_"
+        elif body.library_type == LibraryType.IMAGE:
+            prefix = "lib_i_"
+        else:
+            prefix = "lib_r_"
         code = await _next_code(db, prefix)
 
     lib = Library(
@@ -312,6 +318,37 @@ async def create_library(
                 continue
             seen.add(w)
             db.add(LibraryItem(library_id=lib.id, word=w))
+        await db.flush()
+    elif body.library_type == LibraryType.REPLY and body.words:
+        seen_pair: set[tuple[str, str]] = set()
+        for raw in body.words:
+            raw = (raw or "").strip()
+            if not raw:
+                continue
+            t = r = ""
+            sep_idx = -1
+            sep_ch = ""
+            for ch in ("|||", "\\t", "\t"):
+                idx = raw.find(ch)
+                if idx > 0:
+                    sep_idx = idx
+                    sep_ch = ch
+                    break
+            if sep_idx > 0:
+                t = raw[:sep_idx].strip()
+                r = raw[sep_idx + len(sep_ch):].strip()
+            elif "," in raw:
+                t, r = raw.split(",", 1)
+                t, r = t.strip(), r.strip()
+            if not t or not r:
+                continue
+            key = (t, r)
+            if key in seen_pair:
+                continue
+            seen_pair.add(key)
+            db.add(
+                LibraryItem(library_id=lib.id, trigger=t, reply=r)
+            )
         await db.flush()
 
     await db.refresh(lib)
@@ -576,6 +613,8 @@ def _item_to_out(item: LibraryItem) -> LibraryItemOut:
             "id": item.id,
             "library_id": item.library_id,
             "word": item.word,
+            "trigger": item.trigger,
+            "reply": item.reply,
             "original_filename": item.original_filename,
             "mime_type": item.mime_type,
             "file_size": item.file_size,
@@ -626,41 +665,110 @@ async def add_items(
     lib = await db.get(Library, library_id)
     if not lib or lib.is_deleted:
         raise HTTPException(status_code=404, detail="库不存在")
-    if lib.library_type != LibraryType.WORD:
-        raise HTTPException(status_code=400, detail="该接口仅用于词库")
+    if lib.library_type not in (LibraryType.WORD, LibraryType.REPLY):
+        raise HTTPException(
+            status_code=400, detail="该接口仅用于词库/代答库"
+        )
 
-    existing = {
-        row[0]
-        for row in (
-            await db.execute(
-                select(LibraryItem.word).where(
-                    and_(
-                        LibraryItem.library_id == library_id,
-                        LibraryItem.is_deleted == False,  # noqa: E712
+    if len(body.words) > MAX_WORDS:
+        raise HTTPException(
+            status_code=400, detail=f"单次最多 {MAX_WORDS} 个词/对"
+        )
+
+    if lib.library_type == LibraryType.WORD:
+        existing = {
+            row[0]
+            for row in (
+                await db.execute(
+                    select(LibraryItem.word).where(
+                        and_(
+                            LibraryItem.library_id == library_id,
+                            LibraryItem.is_deleted == False,  # noqa: E712
+                        )
                     )
                 )
-            )
-        ).all()
-    }
-    added = 0
-    skipped = 0
-    inserted: list[LibraryItem] = []
-    seen: set[str] = set()
-    for w in body.words:
-        w = (w or "").strip()
-        if not w or w in seen or w in existing:
-            skipped += 1
-            continue
-        seen.add(w)
-        it = LibraryItem(library_id=library_id, word=w)
-        db.add(it)
-        inserted.append(it)
-        added += 1
-    if added:
-        await db.flush()
-        for it in inserted:
-            await db.refresh(it)
-        await db.commit()
+            ).all()
+            if row[0]
+        }
+        added = 0
+        skipped = 0
+        inserted: list[LibraryItem] = []
+        seen: set[str] = set()
+        for w in body.words:
+            w = (w or "").strip()
+            if not w or w in seen or w in existing:
+                skipped += 1
+                continue
+            seen.add(w)
+            it = LibraryItem(library_id=library_id, word=w)
+            db.add(it)
+            inserted.append(it)
+            added += 1
+        if added:
+            await db.flush()
+            for it in inserted:
+                await db.refresh(it)
+            await db.commit()
+    else:
+        # REPLY: each entry is 'trigger ||| reply' (or trigger<tab>reply / trigger,reply)
+        existing = {
+            (row[0], row[1])
+            for row in (
+                await db.execute(
+                    select(LibraryItem.trigger, LibraryItem.reply).where(
+                        and_(
+                            LibraryItem.library_id == library_id,
+                            LibraryItem.is_deleted == False,  # noqa: E712
+                        )
+                    )
+                )
+            ).all()
+            if row[0] and row[1]
+        }
+        added = 0
+        skipped = 0
+        inserted = []
+        seen: set[tuple[str, str]] = set()
+        for raw in body.words:
+            raw = (raw or "").strip()
+            if not raw:
+                skipped += 1
+                continue
+            t = r = ""
+            sep_idx = -1
+            sep_ch = ""
+            for ch in ("|||", "\\t", "\t"):
+                idx = raw.find(ch)
+                if idx > 0:
+                    sep_idx = idx
+                    sep_ch = ch
+                    break
+            if sep_idx > 0:
+                t = raw[:sep_idx].strip()
+                r = raw[sep_idx + len(sep_ch):].strip()
+            elif "," in raw:
+                t, r = raw.split(",", 1)
+                t, r = t.strip(), r.strip()
+            else:
+                skipped += 1
+                continue
+            if not t or not r:
+                skipped += 1
+                continue
+            key = (t, r)
+            if key in seen or key in existing:
+                skipped += 1
+                continue
+            seen.add(key)
+            it = LibraryItem(library_id=library_id, trigger=t, reply=r)
+            db.add(it)
+            inserted.append(it)
+            added += 1
+        if added:
+            await db.flush()
+            for it in inserted:
+                await db.refresh(it)
+            await db.commit()
 
     base = select(LibraryItem).where(
         and_(LibraryItem.library_id == library_id, LibraryItem.is_deleted == False)  # noqa: E712
@@ -956,8 +1064,10 @@ async def upload_words(
     lib = await db.get(Library, library_id)
     if not lib or lib.is_deleted:
         raise HTTPException(status_code=404, detail="库不存在")
-    if lib.library_type != LibraryType.WORD:
-        raise HTTPException(status_code=400, detail="该接口仅用于词库")
+    if lib.library_type not in (LibraryType.WORD, LibraryType.REPLY):
+        raise HTTPException(
+            status_code=400, detail="该接口仅用于词库/代答库"
+        )
 
     raw = await file.read()
     if not raw:
@@ -970,41 +1080,93 @@ async def upload_words(
         except UnicodeDecodeError:
             raise HTTPException(status_code=400, detail="文件编码不支持,请使用 UTF-8 或 GBK 编码的 txt")
 
-    words: list[str] = []
-    for line in text.splitlines():
-        w = line.strip()
-        if w:
-            words.append(w)
-
-    if len(words) > MAX_WORDS:
-        raise HTTPException(status_code=400, detail=f"单次最多 {MAX_WORDS} 个词")
-
-    existing = {
-        row[0]
-        for row in (
-            await db.execute(
-                select(LibraryItem.word).where(
-                    and_(
-                        LibraryItem.library_id == library_id,
-                        LibraryItem.is_deleted == False,  # noqa: E712
-                    )
-                )
-            )
-        ).all()
-    }
     added = 0
     skipped = 0
     inserted: list[LibraryItem] = []
-    seen: set[str] = set()
-    for w in words:
-        if w in seen or w in existing:
-            skipped += 1
-            continue
-        seen.add(w)
-        it = LibraryItem(library_id=library_id, word=w)
-        db.add(it)
-        inserted.append(it)
-        added += 1
+
+    if lib.library_type == LibraryType.WORD:
+        words: list[str] = []
+        for line in text.splitlines():
+            w = line.strip()
+            if w:
+                words.append(w)
+        if len(words) > MAX_WORDS:
+            raise HTTPException(
+                status_code=400, detail=f"单次最多 {MAX_WORDS} 个词"
+            )
+        existing = {
+            row[0]
+            for row in (
+                await db.execute(
+                    select(LibraryItem.word).where(
+                        and_(
+                            LibraryItem.library_id == library_id,
+                            LibraryItem.is_deleted == False,  # noqa: E712
+                        )
+                    )
+                )
+            ).all()
+        }
+        seen: set[str] = set()
+        for w in words:
+            if w in seen or w in existing:
+                skipped += 1
+                continue
+            seen.add(w)
+            it = LibraryItem(library_id=library_id, word=w)
+            db.add(it)
+            inserted.append(it)
+            added += 1
+    else:
+        # REPLY: each row "trigger<TAB or |||>reply"
+        pairs: list[tuple[str, str]] = []
+        for line in text.splitlines():
+            s = line.strip()
+            if not s:
+                continue
+            t = r = ""
+            if "|||" in s:
+                t, r = s.split("|||", 1)
+            elif "\t" in s:
+                t, r = s.split("\t", 1)
+            elif "," in s:
+                # csv-style trigger,reply — only first comma
+                t, r = s.split(",", 1)
+            t, r = t.strip(), r.strip()
+            if not t or not r:
+                continue
+            pairs.append((t, r))
+        if len(pairs) > MAX_WORDS:
+            raise HTTPException(
+                status_code=400, detail=f"单次最多 {MAX_WORDS} 对"
+            )
+        existing = {
+            (row[0], row[1])
+            for row in (
+                await db.execute(
+                    select(LibraryItem.trigger, LibraryItem.reply).where(
+                        and_(
+                            LibraryItem.library_id == library_id,
+                            LibraryItem.is_deleted == False,  # noqa: E712
+                        )
+                    )
+                )
+            ).all()
+            if row[0] and row[1]
+        }
+        seen_pair: set[tuple[str, str]] = set()
+        for pair in pairs:
+            if pair in seen_pair or pair in existing:
+                skipped += 1
+                continue
+            seen_pair.add(pair)
+            it = LibraryItem(
+                library_id=library_id, trigger=pair[0], reply=pair[1]
+            )
+            db.add(it)
+            inserted.append(it)
+            added += 1
+
     if added:
         await db.flush()
         await db.commit()
