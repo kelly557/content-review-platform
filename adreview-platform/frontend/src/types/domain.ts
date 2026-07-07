@@ -605,7 +605,7 @@ export const WORD_ACTION_OPTIONS: { value: WordSetAction; label: string }[] = [
 
 // ─── Libraries v3 (replaces word_sets + image_sets + hardcoded groups) ───
 
-export type LibraryType = 'word' | 'image'
+export type LibraryType = 'word' | 'image' | 'reply'
 
 export interface LibraryGroup {
   id: number
@@ -978,6 +978,8 @@ export interface AuditPoint {
   risk_level: AuditPointRisk
   is_enabled: boolean
   custom_wordset_id: number | null
+  custom_library_id?: number | null
+  custom_reply_library_id?: number | null
   sort_order: number
   created_at: string
   updated_at: string | null
@@ -1005,7 +1007,23 @@ export interface AuditPointUpdate {
   risk_level?: AuditPointRisk
   is_enabled?: boolean
   custom_wordset_id?: number
+  custom_library_id?: number | null
+  custom_reply_library_id?: number | null
   sort_order?: number
+}
+
+export interface AuditPointBatchItem {
+  index: number
+  label_cn: string
+  status: 'ok' | 'error'
+  point?: AuditPoint
+  error?: string
+}
+
+export interface AuditPointBatchResult {
+  succeeded: number
+  failed: number
+  items: AuditPointBatchItem[]
 }
 
 export interface ItemSuggestion {
@@ -1183,11 +1201,13 @@ export interface KnowledgeImportResult {
   point_id_map: Record<string, number>
 }
 
-// Stubs for in-progress WIP (HumanReviewSettings) — to be consolidated.
+// Stubs for in-progress WIP (HumanReviewSettings / Desensitization / Reply Library) — to be consolidated.
+
+export type StrategyRiskLevel = '低风险' | '中风险' | '高风险' | '零容忍'
 
 export interface StrategyHumanReview {
   is_enabled: boolean
-  risk_levels: RiskLevel[]
+  risk_levels: StrategyRiskLevel[]
   review_rule_id: number | null
 }
 
@@ -1197,8 +1217,56 @@ export const EMPTY_HUMAN_REVIEW: StrategyHumanReview = {
   review_rule_id: null,
 }
 
-export const STRATEGY_RISK_LEVEL_OPTIONS: { value: RiskLevel; label: string; color: string }[] = [
+export const STRATEGY_RISK_LEVEL_OPTIONS: ReadonlyArray<{
+  value: StrategyRiskLevel
+  label: string
+  color: string
+}> = [
   { value: '高风险', label: '高风险', color: 'red' },
   { value: '中风险', label: '中风险', color: 'orange' },
   { value: '低风险', label: '低风险', color: 'blue' },
 ]
+
+export function extractHumanReview(
+  definition: Record<string, unknown> | null | undefined,
+): StrategyHumanReview {
+  const raw = (definition?.human_review ?? {}) as Partial<StrategyHumanReview>
+  return {
+    is_enabled: Boolean(raw.is_enabled),
+    risk_levels: Array.isArray(raw.risk_levels)
+      ? (raw.risk_levels as StrategyRiskLevel[])
+      : [],
+    review_rule_id:
+      typeof raw.review_rule_id === 'number' ? raw.review_rule_id : null,
+  }
+}
+
+export interface DesensitizeSpan {
+  start: number
+  end: number
+  category: string
+}
+
+export interface LibraryItem {
+  id: number
+  library_id: number
+  word: string | null
+  trigger?: string | null
+  reply?: string | null
+  pairs?: Array<{ trigger: string; reply: string }>
+  is_deleted: boolean
+}
+
+export interface ReplyLibraryItem {
+  id: number
+  library_id: number
+  trigger: string
+  reply: string
+  is_deleted: boolean
+}
+
+export interface ReplyLibraryItemCreate {
+  library_id: number
+  trigger: string
+  reply: string
+}

@@ -1,6 +1,6 @@
 """AuditPoint schemas."""
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -70,3 +70,22 @@ class AuditPointUpdate(BaseModel):
 
 class AuditPointResetResult(BaseModel):
     items: list[AuditPointOut]
+
+
+class AuditPointBatchCreate(BaseModel):
+    item_id: int
+    points: list[AuditPointCreate] = Field(min_length=1, max_length=100)
+
+
+class AuditPointBatchItem(BaseModel):
+    index: int
+    label_cn: str
+    status: Literal["ok", "error"]
+    point: Optional[AuditPointOut] = None
+    error: Optional[str] = None
+
+
+class AuditPointBatchResult(BaseModel):
+    succeeded: int
+    failed: int
+    items: list[AuditPointBatchItem]

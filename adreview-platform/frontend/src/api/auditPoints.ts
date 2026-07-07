@@ -1,6 +1,7 @@
 import { api } from './client'
 import type {
   AuditPoint,
+  AuditPointBatchResult,
   AuditPointCreate,
   AuditPointUpdate,
 } from '@/types/domain'
@@ -17,6 +18,17 @@ export const auditPointsApi = {
   create(packageCode: string, payload: AuditPointCreate) {
     return api
       .post<AuditPoint>(`/packages/${packageCode}/points`, payload)
+      .then((r) => r.data)
+  },
+  createMany(
+    packageCode: string,
+    body: { item_id: number; points: AuditPointCreate[] },
+  ) {
+    return api
+      .post<AuditPointBatchResult>(
+        `/packages/${packageCode}/points/batch`,
+        body,
+      )
       .then((r) => r.data)
   },
   update(packageCode: string, pointId: number, payload: AuditPointUpdate) {

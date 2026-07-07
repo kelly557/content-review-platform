@@ -4,7 +4,9 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require_roles
@@ -14,6 +16,9 @@ from app.models.audit_point import AuditPoint
 from app.models.service import Service
 from app.models.user import User
 from app.schemas.audit_point import (
+    AuditPointBatchCreate,
+    AuditPointBatchItem,
+    AuditPointBatchResult,
     AuditPointCreate,
     AuditPointOut,
     AuditPointResetResult,
@@ -171,3 +176,83 @@ async def reset_points(
     await db.flush()
     await db.commit()
     return AuditPointResetResult(items=[AuditPointOut.model_validate(p) for p in rows])
+
+
+@router.post("/{code}/points/batch", response_model=AuditPointBatchResult)
+async def create_points_batch(
+    code: str,
+    body: AuditPointBatchCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("admin")),
+) -> AuditPointBatchResult:
+    await _ensure_package(db, code)
+    item = await db.get(AuditItem, body.item_id)
+    if not item or item.package_code != code:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在"
+        )
+
+    items: list[AuditPointBatchItem] = []
+    succeeded = 0
+    for idx, raw in enumerate(body.points):
+        forced = raw.model_copy(update={"item_id": body.item_id})
+        try:
+            payload = AuditPointCreate.model_validate(forced)
+        except ValidationError as ve:
+            msg = ve.errors()[0].get("msg", "校验失败") if ve.errors() else "校验失败"
+            items.append(
+                AuditPointBatchItem(
+                    index=idx,
+                    label_cn=raw.label_cn,
+                    status="error",
+                    error=msg,
+                )
+            )
+            continue
+
+        try:
+            generated = await _generate_point_code(db, code, body.item_id)
+            point = AuditPoint(
+                package_code=code,
+                item_id=body.item_id,
+                code=generated,
+                label=generated,
+                label_cn=payload.label_cn,
+                description=payload.description,
+                medium_threshold=payload.medium_threshold,
+                high_threshold=payload.high_threshold,
+                scope_text=payload.scope_text,
+                risk_level=payload.risk_level,
+                is_enabled=payload.is_enabled,
+                custom_wordset_id=payload.custom_wordset_id,
+                sort_order=payload.sort_order,
+            )
+            db.add(point)
+            await db.flush()
+            await db.refresh(point)
+            await db.commit()
+            items.append(
+                AuditPointBatchItem(
+                    index=idx,
+                    label_cn=payload.label_cn,
+                    status="ok",
+                    point=AuditPointOut.model_validate(point),
+                )
+            )
+            succeeded += 1
+        except IntegrityError:
+            await db.rollback()
+            items.append(
+                AuditPointBatchItem(
+                    index=idx,
+                    label_cn=payload.label_cn,
+                    status="error",
+                    error="编码冲突，请重试",
+                )
+            )
+
+    return AuditPointBatchResult(
+        succeeded=succeeded,
+        failed=len(body.points) - succeeded,
+        items=items,
+    )

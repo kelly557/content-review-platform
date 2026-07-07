@@ -4,6 +4,20 @@ import { Spin } from 'antd'
 import { ProtectedRoute } from './ProtectedRoute'
 import AppLayout from '@/layouts/AppLayout'
 
+interface LegacyLibraryParams extends Record<string, string | undefined> {
+  type: string
+  id: string
+}
+
+function LegacyLibraryRedirect() {
+  const params = useParams<LegacyLibraryParams>()
+  const target =
+    params.type === 'image'
+      ? `/strategies/images/${params.id}`
+      : `/strategies/words/${params.id}`
+  return <Navigate to={target} replace />
+}
+
 const LoginPage = lazy(() => import('@/pages/auth/LoginPage'))
 const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'))
 const MaterialsListPage = lazy(() => import('@/pages/materials/MaterialsListPage'))
@@ -36,12 +50,6 @@ const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
 function Fallback() {
   return <Spin style={{ display: 'block', margin: '20vh auto' }} />
-}
-
-function LegacyLibraryDetailRedirect() {
-  const params = useParams<{ type?: string; id?: string }>()
-  const target = `/strategies/${params.type === 'image' ? 'images' : 'words'}/${params.id ?? ''}`
-  return <Navigate to={target} replace />
 }
 
 export default function AppRoutes() {
@@ -102,9 +110,7 @@ export default function AppRoutes() {
               />
               <Route
                 path="/strategies/library/:type/:id"
-                element={
-                  <LegacyLibraryDetailRedirect />
-                }
+                element={<LegacyLibraryRedirect />}
               />
               <Route path="/packages/:code/items" element={<PackageItemsPage />} />
               <Route path="/packages/:code/items/new" element={<CreateAuditItemPage />} />
