@@ -10,9 +10,8 @@ import {
   Typography,
   App,
   Modal,
-  Select,
 } from 'antd'
-import { ArrowLeftOutlined, CopyOutlined, LinkOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useNavigate, Link } from 'react-router-dom'
 import { strategiesApi } from '@/api/strategies'
@@ -98,10 +97,6 @@ export default function CreateStrategyForm({
     fromCreate: boolean
     name?: string
   }>({ open: false, fromCreate: mode === 'create' })
-  const [copyModalOpen, setCopyModalOpen] = useState(false)
-  const [sourceStrategies, setSourceStrategies] = useState<Strategy[]>([])
-  const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null)
-  const [copying, setCopying] = useState(false)
 
   useEffect(() => {
     if (mode !== 'edit' || !initial) return
@@ -236,55 +231,6 @@ if (mode === 'create' && countEnabled(enabledItems) === 0) {
       name: prev.name,
     }))
     navigate('/strategies', { state: { refresh: true } })
-  }
-
-  const openCopyModal = async () => {
-    try {
-      const data = await strategiesApi.list({ size: 100 })
-      setSourceStrategies(data.items.filter((s) => s.scope !== 'default' && s.id !== strategyId))
-    } catch {
-      // ignore
-    }
-    setCopyModalOpen(true)
-  }
-
-  const onCopyConfirm = async () => {
-    if (!selectedSourceId) {
-      message.warning('请选择要复制的源策略')
-      return
-    }
-    if (!strategyId && mode === 'create') {
-      message.warning('请先保存策略后再复制配置')
-      return
-    }
-    setCopying(true)
-    try {
-      if (strategyId) {
-        await strategiesApi.importRuleConfig(strategyId, selectedSourceId)
-        const src = sourceStrategies.find((s) => s.id === selectedSourceId)
-        const map: Record<CategoryKey, number[]> = { ...EMPTY_ENABLED }
-        const items = (src?.enabled_items ?? []) as Array<{
-          media_type: CategoryKey
-          item_id: number
-          is_enabled: boolean
-        }>
-        for (const it of items) {
-          if (!it.is_enabled) continue
-          if (it.media_type in map) {
-            map[it.media_type] = Array.from(new Set([...map[it.media_type], it.item_id]))
-          }
-        }
-        setEnabledItems(map)
-        message.success(`已从「${src?.name}」复制策略配置`)
-      }
-      setCopyModalOpen(false)
-      setSelectedSourceId(null)
-    } catch (e: unknown) {
-      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail ?? '复制失败')
-    } finally {
-      setCopying(false)
-    }
   }
 
   if (!hydrated) {
@@ -433,14 +379,6 @@ if (mode === 'create' && countEnabled(enabledItems) === 0) {
           >
             返回
           </Button>
-          <Button
-            type="text"
-            icon={<CopyOutlined />}
-            onClick={openCopyModal}
-            aria-label="复制策略配置"
-          >
-            复制策略配置
-          </Button>
         </Space>
         <Space wrap>
           <Button disabled={step === 0} onClick={goBack}>
@@ -469,9 +407,6 @@ if (mode === 'create' && countEnabled(enabledItems) === 0) {
           <Space wrap>
             {saveResult.strategyId && (
               <>
-                <Link to={`/strategies/${saveResult.strategyId}/rule-config`}>
-                  <Button icon={<LinkOutlined />}>规则配置</Button>
-                </Link>
                 {(['image', 'text', 'audio', 'doc', 'video'] as CategoryKey[]).map((k) => (
                   <Link
                     key={k}
@@ -497,40 +432,6 @@ if (mode === 'create' && countEnabled(enabledItems) === 0) {
             可点击对应按钮前往该策略的检测规则配置，或按审核类型管理已选规则。
           </Text>
         </p>
-      </Modal>
-
-      <Modal
-        open={copyModalOpen}
-        title="复制策略配置"
-        onCancel={() => {
-          setCopyModalOpen(false)
-          setSelectedSourceId(null)
-        }}
-        onOk={onCopyConfirm}
-        confirmLoading={copying}
-        okText="确认复制"
-        cancelText="取消"
-      >
-        <div style={{ marginBottom: 12 }}>
-          <Text>选择一个已有策略，将其审核规则配置复制到当前策略：</Text>
-        </div>
-        <Select
-          style={{ width: '100%' }}
-          placeholder="选择源策略"
-          value={selectedSourceId ?? undefined}
-          onChange={(v) => setSelectedSourceId(v)}
-          options={sourceStrategies.map((s) => ({
-            value: s.id,
-            label: `${s.name}（${s.code}）`,
-          }))}
-          showSearch
-          optionFilterProp="label"
-        />
-        <div style={{ marginTop: 12 }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            复制内容包括：各服务的检测规则阈值、启停状态、词库绑定等。
-          </Text>
-        </div>
       </Modal>
     </div>
   )

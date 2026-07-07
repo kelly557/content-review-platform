@@ -9,7 +9,6 @@ import {
   Tag,
 } from 'antd'
 import {
-  LinkOutlined,
   PictureOutlined,
   FontSizeOutlined,
   SoundOutlined,
@@ -107,11 +106,6 @@ export default function CreateStrategyPage() {
                     </Tag>
                   </Link>
                 ))}
-                <Link to={`/strategies/${initial.id}/rule-config`}>
-                  <Tag color="default" icon={<LinkOutlined />} style={{ cursor: 'pointer' }}>
-                    检测点阈值配置
-                  </Tag>
-                </Link>
               </Space>
             }
           />

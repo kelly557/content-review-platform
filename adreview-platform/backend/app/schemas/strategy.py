@@ -67,13 +67,3 @@ class StrategyValidateResult(BaseModel):
     ok: bool
     warnings: List[str] = Field(default_factory=list)
     checked_at: datetime
-
-
-class StrategyRuleConfigImport(BaseModel):
-    source_strategy_id: int
-
-
-class ServiceRuleConfigSnapshot(BaseModel):
-    service_code: str
-    sub_scopes: List[str] = Field(default_factory=list)
-    rule_overrides: Dict[str, Any] = Field(default_factory=dict)

@@ -432,17 +432,6 @@ export interface StrategyUpdatePayload {
   service_config?: Record<string, unknown>
 }
 
-export interface ServiceRuleConfigSnapshot {
-  service_code: string
-  sub_scopes: string[]
-  rule_overrides: Record<string, {
-    medium_threshold?: number
-    high_threshold?: number
-    is_enabled?: boolean
-    scope_text?: string
-  }>
-}
-
 export interface StrategyValidateResult {
   ok: boolean
   warnings: string[]
@@ -1193,3 +1182,23 @@ export interface KnowledgeImportResult {
   item_id_map: Record<string, number>
   point_id_map: Record<string, number>
 }
+
+// Stubs for in-progress WIP (HumanReviewSettings) — to be consolidated.
+
+export interface StrategyHumanReview {
+  is_enabled: boolean
+  risk_levels: RiskLevel[]
+  review_rule_id: number | null
+}
+
+export const EMPTY_HUMAN_REVIEW: StrategyHumanReview = {
+  is_enabled: false,
+  risk_levels: [],
+  review_rule_id: null,
+}
+
+export const STRATEGY_RISK_LEVEL_OPTIONS: { value: RiskLevel; label: string; color: string }[] = [
+  { value: '高风险', label: '高风险', color: 'red' },
+  { value: '中风险', label: '中风险', color: 'orange' },
+  { value: '低风险', label: '低风险', color: 'blue' },
+]

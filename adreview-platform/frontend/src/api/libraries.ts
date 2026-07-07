@@ -99,6 +99,18 @@ export const librariesApi = {
       .then((r) => r.data)
   },
 
+  uploadWordsTxt(id: number, file: File) {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api
+      .post<{ added: number; skipped: number; total: number }>(
+        `/libraries/${id}/items/upload`,
+        fd,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      .then((r) => r.data)
+  },
+
   itemDownloadUrl(libraryId: number, itemId: number) {
     return `/api/v1/libraries/${libraryId}/items/${itemId}/download`
   },

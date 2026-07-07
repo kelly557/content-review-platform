@@ -5,7 +5,6 @@ import type {
   StrategyCreatePayload,
   StrategyUpdatePayload,
   StrategyValidateResult,
-  ServiceRuleConfigSnapshot,
 } from '@/types/domain'
 
 export const strategiesApi = {
@@ -42,23 +41,6 @@ export const strategiesApi = {
   validate(id: number) {
     return api
       .post<StrategyValidateResult>(`/strategies/${id}/validate`)
-      .then((r) => r.data)
-  },
-  getRuleConfig(id: number) {
-    return api
-      .get<ServiceRuleConfigSnapshot[]>(`/strategies/${id}/rule-config`)
-      .then((r) => r.data)
-  },
-  updateRuleConfig(id: number, config: ServiceRuleConfigSnapshot[]) {
-    return api
-      .put<Strategy>(`/strategies/${id}/rule-config`, config)
-      .then((r) => r.data)
-  },
-  importRuleConfig(id: number, sourceStrategyId: number) {
-    return api
-      .post<Strategy>(`/strategies/${id}/rule-config/import`, {
-        source_strategy_id: sourceStrategyId,
-      })
       .then((r) => r.data)
   },
 }
