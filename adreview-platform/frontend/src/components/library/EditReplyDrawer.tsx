@@ -55,18 +55,17 @@ export default function EditReplyDrawer({ open, library, onCancel, onSuccess }: 
       if (!t) continue
       let trig = ''
       let rep = ''
-      if (t.includes('|||')) {
-        const [a, b] = t.split('|||', 2)
-        trig = (a ?? '').trim()
-        rep = (b ?? '').trim()
-      } else if (t.includes('\t')) {
-        const [a, b] = t.split('\t', 2)
-        trig = (a ?? '').trim()
-        rep = (b ?? '').trim()
-      } else if (t.includes(',')) {
-        const [a, b] = t.split(',', 2)
-        trig = (a ?? '').trim()
-        rep = (b ?? '').trim()
+      const wideSep = '｜'
+      const widx = t.indexOf(wideSep)
+      if (widx > 0) {
+        trig = t.slice(0, widx).trim()
+        rep = t.slice(widx + wideSep.length).trim()
+      } else {
+        const parts = t.split(/\s+/, 2)
+        if (parts.length >= 2) {
+          trig = parts[0].trim()
+          rep = parts[1].trim()
+        }
       }
       if (!trig || !rep) continue
       if (trig.length > MAX_TRIGGER || rep.length > MAX_REPLY) continue
@@ -79,7 +78,7 @@ export default function EditReplyDrawer({ open, library, onCancel, onSuccess }: 
     if (!library) return
     const pairs = parsePairsFromText(text)
     if (pairs.length === 0) {
-      message.warning('没有可添加的有效条目（检查 trigger|||reply 格式与长度）')
+      message.warning('没有可添加的有效条目(检查空格分隔与长度)')
       return
     }
     if (pairs.length > MAX_PAIRS) {
@@ -91,7 +90,7 @@ export default function EditReplyDrawer({ open, library, onCancel, onSuccess }: 
     try {
       const res = await librariesApi.addItems(
         library.id,
-        pairs.map((p) => `${p.trigger}|||${p.reply}`),
+        pairs.map((p) => `${p.trigger} ${p.reply}`),
       )
       message.success(`已添加 ${res.items.length} 条`)
       onSuccess()
@@ -147,7 +146,7 @@ export default function EditReplyDrawer({ open, library, onCancel, onSuccess }: 
                         lineHeight: 1.7,
                       }}
                     >
-                      <li>每行一条，格式：触发词 ||| 代答内容</li>
+                      <li>每行一条,用 空格 或 ‘｜’ 把触发词与回复隔开</li>
                       <li>触发词不超过 {MAX_TRIGGER} 字,代答不超过 {MAX_REPLY} 字</li>
                       <li>单次最多 {MAX_PAIRS} 条</li>
                       <li>同一触发词 + 代答 在库内自动去重</li>
@@ -157,7 +156,7 @@ export default function EditReplyDrawer({ open, library, onCancel, onSuccess }: 
                 <Input.TextArea
                   value={text}
                   onChange={(e) => setText(e.target.value)}
-                  placeholder={'在吗 ||| 亲，在的呢~\n怎么联系 ||| 请拨打 400-xxx'}
+                  placeholder={'在吗 亲,在的呢\n怎么联系 请拨打 400-xxx\n发货｜24小时内'}
                   rows={14}
                   style={{ resize: 'vertical', fontFamily: 'monospace' }}
                   disabled={importing}
@@ -181,8 +180,8 @@ export default function EditReplyDrawer({ open, library, onCancel, onSuccess }: 
                   showIcon
                   message={
                     <span>
-                      每行 <code>trigger</code> 与 <code>reply</code> 用 <code>|||</code> / Tab /
-                      逗号 分隔。.csv 自动识别为 <code>trigger,reply</code>。
+                      每行 <code>触发词</code> 与 <code>回复</code> 之间用空格 或
+                      <code>｜</code> 隔开。 例：<code>问候 您好,有什么可以帮您?</code>
                     </span>
                   }
                 />
@@ -205,7 +204,7 @@ export default function EditReplyDrawer({ open, library, onCancel, onSuccess }: 
                         return false
                       }
                       const text2 = pairs
-                        .map((p) => `${p.trigger}|||${p.reply}`)
+                        .map((p) => `${p.trigger} ${p.reply}`)
                         .join('\n')
                       setText(text2)
                       message.success(

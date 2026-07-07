@@ -80,6 +80,32 @@ GENERIC_CODE_RE = _re.compile(r"^lib_[a-z]?\d+$")
 # ─── helpers ────────────────────────────────────────────────────────────
 
 
+def _split_trigger_reply(raw: str) -> tuple[str, str] | None:
+    """解析 'trigger [sep] reply' 行。支持空格 / 全角'｜'两种分隔符。
+
+    返回 (trigger, reply) 或 None。
+    """
+    s = (raw or "").strip()
+    if not s:
+        return None
+    # 1. 全角竖线 '｜' (U+FF5C)
+    wide = "｜"
+    idx = s.find(wide)
+    if idx > 0:
+        t = s[:idx].strip()
+        r = s[idx + len(wide):].strip()
+        if t and r:
+            return (t, r)
+    # 2. 任意连续空白（空格/Tab）
+    parts = s.split(None, 1)
+    if len(parts) >= 2:
+        t = parts[0].strip()
+        r = parts[1].strip()
+        if t and r:
+            return (t, r)
+    return None
+
+
 def _is_valid_code(code: str, library_type: LibraryType) -> bool:
     if not code or len(code) > 64:
         return False
@@ -322,26 +348,10 @@ async def create_library(
     elif body.library_type == LibraryType.REPLY and body.words:
         seen_pair: set[tuple[str, str]] = set()
         for raw in body.words:
-            raw = (raw or "").strip()
-            if not raw:
+            pair = _split_trigger_reply(raw)
+            if pair is None:
                 continue
-            t = r = ""
-            sep_idx = -1
-            sep_ch = ""
-            for ch in ("|||", "\\t", "\t"):
-                idx = raw.find(ch)
-                if idx > 0:
-                    sep_idx = idx
-                    sep_ch = ch
-                    break
-            if sep_idx > 0:
-                t = raw[:sep_idx].strip()
-                r = raw[sep_idx + len(sep_ch):].strip()
-            elif "," in raw:
-                t, r = raw.split(",", 1)
-                t, r = t.strip(), r.strip()
-            if not t or not r:
-                continue
+            t, r = pair
             key = (t, r)
             if key in seen_pair:
                 continue
@@ -710,7 +720,7 @@ async def add_items(
                 await db.refresh(it)
             await db.commit()
     else:
-        # REPLY: each entry is 'trigger ||| reply' (or trigger<tab>reply / trigger,reply)
+        # REPLY: each entry is 'trigger<sep>reply' where <sep> is space(s) or '｜'
         existing = {
             (row[0], row[1])
             for row in (
@@ -730,31 +740,11 @@ async def add_items(
         inserted = []
         seen: set[tuple[str, str]] = set()
         for raw in body.words:
-            raw = (raw or "").strip()
-            if not raw:
+            pair = _split_trigger_reply(raw)
+            if pair is None:
                 skipped += 1
                 continue
-            t = r = ""
-            sep_idx = -1
-            sep_ch = ""
-            for ch in ("|||", "\\t", "\t"):
-                idx = raw.find(ch)
-                if idx > 0:
-                    sep_idx = idx
-                    sep_ch = ch
-                    break
-            if sep_idx > 0:
-                t = raw[:sep_idx].strip()
-                r = raw[sep_idx + len(sep_ch):].strip()
-            elif "," in raw:
-                t, r = raw.split(",", 1)
-                t, r = t.strip(), r.strip()
-            else:
-                skipped += 1
-                continue
-            if not t or not r:
-                skipped += 1
-                continue
+            t, r = pair
             key = (t, r)
             if key in seen or key in existing:
                 skipped += 1
@@ -1118,24 +1108,13 @@ async def upload_words(
             inserted.append(it)
             added += 1
     else:
-        # REPLY: each row "trigger<TAB or |||>reply"
+        # REPLY: each row "trigger<sep>reply" where <sep> is space(s) or '｜'
         pairs: list[tuple[str, str]] = []
         for line in text.splitlines():
-            s = line.strip()
-            if not s:
+            pair = _split_trigger_reply(line)
+            if pair is None:
                 continue
-            t = r = ""
-            if "|||" in s:
-                t, r = s.split("|||", 1)
-            elif "\t" in s:
-                t, r = s.split("\t", 1)
-            elif "," in s:
-                # csv-style trigger,reply — only first comma
-                t, r = s.split(",", 1)
-            t, r = t.strip(), r.strip()
-            if not t or not r:
-                continue
-            pairs.append((t, r))
+            pairs.append(pair)
         if len(pairs) > MAX_WORDS:
             raise HTTPException(
                 status_code=400, detail=f"单次最多 {MAX_WORDS} 对"

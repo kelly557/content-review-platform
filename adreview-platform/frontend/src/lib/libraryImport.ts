@@ -93,7 +93,9 @@ export async function parseWordsFile(file: File): Promise<ParsedWords & ParseErr
   return { words: dedupeWords(words), errors: [] }
 }
 
-/** 代答：每行 `trigger<TAB>reply` 或 `trigger|||reply` 或 `trigger,reply`。 */
+/** 代答：每行 `trigger<sep>reply` 其中 <sep> 是空格(任意连续空白)
+ * 或单个全角 '｜' (U+FF5C)。
+ */
 export async function parseReplyFile(
   file: File,
 ): Promise<ParsedPairs & ParseError> {
@@ -103,27 +105,26 @@ export async function parseReplyFile(
   const text = result
   const pairs: Array<{ trigger: string; reply: string }> = []
   const errors: string[] = []
-  for (let i = 0; i < text.split(/\r?\n/).length; i += 1) {
-    const rawLine = text.split(/\r?\n/)[i]
-    const line = rawLine.trim()
+  const lines = text.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim()
     if (!line || line.startsWith('#')) continue
     let t = ''
     let r = ''
-    if (line.includes('|||')) {
-      const [a, b] = line.split('|||', 2)
-      t = a.trim()
-      r = (b ?? '').trim()
-    } else if (line.includes('\t')) {
-      const [a, b] = line.split('\t', 2)
-      t = a.trim()
-      r = (b ?? '').trim()
-    } else if (line.includes(',')) {
-      const [a, b] = line.split(',', 2)
-      t = a.trim()
-      r = (b ?? '').trim()
+    const wideSep = '｜'
+    const widx = line.indexOf(wideSep)
+    if (widx > 0) {
+      t = line.slice(0, widx).trim()
+      r = line.slice(widx + wideSep.length).trim()
+    } else {
+      const parts = line.split(/\s+/, 2)
+      if (parts.length >= 2) {
+        t = parts[0].trim()
+        r = parts[1].trim()
+      }
     }
     if (!t || !r) {
-      errors.push(`第 ${i + 1} 行格式不对,需 trigger + reply`)
+      errors.push(`第 ${i + 1} 行无法解析,确认用空格或 '｜' 分隔`)
       continue
     }
     pairs.push({ trigger: t, reply: r })
@@ -131,7 +132,7 @@ export async function parseReplyFile(
   if (pairs.length === 0) {
     return {
       pairs: [],
-      errors: errors.length ? errors : ['文件没有有效 trigger|||reply 对'],
+      errors: errors.length ? errors : ['文件没有有效的触发词/回复对'],
     }
   }
   return { pairs: dedupePairs(pairs), errors }

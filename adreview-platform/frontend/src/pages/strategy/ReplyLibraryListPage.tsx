@@ -340,7 +340,7 @@ export default function ReplyLibraryListPage() {
                     <Form.Item name="pairsText" noStyle>
                       <Input.TextArea
                         rows={8}
-                        placeholder={'您好,客官|||您好,有什么可以帮您?\n发货时间|||24 小时内'}
+                        placeholder={'您好,客官 您好,有什么可以帮您?\n发货时间 24小时内\n发货时间｜24小时内'}
                         disabled={creatingImport}
                         onChange={(e) =>
                           createForm.setFieldValue(
@@ -364,10 +364,10 @@ export default function ReplyLibraryListPage() {
                       <Alert
                         type="info"
                         showIcon
-                        message="每行 trigger + TAB/||| 与 reply 配对"
+                        message="每行一条,用 空格 或 '｜' 把触发词与回复隔开"
                         description={
                           <span>
-                            例：<code>{'您好,客官\t您好,有什么可以帮您?'}</code>
+                            例：<code>{'问候 您好,有什么可以帮您?\n发货｜24小时内'}</code>
                           </span>
                         }
                       />
@@ -392,7 +392,7 @@ export default function ReplyLibraryListPage() {
                               return false
                             }
                             const text = pairs
-                              .map((p) => `${p.trigger}|||${p.reply}`)
+                              .map((p) => `${p.trigger} ${p.reply}`)
                               .join('\n')
                             createForm.setFieldValue('pairsText', text)
                             message.success(
