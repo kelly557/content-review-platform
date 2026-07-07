@@ -372,6 +372,14 @@ export function getTaskStatus(task: ReviewTask): string {
 
 export type StrategyScope = "default" | "general"
 
+export type MediaTypeKey = "image" | "text" | "audio" | "doc" | "video"
+
+export interface StrategyItemRef {
+  media_type: MediaTypeKey
+  item_id: number
+  is_enabled: boolean
+}
+
 export interface Strategy {
   id: number
   code: string
@@ -384,6 +392,7 @@ export interface Strategy {
   effective_until: string | null
   definition: Record<string, unknown>
   service_config: Record<string, unknown>
+  enabled_items: StrategyItemRef[]
   created_at: string
   updated_at: string | null
 }
@@ -399,6 +408,7 @@ export interface StrategyCreatePayload {
   effective_until?: string | null
   application?: string
   services?: string[]
+  enabled_items?: StrategyItemRef[]
   definition?: Record<string, unknown>
 }
 
@@ -417,6 +427,7 @@ export interface StrategyUpdatePayload {
   effective_from?: string | null
   effective_until?: string | null
   services?: string[]
+  enabled_items?: StrategyItemRef[]
   definition?: Record<string, unknown>
   service_config?: Record<string, unknown>
 }
@@ -443,6 +454,13 @@ export const STRATEGY_PRIORITY_LABELS: Record<number, string> = {
   1: "P1 高",
   2: "P2 中",
   3: "P3 低",
+  4: "P4 较低",
+  5: "P5 普通",
+  6: "P6 备用",
+  7: "P7 备用",
+  8: "P8 兜底",
+  9: "P9 兜底",
+  10: "P10 最低",
 }
 
 export function strategyPriorityLabel(p: number): string {
@@ -596,6 +614,125 @@ export const WORD_ACTION_OPTIONS: { value: WordSetAction; label: string }[] = [
   { value: '标签', label: '标签' },
 ]
 
+// ─── Libraries v3 (replaces word_sets + image_sets + hardcoded groups) ───
+
+export type LibraryType = 'word' | 'image'
+
+export interface LibraryGroup {
+  id: number
+  name: string
+  description: string | null
+  sort_order: number
+  is_deleted: boolean
+  deleted_at: string | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface LibraryGroupCreate {
+  name: string
+  description?: string
+  sort_order?: number
+}
+
+export interface LibraryGroupUpdate {
+  name?: string
+  description?: string
+  sort_order?: number
+}
+
+export interface Library {
+  id: number
+  code: string
+  name: string
+  library_type: LibraryType
+  group_id: number
+  group_name: string | null
+  description: string | null
+  is_active: boolean
+  is_deleted: boolean
+  deleted_at: string | null
+  item_count: number
+  ignored_services: string[]
+  created_at: string
+  updated_at: string | null
+}
+
+export interface LibraryListItem {
+  id: number
+  code: string
+  name: string
+  library_type: LibraryType
+  group_id: number
+  group_name: string | null
+  description: string | null
+  is_active: boolean
+  is_deleted: boolean
+  item_count: number
+  created_at: string
+  updated_at: string | null
+}
+
+export interface LibraryCreate {
+  code?: string
+  name: string
+  library_type: LibraryType
+  group_id: number
+  description?: string
+  words?: string[]
+}
+
+export interface LibraryUpdate {
+  name?: string
+  group_id?: number
+  description?: string
+  is_active?: boolean
+  ignored_services?: string[]
+}
+
+export interface LibraryDeletePayload {
+  transfer_to_library_id?: number
+  force?: boolean
+}
+
+export interface AuditPointRef {
+  audit_point_id: number
+  service_code: string
+  label: string
+}
+
+export interface LibraryDeleteResponse {
+  ok: boolean
+  transferred_to: number | null
+  forced: boolean
+  affected_audit_points: number
+  references: AuditPointRef[]
+}
+
+export interface LibraryItem {
+  id: number
+  library_id: number
+  word: string | null
+  original_filename: string | null
+  mime_type: string | null
+  file_size: number | null
+  sha256: string | null
+  created_at: string
+  download_url: string | null
+}
+
+export interface LibraryImageUploadResponse {
+  uploaded: number
+  skipped: number
+  item_count: number
+  items: LibraryItem[]
+}
+
+export interface LibraryItemBatchDeleteResponse {
+  deleted: number
+  skipped: number
+}
+
 export const IMAGE_GROUP_OPTIONS: { value: ImageSetGroup; label: string }[] = [
   { value: '敏感图', label: '敏感图' },
   { value: '品牌', label: '品牌' },
@@ -700,7 +837,6 @@ export type TagCategory =
   | 'custom'
 
 export type TagStatus = 'draft' | 'active' | 'deprecated'
-export type TagSource = 'platform' | 'enterprise' | 'imported'
 
 export interface Tag {
   id: string
@@ -715,7 +851,6 @@ export interface Tag {
   channels: string[]
   knowledge_refs: string[]
   evidence_refs: string[]
-  source: TagSource
   status: TagStatus
   version: number
   created_at: string
@@ -732,7 +867,6 @@ export interface TagSummary {
   jurisdictions: string[]
   industries: string[]
   channels: string[]
-  source: TagSource
   status: TagStatus
   updated_at?: string | null
 }
@@ -749,7 +883,6 @@ export interface TagCreate {
   channels?: string[]
   knowledge_refs?: string[]
   evidence_refs?: string[]
-  source?: TagSource
   status?: TagStatus
 }
 
@@ -803,12 +936,6 @@ export const TAG_STATUS_OPTIONS: { value: TagStatus; label: string; color: strin
   { value: 'deprecated', label: '已停用', color: 'default' },
 ]
 
-export const TAG_SOURCE_OPTIONS: { value: TagSource; label: string }[] = [
-  { value: 'platform', label: '平台内置' },
-  { value: 'enterprise', label: '企业自建' },
-  { value: 'imported', label: '导入' },
-]
-
 export const TAG_JURISDICTION_OPTIONS: { value: string; label: string }[] = [
   { value: 'cn', label: '中国大陆' },
   { value: 'us', label: '美国' },
@@ -831,7 +958,6 @@ export interface AuditItem {
 }
 
 export interface AuditItemCreate {
-  code: string
   name_cn: string
   aliases?: string[]
   description?: string
@@ -870,8 +996,6 @@ export interface AuditPoint {
 
 export interface AuditPointCreate {
   item_id: number
-  code: string
-  label: string
   label_cn: string
   description?: string
   medium_threshold?: number
@@ -908,4 +1032,164 @@ export interface SuggestResponse {
   matches: ItemSuggestion[]
   mock: boolean
   engine: string
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Knowledge Base (知识库)
+// ──────────────────────────────────────────────────────────────────────────────
+
+export type KnowledgeScope =
+  | '法律法规'
+  | '行政规定'
+  | '行业规范'
+  | '内部政策'
+
+export const KNOWLEDGE_SCOPE_OPTIONS: { value: KnowledgeScope; label: string }[] = [
+  { value: '法律法规', label: '法律法规' },
+  { value: '行政规定', label: '行政规定' },
+  { value: '行业规范', label: '行业规范' },
+  { value: '内部政策', label: '内部政策' },
+]
+
+export type KnowledgeDocumentStatus =
+  | 'draft'
+  | 'extracting'
+  | 'review'
+  | 'imported'
+  | 'failed'
+
+export const KNOWLEDGE_STATUS_OPTIONS: {
+  value: KnowledgeDocumentStatus
+  label: string
+  color: string
+}[] = [
+  { value: 'draft', label: '草稿', color: 'default' },
+  { value: 'extracting', label: '抽取中', color: 'processing' },
+  { value: 'review', label: '待审', color: 'warning' },
+  { value: 'imported', label: '已导入', color: 'success' },
+  { value: 'failed', label: '失败', color: 'error' },
+]
+
+export interface KnowledgeDocumentSummary {
+  id: string
+  title: string
+  original_filename: string
+  mime_type: string
+  file_size: number
+  domain: TagDomain
+  scope: KnowledgeScope
+  tag_ids: string[]
+  status: KnowledgeDocumentStatus
+  created_at: string
+  updated_at: string | null
+}
+
+export interface KnowledgeDocumentListResponse {
+  items: KnowledgeDocumentSummary[]
+  total: number
+  page: number
+  size: number
+}
+
+export interface KnowledgeExtractionSummary {
+  id: string
+  document_id: string
+  round_no: number
+  model: string | null
+  prompt_tokens: number
+  completion_tokens: number
+  status: string
+  error_message: string | null
+  chunk_count: number
+  created_at: string
+}
+
+export interface KnowledgeDocumentDetail {
+  id: string
+  title: string
+  original_filename: string
+  mime_type: string
+  file_size: number
+  domain: TagDomain
+  scope: KnowledgeScope
+  tag_ids: string[]
+  target_service_code: string | null
+  status: KnowledgeDocumentStatus
+  error_message: string | null
+  created_by_id: number | null
+  created_at: string
+  updated_at: string | null
+  extractions: KnowledgeExtractionSummary[]
+}
+
+export interface KnowledgeJudgmentLogic {
+  type: 'keyword_match' | 'regex' | 'semantic' | 'threshold'
+  expr: string
+  params: Record<string, unknown>
+}
+
+export interface KnowledgeExtractionPoint {
+  id: string
+  extraction_id: string
+  item_draft_id: string
+  code: string
+  label: string
+  label_cn: string
+  description: string | null
+  judgment_logic: KnowledgeJudgmentLogic
+  judgment_rule: string | null
+  judgment_basis: string | null
+  risk_level: AuditPointRisk
+  medium_threshold: number
+  high_threshold: number
+  scope_text: string | null
+  selected: boolean
+  imported_point_id: number | null
+  created_at: string
+}
+
+export interface KnowledgeExtractionItem {
+  id: string
+  extraction_id: string
+  code: string
+  name_cn: string
+  aliases: string[]
+  description: string | null
+  sort_order: number
+  selected: boolean
+  imported_item_id: number | null
+  points: KnowledgeExtractionPoint[]
+  created_at: string
+}
+
+export interface KnowledgeExtraction {
+  id: string
+  document_id: string
+  round_no: number
+  model: string | null
+  prompt_tokens: number
+  completion_tokens: number
+  raw_response: string | null
+  status: string
+  error_message: string | null
+  chunk_count: number
+  created_at: string
+  items: KnowledgeExtractionItem[]
+}
+
+export interface KnowledgeImportRequest {
+  item_ids?: string[]
+  point_overrides?: Record<string, boolean>
+  target_service_code?: string
+  enable_imported?: boolean
+}
+
+export interface KnowledgeImportResult {
+  document_id: string
+  extraction_id: string
+  service_code: string
+  imported_items: number
+  imported_points: number
+  item_id_map: Record<string, number>
+  point_id_map: Record<string, number>
 }

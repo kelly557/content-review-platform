@@ -16,8 +16,8 @@ const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage'))
 const UsersAdminPage = lazy(() => import('@/pages/admin/UsersAdminPage'))
 const StrategyListPage = lazy(() => import('@/pages/strategy/StrategyListPage'))
 const CreateStrategyPage = lazy(() => import('@/pages/strategy/CreateStrategyPage'))
-const CustomImagesPage = lazy(() => import('@/pages/strategy/CustomImagesPage'))
-const CustomTextsPage = lazy(() => import('@/pages/strategy/CustomTextsPage'))
+const CustomLibraryPage = lazy(() => import('@/pages/strategy/CustomLibraryPage'))
+const LibraryGroupsPage = lazy(() => import('@/pages/strategy/LibraryGroupsPage'))
 const StrategyRulesByTypePage = lazy(
   () => import('@/pages/strategy/StrategyRulesByTypePage'),
 )
@@ -29,6 +29,7 @@ const AuditPointsPage = lazy(() => import('@/pages/packages/AuditPointsPage'))
 const CreateAuditPointPage = lazy(() => import('@/pages/packages/CreateAuditPointPage'))
 const TagsPage = lazy(() => import('@/pages/tags/TagsPage'))
 const HumanReviewRulesPage = lazy(() => import('@/pages/strategy/HumanReviewRulesPage'))
+const KnowledgeBasePage = lazy(() => import('@/pages/knowledge/KnowledgeBasePage'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
 function Fallback() {
@@ -70,8 +71,10 @@ export default function AppRoutes() {
               <Route path="/strategies/new" element={<CreateStrategyPage />} />
               <Route path="/strategies/:id/edit" element={<CreateStrategyPage />} />
               <Route path="/strategies/rules/:serviceCode" element={<ServiceRuleConfigPage />} />
-              <Route path="/strategies/custom-image" element={<CustomImagesPage />} />
-              <Route path="/strategies/custom-text" element={<CustomTextsPage />} />
+              <Route path="/strategies/library/:type" element={<CustomLibraryPage />} />
+              <Route path="/strategies/library-groups" element={<LibraryGroupsPage />} />
+              <Route path="/strategies/custom-image" element={<Navigate to="/strategies/library/image" replace />} />
+              <Route path="/strategies/custom-text" element={<Navigate to="/strategies/library/word" replace />} />
               <Route path="/strategies/:id/rule-config" element={<StrategyRuleConfigPage />} />
               <Route path="/packages/:code/items" element={<PackageItemsPage />} />
               <Route path="/packages/:code/items/new" element={<CreateAuditItemPage />} />
@@ -92,6 +95,7 @@ export default function AppRoutes() {
             <Route element={<ProtectedRoute allow={['admin', 'mlr']} />}>
               <Route path="/tags" element={<TagsPage />} />
               <Route path="/human-review-rules" element={<HumanReviewRulesPage />} />
+              <Route path="/knowledge" element={<KnowledgeBasePage />} />
             </Route>
           </Route>
         </Route>

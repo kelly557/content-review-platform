@@ -10,9 +10,14 @@ from app.models.service_category import ServiceCategory  # noqa: F401
 from app.models.service import Service, ServiceScope  # noqa: F401
 from app.models.wordset import WordSet, WordSetKind  # noqa: F401
 from app.models.imageset import ImageSet, ImageSetItem, ImageSetKind  # noqa: F401
+from app.models.library_group import LibraryGroup  # noqa: F401
+from app.models.library import Library, LibraryType  # noqa: F401
+from app.models.library_item import LibraryItem  # noqa: F401
+from app.models.library_item_reference import LibraryItemReference  # noqa: F401
 from app.models.detection_rule import DetectionRule  # noqa: F401
 from app.models.audit_item import AuditItem  # noqa: F401
 from app.models.audit_point import AuditPoint, AuditPointRisk  # noqa: F401
+from app.models.strategy_item import StrategyItem  # noqa: F401
 from app.models.human_review_config import HumanReviewConfig, RiskLevel  # noqa: F401
 from app.models.material_package import MaterialPackage, MaterialPackageItem  # noqa: F401
 from app.models.tag import (  # noqa: F401
@@ -20,5 +25,15 @@ from app.models.tag import (  # noqa: F401
     TagDomain,
     TagCategory,
     TagStatus,
-    TagSource,
+)
+from app.models.knowledge_document import (  # noqa: F401
+    KnowledgeDocument,
+    KnowledgeDocumentStatus,
+    KnowledgeScope,
+    KnowledgeExtractionStatus,
+)
+from app.models.knowledge_extraction import (  # noqa: F401
+    KnowledgeExtraction,
+    KnowledgeExtractionItem,
+    KnowledgeExtractionPoint,
 )

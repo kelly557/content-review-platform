@@ -8,6 +8,9 @@ from app.api.v1 import (
     auth,
     detection_rules,
     imagesets,
+    knowledge,
+    libraries,
+    library_groups,
     material_packages,
     materials,
     reports,
@@ -20,7 +23,6 @@ from app.api.v1 import (
     workflows,
     wordsets,
 )
-
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
@@ -32,6 +34,8 @@ api_router.include_router(reports.router)
 api_router.include_router(strategies.router)
 api_router.include_router(service_categories.router)
 api_router.include_router(services.router)
+api_router.include_router(library_groups.router)
+api_router.include_router(libraries.router)
 api_router.include_router(wordsets.router)
 api_router.include_router(imagesets.router)
 api_router.include_router(detection_rules.router)
@@ -40,3 +44,4 @@ api_router.include_router(audit_items.router)
 api_router.include_router(audit_points.router)
 api_router.include_router(material_packages.router)
 api_router.include_router(tags.router)
+api_router.include_router(knowledge.router)

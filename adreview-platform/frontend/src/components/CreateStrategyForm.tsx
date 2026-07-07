@@ -48,6 +48,30 @@ const MEDIA_TYPE_LABEL_MAP: Record<CategoryKey, string> = {
   video: '视频',
 }
 
+const EMPTY_ENABLED: Record<CategoryKey, number[]> = {
+  image: [],
+  text: [],
+  audio: [],
+  doc: [],
+  video: [],
+}
+
+function countEnabled(map: Record<CategoryKey, number[]>): number {
+  return Object.values(map).reduce((s, arr) => s + arr.length, 0)
+}
+
+function flattenEnabledItems(
+  map: Record<CategoryKey, number[]>,
+): Array<{ media_type: CategoryKey; item_id: number; is_enabled: boolean }> {
+  const out: Array<{ media_type: CategoryKey; item_id: number; is_enabled: boolean }> = []
+  for (const [media_type, ids] of Object.entries(map) as [CategoryKey, number[]][]) {
+    for (const item_id of ids) {
+      out.push({ media_type, item_id, is_enabled: true })
+    }
+  }
+  return out
+}
+
 export default function CreateStrategyForm({
   mode = 'create',
   strategyId,
@@ -64,7 +88,9 @@ export default function CreateStrategyForm({
     initialStep ?? (mode === 'edit' ? 1 : 0),
   )
   const [submitting, setSubmitting] = useState(false)
-  const [selectedServices, setSelectedServices] = useState<string[]>([])
+  const [enabledItems, setEnabledItems] = useState<Record<CategoryKey, number[]>>(
+    EMPTY_ENABLED,
+  )
   const [hydrated, setHydrated] = useState(mode === 'create')
   const [saveResult, setSaveResult] = useState<{
     open: boolean
@@ -79,9 +105,16 @@ export default function CreateStrategyForm({
 
   useEffect(() => {
     if (mode !== 'edit' || !initial) return
-    const defs = (initial.definition ?? {}) as { services?: string[] }
-    const services = Array.isArray(defs.services) ? defs.services : []
-    setSelectedServices(services)
+    const map: Record<CategoryKey, number[]> = { ...EMPTY_ENABLED }
+    const items = Array.isArray(initial.enabled_items) ? initial.enabled_items : []
+    for (const it of items) {
+      if (!it || !it.is_enabled) continue
+      const mt = it.media_type as CategoryKey
+      if (mt in map) {
+        map[mt] = Array.from(new Set([...map[mt], it.item_id]))
+      }
+    }
+    setEnabledItems(map)
     const from = initial.effective_from ? dayjs(initial.effective_from) : null
     const until = initial.effective_until ? dayjs(initial.effective_until) : null
     const useRange = !!(from && until)
@@ -116,8 +149,8 @@ export default function CreateStrategyForm({
       setStep(0)
       return
     }
-    if (mode === 'create' && selectedServices.length === 0) {
-      message.warning('请在第二步选择至少一个规则')
+if (mode === 'create' && countEnabled(enabledItems) === 0) {
+      message.warning('请在第二步选择至少一个业务规则')
       return
     }
     setSubmitting(true)
@@ -125,7 +158,7 @@ export default function CreateStrategyForm({
       if (mode === 'edit' && strategyId) {
         const savedStrategy = await strategiesApi.update(strategyId, {
           name,
-          services: selectedServices,
+          enabled_items: flattenEnabledItems(enabledItems),
           effective_from:
             values.durationMode === 'range' && values.range?.[0]
               ? values.range[0].toISOString()
@@ -146,7 +179,7 @@ export default function CreateStrategyForm({
       }
       const savedStrategy = await strategiesApi.create({
         name,
-        services: selectedServices,
+        enabled_items: flattenEnabledItems(enabledItems),
         effective_from:
           values.durationMode === 'range' && values.range?.[0]
             ? values.range[0].toISOString()
@@ -154,7 +187,7 @@ export default function CreateStrategyForm({
         effective_until:
           values.durationMode === 'range' && values.range?.[1]
             ? values.range[1].toISOString()
-              : null,
+            : null,
       })
       message.success('已创建策略')
       setSaveResult({
@@ -229,8 +262,19 @@ export default function CreateStrategyForm({
       if (strategyId) {
         await strategiesApi.importRuleConfig(strategyId, selectedSourceId)
         const src = sourceStrategies.find((s) => s.id === selectedSourceId)
-        const srcServices = ((src?.definition ?? {}) as { services?: string[] }).services || []
-        setSelectedServices(srcServices)
+        const map: Record<CategoryKey, number[]> = { ...EMPTY_ENABLED }
+        const items = (src?.enabled_items ?? []) as Array<{
+          media_type: CategoryKey
+          item_id: number
+          is_enabled: boolean
+        }>
+        for (const it of items) {
+          if (!it.is_enabled) continue
+          if (it.media_type in map) {
+            map[it.media_type] = Array.from(new Set([...map[it.media_type], it.item_id]))
+          }
+        }
+        setEnabledItems(map)
         message.success(`已从「${src?.name}」复制策略配置`)
       }
       setCopyModalOpen(false)
@@ -354,8 +398,8 @@ export default function CreateStrategyForm({
           }}
         >
           <StrategyTypeTabs
-            value={selectedServices}
-            onChange={setSelectedServices}
+            value={enabledItems}
+            onChange={setEnabledItems}
           />
 
           <div
@@ -368,7 +412,7 @@ export default function CreateStrategyForm({
           >
             <Text type="secondary">本步合计已选：</Text>
             <Text strong style={{ color: '#0369A1' }}>
-              {selectedServices.length} 项
+              {countEnabled(enabledItems)} 项
             </Text>
           </div>
         </div>
@@ -484,7 +528,7 @@ export default function CreateStrategyForm({
         />
         <div style={{ marginTop: 12 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            复制内容包括：各服务的检测规则阈值、启停状态、自定义词库绑定等。
+            复制内容包括：各服务的检测规则阈值、启停状态、词库绑定等。
           </Text>
         </div>
       </Modal>

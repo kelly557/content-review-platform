@@ -12,6 +12,8 @@ import {
   UserOutlined,
   SettingOutlined,
   ClusterOutlined,
+  BookOutlined,
+  TagsOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
@@ -84,11 +86,13 @@ const NAV_SECTIONS: Array<{
           { key: 'strategies-audio', path: '/strategies/rules-by-type/audio', label: '语音审核规则' },
           { key: 'strategies-doc', path: '/strategies/rules-by-type/doc', label: '文档审核规则' },
           { key: 'strategies-video', path: '/strategies/rules-by-type/video', label: '视频审核规则' },
-          { key: 'strategies-custom-image', path: '/strategies/custom-image', label: '自定义图片库' },
-          { key: 'strategies-custom-text', path: '/strategies/custom-text', label: '自定义词库' },
+          { key: 'strategies-custom-image', path: '/strategies/library/image', label: '图片库' },
+          { key: 'strategies-custom-text', path: '/strategies/library/word', label: '词库' },
+          { key: 'strategies-library-groups', path: '/strategies/library-groups', label: '库管理' },
         ],
       },
       { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核规则', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
+      { kind: 'leaf', key: 'knowledge', path: '/knowledge', label: '知识库', icon: <BookOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
     ],
   },
   {
@@ -113,9 +117,9 @@ const NAV_SECTIONS: Array<{
         roles: ['admin'],
         children: [
           { key: 'admin-users', path: '/admin/users', label: '用户列表' },
-          { key: 'admin-tags', path: '/tags', label: '标签管理' },
         ],
       },
+      { kind: 'leaf', key: 'admin-tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
     ],
   },
 ]
