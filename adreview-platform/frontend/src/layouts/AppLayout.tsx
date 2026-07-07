@@ -18,6 +18,7 @@ import {
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
 import { ROLE_LABELS } from '@/types/domain'
+import { SystemHealthBanner } from '@/components/SystemHealthBanner'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -308,6 +309,7 @@ export default function AppLayout() {
             margin: 0,
           }}
         >
+          <SystemHealthBanner />
           <Outlet />
         </Content>
       </Layout>

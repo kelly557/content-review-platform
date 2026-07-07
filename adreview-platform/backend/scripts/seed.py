@@ -1,5 +1,10 @@
 """Seed initial data: roles represented via users + default workflow templates + default strategy + service catalog."""
+import argparse
 import asyncio
+import fcntl
+import os
+import sys
+from typing import Any, List, Optional, Sequence
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -190,18 +195,30 @@ DEFAULT_SERVICES: list[dict] = [
 ]
 
 
-async def _purge_removed_services(db: AsyncSession) -> None:
+async def _purge_removed_services(
+    db: AsyncSession, *, apply: bool = False, dry_run: bool = False
+) -> None:
     """Delete services whose code is no longer in DEFAULT_SERVICES.
 
     Cascades FK cleanup on detection_rules / human_review_configs /
     audit_points / audit_items and prunes stale service codes from
     strategies.definition.services[].
+
+    默认 apply=False + dry_run=False：
+      - apply=False 时整个函数 no-op，避免误删用户态数据
+      - dry_run=True 仅打印将删除的内容（配合 apply=False 使用）
+    真的要删除：seed.py 入口需 --purge-removed --apply 双开关
     """
+    if not apply:
+        return
     allowed_codes = {s["code"] for s in DEFAULT_SERVICES}
     result = await db.execute(select(Service.code))
     existing_codes = {row[0] for row in result.all()}
     stale_codes = existing_codes - allowed_codes
     if not stale_codes:
+        return
+    if dry_run:
+        print(f"[purge-removed][dry-run] will delete {len(stale_codes)} services: {sorted(stale_codes)}")
         return
     await db.execute(
         delete(DetectionRule).where(DetectionRule.service_code.in_(stale_codes))
@@ -613,13 +630,20 @@ async def _upsert_audit_points(db: AsyncSession) -> int:
     return created
 
 
-async def _purge_orphan_audit_data(db: AsyncSession) -> tuple[int, int]:
-    """Delete audit_items / audit_points not in DEFAULT_AUDIT_ITEMS / DEFAULT_AUDIT_POINTS.
+async def _purge_orphan_audit_data(
+    db: AsyncSession, *, apply: bool = False, dry_run: bool = False
+) -> tuple[int, int]:
+    """Removes orphan audit_items / audit_points that are NOT in the seed whitelist.
 
     Keeps audit_items that match a DEFAULT_AUDIT_ITEMS key (package, code)
     and audit_points that match a DEFAULT_AUDIT_POINTS key (package, code).
     Anything extra is from a previous schema and is removed.
+
+    默认 apply=False → no-op，仅打印白名单内外的差异。
+    真删需要 apply=True 且 dry_run=False（CLI: --purge-user-data --apply）。
     """
+    if not apply and not dry_run:
+        return 0, 0
     item_whitelist = {
         (pkg, code) for pkg, items in DEFAULT_AUDIT_ITEMS.items() for code in items
     }
@@ -638,6 +662,20 @@ async def _purge_orphan_audit_data(db: AsyncSession) -> tuple[int, int]:
         p for p in all_points if (p.package_code, p.code) not in point_whitelist
     ]
 
+    if dry_run or not apply:
+        print(
+            f"[purge-user-data][dry-run] will delete "
+            f"{len(items_to_delete)} audit_items, {len(points_to_delete)} audit_points"
+        )
+        for it in items_to_delete[:10]:
+            print(f"   - item: ({it.package_code}, {it.code})")
+        for p in points_to_delete[:10]:
+            print(f"   - point: ({p.package_code}, {p.code})")
+        if len(items_to_delete) > 10 or len(points_to_delete) > 10:
+            print(f"   ... ({abs(len(items_to_delete) - 10) if len(items_to_delete) > 10 else 0} more items, "
+                  f"{abs(len(points_to_delete) - 10) if len(points_to_delete) > 10 else 0} more points)")
+        return len(items_to_delete), len(points_to_delete)
+
     # Clear any detection_rules FK bridging to orphan audit_points.
     orphan_point_ids = {p.id for p in points_to_delete if p.id is not None}
     if orphan_point_ids:
@@ -655,7 +693,23 @@ async def _purge_orphan_audit_data(db: AsyncSession) -> tuple[int, int]:
     return len(items_to_delete), len(points_to_delete)
 
 
-async def main() -> None:
+async def main(
+    *,
+    purge_removed: bool = False,
+    purge_user_data: bool = False,
+    dry_run: bool = False,
+) -> None:
+    """Seed entrypoint.
+
+    默认行为：仅 upsert 默认数据，不删任何用户态行。
+
+    破坏性操作（显式 opt-in）：
+      --purge-removed  + --apply : 删除白名单外的 services / detection_rules / human_review_configs / audit_points / audit_items
+      --purge-user-data + --apply : 删除未在 DEFAULT_AUDIT_ITEMS/POINTS 白名单的 audit_items / audit_points
+      --dry-run : 与上述任意开关组合，只打印将删除什么，不真的 DELETE
+    """
+    purge_apply = (purge_removed or purge_user_data) and not dry_run
+
     async with SessionLocal() as db:
         await _upsert_templates(db)
         await _upsert_default_strategy(db)
@@ -663,14 +717,18 @@ async def main() -> None:
         await db.flush()
         await _upsert_services(db)
         await db.flush()
-        await _purge_removed_services(db)
+        await _purge_removed_services(
+            db, apply=purge_removed, dry_run=(dry_run and purge_removed)
+        )
         await db.flush()
         await _upsert_wordsets(db)
         await _upsert_detection_rules(db)
         await db.flush()
         items_created = await _upsert_audit_items(db)
         points_created = await _upsert_audit_points(db)
-        items_purged, points_purged = await _purge_orphan_audit_data(db)
+        items_purged, points_purged = await _purge_orphan_audit_data(
+            db, apply=purge_user_data, dry_run=(dry_run and purge_user_data)
+        )
         await _upsert_human_review_configs(db)
         await _upsert_tags(db)
         await _upsert_user(db, "admin@adreview.example.com", "系统管理员", UserRole.ADMIN, settings.app_secret + "-admin")
@@ -678,10 +736,23 @@ async def main() -> None:
         await _upsert_user(db, "mlr@adreview.example.com", "MLR 专家 Bob", UserRole.MLR, "mlr12345")
         await _upsert_user(db, "submitter@adreview.example.com", "提交者 Carol", UserRole.SUBMITTER, "submitter123")
         await db.commit()
-        print(
-            f"seed complete. audit_items={items_created} created (orphans purged={items_purged}) "
-            f"audit_points={points_created} created (orphans purged={points_purged})"
-        )
+        if not dry_run and not purge_apply:
+            print(
+                f"seed complete (safe mode — no purge). "
+                f"audit_items={items_created} created, audit_points={points_created} created. "
+                f"Use --purge-removed or --purge-user-data to clean orphan rows (default skips this)."
+            )
+        elif dry_run:
+            print(
+                f"seed complete (dry-run). "
+                f"audit_items={items_created} upserted, audit_points={points_created} upserted. "
+                f"No rows were deleted. Run without --dry-run to actually purge."
+            )
+        else:
+            print(
+                f"seed complete. audit_items={items_created} created (purged={items_purged}) "
+                f"audit_points={points_created} created (purged={points_purged})"
+            )
 
 
 async def _upsert_human_review_configs(db: AsyncSession) -> None:
@@ -745,6 +816,71 @@ async def _upsert_tags(db: AsyncSession) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
-    await_engine = engine
-    asyncio.run(await_engine.dispose())
+    parser = argparse.ArgumentParser(
+        description="Seed default data. Default: upsert only, never delete user data.",
+    )
+    parser.add_argument(
+        "--purge-removed",
+        action="store_true",
+        help="Delete services NOT in DEFAULT_SERVICES (cascades to detection_rules, "
+             "human_review_configs, audit_points, audit_items). Opt-in for deletion.",
+    )
+    parser.add_argument(
+        "--purge-user-data",
+        action="store_true",
+        help="Delete audit_items / audit_points NOT in seed whitelist.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be deleted; do not actually DELETE rows.",
+    )
+    args = parser.parse_args()
+
+    if (args.purge_removed or args.purge_user_data) and not args.dry_run:
+        print(
+            "WARNING: This will DELETE rows from production tables.",
+            file=sys.stderr,
+        )
+        print(
+            "Re-run with --dry-run first to preview, or set SEED_CONFIRM_DELETE=YES "
+            "to skip this confirmation in non-TTY mode.",
+            file=sys.stderr,
+        )
+        if sys.stdin.isatty():
+            try:
+                reply = input("Type 'yes' to continue: ").strip().lower()
+            except EOFError:
+                reply = ""
+            if reply != "yes":
+                print("Aborted.", file=sys.stderr)
+                sys.exit(1)
+        elif os.environ.get("SEED_CONFIRM_DELETE") != "YES":
+            print(
+                "Refusing to run purge without --dry-run in non-interactive mode "
+                "(set SEED_CONFIRM_DELETE=YES to override).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    lock_path = "/tmp/adreview.seed.lock"
+    lock_fd = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("Another seed.py is already running (lock file held).", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        asyncio.run(main(
+            purge_removed=args.purge_removed,
+            purge_user_data=args.purge_user_data,
+            dry_run=args.dry_run,
+        ))
+    finally:
+        try:
+            os.unlink(lock_path)
+        except OSError:
+            pass
+    _await_engine = engine
+    asyncio.run(_await_engine.dispose())

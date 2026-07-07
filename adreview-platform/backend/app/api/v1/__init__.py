@@ -7,6 +7,7 @@ from app.api.v1 import (
     audit_points,
     auth,
     detection_rules,
+    health,
     imagesets,
     knowledge,
     libraries,
@@ -45,3 +46,4 @@ api_router.include_router(audit_points.router)
 api_router.include_router(material_packages.router)
 api_router.include_router(tags.router)
 api_router.include_router(knowledge.router)
+api_router.include_router(health.router)

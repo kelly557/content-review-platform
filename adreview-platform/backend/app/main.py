@@ -3,17 +3,30 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app import __version__
 from app.api.v1 import api_router
 from app.core.config import settings
-from app.core.logging import setup_logging
+from app.core.logging import get_logger, setup_logging
+from app.db.session import engine
 from app.tasks.background import shutdown as shutdown_tasks
+
+log = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    # Startup probe: verify DB connectivity. Failure does NOT block startup —
+    # we log loudly so operators notice, and the frontend banner picks it up
+    # at the first /health/db poll.
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        log.info("startup: DB connectivity OK")
+    except Exception as exc:
+        log.error(f"startup: DB connectivity FAILED: {exc!r}")
     yield
     await shutdown_tasks()
 
