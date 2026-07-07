@@ -117,7 +117,7 @@ export default function DocumentUploadDrawer({ open, onClose, onUploaded }: Prop
       onClose={onClose}
       title="上传知识库文档"
       width={520}
-      destroyOnClose
+      destroyOnHidden
       extra={
         <Space>
           <Button onClick={onClose}>取消</Button>

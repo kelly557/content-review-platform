@@ -23,6 +23,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   PlusOutlined,
+  ReloadOutlined,
   RobotOutlined,
   SearchOutlined,
   ThunderboltOutlined,
@@ -30,6 +31,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { workflowsApi } from '@/api/workflows'
 import { parseStages } from '@/lib/parseStages'
+import { HR_PREFIX, buildHrCode } from '@/lib/strategyCode'
 import type {
   WorkflowStagePayload,
   WorkflowTemplate,
@@ -38,8 +40,6 @@ import type {
 } from '@/types/domain'
 
 const { Title, Text, Paragraph } = Typography
-
-const HR_PREFIX = 'hr_'
 
 const ROLE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'reviewer', label: '审核员' },
@@ -73,7 +73,7 @@ export default function HumanReviewRulesPage() {
       const list = await workflowsApi.list({ prefix: HR_PREFIX, include_inactive: true })
       setItems(list)
     } catch {
-      message.error('加载审核规则失败')
+      message.error('加载审核策略失败')
     } finally {
       setLoading(false)
     }
@@ -86,9 +86,7 @@ export default function HumanReviewRulesPage() {
   const filtered = useMemo(() => {
     const k = keyword.trim().toLowerCase()
     if (!k) return items
-    return items.filter(
-      (t) => t.name.toLowerCase().includes(k) || t.code.toLowerCase().includes(k),
-    )
+    return items.filter((t) => t.name.toLowerCase().includes(k))
   }, [items, keyword])
 
   const [editing, setEditing] = useState<WorkflowTemplate | null>(null)
@@ -132,7 +130,6 @@ export default function HumanReviewRulesPage() {
         </Space>
       ),
     },
-    { title: '编码', dataIndex: 'code', key: 'code', width: 160 },
     {
       title: '阶段',
       key: 'stageCount',
@@ -199,15 +196,15 @@ export default function HumanReviewRulesPage() {
       <Breadcrumb
         items={[
           { title: <a onClick={() => navigate('/dashboard')}>工作台</a> },
-          { title: '人工审核规则' },
+          { title: '人工审核策略' },
         ]}
         style={{ marginBottom: 16 }}
       />
       <Title level={3} style={{ margin: 0, marginBottom: 8 }}>
-        人工审核规则
+        人工审核策略
       </Title>
       <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 24 }}>
-        配置各服务在 AI 审核后使用的人工审核规则，包括审核节点、角色与协作模式
+        配置各服务在 AI 审核后使用的人工审核策略，包括审核节点、角色与协作模式
       </Text>
 
       <Card
@@ -227,15 +224,24 @@ export default function HumanReviewRulesPage() {
         >
           <Input
             allowClear
-            placeholder="搜索名称或编码"
+            placeholder="搜索名称"
             prefix={<SearchOutlined style={{ color: '#94A3B8' }} />}
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             style={{ maxWidth: 320 }}
           />
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建审核规则
-          </Button>
+          <Space>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={fetchList}
+              loading={loading}
+            >
+              刷新
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建审核策略
+            </Button>
+          </Space>
         </div>
 
         <Table<WorkflowTemplate>
@@ -249,7 +255,7 @@ export default function HumanReviewRulesPage() {
             emptyText: (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="暂无审核规则"
+                description="暂无审核策略"
                 style={{ padding: '32px 0' }}
               />
             ),
@@ -283,7 +289,6 @@ function RuleModal({ open, editing, onClose, onSaved }: RuleModalProps) {
   const { message } = App.useApp()
   const [form] = Form.useForm<{
     name: string
-    code: string
     description?: string
     is_active: boolean
     stages: WorkflowStagePayload[]
@@ -303,7 +308,6 @@ function RuleModal({ open, editing, onClose, onSaved }: RuleModalProps) {
       }))
       form.setFieldsValue({
         name: editing.name,
-        code: editing.code,
         description: editing.description ?? '',
         is_active: editing.is_active,
         stages,
@@ -314,7 +318,6 @@ function RuleModal({ open, editing, onClose, onSaved }: RuleModalProps) {
     } else {
       form.resetFields()
       form.setFieldsValue({
-        code: HR_PREFIX,
         is_active: true,
         stages: [{ name: '初审', role: 'reviewer', mode: 'single' }],
       })
@@ -352,7 +355,11 @@ function RuleModal({ open, editing, onClose, onSaved }: RuleModalProps) {
         await workflowsApi.update(editing.id, payload)
         message.success('已保存')
       } else {
-        await workflowsApi.create({ ...payload, code: values.code } as WorkflowTemplateCreate)
+        const existingCodes = await workflowsApi.list({ prefix: HR_PREFIX, include_inactive: true }).then(
+          (list) => list.map((t) => t.code),
+        )
+        const code = buildHrCode(values.name, existingCodes)
+        await workflowsApi.create({ ...payload, code } as WorkflowTemplateCreate)
         message.success('已创建')
       }
       onSaved()
@@ -374,12 +381,12 @@ function RuleModal({ open, editing, onClose, onSaved }: RuleModalProps) {
       open={open}
       onCancel={onClose}
       width={680}
-      title={isCreate ? '新建人工审核规则' : '编辑人工审核规则'}
+      title={isCreate ? '新建人工审核策略' : '编辑人工审核策略'}
       okText={isCreate ? '创建' : '保存'}
       cancelText="取消"
       confirmLoading={saving}
       onOk={onSubmit}
-      destroyOnClose
+      destroyOnHidden
     >
       <Tabs
         activeKey={tab}
@@ -396,7 +403,7 @@ function RuleModal({ open, editing, onClose, onSaved }: RuleModalProps) {
             children: (
               <div>
                 <Paragraph type="secondary" style={{ marginTop: 0 }}>
-                  用一段中文描述人工审核规则，系统会识别审核节点、角色与协作模式。
+                  用一段中文描述人工审核策略，系统会识别审核节点、角色与协作模式。
                 </Paragraph>
                 <Form layout="vertical">
                   <Form.Item label="名称" required>
@@ -404,13 +411,6 @@ function RuleModal({ open, editing, onClose, onSaved }: RuleModalProps) {
                       placeholder="例如：敏感内容多级审核"
                       value={form.getFieldValue('name') as string | undefined}
                       onChange={(e) => form.setFieldValue('name', e.target.value)}
-                    />
-                  </Form.Item>
-                  <Form.Item label="编码" required tooltip="必须以 hr_ 开头">
-                    <Input
-                      placeholder="hr_sensitive"
-                      value={form.getFieldValue('code') as string | undefined}
-                      onChange={(e) => form.setFieldValue('code', e.target.value)}
                     />
                   </Form.Item>
                   <Form.Item label="描述（自然语言）" required>
@@ -496,24 +496,15 @@ function RuleModal({ open, editing, onClose, onSaved }: RuleModalProps) {
                 >
                   <Input placeholder="例如：敏感内容多级审核" />
                 </Form.Item>
-                <Form.Item
-                  label="编码"
-                  name="code"
-                  tooltip={isCreate ? '必须以 hr_ 开头，创建后不可修改' : '创建后不可修改'}
-                  rules={[
-                    { required: true, message: '请输入编码' },
-                    {
-                      pattern: /^hr_[A-Za-z0-9_\-]+$/,
-                      message: '编码必须以 hr_ 开头，仅含字母数字下划线短横线',
-                    },
-                  ]}
-                >
-                  <Input placeholder="hr_sensitive" disabled={!isCreate} />
-                </Form.Item>
+                {isCreate && (
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                    编码由系统基于名称自动生成，已存在时会自动追加序号
+                  </Text>
+                )}
                 <Form.Item label="描述" name="description">
                   <Input.TextArea
                     rows={2}
-                    placeholder="可选，描述审核规则的用途"
+                    placeholder="可选，描述审核策略的用途"
                   />
                 </Form.Item>
                 <Form.Item label="启用" name="is_active" valuePropName="checked">

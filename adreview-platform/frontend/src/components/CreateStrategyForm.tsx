@@ -19,6 +19,12 @@ import {
   type CategoryKey,
 } from './strategy/constants'
 import StrategyTypeTabs from './strategy/StrategyTypeTabs'
+import { HumanReviewSettings } from './strategy/HumanReviewSettings'
+import {
+  EMPTY_HUMAN_REVIEW,
+  extractHumanReview,
+  type StrategyHumanReview,
+} from '@/types/domain'
 import type { Strategy } from '@/types/domain'
 
 const { Text } = Typography
@@ -35,7 +41,7 @@ interface Props {
   mode?: 'create' | 'edit'
   strategyId?: number
   initial?: Strategy
-  initialStep?: 0 | 1
+  initialStep?: 0 | 1 | 2
   onCancel?: () => void
 }
 
@@ -83,13 +89,14 @@ export default function CreateStrategyForm({
   const navigate = useNavigate()
   const [form] = Form.useForm<BasicFormValues>()
   const [durationMode, setDurationMode] = useState<DurationMode>('always')
-  const [step, setStep] = useState<0 | 1>(
+  const [step, setStep] = useState<0 | 1 | 2>(
     initialStep ?? (mode === 'edit' ? 1 : 0),
   )
   const [submitting, setSubmitting] = useState(false)
   const [enabledItems, setEnabledItems] = useState<Record<CategoryKey, number[]>>(
     EMPTY_ENABLED,
   )
+  const [humanReview, setHumanReview] = useState<StrategyHumanReview>(EMPTY_HUMAN_REVIEW)
   const [hydrated, setHydrated] = useState(mode === 'create')
   const [saveResult, setSaveResult] = useState<{
     open: boolean
@@ -110,6 +117,7 @@ export default function CreateStrategyForm({
       }
     }
     setEnabledItems(map)
+    setHumanReview(extractHumanReview(initial.definition))
     const from = initial.effective_from ? dayjs(initial.effective_from) : null
     const until = initial.effective_until ? dayjs(initial.effective_until) : null
     const useRange = !!(from && until)
@@ -128,8 +136,40 @@ export default function CreateStrategyForm({
     setStep(1)
   }
 
-  const goBack = () => {
-    setStep(0)
+  const goToStep2 = () => {
+    if (mode === 'create' && countEnabled(enabledItems) === 0) {
+      message.warning('请在第二步选择至少一个业务规则')
+      return
+    }
+    setStep(2)
+  }
+
+  const goBackOne = () => setStep((s) => Math.max(0, s - 1) as 0 | 1 | 2)
+
+  const validateHumanReview = (): string | null => {
+    if (!humanReview.is_enabled) return null
+    if (humanReview.risk_levels.length === 0) {
+      return '启用人审复审后，请至少选择一个风险等级'
+    }
+    if (humanReview.review_rule_id === null) {
+      return '启用人审复审后，请选择人工复审流程模板'
+    }
+    return null
+  }
+
+  const buildDefinitionPayload = (): Record<string, unknown> | undefined => {
+    if (!humanReview.is_enabled) {
+      return humanReview.risk_levels.length > 0 || humanReview.review_rule_id !== null
+        ? { human_review: EMPTY_HUMAN_REVIEW }
+        : undefined
+    }
+    return {
+      human_review: {
+        is_enabled: true,
+        risk_levels: humanReview.risk_levels,
+        review_rule_id: humanReview.review_rule_id,
+      },
+    }
   }
 
   const onSubmit = async () => {
@@ -144,10 +184,18 @@ export default function CreateStrategyForm({
       setStep(0)
       return
     }
-if (mode === 'create' && countEnabled(enabledItems) === 0) {
+    if (mode === 'create' && countEnabled(enabledItems) === 0) {
       message.warning('请在第二步选择至少一个业务规则')
+      setStep(1)
       return
     }
+    const hrError = validateHumanReview()
+    if (hrError) {
+      message.warning(hrError)
+      setStep(2)
+      return
+    }
+    const definition = buildDefinitionPayload()
     setSubmitting(true)
     try {
       if (mode === 'edit' && strategyId) {
@@ -162,6 +210,7 @@ if (mode === 'create' && countEnabled(enabledItems) === 0) {
             values.durationMode === 'range' && values.range?.[1]
               ? values.range[1].toISOString()
               : null,
+          definition,
         })
         message.success('已保存策略')
         setSaveResult({
@@ -183,6 +232,7 @@ if (mode === 'create' && countEnabled(enabledItems) === 0) {
           values.durationMode === 'range' && values.range?.[1]
             ? values.range[1].toISOString()
             : null,
+        definition,
       })
       message.success('已创建策略')
       setSaveResult({
@@ -253,6 +303,7 @@ if (mode === 'create' && countEnabled(enabledItems) === 0) {
         items={[
           { title: '基本信息' },
           { title: '策略审核规则' },
+          { title: '人审规则' },
         ]}
       />
 
@@ -364,6 +415,31 @@ if (mode === 'create' && countEnabled(enabledItems) === 0) {
         </div>
       )}
 
+      {step === 2 && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+            width: '100%',
+          }}
+        >
+          <div
+            style={{
+              padding: '12px 16px',
+              background: '#F0F9FF',
+              border: '1px solid #BAE6FD',
+              borderRadius: 6,
+            }}
+          >
+            <Text>
+              配置本策略下提交审核的素材触发人工复审的规则。关闭时，机审按默认高/中风险升级；开启后，严格按此处配置升级。
+            </Text>
+          </div>
+          <HumanReviewSettings value={humanReview} onChange={setHumanReview} />
+        </div>
+      )}
+
       <div
         style={{
           display: 'flex',
@@ -381,14 +457,22 @@ if (mode === 'create' && countEnabled(enabledItems) === 0) {
           </Button>
         </Space>
         <Space wrap>
-          <Button disabled={step === 0} onClick={goBack}>
-            上一步
-          </Button>
           {step === 0 ? (
+            <Button disabled>上一步</Button>
+          ) : (
+            <Button onClick={goBackOne}>上一步</Button>
+          )}
+          {step === 0 && (
             <Button type="primary" onClick={goNext}>
               下一步
             </Button>
-          ) : (
+          )}
+          {step === 1 && (
+            <Button type="primary" onClick={goToStep2}>
+              下一步
+            </Button>
+          )}
+          {step === 2 && (
             <Button type="primary" loading={submitting} onClick={onSubmit}>
               保存策略
             </Button>

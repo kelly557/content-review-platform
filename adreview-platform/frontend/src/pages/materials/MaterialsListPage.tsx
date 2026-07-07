@@ -318,7 +318,7 @@ export default function MaterialsListPage() {
         width={560}
         open={batchOpen}
         onClose={closeBatch}
-        destroyOnClose
+        destroyOnHidden
         extra={
           <Space>
             <Button onClick={clearAll} disabled={uploading || batchFiles.length === 0}>

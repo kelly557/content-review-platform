@@ -8,7 +8,10 @@ import type {
 export const workflowsApi = {
   list(params: { prefix?: string; include_inactive?: boolean } = {}) {
     return api
-      .get<WorkflowTemplate[]>('/workflows/templates', { params })
+      .get<WorkflowTemplate[]>('/workflows/templates', {
+        params: { ...params, _t: Date.now() },
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      })
       .then((r) => r.data)
   },
   get(id: number) {

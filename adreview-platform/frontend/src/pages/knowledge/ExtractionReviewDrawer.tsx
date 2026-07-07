@@ -126,7 +126,7 @@ export default function ExtractionReviewDrawer({ extractionId, onClose, onImport
       onClose={onClose}
       title="抽取结果审核"
       width={760}
-      destroyOnClose
+      destroyOnHidden
       extra={
         <Space>
           <Button onClick={onClose}>关闭</Button>

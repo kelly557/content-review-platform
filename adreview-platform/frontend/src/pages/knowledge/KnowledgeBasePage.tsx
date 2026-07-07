@@ -356,7 +356,7 @@ export default function KnowledgeBasePage() {
         }}
         title={detail?.title ?? '文档详情'}
         width={520}
-        destroyOnClose
+        destroyOnHidden
       >
         {detail && (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>

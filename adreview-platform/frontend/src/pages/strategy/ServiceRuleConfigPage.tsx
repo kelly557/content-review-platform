@@ -660,7 +660,7 @@ export default function ServiceRuleConfigPage() {
         }}
         cancelText="取消"
         width={760}
-        destroyOnClose
+        destroyOnHidden
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Alert
