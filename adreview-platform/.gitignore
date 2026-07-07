@@ -26,6 +26,7 @@ dist/
 *.log
 npm-debug.log*
 .DS_Store
+tsconfig.tsbuildinfo
 
 # Editor
 .vscode/
