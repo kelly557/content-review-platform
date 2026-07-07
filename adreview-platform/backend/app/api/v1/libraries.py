@@ -30,7 +30,8 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_roles
+
 from app.db.session import get_db
 from app.models.audit_point import AuditPoint
 from app.models.library import Library, LibraryType
@@ -43,10 +44,15 @@ from app.schemas.library import (
     AuditPointRef,
     IgnoreToggleRequest,
     IgnoreToggleResponse,
+    LibraryBatchCreateError,
+    LibraryBatchCreateRequest,
+    LibraryBatchCreateResult,
+    LibraryBatchItem,
     LibraryCreate,
     LibraryDeletePayload,
     LibraryDeleteResponse,
-    LibraryImageUploadResponse,
+LibraryImageUploadResponse,
+    LibraryItemUploadResponse,
     LibraryItemBatchDelete,
     LibraryItemBatchDeleteResponse,
     LibraryItemCreate,
@@ -65,12 +71,39 @@ router = APIRouter(prefix="/libraries", tags=["libraries"])
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_FILES_PER_UPLOAD = 100
 MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_WORDS = 1000
 WORD_CODE_RE = _re.compile(r"^ws_\d+$")
 IMAGE_CODE_RE = _re.compile(r"^is_\d+$")
 GENERIC_CODE_RE = _re.compile(r"^lib_[a-z]?\d+$")
 
 
 # ─── helpers ────────────────────────────────────────────────────────────
+
+
+def _is_valid_code(code: str, library_type: LibraryType) -> bool:
+    if not code or len(code) > 64:
+        return False
+    if library_type == LibraryType.WORD:
+        return (
+            bool(WORD_CODE_RE.match(code))
+            or bool(GENERIC_CODE_RE.match(code))
+            or code.startswith("lib_w_")
+            or code.startswith("lib_word_")
+        )
+    if library_type == LibraryType.IMAGE:
+        return (
+            bool(IMAGE_CODE_RE.match(code))
+            or bool(GENERIC_CODE_RE.match(code))
+            or code.startswith("lib_i_")
+            or code.startswith("lib_img_")
+        )
+    if library_type == LibraryType.REPLY:
+        return (
+            bool(GENERIC_CODE_RE.match(code))
+            or code.startswith("lib_r_")
+            or code.startswith("lib_reply_")
+        )
+    return bool(GENERIC_CODE_RE.match(code))
 
 
 async def _next_code(db: AsyncSession, prefix: str) -> str:
@@ -286,6 +319,114 @@ async def create_library(
     group_names = await _group_name_map(db, [lib.group_id])
     await db.commit()
     return _to_out(lib, counts.get(lib.id, 0), group_names.get(lib.group_id))
+
+
+@router.post(
+    "/batch-create",
+    response_model=LibraryBatchCreateResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def batch_create_libraries(
+    body: LibraryBatchCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("admin")),
+) -> LibraryBatchCreateResult:
+    """Create up to 20 libraries in one call.
+
+    Each library is its own transaction — failures do not abort the batch.
+    """
+    created: List[LibraryOut] = []
+    errors: List[LibraryBatchCreateError] = []
+
+    default_group_id = body.group_id
+    if default_group_id is not None:
+        grp = await db.get(LibraryGroup, default_group_id)
+        if not grp or grp.is_deleted:
+            default_group_id = None
+
+    for idx, item in enumerate(body.libraries):
+        try:
+            gid = item.group_id if item.group_id is not None else default_group_id
+            if gid is None:
+                raise ValueError("group_id 必填")
+            grp = await db.get(LibraryGroup, gid)
+            if not grp or grp.is_deleted:
+                raise ValueError("分组不存在或已删除")
+
+            code = item.code.strip()
+            if not code:
+                raise ValueError("code 不能为空")
+            existing = await db.execute(
+                select(Library).where(Library.code == code)
+            )
+            if existing.scalar_one_or_none():
+                raise ValueError("code 已存在")
+
+            if not _is_valid_code(code, item.library_type):
+                raise ValueError("code 格式不合法")
+
+            lib = Library(
+                code=code,
+                name=item.name.strip(),
+                library_type=item.library_type,
+                group_id=gid,
+                description=item.description,
+                is_active=item.is_active,
+                ignored_services=[],
+            )
+            db.add(lib)
+            await db.flush()
+
+            if item.library_type in (LibraryType.WORD, LibraryType.REPLY) and item.words:
+                seen: set[str] = set()
+                for w in item.words:
+                    w = (w or "").strip()
+                    if not w or w in seen:
+                        continue
+                    seen.add(w)
+                    if item.library_type == LibraryType.WORD:
+                        db.add(LibraryItem(library_id=lib.id, word=w))
+                    else:
+                        trigger_reply = w
+                        sep = "|||"
+                        pos = trigger_reply.find(sep)
+                        if pos > 0:
+                            db.add(
+                                LibraryItem(
+                                    library_id=lib.id,
+                                    trigger=trigger_reply[:pos].strip(),
+                                    reply=trigger_reply[pos + 3 :].strip(),
+                                )
+                            )
+                await db.flush()
+
+            await db.refresh(lib)
+            counts = await _counts_for_libraries(db, [lib.id])
+            group_names = await _group_name_map(db, [lib.group_id])
+            await db.commit()
+            created.append(
+                _to_out(
+                    lib,
+                    counts.get(lib.id, 0),
+                    group_names.get(lib.group_id),
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            await db.rollback()
+            errors.append(
+                LibraryBatchCreateError(
+                    index=idx,
+                    code=getattr(item, "code", "") or "",
+                    error=str(e),
+                )
+            )
+
+    return LibraryBatchCreateResult(
+        succeeded=len(created),
+        failed=len(errors),
+        libraries=created,
+        errors=errors,
+    )
 
 
 @router.put("/{library_id}", response_model=LibraryOut)
@@ -796,6 +937,92 @@ async def upload_images(
         )
     except storage.StorageError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─── words upload (multipart .txt) ───────────────────────────────────────
+
+
+@router.post(
+    "/{library_id}/items/upload",
+    response_model=LibraryItemUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_words(
+    library_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> LibraryItemUploadResponse:
+    lib = await db.get(Library, library_id)
+    if not lib or lib.is_deleted:
+        raise HTTPException(status_code=404, detail="库不存在")
+    if lib.library_type != LibraryType.WORD:
+        raise HTTPException(status_code=400, detail="该接口仅用于词库")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="文件为空")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            text = raw.decode("gbk")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="文件编码不支持,请使用 UTF-8 或 GBK 编码的 txt")
+
+    words: list[str] = []
+    for line in text.splitlines():
+        w = line.strip()
+        if w:
+            words.append(w)
+
+    if len(words) > MAX_WORDS:
+        raise HTTPException(status_code=400, detail=f"单次最多 {MAX_WORDS} 个词")
+
+    existing = {
+        row[0]
+        for row in (
+            await db.execute(
+                select(LibraryItem.word).where(
+                    and_(
+                        LibraryItem.library_id == library_id,
+                        LibraryItem.is_deleted == False,  # noqa: E712
+                    )
+                )
+            )
+        ).all()
+    }
+    added = 0
+    skipped = 0
+    inserted: list[LibraryItem] = []
+    seen: set[str] = set()
+    for w in words:
+        if w in seen or w in existing:
+            skipped += 1
+            continue
+        seen.add(w)
+        it = LibraryItem(library_id=library_id, word=w)
+        db.add(it)
+        inserted.append(it)
+        added += 1
+    if added:
+        await db.flush()
+        await db.commit()
+
+    total = (
+        await db.scalar(
+            select(func.count())
+            .select_from(LibraryItem)
+            .where(
+                and_(
+                    LibraryItem.library_id == library_id,
+                    LibraryItem.is_deleted == False,  # noqa: E712
+                )
+            )
+        )
+        or 0
+    )
+    return LibraryItemUploadResponse(added=added, skipped=skipped, total=total)
 
 
 @router.get("/{library_id}/items/{item_id}/download")

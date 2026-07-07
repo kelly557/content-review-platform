@@ -164,3 +164,45 @@ class LibraryImageUploadResponse(BaseModel):
     skipped: int
     item_count: int
     items: List[LibraryItemOut]
+
+
+class LibraryItemUploadResponse(BaseModel):
+    added: int
+    skipped: int
+    total: int
+
+
+class LibraryBatchItem(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    library_type: LibraryType
+    group_id: Optional[int] = None
+    description: Optional[str] = Field(default=None, max_length=200)
+    is_active: bool = True
+    words: List[str] = Field(default_factory=list)
+
+    @field_validator("words")
+    @classmethod
+    def _v_words(cls, v: List[str]) -> List[str]:
+        cleaned = _dedupe_clean_words(v)
+        if len(cleaned) > 1000:
+            raise ValueError("单次最多 1000 个词")
+        return cleaned
+
+
+class LibraryBatchCreateRequest(BaseModel):
+    group_id: Optional[int] = None
+    libraries: List[LibraryBatchItem] = Field(min_length=1, max_length=20)
+
+
+class LibraryBatchCreateError(BaseModel):
+    index: int
+    code: str
+    error: str
+
+
+class LibraryBatchCreateResult(BaseModel):
+    succeeded: int
+    failed: int
+    libraries: List[LibraryOut] = Field(default_factory=list)
+    errors: List[LibraryBatchCreateError] = Field(default_factory=list)

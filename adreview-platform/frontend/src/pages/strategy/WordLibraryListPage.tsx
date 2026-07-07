@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react'
 import {
+  Alert,
   Button,
   Drawer,
   Form,
   Input,
+  Modal,
   Popconfirm,
   Select,
   Space,
   Table,
+  Tabs,
   Tag,
   Typography,
   App,
+  Upload,
   type TableColumnsType,
 } from 'antd'
 import {
@@ -18,6 +22,7 @@ import {
   EditOutlined,
   DeleteOutlined,
   ReloadOutlined,
+  InboxOutlined,
 } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -25,13 +30,19 @@ import { librariesApi } from '@/api/libraries'
 import { libraryGroupsApi } from '@/api/libraryGroups'
 import type {
   Library,
+  LibraryBatchItemPayload,
   LibraryCreate,
   LibraryGroup,
   LibraryListItem,
 } from '@/types/domain'
+import {
+  generateByPrefix,
+  parseLibraryFile,
+  rowsToText as rowsToImportText,
+} from '@/lib/libraryBatchImport'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 
 const MAX_WORDS = 1000
 
@@ -40,6 +51,14 @@ interface CreateFormValues {
   group_id: number
   description?: string
   wordsText?: string
+}
+
+interface BatchFormValues {
+  prefix: string
+  count: number
+  group_id?: number
+  is_active: boolean
+  text: string
 }
 
 export default function WordLibraryListPage() {
@@ -56,6 +75,15 @@ export default function WordLibraryListPage() {
   const [createForm] = Form.useForm<CreateFormValues>()
 
   const [deleteTarget, setDeleteTarget] = useState<Library | null>(null)
+
+  // 批量新建
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchForm] = Form.useForm<BatchFormValues>()
+  const [batchSubmitting, setBatchSubmitting] = useState(false)
+  const [batchImporting, setBatchImporting] = useState(false)
+  const [batchText, setBatchText] = useState('')
+  const [batchGroupId, setBatchGroupId] = useState<number | undefined>(undefined)
+  const [batchKind] = useState<'word'>('word')
 
   const fetchGroups = async () => {
     const data = await libraryGroupsApi.list({ size: 200 })
@@ -216,6 +244,23 @@ export default function WordLibraryListPage() {
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             新建词库
           </Button>
+          <Button
+            icon={<InboxOutlined />}
+            onClick={() => {
+              batchForm.resetFields()
+              batchForm.setFieldsValue({
+                prefix: '敏感词_',
+                count: 5,
+                is_active: true,
+                text: '',
+              })
+              setBatchText('')
+              setBatchGroupId(filterGroupId ?? groups[0]?.id)
+              setBatchOpen(true)
+            }}
+          >
+            批量新建词库
+          </Button>
         </Space>
       </div>
 
@@ -331,6 +376,197 @@ export default function WordLibraryListPage() {
           void fetchLibraries()
         }}
       />
+
+      <Modal
+        title="批量新建词库"
+        open={batchOpen}
+        onCancel={() => {
+          if (batchSubmitting) return
+          setBatchOpen(false)
+        }}
+        onOk={undefined}
+        confirmLoading={batchSubmitting}
+        okText="提交"
+        cancelText="取消"
+        width={760}
+        destroyOnClose
+        footer={
+          <Space>
+            <Button onClick={() => setBatchOpen(false)} disabled={batchSubmitting}>
+              取消
+            </Button>
+            <Button
+              type="primary"
+              loading={batchSubmitting}
+              disabled={batchText.trim().length === 0 || batchSubmitting}
+              onClick={async () => {
+                if (!batchText.trim()) {
+                  message.warning('请填写至少一个库')
+                  return
+                }
+                setBatchSubmitting(true)
+                try {
+                  const lines = batchText
+                    .split('\n')
+                    .map((l) => l.trim())
+                    .filter(Boolean)
+                  const libraries: LibraryBatchItemPayload[] = []
+                  for (let i = 0; i < lines.length; i += 1) {
+                    const cells = lines[i].split(/\t/).map((c) => c.trim())
+                    if (cells.length < 2) continue
+                    const [code, name, itemsRaw] = cells
+                    if (!code || !name) continue
+                    libraries.push({
+                      code,
+                      name,
+                      library_type: batchKind,
+                      group_id: batchGroupId ?? null,
+                      is_active: true,
+                      words: itemsRaw
+                        ? itemsRaw.split(/[,，;；]/).map((s) => s.trim()).filter(Boolean)
+                        : [],
+                    })
+                  }
+                  if (libraries.length === 0) {
+                    message.warning('没有可提交的库')
+                    return
+                  }
+                  const res = await librariesApi.batchCreate({
+                    group_id: batchGroupId ?? null,
+                    libraries,
+                  })
+                  message.success(
+                    `批量提交 ${libraries.length} 个:成功 ${res.succeeded},失败 ${res.failed}`,
+                  )
+                  if (res.failed > 0) {
+                    console.warn('batch errors', res.errors)
+                  }
+                  setBatchOpen(false)
+                  void fetchLibraries()
+                } catch (e: unknown) {
+                  const detail = (e as { response?: { data?: { detail?: string } } })
+                    ?.response?.data?.detail
+                  message.error(detail ?? '提交失败')
+                } finally {
+                  setBatchSubmitting(false)
+                }
+              }}
+            >
+              提交
+            </Button>
+          </Space>
+        }
+      >
+        <Tabs
+          defaultActiveKey="text"
+          items={[
+            {
+              key: 'text',
+              label: '文本导入',
+              children: (
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="每行格式：code<TAB>name<TAB>词条(逗号分隔)"
+                    description={
+                      <span>
+                        示例：
+                        <code>{'lib_w_01\t政治_1\t习近平,台独'}</code>
+                      </span>
+                    }
+                  />
+                  <Space>
+                    <span style={{ width: 80 }}>分组：</span>
+                    <Select
+                      style={{ minWidth: 200 }}
+                      value={batchGroupId}
+                      options={groups.map((g) => ({
+                        value: g.id,
+                        label: g.name,
+                      }))}
+                      onChange={setBatchGroupId}
+                      placeholder="选择分组"
+                    />
+                  </Space>
+                  <Input.TextArea
+                    value={batchText}
+                    onChange={(e) => setBatchText(e.target.value)}
+                    rows={10}
+                    placeholder={
+                      'lib_w_01\t政治_1\t习近平,台独\nlib_w_02\t政治_2\t反动'
+                    }
+                    style={{ fontFamily: 'Menlo, Monaco, monospace' }}
+                    disabled={batchSubmitting}
+                  />
+                  <Space>
+                    <Upload
+                      accept=".txt,.csv,.tsv"
+                      beforeUpload={async (file) => {
+                        setBatchImporting(true)
+                        try {
+                          const { rows, errors } = await parseLibraryFile(
+                            file as File,
+                            batchKind,
+                            batchGroupId,
+                          )
+                          if (errors.length > 0 || rows.length === 0) {
+                            message.error(errors[0] ?? '文件无有效数据')
+                            return false
+                          }
+                          setBatchText(rowsToImportText(rows))
+                          message.success(`已导入 ${rows.length} 个库`)
+                          return false
+                        } catch (e) {
+                          message.error(
+                            '解析失败：' + (e as Error).message,
+                          )
+                          return false
+                        } finally {
+                          setBatchImporting(false)
+                        }
+                      }}
+                      showUploadList={false}
+                      maxCount={1}
+                      disabled={batchSubmitting || batchImporting}
+                    >
+                      <Button
+                        icon={<InboxOutlined />}
+                        loading={batchImporting}
+                      >
+                        从 .txt/.csv 导入
+                      </Button>
+                    </Upload>
+                    <Button
+                      size="small"
+                      onClick={() =>
+                        setBatchText(
+                          generateByPrefix(
+                            'lib_w_demo_',
+                            3,
+                            batchKind,
+                            batchGroupId,
+                          )
+                            .map((r) => `${r.code}\t${r.name}\t`)
+                            .join('\n'),
+                        )
+                      }
+                    >
+                      填入示例
+                    </Button>
+                    <Button size="small" onClick={() => setBatchText('')}>
+                      清空
+                    </Button>
+                  </Space>
+                  <Text type="secondary">
+                    将生成 {batchText.split('\n').filter((l) => l.trim()).length} 个库
+                  </Text>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Modal>
     </div>
   )
 }

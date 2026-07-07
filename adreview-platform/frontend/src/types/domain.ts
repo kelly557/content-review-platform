@@ -1026,6 +1026,36 @@ export interface AuditPointBatchResult {
   items: AuditPointBatchItem[]
 }
 
+export type LibraryKind = 'word' | 'image' | 'reply'
+
+export interface LibraryBatchItemPayload {
+  code: string
+  name: string
+  library_type: LibraryKind
+  group_id?: number | null
+  description?: string | null
+  is_active?: boolean
+  words?: string[]
+}
+
+export interface LibraryBatchCreateRequest {
+  group_id?: number | null
+  libraries: LibraryBatchItemPayload[]
+}
+
+export interface LibraryBatchCreateError {
+  index: number
+  code: string
+  error: string
+}
+
+export interface LibraryBatchCreateResult {
+  succeeded: number
+  failed: number
+  libraries: Library[]
+  errors: LibraryBatchCreateError[]
+}
+
 export interface ItemSuggestion {
   item_id: number
   item_code: string

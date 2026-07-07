@@ -2,6 +2,8 @@ import { api } from './client'
 import type {
   AuditPointRef,
   Library,
+  LibraryBatchCreateRequest,
+  LibraryBatchCreateResult,
   LibraryCreate,
   LibraryDeletePayload,
   LibraryDeleteResponse,
@@ -106,12 +108,20 @@ export const librariesApi = {
       .post<{ added: number; skipped: number; total: number }>(
         `/libraries/${id}/items/upload`,
         fd,
-        { headers: { 'Content-Type': 'multipart/form-data' } },
+        {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        },
       )
       .then((r) => r.data)
   },
 
   itemDownloadUrl(libraryId: number, itemId: number) {
     return `/api/v1/libraries/${libraryId}/items/${itemId}/download`
+  },
+
+  batchCreate(body: LibraryBatchCreateRequest) {
+    return api
+      .post<LibraryBatchCreateResult>('/libraries/batch-create', body)
+      .then((r) => r.data)
   },
 }

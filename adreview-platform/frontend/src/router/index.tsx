@@ -34,6 +34,8 @@ const WordLibraryListPage = lazy(() => import('@/pages/strategy/WordLibraryListP
 const ImageLibraryListPage = lazy(() => import('@/pages/strategy/ImageLibraryListPage'))
 const WordLibraryDetailPage = lazy(() => import('@/pages/strategy/WordLibraryDetailPage'))
 const ImageLibraryDetailPage = lazy(() => import('@/pages/strategy/ImageLibraryDetailPage'))
+const ReplyLibraryListPage = lazy(() => import('@/pages/strategy/ReplyLibraryListPage'))
+const ReplyLibraryDetailPage = lazy(() => import('@/pages/strategy/ReplyLibraryDetailPage'))
 const LibraryGroupsPage = lazy(() => import('@/pages/strategy/LibraryGroupsPage'))
 const StrategyRulesByTypePage = lazy(
   () => import('@/pages/strategy/StrategyRulesByTypePage'),
@@ -91,6 +93,8 @@ export default function AppRoutes() {
               <Route path="/strategies/words/:id" element={<WordLibraryDetailPage />} />
               <Route path="/strategies/images" element={<ImageLibraryListPage />} />
               <Route path="/strategies/images/:id" element={<ImageLibraryDetailPage />} />
+              <Route path="/strategies/replies" element={<ReplyLibraryListPage />} />
+              <Route path="/strategies/replies/:id" element={<ReplyLibraryDetailPage />} />
               <Route path="/strategies/library-groups" element={<LibraryGroupsPage />} />
               <Route
                 path="/strategies/custom-image"
