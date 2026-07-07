@@ -25,12 +25,34 @@ from app.services.nl_match import suggest_items
 router = APIRouter(prefix="/packages", tags=["audit-items"])
 
 
+MEDIA_BY_PACKAGE = {
+    "image_audit_pro": "image",
+    "text_audit_pro": "text",
+    "audio_audit_pro": "audio",
+    "document_audit_pro": "doc",
+    "video_audit_pro": "video",
+}
+
+
 async def _ensure_package(db: AsyncSession, code: str) -> Service:
     result = await db.execute(select(Service).where(Service.code == code))
     svc = result.scalar_one_or_none()
     if not svc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="规则包不存在")
     return svc
+
+
+async def _generate_item_code(db: AsyncSession, package_code: str) -> str:
+    """Generate a unique audit item code: ai_{n+1} within the package.
+
+    Concurrent safety: relies on the (package_code, code) UniqueConstraint
+    to surface a 409 if two requests race to the same n.
+    """
+    count_stmt = select(func.count(AuditItem.id)).where(
+        AuditItem.package_code == package_code,
+    )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+    return f"ai_{total + 1}"
 
 
 async def _point_counts(db: AsyncSession, package_code: str) -> dict[int, int]:
@@ -40,6 +62,48 @@ async def _point_counts(db: AsyncSession, package_code: str) -> dict[int, int]:
         .group_by(AuditPoint.item_id)
     )
     return {row[0]: int(row[1]) for row in result.all()}
+
+
+@router.get("/by-media-type/{media_type}", response_model=list[AuditItemOut])
+async def list_items_by_media_type(
+    media_type: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> list[AuditItemOut]:
+    """列出某个媒体类型下的所有业务规则 (audit_item).
+
+    例如 media_type=image → 返回 image_audit_pro 服务下所有 item（涉政/涉黄/...）。
+    """
+    packages = [
+        pkg for pkg, m in MEDIA_BY_PACKAGE.items() if m == media_type
+    ]
+    if not packages:
+        return []
+
+    items_result = await db.execute(
+        select(AuditItem).where(AuditItem.package_code.in_(packages))
+    )
+    rows = list(items_result.scalars())
+    counts_per_pkg: dict[str, dict[int, int]] = {}
+    for pkg in packages:
+        counts_per_pkg[pkg] = await _point_counts(db, pkg)
+
+    return [
+        AuditItemOut(
+            id=r.id,
+            package_code=r.package_code,
+            code=r.code,
+            name_cn=r.name_cn,
+            aliases=list(r.aliases or []),
+            description=r.description,
+            sort_order=r.sort_order,
+            is_enabled=r.is_enabled,
+            point_count=counts_per_pkg.get(r.package_code, {}).get(r.id, 0),
+            created_at=r.created_at,
+            updated_at=r.updated_at,
+        )
+        for r in rows
+    ]
 
 
 @router.get("/{code}/items", response_model=list[AuditItemOut])
@@ -85,16 +149,10 @@ async def create_item(
     _: User = Depends(require_roles("admin")),
 ) -> AuditItemOut:
     await _ensure_package(db, code)
-    existing = await db.execute(
-        select(AuditItem).where(
-            AuditItem.package_code == code, AuditItem.code == body.code
-        )
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="审核项编码已存在")
+    generated_code = await _generate_item_code(db, code)
     item = AuditItem(
         package_code=code,
-        code=body.code,
+        code=generated_code,
         name_cn=body.name_cn,
         aliases=body.aliases,
         description=body.description,
@@ -102,7 +160,14 @@ async def create_item(
         is_enabled=body.is_enabled,
     )
     db.add(item)
-    await db.flush()
+    try:
+        await db.flush()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="审核项编码生成冲突，请重试",
+        )
     await db.refresh(item)
     await db.commit()
     return AuditItemOut(

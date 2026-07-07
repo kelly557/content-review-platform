@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require_roles
@@ -29,6 +29,20 @@ async def _ensure_package(db: AsyncSession, code: str) -> Service:
     if not svc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="规则包不存在")
     return svc
+
+
+async def _generate_point_code(db: AsyncSession, package_code: str, item_id: int) -> str:
+    """Generate a unique audit point code: ap_{item_id}_{n+1}.
+
+    Concurrent safety: relies on the (package_code, code) UniqueConstraint
+    to surface a 409 if two requests race to the same n.
+    """
+    count_stmt = select(func.count(AuditPoint.id)).where(
+        AuditPoint.package_code == package_code,
+        AuditPoint.item_id == item_id,
+    )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+    return f"ap_{item_id}_{total + 1}"
 
 
 @router.get("/{code}/points", response_model=list[AuditPointOut])
@@ -61,18 +75,12 @@ async def create_point(
     item = await db.get(AuditItem, body.item_id)
     if not item or item.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在")
-    existing = await db.execute(
-        select(AuditPoint).where(
-            AuditPoint.package_code == code, AuditPoint.code == body.code
-        )
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="审核点编码已存在")
+    generated_code = await _generate_point_code(db, code, body.item_id)
     point = AuditPoint(
         package_code=code,
         item_id=body.item_id,
-        code=body.code,
-        label=body.label,
+        code=generated_code,
+        label=generated_code,
         label_cn=body.label_cn,
         description=body.description,
         medium_threshold=body.medium_threshold,
@@ -84,7 +92,14 @@ async def create_point(
         sort_order=body.sort_order,
     )
     db.add(point)
-    await db.flush()
+    try:
+        await db.flush()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="审核点编码生成冲突，请重试",
+        )
     await db.refresh(point)
     await db.commit()
     return AuditPointOut.model_validate(point)

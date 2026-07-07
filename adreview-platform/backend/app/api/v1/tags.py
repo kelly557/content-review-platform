@@ -23,7 +23,6 @@ from app.core.deps import get_current_user
 from app.db.session import get_db
 from app.models.tag import (
     TagDomain,
-    TagSource,
     TagStatus,
 )
 from app.models.user import User
@@ -67,7 +66,6 @@ def _to_summary(tag) -> TagSummary:
         jurisdictions=list(tag.jurisdictions or []),
         industries=list(tag.industries or []),
         channels=list(tag.channels or []),
-        source=tag.source,
         status=tag.status,
         updated_at=tag.updated_at,
     )
@@ -85,7 +83,6 @@ async def list_tags(
     domain: Optional[TagDomain] = None,
     category: Optional[str] = None,
     status_: Optional[TagStatus] = Query(None, alias="status"),
-    source: Optional[TagSource] = None,
     jurisdiction: Optional[List[str]] = Query(None),
     industry: Optional[List[str]] = Query(None),
     channel: Optional[List[str]] = Query(None),
@@ -98,7 +95,6 @@ async def list_tags(
         domain=domain.value if domain else None,
         category=category,
         status=status_,
-        source=source.value if source else None,
         jurisdictions=jurisdiction,
         industries=industry,
         channels=channel,
@@ -172,8 +168,6 @@ async def delete_tag(
     tag = await tag_service.get_tag(db, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="标签不存在")
-    if tag.source == TagSource.PLATFORM:
-        raise HTTPException(status_code=400, detail="平台内置标签不可删除，可停用")
     await tag_service.delete_tag(db, tag)
     await db.commit()
 

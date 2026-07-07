@@ -27,11 +27,9 @@ import {
   TAG_CATEGORY_OPTIONS,
   TAG_DOMAIN_OPTIONS,
   TAG_JURISDICTION_OPTIONS,
-  TAG_SOURCE_OPTIONS,
   TAG_STATUS_OPTIONS,
   type TagCategory,
   type TagDomain,
-  type TagSource,
   type TagStatus,
   type TagSummary,
 } from '@/types/domain'
@@ -50,12 +48,6 @@ const STATUS_LABEL: Record<TagStatus, string> = {
   deprecated: '已停用',
 }
 
-const SOURCE_LABEL: Record<TagSource, string> = {
-  platform: '平台内置',
-  enterprise: '企业',
-  imported: '导入',
-}
-
 function domainLabel(d: TagDomain): string {
   return TAG_DOMAIN_OPTIONS.find((o) => o.value === d)?.cn ?? d
 }
@@ -65,7 +57,6 @@ function categoryLabel(c: TagCategory): string {
 }
 
 interface DraftValues {
-  code?: string
   name: string
   domain?: TagDomain
   category?: TagCategory
@@ -144,11 +135,10 @@ export default function TagsPage() {
       const values = await createForm.validateFields()
       setSaving(true)
       await tagsApi.create({
-        code: values.code || undefined,
+        code: undefined,
         name: values.name,
         domain: values.domain!,
         category: values.category!,
-        source: 'enterprise',
         status: 'active',
       })
       message.success('已创建')
@@ -217,15 +207,9 @@ export default function TagsPage() {
 
   const columns: TableColumnsType<TagSummary> = [
     {
-      title: '编码',
-      dataIndex: 'code',
-      width: '14%',
-      render: (v: string) => <Text code>{v}</Text>,
-    },
-    {
       title: '名称',
       dataIndex: 'name',
-      width: '14%',
+      width: '18%',
       render: (v: string, row) => (
         <Space direction="vertical" size={0}>
           <Text strong>{v}</Text>
@@ -234,27 +218,21 @@ export default function TagsPage() {
       ),
     },
     {
-      title: '领域',
+      title: '标签类型',
       dataIndex: 'domain',
-      width: '8%',
+      width: '10%',
       render: (d: TagDomain) => <Tag color="geekblue">{domainLabel(d)}</Tag>,
     },
     {
-      title: '对象',
+      title: '命中示例',
       dataIndex: 'category',
-      width: '8%',
+      width: '10%',
       render: (c: TagCategory) => <Tag>{categoryLabel(c)}</Tag>,
-    },
-    {
-      title: '来源',
-      dataIndex: 'source',
-      width: '8%',
-      render: (s: TagSource) => <Text type="secondary">{SOURCE_LABEL[s]}</Text>,
     },
     {
       title: '状态',
       dataIndex: 'status',
-      width: '8%',
+      width: '10%',
       render: (s: TagStatus) => <Tag color={STATUS_COLORS[s]}>{STATUS_LABEL[s]}</Tag>,
     },
     {
@@ -287,7 +265,7 @@ export default function TagsPage() {
           )}
           <Popconfirm
             title="确认删除？"
-            description="删除后不可恢复（平台内置标签不可删）"
+            description="删除后不可恢复"
             onConfirm={() => handleDelete(row.id)}
             okText="删除"
             cancelText="取消"
@@ -304,8 +282,7 @@ export default function TagsPage() {
 
   const summary = useMemo(() => {
     const active = items.filter((i) => i.status === 'active').length
-    const platform = items.filter((i) => i.source === 'platform').length
-    return { active, platform }
+    return { active }
   }, [items])
 
   return (
@@ -334,7 +311,7 @@ export default function TagsPage() {
         }}
       >
         <Input
-          placeholder="搜索名称 / 编码"
+          placeholder="搜索名称"
           prefix={<SearchOutlined />}
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -343,7 +320,7 @@ export default function TagsPage() {
           allowClear
         />
         <Select
-          placeholder="领域"
+          placeholder="标签类型"
           allowClear
           style={{ width: 130 }}
           value={filters.domain}
@@ -351,7 +328,7 @@ export default function TagsPage() {
           options={TAG_DOMAIN_OPTIONS.map((o) => ({ value: o.value, label: o.cn }))}
         />
         <Select
-          placeholder="对象类型"
+          placeholder="命中示例"
           allowClear
           style={{ width: 140 }}
           value={filters.category}
@@ -365,14 +342,6 @@ export default function TagsPage() {
           value={filters.status}
           onChange={(v) => setFilters({ ...filters, status: v, page: 1 })}
           options={TAG_STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-        />
-        <Select
-          placeholder="来源"
-          allowClear
-          style={{ width: 110 }}
-          value={filters.source}
-          onChange={(v) => setFilters({ ...filters, source: v, page: 1 })}
-          options={TAG_SOURCE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
         />
         <Select
           placeholder="法域"
@@ -415,7 +384,6 @@ export default function TagsPage() {
       >
         <Text type="secondary">当前页</Text>
         <Text>启用 <Text strong>{summary.active}</Text></Text>
-        <Text>平台内置 <Text strong>{summary.platform}</Text></Text>
         <Text type="secondary">合计 {total}</Text>
       </div>
 
@@ -436,16 +404,8 @@ export default function TagsPage() {
           <Form<DraftValues>
             form={createForm}
             layout="inline"
-            initialValues={{ code: '', name: '' }}
+            initialValues={{ name: '' }}
           >
-            <Form.Item
-              name="code"
-              label="编码"
-              tooltip="留空自动生成"
-              style={{ minWidth: 220 }}
-            >
-              <Input placeholder="选填，自动生成 tag_N" />
-            </Form.Item>
             <Form.Item
               name="name"
               label="名称"
@@ -456,7 +416,7 @@ export default function TagsPage() {
             </Form.Item>
             <Form.Item
               name="domain"
-              label="领域"
+              label="标签类型"
               rules={[{ required: true, message: '请选择' }]}
               style={{ minWidth: 180 }}
             >
@@ -467,7 +427,7 @@ export default function TagsPage() {
             </Form.Item>
             <Form.Item
               name="category"
-              label="对象"
+              label="命中示例"
               rules={[{ required: true, message: '请选择' }]}
               style={{ minWidth: 180 }}
             >
@@ -521,12 +481,9 @@ export default function TagsPage() {
               }}
             >
               <Text strong style={{ display: 'block', marginBottom: 8 }}>
-                编辑标签 · {row.code}
+                编辑标签 · {row.name}
               </Text>
               <Form<DraftValues> form={editForm} layout="inline">
-                <Form.Item label="编码" style={{ minWidth: 220 }}>
-                  <Input value={row.code} disabled />
-                </Form.Item>
                 <Form.Item
                   name="name"
                   label="名称"
@@ -537,7 +494,7 @@ export default function TagsPage() {
                 </Form.Item>
                 <Form.Item
                   name="domain"
-                  label="领域"
+                  label="标签类型"
                   rules={[{ required: true, message: '请选择' }]}
                   style={{ minWidth: 180 }}
                 >
@@ -547,7 +504,7 @@ export default function TagsPage() {
                 </Form.Item>
                 <Form.Item
                   name="category"
-                  label="对象"
+                  label="命中示例"
                   rules={[{ required: true, message: '请选择' }]}
                   style={{ minWidth: 180 }}
                 >

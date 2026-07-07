@@ -22,7 +22,6 @@ class AuditItemOut(ORMBase):
 
 
 class AuditItemCreate(BaseModel):
-    code: str = Field(min_length=1, max_length=64)
     name_cn: str = Field(min_length=1, max_length=64)
     aliases: list[Any] = Field(default_factory=list)
     description: Optional[str] = None

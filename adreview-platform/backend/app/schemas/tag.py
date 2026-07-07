@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.models.tag import (
     TagCategory,
     TagDomain,
-    TagSource,
     TagStatus,
 )
 from app.schemas.common import ORMBase
@@ -27,7 +26,6 @@ class TagBase(BaseModel):
     channels: List[str] = Field(default_factory=list)
     knowledge_refs: List[str] = Field(default_factory=list)
     evidence_refs: List[str] = Field(default_factory=list)
-    source: TagSource = TagSource.ENTERPRISE
     status: TagStatus = TagStatus.DRAFT
 
     @field_validator("jurisdictions", "industries", "channels")
@@ -67,7 +65,6 @@ class TagOut(ORMBase):
     channels: List[str]
     knowledge_refs: List[str]
     evidence_refs: List[str]
-    source: TagSource
     status: TagStatus
     version: int
     created_at: datetime
@@ -88,6 +85,5 @@ class TagSummary(BaseModel):
     jurisdictions: List[str]
     industries: List[str]
     channels: List[str]
-    source: TagSource
     status: TagStatus
     updated_at: Optional[datetime]

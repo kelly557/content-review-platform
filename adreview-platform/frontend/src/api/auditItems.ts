@@ -3,6 +3,7 @@ import type {
   AuditItem,
   AuditItemCreate,
   AuditItemUpdate,
+  MediaTypeKey,
   SuggestResponse,
 } from '@/types/domain'
 
@@ -10,6 +11,11 @@ export const auditItemsApi = {
   list(packageCode: string, params?: { enabled?: boolean; q?: string }) {
     return api
       .get<AuditItem[]>(`/packages/${packageCode}/items`, { params })
+      .then((r) => r.data)
+  },
+  listByMediaType(mediaType: MediaTypeKey) {
+    return api
+      .get<AuditItem[]>(`/packages/by-media-type/${mediaType}`)
       .then((r) => r.data)
   },
   suggest(packageCode: string, query: string, topK = 5) {

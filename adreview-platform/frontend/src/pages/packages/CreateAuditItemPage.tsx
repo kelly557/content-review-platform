@@ -21,7 +21,6 @@ const { TextArea } = Input
 const { Title, Text } = Typography
 
 interface CreateForm {
-  code: string
   name_cn: string
   aliases: string[]
   description?: string
@@ -78,13 +77,12 @@ export default function CreateAuditItemPage() {
   }
 
   const pickSuggestion = (s: ItemSuggestion) => {
-    form.setFieldsValue({
-      code: s.item_code,
-      name_cn: s.item_name_cn,
-      aliases: s.matched_aliases,
-    })
-    message.info(`已选择「${s.item_name_cn}」，请确认后提交`)
-    setMode('form')
+    const targetMediaType = mediaType ?? MEDIA_BY_PACKAGE[code]
+    navigate(
+      targetMediaType
+        ? `/strategies/rules-by-type/${targetMediaType}/${s.item_id}`
+        : `/packages/${code}/items/${s.item_id}/points`,
+    )
   }
 
   const onSubmit = async () => {
@@ -93,7 +91,6 @@ export default function CreateAuditItemPage() {
     setCreating(true)
     try {
       await auditItemsApi.create(code, {
-        code: values.code,
         name_cn: values.name_cn,
         aliases: values.aliases ?? [],
         description: values.description,
@@ -224,16 +221,6 @@ export default function CreateAuditItemPage() {
                     rules={[{ required: true, message: '请输入名称' }]}
                   >
                     <Input placeholder="例如：涉政" />
-                  </Form.Item>
-                  <Form.Item
-                    name="code"
-                    label="审核项编码"
-                    rules={[
-                      { required: true, message: '请输入编码' },
-                      { pattern: /^[a-zA-Z][a-zA-Z0-9_]*$/, message: '以字母开头，字母数字下划线' },
-                    ]}
-                  >
-                    <Input placeholder="例如：tx_politics" />
                   </Form.Item>
                   <Form.Item name="aliases" label="别名（自然语言匹配用）">
                     <Select

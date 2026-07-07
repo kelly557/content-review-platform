@@ -77,12 +77,6 @@ class TagStatus(str, enum.Enum):
     DEPRECATED = "deprecated"
 
 
-class TagSource(str, enum.Enum):
-    PLATFORM = "platform"
-    ENTERPRISE = "enterprise"
-    IMPORTED = "imported"
-
-
 class Tag(Base):
     __tablename__ = "tags"
 
@@ -103,9 +97,6 @@ class Tag(Base):
     knowledge_refs: Mapped[List[str]] = mapped_column(_JSONType, default=list, nullable=False)
     evidence_refs: Mapped[List[str]] = mapped_column(_JSONType, default=list, nullable=False)
 
-    source: Mapped[TagSource] = mapped_column(
-        Enum(TagSource), default=TagSource.ENTERPRISE, nullable=False, index=True
-    )
     status: Mapped[TagStatus] = mapped_column(
         Enum(TagStatus), default=TagStatus.DRAFT, nullable=False, index=True
     )

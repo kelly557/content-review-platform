@@ -17,7 +17,6 @@ from app.models.tag import (
     Tag,
     TagCategory,
     TagDomain,
-    TagSource,
     TagStatus,
 )
 
@@ -110,7 +109,6 @@ async def _upsert_tag(db: AsyncSession, spec: dict[str, Any]) -> Tag:
         channels=spec.get("channels", []),
         knowledge_refs=spec.get("knowledge_refs", []),
         evidence_refs=spec.get("evidence_refs", []),
-        source=TagSource.PLATFORM,
         status=TagStatus.ACTIVE,
         version=1,
     )

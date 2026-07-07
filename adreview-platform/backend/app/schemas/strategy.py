@@ -8,6 +8,12 @@ from app.models.strategy import StrategyScope
 from app.schemas.common import ORMBase
 
 
+class StrategyItemRef(BaseModel):
+    media_type: str = Field(min_length=1, max_length=16)
+    item_id: int
+    is_enabled: bool = True
+
+
 class StrategyOut(ORMBase):
     id: int
     code: str
@@ -20,6 +26,7 @@ class StrategyOut(ORMBase):
     effective_until: Optional[datetime]
     definition: Dict[str, Any] = Field(default_factory=dict)
     service_config: Dict[str, Any] = Field(default_factory=dict)
+    enabled_items: List[StrategyItemRef] = Field(default_factory=list)
     created_at: datetime
     updated_at: Optional[datetime]
 
@@ -34,6 +41,7 @@ class StrategyCreate(BaseModel):
     effective_from: Optional[datetime] = None
     effective_until: Optional[datetime] = None
     services: List[str] = Field(default_factory=list)
+    enabled_items: List[StrategyItemRef] = Field(default_factory=list)
     definition: Dict[str, Any] = Field(default_factory=dict)
     service_config: Dict[str, Any] = Field(default_factory=dict)
 
@@ -46,12 +54,13 @@ class StrategyUpdate(BaseModel):
     effective_from: Optional[datetime] = None
     effective_until: Optional[datetime] = None
     services: Optional[List[str]] = None
+    enabled_items: Optional[List[StrategyItemRef]] = None
     definition: Optional[Dict[str, Any]] = None
     service_config: Optional[Dict[str, Any]] = None
 
 
 class StrategyDuplicateRequest(BaseModel):
-    name: Optional[str] = Field(default=None, max_length=128)
+    name: Optional[str] = None
 
 
 class StrategyValidateResult(BaseModel):

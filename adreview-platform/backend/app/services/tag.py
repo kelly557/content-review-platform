@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.tag import Tag, TagSource, TagStatus
+from app.models.tag import Tag, TagStatus
 from app.schemas.tag import TagCreate, TagUpdate
 
 
@@ -23,7 +23,6 @@ async def list_tags(
     domain: Optional[str] = None,
     category: Optional[str] = None,
     status: Optional[TagStatus] = None,
-    source: Optional[str] = None,
     jurisdictions: Optional[List[str]] = None,
     industries: Optional[List[str]] = None,
     channels: Optional[List[str]] = None,
@@ -37,8 +36,6 @@ async def list_tags(
         conds.append(Tag.category == category)
     if status:
         conds.append(Tag.status == status)
-    if source:
-        conds.append(Tag.source == source)
     if q:
         conds.append(or_(Tag.name.ilike(f"%{q}%"), Tag.code.ilike(f"%{q}%")))
     if conds:
@@ -95,7 +92,6 @@ async def create_tag(db: AsyncSession, body: TagCreate) -> Tag:
         channels=body.channels,
         knowledge_refs=body.knowledge_refs,
         evidence_refs=body.evidence_refs,
-        source=body.source,
         status=body.status,
         version=1,
     )

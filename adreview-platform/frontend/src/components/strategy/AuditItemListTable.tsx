@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Empty, Space, Table, Tag, Typography } from 'antd'
+import { Empty, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { Link } from 'react-router-dom'
 import { auditItemsApi } from '@/api/auditItems'
-import { servicesApi } from '@/api/services'
-import type { AuditItem, Service } from '@/types/domain'
+import type { AuditItem } from '@/types/domain'
 
 const { Text } = Typography
 
@@ -24,24 +23,17 @@ interface Props {
 export default function AuditItemListTable({ mediaType }: Props) {
   const packageCode = PACKAGE_BY_MEDIA[mediaType] ?? null
   const [items, setItems] = useState<AuditItem[]>([])
-  const [pkg, setPkg] = useState<Service | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!packageCode) {
       setItems([])
-      setPkg(null)
       return
     }
     setLoading(true)
-    Promise.all([
-      auditItemsApi.list(packageCode),
-      servicesApi.list({ size: 200, q: packageCode }),
-    ])
-      .then(([list, svcs]) => {
-        setItems(list)
-        setPkg(svcs.items.find((s) => s.code === packageCode) ?? null)
-      })
+    auditItemsApi
+      .list(packageCode)
+      .then(setItems)
       .finally(() => setLoading(false))
   }, [packageCode])
 
@@ -49,27 +41,17 @@ export default function AuditItemListTable({ mediaType }: Props) {
     {
       title: '名称',
       dataIndex: 'name_cn',
-      width: '25%',
-      render: (v: string, row) => (
-        <Space size={6}>
-          <Text strong style={{ color: '#020617' }}>
-            {v}
-          </Text>
-          <Tag>{row.code}</Tag>
-        </Space>
+      width: '35%',
+      render: (v: string) => (
+        <Text strong style={{ color: '#020617' }}>
+          {v}
+        </Text>
       ),
-    },
-    {
-      title: '场景',
-      dataIndex: 'package_code',
-      width: '25%',
-      render: () =>
-        pkg ? <Text>{pkg.name}</Text> : <Text type="secondary">—</Text>,
     },
     {
       title: '更新时间',
       dataIndex: 'updated_at',
-      width: '30%',
+      width: '35%',
       render: (v: string | null) =>
         v ? (
           <Text style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -81,7 +63,7 @@ export default function AuditItemListTable({ mediaType }: Props) {
     },
     {
       title: '操作',
-      width: '20%',
+      width: '30%',
       render: (_, row) => (
         <Link to={`/strategies/rules-by-type/${mediaType}/${row.id}`}>
           配置
@@ -107,6 +89,7 @@ export default function AuditItemListTable({ mediaType }: Props) {
       dataSource={items}
       columns={columns}
       pagination={false}
+      scroll={{ x: true }}
       locale={{
         emptyText: (
           <Empty

@@ -107,3 +107,45 @@ def save_image_upload(
 def export_path(name: str) -> Path:
     settings.ensure_storage_dirs()
     return settings.storage_root / "exports" / name
+
+
+def _safe_knowledge_key(doc_id: str, original_filename: str) -> str:
+    ext = Path(original_filename).suffix.lower()
+    if not ext:
+        ext = ".bin"
+    stamp = datetime.utcnow().strftime("%Y%m")
+    return f"knowledge/{stamp}/{doc_id}{ext}"
+
+
+def save_knowledge_upload(
+    doc_id: str, original_filename: str, source: BinaryIO
+) -> tuple[str, int, str]:
+    """Save a knowledge base document (PDF/TXT/MD) to the knowledge namespace.
+
+    Returns (storage_key, size, sha256).
+    """
+    settings.ensure_storage_dirs()
+    if not original_filename:
+        raise StorageError("filename required")
+
+    sha = hashlib.sha256()
+    size = 0
+    buf = bytearray()
+    while True:
+        chunk = source.read(1024 * 1024)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        sha.update(chunk)
+        size += len(chunk)
+    if size == 0:
+        raise StorageError("empty file")
+    if size > settings.storage_max_upload_mb * 1024 * 1024:
+        raise StorageError(f"file exceeds max size {settings.storage_max_upload_mb}MB")
+
+    key = _safe_knowledge_key(doc_id, original_filename)
+    dest_path = settings.storage_root / "uploads" / key
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    with dest_path.open("wb") as out:
+        out.write(bytes(buf))
+    return key, size, sha.hexdigest()

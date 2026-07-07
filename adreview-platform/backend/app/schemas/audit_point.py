@@ -29,8 +29,6 @@ class AuditPointOut(ORMBase):
 
 class AuditPointCreate(BaseModel):
     item_id: int
-    code: str = Field(min_length=1, max_length=64)
-    label: str = Field(min_length=1, max_length=128)
     label_cn: str = Field(min_length=1, max_length=64)
     description: Optional[str] = None
     medium_threshold: float = Field(default=60.0, ge=0, le=100)

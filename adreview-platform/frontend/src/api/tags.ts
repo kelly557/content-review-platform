@@ -5,7 +5,6 @@ import type {
   TagCategory,
   TagCreate,
   TagDomain,
-  TagSource,
   TagStatus,
   TagSummary,
   TagUpdate,
@@ -17,7 +16,6 @@ export interface TagListParams {
   domain?: TagDomain
   category?: TagCategory
   status?: TagStatus
-  source?: TagSource
   jurisdiction?: string[]
   industry?: string[]
   channel?: string[]

@@ -50,10 +50,11 @@ def test_default_strategy_is_seeded_immutably():
     assert body.scope == StrategyScope.DEFAULT  # would be rejected by endpoint
 
 
-def test_priority_labels_have_four_levels():
-    """UX invariant: page labels must align with backend accepted range."""
+def test_priority_in_full_range():
+    """UX invariant: page labels must cover backend accepted range 0-10."""
     from app.schemas.strategy import StrategyCreate
     from app.models.strategy import StrategyScope
 
-    body = StrategyCreate(name="x", scope=StrategyScope.GENERAL, priority=2)
-    assert body.priority == 2
+    for p in range(11):
+        body = StrategyCreate(name=f"x{p}", scope=StrategyScope.GENERAL, priority=p)
+        assert body.priority == p

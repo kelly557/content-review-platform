@@ -15,7 +15,7 @@ from app.models.user import User, UserRole
 from app.models.workflow import WorkflowTemplate
 from app.models.detection_rule import DetectionRule
 from app.models.human_review_config import HumanReviewConfig
-from app.models.tag import Tag, TagCategory, TagDomain, TagSource, TagStatus
+from app.models.tag import Tag, TagCategory, TagDomain, TagStatus
 from app.models.audit_item import AuditItem
 from app.models.audit_point import AuditPoint, AuditPointRisk
 
@@ -448,7 +448,6 @@ DEFAULT_AUDIT_POINTS: list[tuple[str, str, str, str, str, float, float, str]] = 
     ("ad_compliance_detection_pro", "pt_drainage",   "pt_toSocialNetwork_tii_lib","词库社交平台引流",        "词库用于命中返回该行标签",            55.0, 85.0, "高风险"),
     # ---------------- image_audit_pro ----------------
     ("image_audit_pro", "img_politics",   "politics_general",     "涉政通用",       "涉政通用：政治人物、政治事件、政治符号",          60.0, 85.0, "高风险"),
-    ("image_audit_pro", "img_politics",   "politics_general_lib", "自定义涉政图库", "自定义涉政图库：词库用于命中返回该行标签",        55.0, 80.0, "高风险"),
     ("image_audit_pro", "img_porn",       "porn_general",         "涉黄通用",       "涉黄通用：裸露、色情、低俗",                       55.0, 85.0, "高风险"),
     ("image_audit_pro", "img_porn",       "porn_general_tii",     "图中色情 OCR",   "图中文字色情 OCR 识别",                            55.0, 80.0, "中风险"),
     ("image_audit_pro", "img_porn",       "porn_general_tii_lib", "词库色情关键词", "词库色情 OCR 关键词",                              50.0, 75.0, "中风险"),
@@ -739,7 +738,6 @@ async def _upsert_tags(db: AsyncSession) -> None:
                 jurisdictions=["cn"],
                 industries=[],
                 channels=[],
-                source=TagSource.PLATFORM,
                 status=TagStatus.ACTIVE,
                 version=1,
             )

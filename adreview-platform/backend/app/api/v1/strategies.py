@@ -7,18 +7,21 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require_roles
 from app.db.session import get_db
+from app.models.audit_item import AuditItem
 from app.models.strategy import Strategy, StrategyScope
+from app.models.strategy_item import StrategyItem
 from app.models.user import User
 from app.models.detection_rule import DetectionRule
 from app.schemas.common import Page
 from app.schemas.strategy import (
     StrategyCreate,
     StrategyDuplicateRequest,
+    StrategyItemRef,
     StrategyOut,
     StrategyUpdate,
     StrategyValidateResult,
@@ -30,9 +33,65 @@ from app.services import audit
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 
 
-def _ensure_code_unique_or_409(db: AsyncSession, code: str, exclude_id: Optional[int] = None) -> None:
-    """Caller must `await` after constructing the query — kept sync to keep call-site simple."""
-    raise NotImplementedError
+MEDIA_BY_PACKAGE = {
+    "image_audit_pro": "image",
+    "text_audit_pro": "text",
+    "audio_audit_pro": "audio",
+    "document_audit_pro": "doc",
+    "video_audit_pro": "video",
+}
+
+
+async def _load_enabled_items(
+    db: AsyncSession, strategy_id: int
+) -> list[StrategyItemRef]:
+    """Load enabled audit items for a strategy. Returns [] on any failure."""
+    try:
+        rows = await db.execute(
+            select(StrategyItem).where(StrategyItem.strategy_id == strategy_id)
+        )
+    except Exception:
+        return []
+    out: list[StrategyItemRef] = []
+    for r in rows.scalars():
+        out.append(
+            StrategyItemRef(
+                media_type=r.media_type,
+                item_id=r.item_id,
+                is_enabled=r.is_enabled,
+            )
+        )
+    return out
+
+
+async def _replace_enabled_items(
+    db: AsyncSession,
+    strategy_id: int,
+    enabled_items: list[StrategyItemRef],
+) -> None:
+    await db.execute(
+        delete(StrategyItem).where(StrategyItem.strategy_id == strategy_id)
+    )
+    seen: set[tuple[str, int]] = set()
+    for ref in enabled_items:
+        key = (ref.media_type, ref.item_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        item = await db.get(AuditItem, ref.item_id)
+        if not item:
+            continue
+        expected_media = MEDIA_BY_PACKAGE.get(item.package_code)
+        if expected_media and expected_media != ref.media_type:
+            ref_media = ref.media_type
+        db.add(
+            StrategyItem(
+                strategy_id=strategy_id,
+                media_type=ref.media_type,
+                item_id=ref.item_id,
+                is_enabled=ref.is_enabled,
+            )
+        )
 
 
 async def _next_code(db: AsyncSession) -> str:
@@ -66,8 +125,12 @@ async def list_strategies(
     stmt = stmt.order_by(Strategy.scope.asc(), Strategy.priority.asc(), Strategy.id.asc())
     stmt = stmt.offset((page - 1) * size).limit(size)
     result = await db.execute(stmt)
-    items = [StrategyOut.model_validate(s) for s in result.scalars()]
-    return Page(items=items, total=total, page=page, size=size)
+    items_out: list[StrategyOut] = []
+    for s in result.scalars():
+        so = StrategyOut.model_validate(s)
+        so.enabled_items = await _load_enabled_items(db, s.id)
+        items_out.append(so)
+    return Page(items=items_out, total=total, page=page, size=size)
 
 
 @router.post("", response_model=StrategyOut, status_code=status.HTTP_201_CREATED)
@@ -110,10 +173,18 @@ async def create_strategy(
     )
     db.add(strategy)
     await db.flush()
+
+    if body.enabled_items:
+        await _replace_enabled_items(db, strategy.id, body.enabled_items)
+
     await audit.write_audit(
         db, actor=user, action="strategy.create",
         entity_type="strategy", entity_id=strategy.id,
-        payload={"code": strategy.code, "scope": strategy.scope.value},
+        payload={
+            "code": strategy.code,
+            "scope": strategy.scope.value,
+            "enabled_item_count": len(body.enabled_items or []),
+        },
     )
     await db.commit()
     return strategy
@@ -128,7 +199,9 @@ async def get_strategy(
     strategy = await db.get(Strategy, strategy_id)
     if not strategy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="策略不存在")
-    return strategy
+    so = StrategyOut.model_validate(strategy)
+    so.enabled_items = await _load_enabled_items(db, strategy.id)
+    return so
 
 
 @router.patch("/{strategy_id}", response_model=StrategyOut)
@@ -172,8 +245,11 @@ async def update_strategy(
         merged["services"] = list(body.services)
         strategy.definition = merged
 
+    if body.enabled_items is not None and not is_default:
+        await _replace_enabled_items(db, strategy.id, body.enabled_items)
+
     await db.flush()
-    await db.refresh(strategy)
+    strategy.enabled_items = await _load_enabled_items(db, strategy.id)
     await audit.write_audit(
         db, actor=user, action="strategy.update",
         entity_type="strategy", entity_id=strategy.id,
@@ -234,12 +310,18 @@ async def duplicate_strategy(
     )
     db.add(dup)
     await db.flush()
+
+    src_items = await _load_enabled_items(db, src.id)
+    if src_items:
+        await _replace_enabled_items(db, dup.id, src_items)
+
     await audit.write_audit(
         db, actor=user, action="strategy.duplicate",
         entity_type="strategy", entity_id=dup.id,
         payload={"source_id": src.id, "new_code": new_code},
     )
     await db.commit()
+    dup.enabled_items = await _load_enabled_items(db, dup.id)
     return dup
 
 
@@ -335,7 +417,7 @@ async def update_strategy_rule_config(
         }
     strategy.service_config = svc_config
     await db.flush()
-    await db.refresh(strategy)
+    strategy.enabled_items = await _load_enabled_items(db, strategy.id)
     await audit.write_audit(
         db, actor=user, action="strategy.rule_config.update",
         entity_type="strategy", entity_id=strategy.id,
@@ -366,7 +448,7 @@ async def import_rule_config(
 
     strategy.service_config = src.service_config or {}
     await db.flush()
-    await db.refresh(strategy)
+    strategy.enabled_items = await _load_enabled_items(db, strategy.id)
     await audit.write_audit(
         db, actor=user, action="strategy.rule_config.import",
         entity_type="strategy", entity_id=strategy.id,

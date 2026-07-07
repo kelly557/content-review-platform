@@ -11,9 +11,7 @@ import {
   Modal,
   App,
   Empty,
-  Dropdown,
   Typography,
-  type MenuProps,
   type TableColumnsType,
 } from 'antd'
 import {
@@ -26,13 +24,13 @@ import {
   DeleteOutlined,
   EditOutlined,
   CheckOutlined,
-  AppstoreOutlined,
 } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { strategiesApi } from '@/api/strategies'
 import { useAuthStore } from '@/store'
 import {
+  STRATEGY_PRIORITY_LABELS,
   strategyPriorityLabel,
   type Strategy,
   type StrategyValidateResult,
@@ -133,6 +131,7 @@ export default function StrategyListPage() {
       message.error(detail || '验证失败')
     }
   }
+  void onValidate
 
   const onDuplicate = async (s: Strategy) => {
     try {
@@ -267,72 +266,66 @@ export default function StrategyListPage() {
       {
         title: '优先级',
         dataIndex: 'priority',
-        width: '6%',
-        render: (p: number) => {
-          const color = p === 0 ? 'red' : p === 1 ? 'volcano' : p === 2 ? 'gold' : 'default'
-          return <Tag color={color}>{strategyPriorityLabel(p)}</Tag>
+        width: '8%',
+        render: (p: number, record) => {
+          const isDefault = record.scope === 'default'
+          if (isDefault || !isAdmin) {
+            const color = p === 0 ? 'red' : p === 1 ? 'volcano' : p === 2 ? 'gold' : 'default'
+            return <Tag color={color}>{strategyPriorityLabel(p)}</Tag>
+          }
+          return (
+            <Select
+              size="small"
+              value={p}
+              style={{ width: 110 }}
+              onChange={async (v: number) => {
+                try {
+                  await strategiesApi.update(record.id, { priority: v })
+                  message.success('优先级已更新')
+                  fetch()
+                } catch (e: unknown) {
+                  const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+                  message.error(detail || '更新失败')
+                }
+              }}
+              options={Object.entries(STRATEGY_PRIORITY_LABELS).map(([k, label]) => ({
+                value: Number(k),
+                label,
+              }))}
+            />
+          )
         },
       },
       {
         title: '操作',
-        width: '14%',
+        width: '11%',
         fixed: 'right',
         render: (_: unknown, record) => {
           const isDefault = record.scope === 'default'
-          const moreItems: NonNullable<MenuProps['items']> = []
-          if (!isDefault) {
-            moreItems.push({
-              key: 'by-type',
-              icon: <AppstoreOutlined />,
-              label: '按类型管理',
-              onClick: () =>
-                navigate(`/strategies/rules-by-type/image?strategy=${record.id}`),
-            })
-          }
-          if (!isDefault && isAdmin) {
-            moreItems.push({
-              key: 'duplicate',
-              icon: <CopyOutlined />,
-              label: '复制',
-              onClick: () => onDuplicate(record),
-            })
-          }
-          if (!isDefault && isAdmin) {
-            moreItems.push({ type: 'divider' })
-            moreItems.push({
-              key: 'delete',
-              icon: <DeleteOutlined />,
-              label: <span style={{ color: '#DC2626' }}>删除</span>,
-              onClick: () => {
-                Modal.confirm({
-                  title: '确认删除该策略？',
-                  content: '删除后无法撤销。',
-                  okText: '删除',
-                  okType: 'danger',
-                  cancelText: '取消',
-                  onOk: () => onDelete(record),
-                })
-              },
-            })
-          }
+          if (isDefault || !isAdmin) return null
           return (
             <Space size={12} wrap>
-              <a onClick={() => onValidate(record)}>验证</a>
-              {!isDefault && isAdmin && (
-                <a onClick={() => navigate(`/strategies/${record.id}/edit`)}>
-                  <EditOutlined /> 编辑
-                </a>
-              )}
-              {!isDefault && (
-                <a onClick={() => navigate(`/strategies/${record.id}/rule-config`)}>
-                  规则配置
-                </a>
-              )}
-              {moreItems.length > 0 && (
-                <Dropdown menu={{ items: moreItems }} trigger={['click']}>
-                  <a>更多 ▾</a>
-                </Dropdown>
-              )}
+              <a onClick={() => navigate(`/strategies/${record.id}/edit`)}>
+                <EditOutlined /> 编辑
+              </a>
+              <a onClick={() => onDuplicate(record)}>
+                <CopyOutlined /> 复制
+              </a>
+              <a
+                style={{ color: '#DC2626' }}
+                onClick={() => {
+                  Modal.confirm({
+                    title: '确认删除该策略？',
+                    content: '删除后无法撤销。',
+                    okText: '删除',
+                    okType: 'danger',
+                    cancelText: '取消',
+                    onOk: () => onDelete(record),
+                  })
+                }}
+              >
+                <DeleteOutlined /> 删除
+              </a>
             </Space>
           )
         },

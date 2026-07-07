@@ -20,8 +20,6 @@ const { TextArea } = Input
 const { Title } = Typography
 
 interface PointForm {
-  code: string
-  label: string
   label_cn: string
   description?: string
   medium_threshold: number
@@ -60,8 +58,6 @@ export default function CreateAuditPointPage() {
     try {
       await auditPointsApi.create(code, {
         item_id: Number(itemId),
-        code: values.code,
-        label: values.label,
         label_cn: values.label_cn,
         description: values.description,
         medium_threshold: values.medium_threshold,
@@ -93,26 +89,6 @@ export default function CreateAuditPointPage() {
             rules={[{ required: true, message: '请输入名称' }]}
           >
             <Input placeholder="例如：涉政（严格模式）" />
-          </Form.Item>
-          <Form.Item
-            name="label"
-            label="label 标识"
-            rules={[
-              { required: true, message: '请输入 label' },
-              { pattern: /^[a-zA-Z][a-zA-Z0-9_]*$/, message: '以字母开头，字母数字下划线' },
-            ]}
-          >
-            <Input placeholder="例如：tx_politics_strict" />
-          </Form.Item>
-          <Form.Item
-            name="code"
-            label="审核点编码（包内唯一）"
-            rules={[
-              { required: true, message: '请输入编码' },
-              { pattern: /^[a-zA-Z][a-zA-Z0-9_]*$/, message: '以字母开头，字母数字下划线' },
-            ]}
-          >
-            <Input placeholder="例如：tx_politics_strict" />
           </Form.Item>
           <Form.Item label="所属审核项">
             <Select
