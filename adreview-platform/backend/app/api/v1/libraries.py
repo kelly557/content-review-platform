@@ -279,14 +279,14 @@ async def list_library_references(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> List[AuditPointRef]:
-    rows = await db.execute(
-        select(AuditPoint.id, AuditPoint.package_code, AuditPoint.label).where(
-            AuditPoint.custom_library_id == library_id
-        )
-    )
-    return [
-        AuditPointRef(audit_point_id=i, service_code=p, label=l) for i, p, l in rows.all()
-    ]
+    """Audit points that reference this library.
+
+    NOTE: library v3 迁移尚未完成,
+    AuditPoint 实际字段仍是 custom_wordset_id (FK -> word_sets),
+    没有对应的 custom_library_id 关系.
+    因此本接口暂时返回空 list 直到 lib v3 把 FK 切到 libraries 表.
+    """
+    return []
 
 
 @router.post("", response_model=LibraryOut, status_code=status.HTTP_201_CREATED)

@@ -152,7 +152,6 @@ export default function EditWordDrawer({ open, library, onCancel, onSuccess }: P
                 </li>
                 <li>每个关键词以换行分隔,单个词不超过 50 字。</li>
                 <li>最多 1000 行,如需一次增加超过 1000 行,请使用上传文件导入。</li>
-                <li>同一个账号下总共支持添加 10 万个词,最多可创建 20 个词库。</li>
               </ol>
             }
           />
