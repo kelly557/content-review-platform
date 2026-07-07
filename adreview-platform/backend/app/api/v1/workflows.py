@@ -48,7 +48,7 @@ async def list_templates(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
     prefix: Optional[str] = Query(
-        None, description="按 code 前缀过滤（人审规则用 'hr_'）"
+        None, description="按 code 前缀过滤（人审策略用 'hr_'）"
     ),
     include_inactive: bool = Query(False, description="是否包含已停用模板"),
 ) -> List[WorkflowTemplateOut]:

@@ -44,6 +44,7 @@ class _JSONType(TypeDecorator):
 class LibraryType(str, enum.Enum):
     WORD = "word"
     IMAGE = "image"
+    REPLY = "reply"
 
 
 class Library(Base):

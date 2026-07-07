@@ -218,13 +218,34 @@ async def should_escalate_to_human(
     db: AsyncSession,
     task: ReviewTask,
     force_human_rules: List[str] | None = None,
+    strategy_human_review: Dict[str, Any] | None = None,
 ) -> bool:
-    """Determine if machine review result should escalate to human review."""
+    """Determine if machine review result should escalate to human review.
+
+    决策流程：
+    1. 若显式传入 strategy_human_review（来自 Strategy.definition.human_review），
+       按它决定：(a) is_enabled=False → 不升级；(b) risk_level ∈ risk_levels → 升级；
+       (c) 配置存在但未命中 → 不升级（严格策略语义）。
+    2. 否则走默认行为：高/中风险升级；或 force_human_rules 关键词命中升级。
+    """
     if not task.machine_result:
         return False
 
     risk_level = task.machine_result.get("risk_level", "无风险")
     hits = task.machine_result.get("hits", [])
+
+    if strategy_human_review is not None:
+        if not strategy_human_review.get("is_enabled", False):
+            return False
+        levels = strategy_human_review.get("risk_levels") or []
+        if risk_level in levels:
+            return True
+        if force_human_rules:
+            for hit in hits:
+                label_cn = hit.get("label_cn", "")
+                if any(rule in label_cn for rule in force_human_rules):
+                    return True
+        return False
 
     if risk_level in ["高风险", "中风险"]:
         return True

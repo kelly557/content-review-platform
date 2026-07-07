@@ -52,6 +52,7 @@ async def start_instance(
     force_human_rules: list[str] | None = None,
     task_name: str | None = None,
     skip_machine_review: bool = False,
+    strategy_human_review: dict | None = None,
 ) -> WorkflowInstance:
     definition = template.definition or {}
     stages: list[dict] = definition.get("stages", [])
@@ -64,6 +65,7 @@ async def start_instance(
         template_id=template.id,
         state="running",
         current_stage_key=stages[0]["key"],
+        strategy_human_review=strategy_human_review,
     )
     db.add(instance)
     await db.flush()
@@ -223,7 +225,11 @@ async def _handle_machine_stage_completion(
 
     from app.tasks.machine_review import should_escalate_to_human
 
-    should_escalate = await should_escalate_to_human(db, task)
+    should_escalate = await should_escalate_to_human(
+        db,
+        task,
+        strategy_human_review=getattr(instance, "strategy_human_review", None),
+    )
 
     current_node.status = "approved"
 

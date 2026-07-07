@@ -49,6 +49,11 @@ class WorkflowInstance(Base):
     # state ∈ {running, approved, rejected, withdrawn, cancelled}
     current_stage_key: Mapped[Optional[str]] = mapped_column(String(64))
 
+    # Snapshot of strategy.definition.human_review at instance start time.
+    # Read by should_escalate_to_human to decide machine → human escalation.
+    # Shape: {"is_enabled": bool, "risk_levels": [str], "review_rule_id": int | null}
+    strategy_human_review: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
