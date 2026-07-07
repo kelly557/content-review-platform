@@ -17,8 +17,10 @@ from app.models.strategy import Strategy, StrategyScope
 from app.models.strategy_item import StrategyItem
 from app.models.user import User
 from app.models.detection_rule import DetectionRule
+from app.models.workflow import WorkflowTemplate
 from app.schemas.common import Page
 from app.schemas.strategy import (
+    HumanReviewSettings,
     StrategyCreate,
     StrategyDuplicateRequest,
     StrategyItemRef,
@@ -38,6 +40,57 @@ MEDIA_BY_PACKAGE = {
     "document_audit_pro": "doc",
     "video_audit_pro": "video",
 }
+
+
+def _merge_human_review(definition: dict, hr: HumanReviewSettings) -> dict:
+    """把 HumanReviewSettings 写入 definition.human_review 键。"""
+    merged = dict(definition or {})
+    merged["human_review"] = hr.normalized().model_dump()
+    return merged
+
+
+async def _validate_review_rule(db: AsyncSession, review_rule_id: int | None) -> None:
+    """校验 review_rule_id 存在且 code 以 hr_ 开头。"""
+    if review_rule_id is None:
+        return
+    template = await db.get(WorkflowTemplate, review_rule_id)
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"人工复审模板不存在 (id={review_rule_id})",
+        )
+    if not (template.code or "").startswith("hr_"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="人工复审模板必须以 hr_ 开头",
+        )
+
+
+async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyOut:
+    """Eagerly materialize a Strategy into StrategyOut inside the async session.
+
+    在 commit 之后构造 schema，避免响应序列化阶段触发
+    `MissingGreenlet`（访问 server_default 列 / 时间戳字段会触发 lazy IO）。
+    """
+    await db.refresh(strategy)
+    enabled = await _load_enabled_items(db, strategy.id)
+    data = {
+        "id": strategy.id,
+        "code": strategy.code,
+        "name": strategy.name,
+        "scope": strategy.scope,
+        "description": strategy.description,
+        "is_active": strategy.is_active,
+        "priority": strategy.priority,
+        "effective_from": strategy.effective_from,
+        "effective_until": strategy.effective_until,
+        "definition": strategy.definition or {},
+        "service_config": strategy.service_config or {},
+        "enabled_items": enabled,
+        "created_at": strategy.created_at,
+        "updated_at": strategy.updated_at,
+    }
+    return StrategyOut.model_validate(data)
 
 
 async def _load_enabled_items(
@@ -136,7 +189,7 @@ async def create_strategy(
     body: StrategyCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles("admin")),
-) -> Strategy:
+) -> StrategyOut:
     if body.scope == StrategyScope.DEFAULT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -151,10 +204,13 @@ async def create_strategy(
     else:
         code = await _next_code(db)
 
-    merged_definition = {
-        **(body.definition or {}),
-        "services": list(body.services or []),
-    }
+    hr_settings = HumanReviewSettings.model_validate(
+        (body.definition or {}).get("human_review") or {}
+    )
+    await _validate_review_rule(db, hr_settings.review_rule_id)
+
+    merged_definition = _merge_human_review(body.definition or {}, hr_settings)
+    merged_definition["services"] = list(body.services or [])
 
     strategy = Strategy(
         code=code,
@@ -182,10 +238,11 @@ async def create_strategy(
             "code": strategy.code,
             "scope": strategy.scope.value,
             "enabled_item_count": len(body.enabled_items or []),
+            "human_review_enabled": hr_settings.is_enabled,
         },
     )
     await db.commit()
-    return strategy
+    return await _serialize_strategy(db, strategy)
 
 
 @router.get("/{strategy_id}", response_model=StrategyOut)
@@ -193,13 +250,11 @@ async def get_strategy(
     strategy_id: int,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("admin", "mlr")),
-) -> Strategy:
+) -> StrategyOut:
     strategy = await db.get(Strategy, strategy_id)
     if not strategy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="策略不存在")
-    so = StrategyOut.model_validate(strategy)
-    so.enabled_items = await _load_enabled_items(db, strategy.id)
-    return so
+    return await _serialize_strategy(db, strategy)
 
 
 @router.patch("/{strategy_id}", response_model=StrategyOut)
@@ -208,7 +263,7 @@ async def update_strategy(
     body: StrategyUpdate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles("admin")),
-) -> Strategy:
+) -> StrategyOut:
     strategy = await db.get(Strategy, strategy_id)
     if not strategy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="策略不存在")
@@ -234,7 +289,11 @@ async def update_strategy(
     if body.effective_until is not None:
         strategy.effective_until = body.effective_until
     if body.definition is not None and not is_default:
-        strategy.definition = body.definition
+        hr_settings = HumanReviewSettings.model_validate(
+            (body.definition or {}).get("human_review") or {}
+        )
+        await _validate_review_rule(db, hr_settings.review_rule_id)
+        strategy.definition = _merge_human_review(body.definition or {}, hr_settings)
     if body.service_config is not None and not is_default:
         strategy.service_config = body.service_config
 
@@ -247,14 +306,13 @@ async def update_strategy(
         await _replace_enabled_items(db, strategy.id, body.enabled_items)
 
     await db.flush()
-    strategy.enabled_items = await _load_enabled_items(db, strategy.id)
     await audit.write_audit(
         db, actor=user, action="strategy.update",
         entity_type="strategy", entity_id=strategy.id,
         payload={"fields": list(body.model_dump(exclude_unset=True).keys())},
     )
     await db.commit()
-    return strategy
+    return await _serialize_strategy(db, strategy)
 
 
 @router.delete("/{strategy_id}", status_code=status.HTTP_204_NO_CONTENT)

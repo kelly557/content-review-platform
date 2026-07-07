@@ -7,6 +7,25 @@ from pydantic import BaseModel, Field
 from app.models.strategy import StrategyScope
 from app.schemas.common import ORMBase
 
+VALID_RISK_LEVELS = ("低风险", "中风险", "高风险", "零容忍")
+
+
+class HumanReviewSettings(BaseModel):
+    """策略级别的人工审核配置，存入 strategy.definition.human_review JSONB。"""
+
+    is_enabled: bool = False
+    risk_levels: List[str] = Field(default_factory=list)
+    review_rule_id: Optional[int] = None
+
+    def normalized(self) -> "HumanReviewSettings":
+        """清理后返回：仅保留合法 risk_levels，无意义字段置空。"""
+        levels = [l for l in self.risk_levels if l in VALID_RISK_LEVELS]
+        if not self.is_enabled:
+            return HumanReviewSettings(is_enabled=False, risk_levels=[], review_rule_id=None)
+        return HumanReviewSettings(
+            is_enabled=True, risk_levels=levels, review_rule_id=self.review_rule_id
+        )
+
 
 class StrategyItemRef(BaseModel):
     media_type: str = Field(min_length=1, max_length=16)
