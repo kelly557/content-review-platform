@@ -296,33 +296,36 @@ export default function CreateStrategyForm({
         width: '100%',
       }}
     >
-      <Steps
-        current={step}
-        size="small"
-        responsive
-        items={[
-          { title: '基本信息' },
-          { title: '策略审核规则' },
-          { title: '人审规则' },
-        ]}
-      />
+      <Form
+        form={form}
+        layout="vertical"
+        component={false}
+        requiredMark={(label) => (
+          <span>
+            <span style={{ color: '#DC2626', marginRight: 4 }}>*</span>
+            {label}
+          </span>
+        )}
+        scrollToFirstError
+        validateTrigger={['onBlur', 'onSubmit']}
+      >
+        <Steps
+          current={step}
+          size="small"
+          responsive
+          items={[
+            { title: '基本信息' },
+            { title: '策略审核规则' },
+            { title: '人审规则' },
+          ]}
+        />
 
-      <div style={{ display: step === 0 ? 'block' : 'none' }}>
-        <Form
-          form={form}
-          layout="vertical"
-          requiredMark={(label) => (
-            <span>
-              <span style={{ color: '#DC2626', marginRight: 4 }}>*</span>
-              {label}
-            </span>
-          )}
-          scrollToFirstError
-          validateTrigger={['onBlur', 'onSubmit']}
-        >
+        <div hidden={step !== 0}>
           <Form.Item
             label="策略名称"
             name="name"
+            htmlFor=""
+            initialValue=""
             rules={[
               { required: true, message: '请输入策略名称' },
               { max: 20, message: '不超过 20 个字符' },
@@ -340,6 +343,8 @@ export default function CreateStrategyForm({
           <Form.Item
             name="durationMode"
             label="策略生效时间"
+            htmlFor=""
+            initialValue="always"
             rules={[{ required: true, message: '请选择生效时间' }]}
           >
             <Segmented
@@ -348,74 +353,78 @@ export default function CreateStrategyForm({
                 { label: '指定时间', value: 'range' },
               ]}
               value={durationMode}
-              onChange={(v) => setDurationMode(v as DurationMode)}
+              onChange={(v) => {
+                const next = v as DurationMode
+                setDurationMode(next)
+                form.setFieldValue('durationMode', next)
+              }}
               aria-label="策略生效时间模式"
             />
           </Form.Item>
-          {durationMode === 'range' && (
-            <Form.Item
-              name="range"
-              label="生效时间范围"
-              dependencies={['durationMode']}
-              rules={[
-                {
-                  validator: (_, value: [Dayjs, Dayjs] | undefined) => {
-                    if (durationMode !== 'range') return Promise.resolve()
-                    if (!value || value.length !== 2) {
-                      return Promise.reject(new Error('请选择起止日期'))
-                    }
-                    if (!value[0].isBefore(value[1])) {
-                      return Promise.reject(new Error('起始时间必须早于结束时间'))
-                    }
-                    return Promise.resolve()
-                  },
+
+          <Form.Item
+            name="range"
+            label="生效时间范围"
+            htmlFor=""
+            dependencies={['durationMode']}
+            hidden={durationMode !== 'range'}
+            rules={[
+              {
+                validator: (_, value: [Dayjs, Dayjs] | undefined) => {
+                  if (durationMode !== 'range') return Promise.resolve()
+                  if (!value || value.length !== 2) {
+                    return Promise.reject(new Error('请选择起止日期'))
+                  }
+                  if (!value[0].isBefore(value[1])) {
+                    return Promise.reject(new Error('起始时间必须早于结束时间'))
+                  }
+                  return Promise.resolve()
                 },
-              ]}
-            >
-              <DatePicker.RangePicker
-                showTime={{
-                  format: 'HH:mm',
-                  defaultValue: [dayjs('00:00', 'HH:mm'), dayjs('23:59', 'HH:mm')],
-                }}
-                format="YYYY.MM.DD HH:mm"
-                placeholder={['开始日期', '结束日期']}
-              />
-            </Form.Item>
-          )}
-        </Form>
-      </div>
+              },
+            ]}
+          >
+            <DatePicker.RangePicker
+              showTime={{
+                format: 'HH:mm',
+                defaultValue: [dayjs('00:00', 'HH:mm'), dayjs('23:59', 'HH:mm')],
+              }}
+              format="YYYY.MM.DD HH:mm"
+              placeholder={['开始日期', '结束日期']}
+            />
+          </Form.Item>
+        </div>
 
-      {step === 1 && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 16,
-            width: '100%',
-          }}
-        >
-          <StrategyTypeTabs
-            value={enabledItems}
-            onChange={setEnabledItems}
-          />
-
+        {step === 1 && (
           <div
             style={{
               display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: 8,
+              flexDirection: 'column',
+              gap: 16,
+              width: '100%',
             }}
           >
-            <Text type="secondary">本步合计已选：</Text>
-            <Text strong style={{ color: '#0369A1' }}>
-              {countEnabled(enabledItems)} 项
-            </Text>
-          </div>
-        </div>
-      )}
+            <StrategyTypeTabs
+              value={enabledItems}
+              onChange={setEnabledItems}
+            />
 
-      {step === 2 && (
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <Text type="secondary">本步合计已选：</Text>
+              <Text strong style={{ color: '#0369A1' }}>
+                {countEnabled(enabledItems)} 项
+              </Text>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
         <div
           style={{
             display: 'flex',
@@ -439,15 +448,16 @@ export default function CreateStrategyForm({
           <HumanReviewSettings value={humanReview} onChange={setHumanReview} />
         </div>
       )}
+    </Form>
 
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 12,
-        }}
-      >
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 12,
+      }}
+    >
         <Space wrap>
           <Button
             icon={<ArrowLeftOutlined />}

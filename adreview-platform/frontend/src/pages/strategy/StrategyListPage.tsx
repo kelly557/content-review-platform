@@ -11,7 +11,6 @@ import {
   Modal,
   App,
   Empty,
-  Typography,
   type TableColumnsType,
 } from 'antd'
 import {
@@ -35,8 +34,6 @@ import {
   type Strategy,
   type StrategyValidateResult,
 } from '@/types/domain'
-
-const { Text } = Typography
 
 const DEFAULT_TOOLTIP =
   '默认策略在以下任一情况发生时生效执行：未配置策略；所有策略均未启用；所有策略均未达到生效时间。'
@@ -208,35 +205,10 @@ export default function StrategyListPage() {
               </Space>
             )
           }
+          if (!record.effective_from && !record.effective_until) {
+            return <span style={{ color: '#64748B' }}>长期有效</span>
+          }
           return <span style={{ color: '#020617', fontVariantNumeric: 'tabular-nums' }}>{formatRange(record)}</span>
-        },
-      },
-      {
-        title: '已选规则',
-        dataIndex: 'rule_summary',
-        width: '18%',
-        render: (_: unknown, record) => {
-          const defs = (record.definition ?? {}) as { services?: string[] }
-          const services = Array.isArray(defs.services) ? defs.services : []
-          if (record.scope === 'default') {
-            return (
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                默认策略不可配置
-              </Text>
-            )
-          }
-          if (services.length === 0) {
-            return (
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                <span style={{ color: '#D97706' }}>未配置</span>
-              </Text>
-            )
-          }
-          return (
-            <Space size={4} wrap>
-              <Tag color="blue">{services.length} 项</Tag>
-            </Space>
-          )
         },
       },
       {
