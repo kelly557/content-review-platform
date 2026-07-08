@@ -401,7 +401,6 @@ export interface Strategy {
   scope: StrategyScope
   description: string | null
   is_active: boolean
-  priority: number
   effective_from: string | null
   effective_until: string | null
   definition: Record<string, unknown>
@@ -418,7 +417,6 @@ export interface StrategyCreatePayload {
   scope?: StrategyScope
   description?: string
   is_active?: boolean
-  priority?: number
   effective_from?: string | null
   effective_until?: string | null
   application?: string
@@ -439,7 +437,6 @@ export interface StrategyUpdatePayload {
   name?: string
   description?: string
   is_active?: boolean
-  priority?: number
   effective_from?: string | null
   effective_until?: string | null
   services?: string[]
@@ -453,24 +450,6 @@ export interface StrategyValidateResult {
   ok: boolean
   warnings: string[]
   checked_at: string
-}
-
-export const STRATEGY_PRIORITY_LABELS: Record<number, string> = {
-  0: "P0 紧急",
-  1: "P1 高",
-  2: "P2 中",
-  3: "P3 低",
-  4: "P4 较低",
-  5: "P5 普通",
-  6: "P6 备用",
-  7: "P7 备用",
-  8: "P8 兜底",
-  9: "P9 兜底",
-  10: "P10 最低",
-}
-
-export function strategyPriorityLabel(p: number): string {
-  return STRATEGY_PRIORITY_LABELS[p] ?? `P${p}`
 }
 
 export type ServiceScope = "业务场景" | "特殊场景" | "通用场景" | "AIGC场景" | "百炼场景"

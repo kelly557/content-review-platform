@@ -1,8 +1,11 @@
 """Strategy configuration model.
 
-Represents a review/risk strategy that can be activated based on time window,
-priority, and toggle state. The "default" strategy is a singleton that takes
-effect when no other strategy is active.
+Represents a review/risk strategy. The "default" strategy is a singleton that
+takes effect when no other strategy is active.
+
+注：原 priority 字段已删除（v11 清理过度设计）。该字段从未被 runtime 实际使用，
+且 index `ix_strategy_priority_active` 也是为不存在的"按 priority 选策略"功能
+预先建的索引。一并移除以减少误导。
 """
 from __future__ import annotations
 
@@ -10,7 +13,7 @@ import enum
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,7 +37,6 @@ class Strategy(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     effective_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     effective_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -49,7 +51,3 @@ class Strategy(Base):
     )
 
     creator = relationship("User", foreign_keys=[created_by_id])
-
-    __table_args__ = (
-        Index("ix_strategy_priority_active", "priority", "is_active"),
-    )

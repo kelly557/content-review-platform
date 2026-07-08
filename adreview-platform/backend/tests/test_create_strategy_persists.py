@@ -23,7 +23,6 @@ def _make_strategy_mock(**overrides) -> MagicMock:
     m.scope = overrides.get("scope", "general")
     m.description = overrides.get("description", None)
     m.is_active = overrides.get("is_active", True)
-    m.priority = overrides.get("priority", 1)
     m.effective_from = overrides.get("effective_from", None)
     m.effective_until = overrides.get("effective_until", None)
     m.definition = overrides.get("definition", {})
@@ -66,7 +65,6 @@ async def test_strategy_create_calls_commit():
         name="test-commit",
         services=["text_audit_pro"],
         is_active=True,
-        priority=1,
     )
 
     # Call handler — accept any schema-validation failure from mocks

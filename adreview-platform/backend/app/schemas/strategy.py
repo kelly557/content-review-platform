@@ -66,7 +66,6 @@ class StrategyOut(ORMBase):
     scope: StrategyScope
     description: Optional[str]
     is_active: bool
-    priority: int
     effective_from: Optional[datetime]
     effective_until: Optional[datetime]
     definition: Dict[str, Any] = Field(default_factory=dict)
@@ -83,7 +82,6 @@ class StrategyCreate(BaseModel):
     scope: StrategyScope = StrategyScope.GENERAL
     description: Optional[str] = None
     is_active: bool = True
-    priority: int = Field(default=1, ge=0, le=10)
     effective_from: Optional[datetime] = None
     effective_until: Optional[datetime] = None
     services: List[str] = Field(default_factory=list)
@@ -97,7 +95,6 @@ class StrategyUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     description: Optional[str] = None
     is_active: Optional[bool] = None
-    priority: Optional[int] = Field(default=None, ge=0, le=10)
     effective_from: Optional[datetime] = None
     effective_until: Optional[datetime] = None
     services: Optional[List[str]] = None

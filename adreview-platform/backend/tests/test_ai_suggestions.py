@@ -143,18 +143,29 @@ def test_suggest_action_sensitive_s0_approved():
     ) == "approved"
 
 
-def test_suggest_action_low_approved_by_default():
+def test_suggest_action_low_review_when_human_enabled():
+    """v10 策略级优先：低风险 + 人审开 → review（无视 recall_mode）。"""
     assert _suggest_action_for(
         RiskLevel.LOW.value, SensitiveLevel.S0.value,
         human_enabled=True, recall_mode=False,
-    ) == "approved"
+    ) == "review"
 
 
-def test_suggest_action_low_review_in_recall_mode():
+def test_suggest_action_low_review_when_human_enabled_recall_true():
+    """v10 策略级优先：低风险 + 人审开 + recall=true → review（结果一致）。"""
     assert _suggest_action_for(
         RiskLevel.LOW.value, SensitiveLevel.S0.value,
         human_enabled=True, recall_mode=True,
     ) == "review"
+
+
+def test_suggest_action_low_approved_when_human_disabled():
+    """v10 策略级优先：低风险 + 人审关 → approved（无视 recall_mode）。"""
+    for recall in (False, True):
+        assert _suggest_action_for(
+            RiskLevel.LOW.value, SensitiveLevel.S0.value,
+            human_enabled=False, recall_mode=recall,
+        ) == "approved"
 
 
 def test_suggest_action_none_always_approved():

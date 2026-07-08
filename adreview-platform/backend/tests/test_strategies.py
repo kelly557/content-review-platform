@@ -50,11 +50,12 @@ def test_default_strategy_is_seeded_immutably():
     assert body.scope == StrategyScope.DEFAULT  # would be rejected by endpoint
 
 
-def test_priority_in_full_range():
-    """UX invariant: page labels must cover backend accepted range 0-10."""
+def test_strategy_create_no_priority_field():
+    """v11: priority 字段已删除。StrategyCreate 不再含 priority。"""
     from app.schemas.strategy import StrategyCreate
     from app.models.strategy import StrategyScope
 
-    for p in range(11):
-        body = StrategyCreate(name=f"x{p}", scope=StrategyScope.GENERAL, priority=p)
-        assert body.priority == p
+    body = StrategyCreate(name="x", scope=StrategyScope.GENERAL)
+    # 类级别的 model_fields 才是合法访问点
+    assert "priority" not in StrategyCreate.model_fields
+    assert "priority" not in body.model_dump()
