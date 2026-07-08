@@ -681,7 +681,7 @@ async def _upsert_audit_points(db: AsyncSession) -> int:
             row.item_id = item_id
             row.label = point_code
             row.label_cn = label_cn
-            row.description = scope_text
+            row.description = None
             row.scope_text = scope_text
             row.medium_threshold = medium
             row.high_threshold = high
@@ -695,7 +695,7 @@ async def _upsert_audit_points(db: AsyncSession) -> int:
                     code=point_code,
                     label=point_code,
                     label_cn=label_cn,
-                    description=scope_text,
+                    description=None,
                     scope_text=scope_text,
                     medium_threshold=medium,
                     high_threshold=high,
