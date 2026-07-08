@@ -99,7 +99,6 @@ async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyO
         "scope": strategy.scope,
         "description": strategy.description,
         "is_active": strategy.is_active,
-        "priority": strategy.priority,
         "effective_from": strategy.effective_from,
         "effective_until": strategy.effective_until,
         "definition": definition,
@@ -316,7 +315,7 @@ async def list_strategies(
         stmt = stmt.where(and_(*conditions))
 
     total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    stmt = stmt.order_by(Strategy.scope.asc(), Strategy.priority.asc(), Strategy.id.asc())
+    stmt = stmt.order_by(Strategy.scope.asc(), Strategy.id.asc())
     stmt = stmt.offset((page - 1) * size).limit(size)
     result = await db.execute(stmt)
     items_out: list[StrategyOut] = []
@@ -362,7 +361,6 @@ async def create_strategy(
         scope=body.scope,
         description=body.description,
         is_active=body.is_active,
-        priority=body.priority,
         effective_from=body.effective_from,
         effective_until=body.effective_until,
         definition=merged_definition,
@@ -431,8 +429,6 @@ async def update_strategy(
         strategy.description = body.description
     if body.is_active is not None:
         strategy.is_active = body.is_active
-    if body.priority is not None:
-        strategy.priority = body.priority
     if body.effective_from is not None:
         strategy.effective_from = body.effective_from
     if body.effective_until is not None:
@@ -510,7 +506,6 @@ async def duplicate_strategy(
         scope=src.scope,
         description=src.description,
         is_active=False,
-        priority=src.priority,
         effective_from=src.effective_from,
         effective_until=src.effective_until,
         definition=src.definition or {},
@@ -551,19 +546,6 @@ async def validate_strategy(
     if strategy.effective_from and strategy.effective_until:
         if strategy.effective_from >= strategy.effective_until:
             warnings.append("生效起始时间晚于结束时间")
-
-    if strategy.scope != StrategyScope.DEFAULT:
-        same_priority = await db.execute(
-            select(Strategy).where(
-                Strategy.priority == strategy.priority,
-                Strategy.scope == StrategyScope.GENERAL,
-                Strategy.id != strategy.id,
-                Strategy.is_active.is_(True),
-            )
-        )
-        peers = list(same_priority.scalars())
-        if peers:
-            warnings.append(f"同优先级 P{strategy.priority} 还有 {len(peers)} 个其他启用策略，可能产生匹配歧义")
 
     return StrategyValidateResult(
         ok=True,

@@ -29,8 +29,6 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { strategiesApi } from '@/api/strategies'
 import { useAuthStore } from '@/store'
 import {
-  STRATEGY_PRIORITY_LABELS,
-  strategyPriorityLabel,
   type Strategy,
   type StrategyValidateResult,
 } from '@/types/domain'
@@ -234,39 +232,6 @@ export default function StrategyListPage() {
           ) : (
             <span style={{ color: '#94A3B8' }}>—</span>
           ),
-      },
-      {
-        title: '优先级',
-        dataIndex: 'priority',
-        width: '8%',
-        render: (p: number, record) => {
-          const isDefault = record.scope === 'default'
-          if (isDefault || !isAdmin) {
-            const color = p === 0 ? 'red' : p === 1 ? 'volcano' : p === 2 ? 'gold' : 'default'
-            return <Tag color={color}>{strategyPriorityLabel(p)}</Tag>
-          }
-          return (
-            <Select
-              size="small"
-              value={p}
-              style={{ width: 110 }}
-              onChange={async (v: number) => {
-                try {
-                  await strategiesApi.update(record.id, { priority: v })
-                  message.success('优先级已更新')
-                  fetch()
-                } catch (e: unknown) {
-                  const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-                  message.error(detail || '更新失败')
-                }
-              }}
-              options={Object.entries(STRATEGY_PRIORITY_LABELS).map(([k, label]) => ({
-                value: Number(k),
-                label,
-              }))}
-            />
-          )
-        },
       },
       {
         title: '操作',
