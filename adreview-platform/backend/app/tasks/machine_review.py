@@ -385,16 +385,21 @@ def _suggest_action_for(
     risk_level: str,
     sensitive_level: str,
     human_enabled: bool,
-    recall_mode: bool,
+    recall_mode: bool,  # noqa: ARG001  保留签名兼容，不再参与决策
 ) -> str:
-    """决策矩阵（5 risk × 4 sensitive × 2 human × 2 recall = 80 组合）。
+    """决策矩阵（5 risk × 4 sensitive × 2 human = 40 组合）。
+
+    策略级优先：升级人审的判定完全由策略级 risk_levels / sensitive_levels 决定
+    （见 should_escalate_to_human），本函数只决定机审的 auto_* 动作，
+    **不再读取 recall_mode**。``recall_mode`` 参数保留以保持调用方签名兼容。
 
     核心规则：
       - 高风险 / 中风险 → 人审开 → review；人审关 → rejected（不放行）
-      - 敏感 + S3 / S2   → 人审开+召回 → review；其他 → rejected（不放行）
-      - 敏感 + S1        → desensitize（脱敏放行，无视人审/召回）
+      - 敏感 + S3 / S2   → 人审开 → review；人审关 → rejected
+      - 敏感 + S1        → desensitize（脱敏放行，无视人审）
       - 敏感 + S0        → approved（没检出敏感内容，放行）
-      - 低风险 / 无风险  → 人审开+召回 → review；其他 → approved
+      - 低风险           → 人审开 → review；人审关 → approved
+      - 无风险           → approved
     """
     if risk_level == RiskLevel.HIGH.value:
         return (
@@ -414,7 +419,7 @@ def _suggest_action_for(
         if sensitive_level in (SensitiveLevel.S3.value, SensitiveLevel.S2.value):
             return (
                 SUGGESTED_ACTION_REVIEW
-                if (human_enabled and recall_mode)
+                if human_enabled
                 else SUGGESTED_ACTION_REJECTED
             )
         if sensitive_level == SensitiveLevel.S1.value:
@@ -425,7 +430,7 @@ def _suggest_action_for(
     if risk_level == RiskLevel.LOW.value:
         return (
             SUGGESTED_ACTION_REVIEW
-            if (human_enabled and recall_mode)
+            if human_enabled
             else SUGGESTED_ACTION_APPROVED
         )
 
@@ -452,28 +457,48 @@ async def should_escalate_to_human(
        (a) is_enabled=False → 不升级人审，由 workflow_engine 按
            machine_result.suggested_action 决定 auto_approve /
            auto_reject / auto_observe / auto_desensitize
-       (b) risk_level ∈ risk_levels → 升级人审，人审结果决定最终
-       (c) 配置存在但未命中 → 不升级人审，走 (a)
+       (b) risk_level ∈ risk_levels → 升级人审（与「召回模式」无关）
+       (c) risk_level == "敏感" 且 sensitive_level ∈ sensitive_levels
+           且 sensitive_level != "S1" → 升级人审
+           （S1 永远走脱敏放行，由 _suggest_action_for 决定，不升级）
+           （S2/S3 真正升级还需 service 召回模式开启，由 _suggest_action_for 决定）
+       (d) force_human_rules 关键词命中 → 仍升级
+       (e) 都不命中 → 不升级人审，走 (a)
 
     2. 否则（理论不可达：strategies API 总写入 definition.human_review，
        所以分支 2 在策略创建/编辑流程中实际不会被触发）
        走默认行为：高/中风险升级；force_human_rules 关键词命中升级。
 
     注意：auto_* 动作的拆分见 workflow_engine._handle_machine_stage_completion
-    和 machine_review._suggest_action_for。
+    和 machine_review._suggest_action_for。``recall_mode`` 实际动作切换由
+    _suggest_action_for 负责；本函数只负责"是否升级"的策略级判定。
     """
     if not task.machine_result:
         return False
 
     risk_level = task.machine_result.get("risk_level", "无风险")
+    sensitive_level = task.machine_result.get("sensitive_level", "S0")
     hits = task.machine_result.get("hits", [])
 
     if strategy_human_review is not None:
         if not strategy_human_review.get("is_enabled", False):
             return False
         levels = strategy_human_review.get("risk_levels") or []
+        sensitive_levels = strategy_human_review.get("sensitive_levels") or []
+
+        # (b) 风险等级命中
         if risk_level in levels:
             return True
+
+        # (c) 「敏感」档位 + 敏感等级命中（排除永远脱敏的 S1）
+        if (
+            risk_level == RiskLevel.SENSITIVE.value
+            and sensitive_level in sensitive_levels
+            and sensitive_level != SensitiveLevel.S1.value
+        ):
+            return True
+
+        # (d) force_human_rules 关键词命中
         if force_human_rules:
             for hit in hits:
                 label_cn = hit.get("label_cn", "")

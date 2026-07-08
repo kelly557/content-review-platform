@@ -26,17 +26,20 @@ from app.tasks.machine_review import _suggest_action_for
 
 
 def _expected(risk, sensitive, human, recall):
-    """与 _suggest_action_for v9 实现严格对齐的期望值。"""
+    """与 _suggest_action_for v10 实现严格对齐的期望值。
+
+    v10：策略级优先 — recall_mode 不再参与决策，参数保留仅为签名兼容。
+    """
     if risk in (RiskLevel.HIGH.value, RiskLevel.MEDIUM.value):
         return "review" if human else "rejected"
     if risk == RiskLevel.SENSITIVE.value:
         if sensitive in (SensitiveLevel.S3.value, SensitiveLevel.S2.value):
-            return "review" if (human and recall) else "rejected"
+            return "review" if human else "rejected"
         if sensitive == SensitiveLevel.S1.value:
             return "desensitize"
         return "approved"  # S0
     if risk == RiskLevel.LOW.value:
-        return "review" if (human and recall) else "approved"
+        return "review" if human else "approved"
     return "approved"  # NONE
 
 
@@ -67,6 +70,102 @@ def test_suggest_action_matrix(risk, sensitive, human_enabled, recall_mode):
         f"human={human_enabled}, recall={recall_mode} "
         f"expected {expected!r} got {actual!r}"
     )
+
+
+# ── 策略级优先：recall_mode 不再阻塞升级（v10 关键 case） ─────────────────
+
+
+@pytest.mark.parametrize("recall_mode", [False, True])
+def test_low_risk_strategy_priority_overrides_recall_mode(recall_mode: bool):
+    """低风险 + 人审开 → review（无视 service recall_mode）。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    actual = _suggest_action_for(
+        RiskLevel.LOW.value,
+        SensitiveLevel.S0.value,
+        human_enabled=True,
+        recall_mode=recall_mode,
+    )
+    assert actual == "review", (
+        f"低风险 + 人审开 + recall={recall_mode} 必须升级人审，实际={actual}"
+    )
+
+
+@pytest.mark.parametrize("recall_mode", [False, True])
+def test_sensitive_s2_strategy_priority_overrides_recall_mode(recall_mode: bool):
+    """敏感 S2 + 人审开 → review（无视 service recall_mode）。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    actual = _suggest_action_for(
+        RiskLevel.SENSITIVE.value,
+        SensitiveLevel.S2.value,
+        human_enabled=True,
+        recall_mode=recall_mode,
+    )
+    assert actual == "review", (
+        f"敏感 S2 + 人审开 + recall={recall_mode} 必须升级人审，实际={actual}"
+    )
+
+
+@pytest.mark.parametrize("recall_mode", [False, True])
+def test_sensitive_s3_strategy_priority_overrides_recall_mode(recall_mode: bool):
+    """敏感 S3 + 人审开 → review（无视 service recall_mode）。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    actual = _suggest_action_for(
+        RiskLevel.SENSITIVE.value,
+        SensitiveLevel.S3.value,
+        human_enabled=True,
+        recall_mode=recall_mode,
+    )
+    assert actual == "review", (
+        f"敏感 S3 + 人审开 + recall={recall_mode} 必须升级人审，实际={actual}"
+    )
+
+
+def test_low_risk_human_off_still_approved_regardless_recall():
+    """低风险 + 人审关 → approved（无论 recall_mode）。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    for recall in (False, True):
+        actual = _suggest_action_for(
+            RiskLevel.LOW.value,
+            SensitiveLevel.S0.value,
+            human_enabled=False,
+            recall_mode=recall,
+        )
+        assert actual == "approved"
+
+
+def test_sensitive_s2_human_off_still_rejected_regardless_recall():
+    """敏感 S2 + 人审关 → rejected（无论 recall_mode）。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    for recall in (False, True):
+        actual = _suggest_action_for(
+            RiskLevel.SENSITIVE.value,
+            SensitiveLevel.S2.value,
+            human_enabled=False,
+            recall_mode=recall,
+        )
+        assert actual == "rejected"
+
+
+def test_s1_always_desensitize_regardless_human_and_recall():
+    """S1 永远走脱敏放行（与 _suggest_action_for 之前的语义一致）。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    for human in (False, True):
+        for recall in (False, True):
+            actual = _suggest_action_for(
+                RiskLevel.SENSITIVE.value,
+                SensitiveLevel.S1.value,
+                human_enabled=human,
+                recall_mode=recall,
+            )
+            assert actual == "desensitize", (
+                f"S1 必须 desensitize，human={human}, recall={recall}, got={actual}"
+            )
 
 
 # ── _handle_machine_stage_completion 集成测试（关键路径） ──────────────────────

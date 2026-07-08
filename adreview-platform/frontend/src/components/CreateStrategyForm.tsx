@@ -171,24 +171,32 @@ export default function CreateStrategyForm({
   const validateHumanReview = (): string | null => {
     if (!humanReview.is_enabled) return null
     if (humanReview.risk_levels.length === 0) {
-      return '启用人审复审后，请至少选择一个风险等级'
+      return '启用人审复审后，请至少选择一个升级触发的风险等级'
     }
     if (humanReview.review_rule_id === null) {
       return '启用人审复审后，请选择人工复审流程模板'
+    }
+    if (
+      humanReview.risk_levels.includes('敏感') &&
+      humanReview.sensitive_levels.length === 0
+    ) {
+      return '已选「敏感」风险等级，请至少选择一个敏感等级，否则「敏感」档位不会触发升级'
     }
     return null
   }
 
   const buildDefinitionPayload = (): Record<string, unknown> | undefined => {
     if (!humanReview.is_enabled) {
-      return humanReview.risk_levels.length > 0 || humanReview.review_rule_id !== null
-        ? { human_review: EMPTY_HUMAN_REVIEW }
-        : undefined
+      const hasAny = humanReview.risk_levels.length > 0
+        || humanReview.sensitive_levels.length > 0
+        || humanReview.review_rule_id !== null
+      return hasAny ? { human_review: EMPTY_HUMAN_REVIEW } : undefined
     }
     return {
       human_review: {
         is_enabled: true,
         risk_levels: humanReview.risk_levels,
+        sensitive_levels: humanReview.sensitive_levels,
         review_rule_id: humanReview.review_rule_id,
       },
     }
