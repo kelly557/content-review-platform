@@ -1245,11 +1245,27 @@ export interface KnowledgeImportResult {
 
 export type StrategyRiskLevel = '低风险' | '中风险' | '高风险' | '无风险' | '敏感'
 
+export type AutoAction = 'approved' | 'rejected' | 'desensitize' | 'review'
+
+/** key = "<risk>|<sensitive>"，sensitive = "—" 表示该 risk 无 sensitive 维度 */
+export type AutoActionOverrides = Record<string, AutoAction>
+
+function isAutoActionOverrides(
+  v: unknown,
+): v is AutoActionOverrides {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  return Object.values(v as Record<string, unknown>).every(
+    (x) => x === 'approved' || x === 'rejected' || x === 'desensitize' || x === 'review',
+  )
+}
+
 export interface StrategyHumanReview {
   is_enabled: boolean
   risk_levels: StrategyRiskLevel[]
   sensitive_levels: SensitiveLevel[]
   review_rule_id: number | null
+  /** 用户对每个 cell 动作的覆盖。嵌进 strategy.definition.human_review dict。 */
+  auto_action_overrides?: AutoActionOverrides
 }
 
 export const EMPTY_HUMAN_REVIEW: StrategyHumanReview = {
@@ -1257,6 +1273,7 @@ export const EMPTY_HUMAN_REVIEW: StrategyHumanReview = {
   risk_levels: [],
   sensitive_levels: [],
   review_rule_id: null,
+  auto_action_overrides: {},
 }
 
 export const STRATEGY_RISK_LEVEL_OPTIONS: ReadonlyArray<{
@@ -1478,6 +1495,9 @@ export function extractHumanReview(
       : [],
     review_rule_id:
       typeof raw.review_rule_id === 'number' ? raw.review_rule_id : null,
+    auto_action_overrides: isAutoActionOverrides(raw.auto_action_overrides)
+      ? raw.auto_action_overrides
+      : {},
   }
 }
 

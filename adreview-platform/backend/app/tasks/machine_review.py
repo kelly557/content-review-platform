@@ -98,12 +98,15 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
         # 3. 规则命中（含每个 hit 的 sensitive_grade）
         rule_hits = _generate_mock_rule_hits(hits)
 
-        # 4. 决策矩阵：4 个上下文变量 → suggested_action
+        # 4. 决策矩阵：4 个上下文变量 + 用户自定义覆盖 → suggested_action
         hr_cfg = getattr(instance, "strategy_human_review", None) or {}
         human_enabled = bool(hr_cfg.get("is_enabled", False))
         recall_mode = await _get_recall_mode_for_services(db, services)
+        # 用户覆盖嵌在 strategy_human_review dict 里
+        auto_overrides = hr_cfg.get("auto_action_overrides") if isinstance(hr_cfg, dict) else None
         suggested_action = _suggest_action_for(
-            risk_level, sensitive_level, human_enabled, recall_mode
+            risk_level, sensitive_level, human_enabled, recall_mode,
+            auto_action_overrides=auto_overrides,
         )
 
         # 5. 写 machine_result
@@ -386,6 +389,7 @@ def _suggest_action_for(
     sensitive_level: str,
     human_enabled: bool,
     recall_mode: bool,  # noqa: ARG001  保留签名兼容，不再参与决策
+    auto_action_overrides: Dict[str, str] | None = None,
 ) -> str:
     """决策矩阵（5 risk × 4 sensitive × 2 human = 40 组合）。
 
@@ -393,14 +397,42 @@ def _suggest_action_for(
     （见 should_escalate_to_human），本函数只决定机审的 auto_* 动作，
     **不再读取 recall_mode**。``recall_mode`` 参数保留以保持调用方签名兼容。
 
-    核心规则：
+    用户级覆盖（auto_action_overrides）：
+      - key = "<risk>|<sensitive>"，sensitive = "—" 表示该 risk 无 sensitive 维度
+      - value ∈ {approved, rejected, desensitize, review}
+      - 用户配过的 cell 直接返回用户值（不再走默认矩阵）
+      - "review" 在关人审时自动转 rejected（兜底，避免误用）
+
+    核心规则（用户未覆盖时的默认值）：
       - 高风险 / 中风险 → 人审开 → review；人审关 → rejected（不放行）
       - 敏感 + S3 / S2   → 人审开 → review；人审关 → rejected
-      - 敏感 + S1        → desensitize（脱敏放行，无视人审）
+      - 敏感 + S1        → desensitize（脱敏放行；用户可改）
       - 敏感 + S0        → approved（没检出敏感内容，放行）
       - 低风险           → 人审开 → review；人审关 → approved
       - 无风险           → approved
     """
+    # 1) 用户级覆盖优先
+    if auto_action_overrides:
+        cell_key = (
+            f"{risk_level}|{sensitive_level}"
+            if sensitive_level != SensitiveLevel.S0.value
+            else f"{risk_level}|—"
+        )
+        action = auto_action_overrides.get(cell_key)
+        if action:
+            # 关人审时，"review" 没有意义，降级为 rejected
+            if action == SUGGESTED_ACTION_REVIEW and not human_enabled:
+                return SUGGESTED_ACTION_REJECTED
+            if action in (
+                SUGGESTED_ACTION_APPROVED,
+                SUGGESTED_ACTION_REJECTED,
+                SUGGESTED_ACTION_DESENSITIZE,
+                SUGGESTED_ACTION_REVIEW,
+            ):
+                return action
+            # 无效值忽略，走默认
+
+    # 2) 默认矩阵
     if risk_level == RiskLevel.HIGH.value:
         return (
             SUGGESTED_ACTION_REVIEW

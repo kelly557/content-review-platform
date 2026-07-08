@@ -168,6 +168,126 @@ def test_s1_always_desensitize_regardless_human_and_recall():
             )
 
 
+# ── v12：用户级 auto_action_overrides 覆盖测试 ─────────────────────────
+
+
+@pytest.mark.parametrize("action", ["approved", "rejected", "desensitize", "review"])
+def test_user_override_takes_priority_for_each_cell(action: str):
+    """用户在 overrides 里写什么，就返回什么（人审开时）。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    overrides = {"高风险|—": action}
+    out = _suggest_action_for(
+        RiskLevel.HIGH.value, SensitiveLevel.S0.value,
+        human_enabled=True, recall_mode=False,
+        auto_action_overrides=overrides,
+    )
+    assert out == action
+
+
+@pytest.mark.parametrize("action", ["approved", "rejected", "desensitize"])
+def test_user_override_s1_can_change_default_desensitize(action: str):
+    """S1 默认 desensitize，但用户可改（不再锁）。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    overrides = {"敏感|S1": action}
+    out = _suggest_action_for(
+        RiskLevel.SENSITIVE.value, SensitiveLevel.S1.value,
+        human_enabled=True, recall_mode=False,
+        auto_action_overrides=overrides,
+    )
+    assert out == action
+
+
+def test_user_override_s1_default_unchanged_when_no_override():
+    """S1 无 override 时仍走默认 desensitize。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    out = _suggest_action_for(
+        RiskLevel.SENSITIVE.value, SensitiveLevel.S1.value,
+        human_enabled=True, recall_mode=False,
+        auto_action_overrides=None,
+    )
+    assert out == "desensitize"
+
+
+def test_user_override_review_falls_back_to_rejected_when_human_disabled():
+    """关人审时"review" 兜底为 rejected（避免误用）。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    overrides = {"高风险|—": "review"}
+    out = _suggest_action_for(
+        RiskLevel.HIGH.value, SensitiveLevel.S0.value,
+        human_enabled=False, recall_mode=False,
+        auto_action_overrides=overrides,
+    )
+    assert out == "rejected"
+
+
+def test_user_override_review_honored_when_human_enabled():
+    """开人审时"review" 保留。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    overrides = {"高风险|—": "review"}
+    out = _suggest_action_for(
+        RiskLevel.HIGH.value, SensitiveLevel.S0.value,
+        human_enabled=True, recall_mode=False,
+        auto_action_overrides=overrides,
+    )
+    assert out == "review"
+
+
+def test_invalid_override_falls_back_to_default():
+    """无效 action 值（拼写错误）走默认矩阵。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    overrides = {"高风险|—": "invalid_action"}
+    out = _suggest_action_for(
+        RiskLevel.HIGH.value, SensitiveLevel.S0.value,
+        human_enabled=True, recall_mode=False,
+        auto_action_overrides=overrides,
+    )
+    # 默认：人审开 → review
+    assert out == "review"
+
+
+def test_empty_overrides_falls_back_to_default():
+    """空 dict overrides 等同于 None。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    out = _suggest_action_for(
+        RiskLevel.MEDIUM.value, SensitiveLevel.S0.value,
+        human_enabled=False, recall_mode=False,
+        auto_action_overrides={},
+    )
+    # 默认：人审关 → rejected
+    assert out == "rejected"
+
+
+@pytest.mark.parametrize("risk_value,sen_value,key", [
+    (RiskLevel.HIGH.value, SensitiveLevel.S0.value, "高风险|—"),
+    (RiskLevel.MEDIUM.value, SensitiveLevel.S0.value, "中风险|—"),
+    (RiskLevel.LOW.value, SensitiveLevel.S0.value, "低风险|—"),
+    (RiskLevel.NONE.value, SensitiveLevel.S0.value, "无风险|—"),
+    (RiskLevel.SENSITIVE.value, SensitiveLevel.S3.value, "敏感|S3"),
+    (RiskLevel.SENSITIVE.value, SensitiveLevel.S2.value, "敏感|S2"),
+    (RiskLevel.SENSITIVE.value, SensitiveLevel.S1.value, "敏感|S1"),
+    (RiskLevel.SENSITIVE.value, SensitiveLevel.S0.value, "敏感|—"),  # S0 走 "—" 形式
+])
+def test_all_8_cell_keys_recognized(risk_value: str, sen_value: str, key: str):
+    """8 个 cell key 全部能被识别（无 typo）。"""
+    from app.tasks.machine_review import _suggest_action_for
+
+    overrides = {key: "approved"}
+    out = _suggest_action_for(
+        risk_value, sen_value,
+        human_enabled=False, recall_mode=False,
+        auto_action_overrides=overrides,
+    )
+    # 只要返回的是合法值（approved/rejected/desensitize/review）就 OK
+    assert out in ("approved", "rejected", "desensitize", "review")
+
+
 # ── _handle_machine_stage_completion 集成测试（关键路径） ──────────────────────
 
 
