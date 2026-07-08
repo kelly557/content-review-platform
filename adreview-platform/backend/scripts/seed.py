@@ -554,7 +554,18 @@ DEFAULT_AUDIT_POINTS: list[tuple[str, str, str, str, str, float, float, str]] = 
     ("image_audit_pro", "img_special",    "special_general",      "专项通用",       "专项通用：专项检查任务标识的内容",                 50.0, 75.0, "中风险"),
     ("image_audit_pro", "img_special",    "special_general_lib",  "自定义专项图库", "自定义专项图库",                                   45.0, 70.0, "低风险"),
     # ---------------- text_audit_pro ----------------
-    ("text_audit_pro", "tx_politics",         "tx_politics",        "涉政",                "涉政违规内容",                60.0, 85.0, "高风险"),
+    # ---------------- text_audit_pro · 涉政审核（11 个细分点） ----------------
+    ("text_audit_pro", "tx_politics", "tx_politics_current_president",   "现任国家主席",       "涉及现任国家主席的影射和负面言论；提及现任国家主席的姓名、职务、亲昵称呼",                                                  60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_politics", "tx_politics_former_leaders",       "历任国家核心领导人", "对历任核心领导人（主席、总理）的影射和负面言论；提及历任核心领导人（主席、总理）的姓名、职务、亲昵称呼",                60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_politics", "tx_politics_other_domestic_leaders","国内其他主要领导人", "对国内其他主要领导人（正国级、副国级）的负面言论；提及国内其他主要领导人的姓名、职务、亲昵称呼",                        60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_politics", "tx_politics_leaders_improper",     "核心领导人不当表述", "不合时宜、不合身份、不合场所地谈论现历任核心领导人",                                                                  60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_politics", "tx_politics_foreign_leaders",      "现历任国外领导人",   "提及现任/历任国外领导人",                                                                                                60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_politics", "tx_politics_main_forbidden_events","主要政治禁宣事件",   "涉及国内禁止提及的主要政治禁宣事件",                                                                                  60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_politics", "tx_politics_other_forbidden_events","其他政治禁宣事件",   "涉及国内禁止提及的其他政治禁宣事件",                                                                                  60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_politics", "tx_politics_modern_political",     "近现代政治事件或国际关系", "对近现代中国政治事件、世界形势、国际关系的负面讨论；提及（中国）近现代政治军事事件的名称、组织、人物",            60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_politics", "tx_politics_territorial_secession","中国领土分裂",       "宣扬分裂主义言论、支持分裂主义组织、或参与分裂主义活动等论述",                                                            60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_politics", "tx_politics_ideology_violation",   "违规的意识形态",     "否定党、国家、政府、制度的观点和思想倾向，对政治政体象征的负面言论和不当表述",                                              60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_politics", "tx_politics_political_entity",     "政治实体",           "提及党组织相关的理论、活动；提及政协会议、国家政策；提及军事装备、活动、组织；提及国家机构、政府机关、公职职务名称",        60.0, 85.0, "高风险"),
     ("text_audit_pro", "tx_terrorism",        "tx_terrorism",       "暴恐",                "暴恐违规内容",                60.0, 85.0, "高风险"),
     ("text_audit_pro", "tx_porn",             "tx_porn",            "色情",                "色情违规内容",                60.0, 85.0, "高风险"),
     ("text_audit_pro", "tx_advertising",      "tx_advertising",     "广告法",              "广告法违规内容",              55.0, 80.0, "高风险"),
@@ -801,6 +812,7 @@ async def main(
         await _upsert_human_review_configs(db)
         await _upsert_tags(db)
         await _upsert_bad_libraries(db)
+        await _upsert_politics_libraries(db)
         await _upsert_user(db, "admin@adreview.example.com", "系统管理员", UserRole.ADMIN, settings.app_secret + "-admin")
         await _upsert_user(db, "reviewer@adreview.example.com", "审核员 Alice", UserRole.REVIEWER, "reviewer123")
         await _upsert_user(db, "mlr@adreview.example.com", "MLR 专家 Bob", UserRole.MLR, "mlr12345")
@@ -879,6 +891,27 @@ DEFAULT_BAD_LIBRARIES: list[dict[str, str]] = [
 ]
 
 
+# ---------- 涉政审核默认词库（占位） ----------
+# 为 text_audit_pro.tx_politics item 下 11 个 audit_point 各创建一个空 word 词库，
+# 方便运营在「策略资源 → 词库」中直接看到并填充关键词。
+# 不会自动关联到 audit_point（按"暂不关联库"约定）；运营后续在
+# ServiceRuleConfigPage 的「关联库」列手动绑定即可。
+POLITICS_LIBRARY_GROUP_NAME = "涉政"
+DEFAULT_POLITICS_LIBRARIES: list[dict[str, str]] = [
+    {"code": "lib_w_politics_current_president",     "name": "涉政词库-现任国家主席",     "description": "现任国家主席的姓名、职务、亲昵称呼及影射/负面言论关键词"},
+    {"code": "lib_w_politics_former_leaders",        "name": "涉政词库-历任国家核心领导人", "description": "历任核心领导人（主席、总理）的姓名、职务、亲昵称呼及影射/负面言论关键词"},
+    {"code": "lib_w_politics_other_domestic_leaders","name": "涉政词库-国内其他主要领导人", "description": "正国级/副国级国内其他主要领导人姓名、职务、亲昵称呼及负面言论关键词"},
+    {"code": "lib_w_politics_leaders_improper",      "name": "涉政词库-核心领导人不当表述", "description": "不合时宜/不合身份/不合场所谈论现历任核心领导人的不当表述关键词"},
+    {"code": "lib_w_politics_foreign_leaders",       "name": "涉政词库-现历任国外领导人",   "description": "现任/历任国外领导人姓名及关联关键词"},
+    {"code": "lib_w_politics_main_forbidden_events", "name": "涉政词库-主要政治禁宣事件",   "description": "国内禁止提及的主要政治禁宣事件相关关键词"},
+    {"code": "lib_w_politics_other_forbidden_events","name": "涉政词库-其他政治禁宣事件",   "description": "国内禁止提及的其他政治禁宣事件相关关键词"},
+    {"code": "lib_w_politics_modern_political",      "name": "涉政词库-近现代政治事件或国际关系", "description": "近现代中国政治事件、世界形势、国际关系相关负面表述及政治军事事件/组织/人物关键词"},
+    {"code": "lib_w_politics_territorial_secession", "name": "涉政词库-中国领土分裂",       "description": "分裂主义言论、支持分裂主义组织、参与分裂主义活动相关关键词"},
+    {"code": "lib_w_politics_ideology_violation",    "name": "涉政词库-违规的意识形态",     "description": "否定党/国家/政府/制度的观点、政治政体象征负面言论及不当表述关键词"},
+    {"code": "lib_w_politics_political_entity",      "name": "涉政词库-政治实体",           "description": "党组织理论/活动、政协会议、国家政策、军事装备/活动/组织、国家机构/政府机关/公职职务名称关键词"},
+]
+
+
 async def _upsert_bad_libraries(db: AsyncSession) -> None:
     """Ensure the '不良' library group + 7 empty word libraries exist (idempotent)."""
     grp = (
@@ -897,6 +930,49 @@ async def _upsert_bad_libraries(db: AsyncSession) -> None:
         await db.flush()
 
     for spec in DEFAULT_BAD_LIBRARIES:
+        lib = (
+            await db.execute(
+                select(Library).where(Library.code == spec["code"])
+            )
+        ).scalars().first()
+        if lib:
+            lib.name = spec["name"]
+            lib.description = spec["description"]
+            lib.group_id = grp.id
+            lib.is_active = True
+        else:
+            db.add(
+                Library(
+                    code=spec["code"],
+                    name=spec["name"],
+                    library_type=LibraryType.WORD,
+                    group_id=grp.id,
+                    description=spec["description"],
+                    is_active=True,
+                    is_deleted=False,
+                    ignored_services=[],
+                )
+            )
+
+
+async def _upsert_politics_libraries(db: AsyncSession) -> None:
+    """Ensure the '涉政' library group + 11 empty word libraries exist (idempotent)."""
+    grp = (
+        await db.execute(
+            select(LibraryGroup).where(LibraryGroup.name == POLITICS_LIBRARY_GROUP_NAME)
+        )
+    ).scalars().first()
+    if not grp:
+        grp = LibraryGroup(
+            name=POLITICS_LIBRARY_GROUP_NAME,
+            description="涉政审核相关词库/图片库/代答库分组",
+            sort_order=0,
+            is_deleted=False,
+        )
+        db.add(grp)
+        await db.flush()
+
+    for spec in DEFAULT_POLITICS_LIBRARIES:
         lib = (
             await db.execute(
                 select(Library).where(Library.code == spec["code"])
