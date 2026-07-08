@@ -1271,6 +1271,117 @@ export const STRATEGY_RISK_LEVEL_OPTIONS: ReadonlyArray<{
   { value: '低风险', label: '低风险', color: 'blue' },
 ]
 
+// ─── v6 敏感等级 (SensitiveLevel) ─────────────────────────────────────────────
+// 与后端 backend/app/models/sensitive_level.py:SensitiveLevel 保持一致。
+// 数字越大敏感程度越高；S0 = 未检出敏感内容。
+export type SensitiveLevel = 'S0' | 'S1' | 'S2' | 'S3'
+
+export const SENSITIVE_LEVEL_OPTIONS: ReadonlyArray<{
+  value: SensitiveLevel
+  label: string
+  rank: number
+  color: string
+}> = [
+  { value: 'S0', label: 'S0 未检出', rank: 0, color: 'default' },
+  { value: 'S1', label: 'S1 轻度敏感', rank: 1, color: 'blue' },
+  { value: 'S2', label: 'S2 中度敏感', rank: 2, color: 'orange' },
+  { value: 'S3', label: 'S3 重度敏感', rank: 3, color: 'red' },
+]
+
+// 素材级动作（与后端 RISK_LEVELS_AUTO_* 保持语义一致）
+export type SuggestedAction =
+  | 'approved'
+  | 'rejected'
+  | 'desensitize'
+  | 'review'
+
+// 关闭人审时的处置预览（双轴：risk × sensitive）
+// 单一来源：HumanReviewSettings 渲染表 + 后端 _suggest_action_for 需保持一致
+export type DispositionIcon = 'stop' | 'scissor' | 'check'
+
+export interface DispositionRow {
+  risk: StrategyRiskLevel | '敏感' | '无风险'
+  sensitive: SensitiveLevel | '—'
+  action: SuggestedAction
+  statusLabel: string
+  statusColor: 'volcano' | 'red' | 'orange' | 'gold' | 'green' | 'blue' | 'default'
+  iconName?: DispositionIcon
+  note?: string
+}
+
+export const DEFAULT_DISPOSITION_PREVIEW: ReadonlyArray<DispositionRow> = [
+  {
+    risk: '高风险',
+    sensitive: '—',
+    action: 'rejected',
+    statusLabel: '拒绝',
+    statusColor: 'volcano',
+    iconName: 'stop',
+    note: '命中医疗/政治等',
+  },
+  {
+    risk: '中风险',
+    sensitive: '—',
+    action: 'rejected',
+    statusLabel: '拒绝',
+    statusColor: 'volcano',
+    iconName: 'stop',
+    note: '不放行（人审开→升级人审）',
+  },
+  {
+    risk: '敏感',
+    sensitive: 'S3',
+    action: 'rejected',
+    statusLabel: '拒绝',
+    statusColor: 'volcano',
+    iconName: 'stop',
+    note: '重度敏感（人审开+召回→升级人审）',
+  },
+  {
+    risk: '敏感',
+    sensitive: 'S2',
+    action: 'rejected',
+    statusLabel: '拒绝',
+    statusColor: 'volcano',
+    iconName: 'stop',
+    note: '中度敏感，不放行（人审开+召回→升级人审）',
+  },
+  {
+    risk: '敏感',
+    sensitive: 'S1',
+    action: 'desensitize',
+    statusLabel: '脱敏放行',
+    statusColor: 'gold',
+    iconName: 'scissor',
+    note: '轻度敏感，自动脱敏后放行',
+  },
+  {
+    risk: '敏感',
+    sensitive: 'S0',
+    action: 'approved',
+    statusLabel: '通过',
+    statusColor: 'green',
+    iconName: 'check',
+    note: '没检出敏感内容',
+  },
+  {
+    risk: '低风险',
+    sensitive: '—',
+    action: 'approved',
+    statusLabel: '通过',
+    statusColor: 'green',
+    iconName: 'check',
+  },
+  {
+    risk: '无风险',
+    sensitive: '—',
+    action: 'approved',
+    statusLabel: '通过',
+    statusColor: 'green',
+    iconName: 'check',
+  },
+]
+
 export function extractHumanReview(
   definition: Record<string, unknown> | null | undefined,
 ): StrategyHumanReview {

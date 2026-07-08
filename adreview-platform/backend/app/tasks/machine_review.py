@@ -1,4 +1,13 @@
-"""Machine review task: async execution of AI detection services."""
+"""Machine review task: async execution of AI detection services.
+
+v6 refactor:
+- 引入 RiskLevel.SENSITIVE = "敏感" 桶，承载 PII-only 命中
+- 引入 SensitiveLevel（S0/S1/S2/S3）作为 hit 级细粒度严重度
+- aggregate_risk_level 扩展识别敏感/医疗/政治/金融
+- aggregate_sensitive_level 按 max 汇总素材级 S 等级
+- _suggest_action_for 决策矩阵 5×4×2×2 = 80 组合
+- run_machine_review 末尾把 suggested_action + desensitize_plan 写入 machine_result
+"""
 from __future__ import annotations
 
 import random
@@ -12,9 +21,26 @@ from sqlalchemy.orm import selectinload
 from app.core.logging import get_logger
 from app.models.human_review_config import HumanReviewConfig, RiskLevel
 from app.models.review import MachineStatus, ReviewTask, ReviewType
+from app.models.sensitive_level import (
+    SENSITIVE_LEVEL_RANK,
+    SensitiveLevel,
+    sensitive_level_rank,
+)
 from app.models.workflow import WorkflowInstance, WorkflowNode, WorkflowTemplate
 
 log = get_logger(__name__)
+
+
+# ─── 后端单一来源：素材级动作清单（与前端 HumanReviewSettings 预览表保持一致）───
+RISK_LEVELS_AUTO_REJECT = (RiskLevel.HIGH.value, RiskLevel.MEDIUM.value)
+RISK_LEVELS_AUTO_DESENSITIZE = (RiskLevel.SENSITIVE.value,)
+RISK_LEVELS_AUTO_APPROVE = (RiskLevel.LOW.value, RiskLevel.NONE.value)
+
+# ─── suggested_action 字符串集合（与 workflow_engine 解析保持一致）─────────────
+SUGGESTED_ACTION_APPROVED = "approved"
+SUGGESTED_ACTION_REJECTED = "rejected"
+SUGGESTED_ACTION_DESENSITIZE = "desensitize"
+SUGGESTED_ACTION_REVIEW = "review"
 
 
 async def run_machine_review(task_id: int, db: AsyncSession) -> None:
@@ -63,21 +89,50 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
             svc_hits = await call_mock_detection(svc_code, task.material_version_id)
             hits.extend(svc_hits)
 
+        # 1. 素材级 risk_level（5 档：高/中/低/敏感/无）
         risk_level = aggregate_risk_level(hits)
 
+        # 2. 素材级 sensitive_level（S0/S1/S2/S3，按 max 汇总）
+        sensitive_level = aggregate_sensitive_level(hits)
+
+        # 3. 规则命中（含每个 hit 的 sensitive_grade）
         rule_hits = _generate_mock_rule_hits(hits)
 
-        task.machine_result = {
+        # 4. 决策矩阵：4 个上下文变量 → suggested_action
+        hr_cfg = getattr(instance, "strategy_human_review", None) or {}
+        human_enabled = bool(hr_cfg.get("is_enabled", False))
+        recall_mode = await _get_recall_mode_for_services(db, services)
+        suggested_action = _suggest_action_for(
+            risk_level, sensitive_level, human_enabled, recall_mode
+        )
+
+        # 5. 写 machine_result
+        machine_result: Dict[str, Any] = {
             "risk_level": risk_level,
+            "sensitive_level": sensitive_level,
             "hits": hits,
             "rule_hits": rule_hits,
-            "summary": f"检测到 {len(hits)} 条命中，风险等级：{risk_level}",
+            "suggested_action": suggested_action,
+            "summary": (
+                f"检测到 {len(hits)} 条命中，"
+                f"风险等级：{risk_level}，敏感等级：{sensitive_level}"
+            ),
         }
+
+        # 6. 敏感档（risk=敏感 且 sensitive ≥ S1）→ 生成 desensitize_plan
+        if risk_level == RiskLevel.SENSITIVE.value and sensitive_level != SensitiveLevel.S0.value:
+            machine_result["desensitize_plan"] = _build_desensitize_plan(hits)
+
+        task.machine_result = machine_result
         task.machine_status = MachineStatus.COMPLETED
         task.machine_completed_at = datetime.now(timezone.utc)
         await db.commit()
 
-        log.info(f"Machine review completed for task {task_id}, risk_level={risk_level}")
+        log.info(
+            f"Machine review completed for task {task_id}, "
+            f"risk_level={risk_level}, sensitive_level={sensitive_level}, "
+            f"suggested_action={suggested_action}"
+        )
 
         from app.services.workflow_engine import evaluate_stage_completion
         await evaluate_stage_completion(db, instance)
@@ -104,13 +159,20 @@ def _get_stage_config(instance: WorkflowInstance, stage_key: str) -> Dict[str, A
 
 
 async def call_mock_detection(service_code: str, version_id: int) -> List[Dict[str, Any]]:
-    """Mock detection service that returns random hits."""
+    """Mock detection service that returns random hits.
+
+    每个 hit 携带 sensitive_grade（S0~S3），mock 规则：
+      - 医疗/政治 → S3
+      - 金融 → S2
+      - 敏感内容 → S1
+      - 其他 → S0
+    """
     await _simulate_network_delay()
 
     mock_labels = [
         {"label": "medical_ad_violation", "label_cn": "医疗广告违规", "risk": "高风险"},
         {"label": "financial_risk_warning", "label_cn": "金融风险提示", "risk": "中风险"},
-        {"label": "sensitive_content", "label_cn": "敏感内容", "risk": "低风险"},
+        {"label": "sensitive_content", "label_cn": "敏感内容", "risk": "敏感"},
         {"label": "political_content", "label_cn": "政治敏感", "risk": "高风险"},
     ]
 
@@ -130,7 +192,26 @@ async def call_mock_detection(service_code: str, version_id: int) -> List[Dict[s
             "timestamp_ms": None,
         })
 
+    # 给每个 hit 打 sensitive_grade（mock 规则）
+    for h in hits:
+        h["sensitive_grade"] = _mock_sensitive_grade_for(h)
+
     return hits
+
+
+def _mock_sensitive_grade_for(hit: Dict[str, Any]) -> str:
+    """Mock：基于 label_cn 推断 hit 的 sensitive_grade。
+
+    真实机审服务会直接返回 sensitive_grade；mock 用关键词兜底。
+    """
+    lc = hit.get("label_cn", "")
+    if "医疗" in lc or "政治" in lc:
+        return SensitiveLevel.S3.value
+    if "金融" in lc:
+        return SensitiveLevel.S2.value
+    if "敏感" in lc:
+        return SensitiveLevel.S1.value
+    return SensitiveLevel.S0.value
 
 
 def _pick_quote_for_version(version_id: int) -> str:
@@ -169,29 +250,78 @@ def _pick_quote_for_version(version_id: int) -> str:
 
 
 def aggregate_risk_level(hits: List[Dict[str, Any]]) -> str:
-    """Aggregate risk level from hits."""
-    if not hits:
-        return "无风险"
+    """Aggregate material-level risk_level from hits.
 
-    risk_scores = {"高风险": 3, "中风险": 2, "低风险": 1, "无风险": 0}
+    5 档桶（v6）：
+      - 医疗/政治 → 高风险
+      - 金融 → 中风险
+      - 敏感内容 → 敏感（新增）
+      - 其他命中 → 低风险
+      - 无命中 → 无风险
+    """
+    if not hits:
+        return RiskLevel.NONE.value
+
+    # 兼容旧风险字段（hit["risk"]）和关键词兜底
+    explicit_priority = {
+        RiskLevel.HIGH.value: 4,
+        RiskLevel.MEDIUM.value: 3,
+        RiskLevel.SENSITIVE.value: 2,
+        RiskLevel.LOW.value: 1,
+        RiskLevel.NONE.value: 0,
+    }
     max_score = 0
     for hit in hits:
+        # 优先用显式 risk 字段
+        risk_raw = (hit.get("risk") or "").strip()
+        if risk_raw in explicit_priority:
+            max_score = max(max_score, explicit_priority[risk_raw])
+            continue
+        # 否则按 label_cn 兜底
         label_cn = hit.get("label_cn", "")
         if "医疗" in label_cn or "政治" in label_cn:
-            max_score = max(max_score, 3)
+            max_score = max(max_score, 4)
         elif "金融" in label_cn:
-            max_score = max(max_score, 2)
+            max_score = max(max_score, 3)
         elif "敏感" in label_cn:
+            max_score = max(max_score, 2)
+        else:
             max_score = max(max_score, 1)
 
-    for level, score in risk_scores.items():
-        if score == max_score:
-            return level
-    return "无风险"
+    if max_score >= 4:
+        return RiskLevel.HIGH.value
+    if max_score >= 3:
+        return RiskLevel.MEDIUM.value
+    if max_score >= 2:
+        return RiskLevel.SENSITIVE.value
+    if max_score >= 1:
+        return RiskLevel.LOW.value
+    return RiskLevel.NONE.value
+
+
+def aggregate_sensitive_level(hits: List[Dict[str, Any]]) -> str:
+    """Aggregate material-level SensitiveLevel from hit-level sensitive_grade.
+
+    取 max（"严重度最高原则"）；全无 S 字段 → S0。
+    """
+    best_rank = 0
+    best_level = SensitiveLevel.S0.value
+    for hit in hits:
+        grade = hit.get("sensitive_grade")
+        rank = sensitive_level_rank(grade)
+        if rank > best_rank:
+            best_rank = rank
+            best_level = grade if isinstance(grade, str) else (
+                grade.value if hasattr(grade, "value") else SensitiveLevel.S0.value
+            )
+    return best_level
 
 
 def _generate_mock_rule_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Generate mock rule hits based on detection hits."""
+    """Generate mock rule hits based on detection hits.
+
+    每个 rule_hit 透传对应 hit 的 sensitive_grade。
+    """
     rule_hits = []
     seen_labels = set()
     for hit in hits:
@@ -204,8 +334,103 @@ def _generate_mock_rule_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]
                 "label_cn": hit.get("label_cn", label),
                 "threshold": 0.5,
                 "matched": True,
+                "sensitive_grade": hit.get("sensitive_grade", SensitiveLevel.S0.value),
             })
     return rule_hits
+
+
+def _build_desensitize_plan(hits: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build desensitize plan from sensitive hits (risk=敏感 且 sensitive ≥ S1).
+
+    每个 entry 携带 label、label_cn、original (hit.quote)、sensitive_grade。
+    desensitization.apply API 会读取此 plan 并执行 mask。
+    """
+    entries: List[Dict[str, Any]] = []
+    for hit in hits:
+        grade = hit.get("sensitive_grade", SensitiveLevel.S0.value)
+        if sensitive_level_rank(grade) < sensitive_level_rank(SensitiveLevel.S1):
+            continue
+        entries.append({
+            "label": hit.get("label"),
+            "label_cn": hit.get("label_cn"),
+            "category": hit.get("label"),  # 粗略分类
+            "original": hit.get("quote"),
+            "sensitive_grade": grade,
+        })
+    return {
+        "category": "sensitive",
+        "entries": entries,
+    }
+
+
+async def _get_recall_mode_for_services(
+    db: AsyncSession, service_codes: List[str]
+) -> bool:
+    """Return True if ANY of the given services has HumanReviewConfig.recall_mode=True."""
+    if not service_codes:
+        return False
+    try:
+        result = await db.execute(
+            select(HumanReviewConfig).where(
+                HumanReviewConfig.service_code.in_(service_codes)
+            )
+        )
+        configs = list(result.scalars())
+    except Exception:
+        return False
+    return any(c.recall_mode for c in configs)
+
+
+def _suggest_action_for(
+    risk_level: str,
+    sensitive_level: str,
+    human_enabled: bool,
+    recall_mode: bool,
+) -> str:
+    """决策矩阵（5 risk × 4 sensitive × 2 human × 2 recall = 80 组合）。
+
+    核心规则：
+      - 高风险 / 中风险 → 人审开 → review；人审关 → rejected（不放行）
+      - 敏感 + S3 / S2   → 人审开+召回 → review；其他 → rejected（不放行）
+      - 敏感 + S1        → desensitize（脱敏放行，无视人审/召回）
+      - 敏感 + S0        → approved（没检出敏感内容，放行）
+      - 低风险 / 无风险  → 人审开+召回 → review；其他 → approved
+    """
+    if risk_level == RiskLevel.HIGH.value:
+        return (
+            SUGGESTED_ACTION_REVIEW
+            if human_enabled
+            else SUGGESTED_ACTION_REJECTED
+        )
+
+    if risk_level == RiskLevel.MEDIUM.value:
+        return (
+            SUGGESTED_ACTION_REVIEW
+            if human_enabled
+            else SUGGESTED_ACTION_REJECTED
+        )
+
+    if risk_level == RiskLevel.SENSITIVE.value:
+        if sensitive_level in (SensitiveLevel.S3.value, SensitiveLevel.S2.value):
+            return (
+                SUGGESTED_ACTION_REVIEW
+                if (human_enabled and recall_mode)
+                else SUGGESTED_ACTION_REJECTED
+            )
+        if sensitive_level == SensitiveLevel.S1.value:
+            return SUGGESTED_ACTION_DESENSITIZE
+        # S0：没检出敏感内容，放行
+        return SUGGESTED_ACTION_APPROVED
+
+    if risk_level == RiskLevel.LOW.value:
+        return (
+            SUGGESTED_ACTION_REVIEW
+            if (human_enabled and recall_mode)
+            else SUGGESTED_ACTION_APPROVED
+        )
+
+    # RiskLevel.NONE
+    return SUGGESTED_ACTION_APPROVED
 
 
 async def _simulate_network_delay() -> None:
@@ -223,10 +448,19 @@ async def should_escalate_to_human(
     """Determine if machine review result should escalate to human review.
 
     决策流程：
-    1. 若显式传入 strategy_human_review（来自 Strategy.definition.human_review），
-       按它决定：(a) is_enabled=False → 不升级；(b) risk_level ∈ risk_levels → 升级；
-       (c) 配置存在但未命中 → 不升级（严格策略语义）。
-    2. 否则走默认行为：高/中风险升级；或 force_human_rules 关键词命中升级。
+    1. 若显式传入 strategy_human_review（来自 Strategy.definition.human_review）：
+       (a) is_enabled=False → 不升级人审，由 workflow_engine 按
+           machine_result.suggested_action 决定 auto_approve /
+           auto_reject / auto_observe / auto_desensitize
+       (b) risk_level ∈ risk_levels → 升级人审，人审结果决定最终
+       (c) 配置存在但未命中 → 不升级人审，走 (a)
+
+    2. 否则（理论不可达：strategies API 总写入 definition.human_review，
+       所以分支 2 在策略创建/编辑流程中实际不会被触发）
+       走默认行为：高/中风险升级；force_human_rules 关键词命中升级。
+
+    注意：auto_* 动作的拆分见 workflow_engine._handle_machine_stage_completion
+    和 machine_review._suggest_action_for。
     """
     if not task.machine_result:
         return False

@@ -219,7 +219,15 @@ async def _handle_machine_stage_completion(
     current_node: WorkflowNode,
     task: ReviewTask,
 ) -> None:
-    """Handle machine stage completion and decide whether to escalate to human."""
+    """Handle machine stage completion and decide whether to escalate to human.
+
+    v9 改造：读 ``machine_result.suggested_action`` 落地到 3 类终态：
+
+    - ``approved``        → 终态 APPROVED
+    - ``rejected``        → 终态 REJECTED（含原中风险/OBSERVE 路径，v9 后统一拒绝）
+    - ``desensitize``     → 终态 DESENSITIZED（S1 轻度敏感脱敏放行）
+    - ``review``          → 升级到下一个人审节点（保持原行为）
+    """
     if task.machine_status != MachineStatus.COMPLETED:
         return
 
@@ -242,7 +250,45 @@ async def _handle_machine_stage_completion(
             await _activate_node(db, instance, next_human_node, instance.material_id)
             return
 
+    # 不升级人审：按 suggested_action 落 3 类终态
+    machine_result = task.machine_result or {}
+    suggested = machine_result.get("suggested_action", "approved")
+
+    if suggested == "rejected":
+        await _finalize(db, instance, current_node, approved=False)
+        return
+    if suggested == "desensitize":
+        await _finalize_desensitized(db, instance, current_node)
+        return
+
+    # approved / 兜底
     await _finalize(db, instance, current_node, approved=True)
+
+
+async def _finalize_desensitized(
+    db: AsyncSession,
+    instance: WorkflowInstance,
+    current_node: WorkflowNode,
+) -> None:
+    """脱敏：素材脱敏后放行（S1 轻度敏感）。"""
+    instance.state = "approved"
+    instance.completed_at = datetime.now(timezone.utc)
+    for n in instance.nodes:
+        if n.status == "pending":
+            n.status = "skipped"
+
+    material = await db.get(Material, instance.material_id)
+    if material is not None:
+        material.status = MaterialStatus.DESENSITIZED
+
+    await write_audit(
+        db,
+        actor=None,
+        action="workflow.desensitized",
+        entity_type="workflow_instance",
+        entity_id=instance.id,
+        payload={"final_stage": current_node.stage_key},
+    )
 
 
 async def _reload_instance(db: AsyncSession, instance_id: int) -> WorkflowInstance:

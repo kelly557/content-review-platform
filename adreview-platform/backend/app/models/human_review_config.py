@@ -20,6 +20,7 @@ class RiskLevel(str, enum.Enum):
     HIGH = "高风险"
     MEDIUM = "中风险"
     LOW = "低风险"
+    SENSITIVE = "敏感"
     NONE = "无风险"
 
 

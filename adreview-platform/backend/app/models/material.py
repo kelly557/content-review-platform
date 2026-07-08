@@ -36,6 +36,7 @@ class MaterialStatus(str, enum.Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     WITHDRAWN = "withdrawn"
+    DESENSITIZED = "desensitized"
 
 
 class Material(Base):
