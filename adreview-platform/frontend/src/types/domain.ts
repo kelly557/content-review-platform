@@ -380,6 +380,20 @@ export interface StrategyItemRef {
   is_enabled: boolean
 }
 
+export interface StrategyPointRef {
+  media_type: MediaTypeKey
+  item_id: number
+  point_id: number
+  is_enabled: boolean
+}
+
+export interface StrategyEnabledPointsMeta {
+  total: number
+  enabled: number
+  disabled: number
+  has_overrides: boolean
+}
+
 export interface Strategy {
   id: number
   code: string
@@ -393,6 +407,7 @@ export interface Strategy {
   definition: Record<string, unknown>
   service_config: Record<string, unknown>
   enabled_items: StrategyItemRef[]
+  enabled_points?: StrategyPointRef[]
   created_at: string
   updated_at: string | null
 }
@@ -409,6 +424,7 @@ export interface StrategyCreatePayload {
   application?: string
   services?: string[]
   enabled_items?: StrategyItemRef[]
+  enabled_points?: StrategyPointRef[]
   definition?: Record<string, unknown>
 }
 
@@ -428,6 +444,7 @@ export interface StrategyUpdatePayload {
   effective_until?: string | null
   services?: string[]
   enabled_items?: StrategyItemRef[]
+  enabled_points?: StrategyPointRef[]
   definition?: Record<string, unknown>
   service_config?: Record<string, unknown>
 }
