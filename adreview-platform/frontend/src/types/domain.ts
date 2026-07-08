@@ -1284,14 +1284,12 @@ export const STRATEGY_RISK_LEVEL_OPTIONS: ReadonlyArray<{
   value: StrategyRiskLevel
   label: string
   color: string
-  /** True if escalation also requires the service-level "召回模式" to be on. */
-  escalateRequiresRecall?: boolean
 }> = [
   { value: '高风险', label: '高风险', color: 'red' },
   { value: '中风险', label: '中风险', color: 'orange' },
-  { value: '低风险', label: '低风险', color: 'blue', escalateRequiresRecall: true },
+  { value: '低风险', label: '低风险', color: 'blue' },
   { value: '无风险', label: '无风险', color: 'default' },
-  { value: '敏感',   label: '敏感',   color: 'purple', escalateRequiresRecall: true },
+  { value: '敏感',   label: '敏感',   color: 'purple' },
 ]
 
 // ─── v6 敏感等级 (SensitiveLevel) ─────────────────────────────────────────────
@@ -1405,12 +1403,13 @@ export const DEFAULT_DISPOSITION_PREVIEW: ReadonlyArray<DispositionRow> = [
   },
 ]
 
-// 开启人审 + 召回模式时的处置预览（与 backend _suggest_action_for 严格对齐）
+// 开启人审时的处置预览（与 backend _suggest_action_for v10 严格对齐）
+// 策略级优先：人审开 → review；人审关 → approved/rejected。recall_mode 不再参与。
 // 高/中风险：人审开 → review
-// 敏感 S2/S3：人审开 + 召回 → review（否则仍 rejected）
+// 敏感 S2/S3：人审开 → review
 // 敏感 S1：永远 desensitize（不升级人审）
 // 敏感 S0：approved
-// 低风险：人审开 + 召回 → review（否则 approved）
+// 低风险：人审开 → review
 // 无风险：approved
 export const HUMAN_ON_DISPOSITION_PREVIEW: ReadonlyArray<DispositionRow> = [
   {
@@ -1435,19 +1434,19 @@ export const HUMAN_ON_DISPOSITION_PREVIEW: ReadonlyArray<DispositionRow> = [
     risk: '敏感',
     sensitive: 'S3',
     action: 'review',
-    statusLabel: '升级人审（需召回模式）',
+    statusLabel: '升级人审',
     statusColor: 'gold',
     iconName: 'check',
-    note: '重度敏感 + 召回模式开启',
+    note: '命中敏感 S3',
   },
   {
     risk: '敏感',
     sensitive: 'S2',
     action: 'review',
-    statusLabel: '升级人审（需召回模式）',
+    statusLabel: '升级人审',
     statusColor: 'gold',
     iconName: 'check',
-    note: '中度敏感 + 召回模式开启',
+    note: '命中敏感 S2',
   },
   {
     risk: '敏感',
@@ -1471,10 +1470,10 @@ export const HUMAN_ON_DISPOSITION_PREVIEW: ReadonlyArray<DispositionRow> = [
     risk: '低风险',
     sensitive: '—',
     action: 'review',
-    statusLabel: '升级人审（需召回模式）',
+    statusLabel: '升级人审',
     statusColor: 'gold',
     iconName: 'check',
-    note: '低风险 + 召回模式开启',
+    note: '命中低风险',
   },
   {
     risk: '无风险',

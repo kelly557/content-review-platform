@@ -385,16 +385,21 @@ def _suggest_action_for(
     risk_level: str,
     sensitive_level: str,
     human_enabled: bool,
-    recall_mode: bool,
+    recall_mode: bool,  # noqa: ARG001  保留签名兼容，不再参与决策
 ) -> str:
-    """决策矩阵（5 risk × 4 sensitive × 2 human × 2 recall = 80 组合）。
+    """决策矩阵（5 risk × 4 sensitive × 2 human = 40 组合）。
+
+    策略级优先：升级人审的判定完全由策略级 risk_levels / sensitive_levels 决定
+    （见 should_escalate_to_human），本函数只决定机审的 auto_* 动作，
+    **不再读取 recall_mode**。``recall_mode`` 参数保留以保持调用方签名兼容。
 
     核心规则：
       - 高风险 / 中风险 → 人审开 → review；人审关 → rejected（不放行）
-      - 敏感 + S3 / S2   → 人审开+召回 → review；其他 → rejected（不放行）
-      - 敏感 + S1        → desensitize（脱敏放行，无视人审/召回）
+      - 敏感 + S3 / S2   → 人审开 → review；人审关 → rejected
+      - 敏感 + S1        → desensitize（脱敏放行，无视人审）
       - 敏感 + S0        → approved（没检出敏感内容，放行）
-      - 低风险 / 无风险  → 人审开+召回 → review；其他 → approved
+      - 低风险           → 人审开 → review；人审关 → approved
+      - 无风险           → approved
     """
     if risk_level == RiskLevel.HIGH.value:
         return (
@@ -414,7 +419,7 @@ def _suggest_action_for(
         if sensitive_level in (SensitiveLevel.S3.value, SensitiveLevel.S2.value):
             return (
                 SUGGESTED_ACTION_REVIEW
-                if (human_enabled and recall_mode)
+                if human_enabled
                 else SUGGESTED_ACTION_REJECTED
             )
         if sensitive_level == SensitiveLevel.S1.value:
@@ -425,7 +430,7 @@ def _suggest_action_for(
     if risk_level == RiskLevel.LOW.value:
         return (
             SUGGESTED_ACTION_REVIEW
-            if (human_enabled and recall_mode)
+            if human_enabled
             else SUGGESTED_ACTION_APPROVED
         )
 

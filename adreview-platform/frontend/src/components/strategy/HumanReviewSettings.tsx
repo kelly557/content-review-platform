@@ -70,6 +70,13 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
     }
   }, [])
 
+  // 关闭人审时，重置预览模式为 'off'（避免下次开启时残留）
+  useEffect(() => {
+    if (!value.is_enabled && previewMode !== 'off') {
+      setPreviewMode('off')
+    }
+  }, [value.is_enabled, previewMode])
+
   const patch = (next: Partial<StrategyHumanReview>) => {
     onChange({ ...value, ...next })
   }
@@ -97,19 +104,10 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
   const renderRiskTag = (risk: StrategyRiskLevel) => {
     const opt = riskOptions.find((o) => o.value === risk)
     if (!opt) return risk
-    const tag = (
+    return (
       <Tag color={opt.color} bordered={false}>
         {opt.label}
       </Tag>
-    )
-    if (!opt.escalateRequiresRecall) return tag
-    return (
-      <Space size={4}>
-        {tag}
-        <Tooltip title="该档位升级人审还需 service 同时开启「召回模式」">
-          <ExclamationCircleOutlined style={{ color: '#F59E0B' }} />
-        </Tooltip>
-      </Space>
     )
   }
 
@@ -191,7 +189,7 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
       >
         <Form.Item
           label="启用人审复审"
-          tooltip="关闭后机审按风险等级 + 敏感等级直接出结论。仅低风险/无风险/敏感-S0 通过；中风险与敏感 S2/S3 拒绝；敏感 S1 脱敏放行。不会升级人工复审。"
+          tooltip="关闭后机审按风险等级 + 敏感等级直接出结论。仅低风险/无风险/敏感-S0 通过；中风险与敏感 S2/S3 拒绝；敏感 S1 脱敏放行。不会升级人工复审。开启后下方会显示详细的处置预览。"
           style={{ marginBottom: 0 }}
         >
           <Space>
@@ -208,7 +206,7 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
       <Form.Item
         label="升级人审的机审风险等级"
         required={value.is_enabled}
-        tooltip="机审结果出现下列风险等级时升级到人工复审。「低风险」/「敏感」档位还需 service 同时开启「召回模式」。"
+        tooltip="机审结果出现下列风险等级时升级到人工复审。策略级选择优先于 service 默认设置。"
         style={{ marginBottom: 0 }}
       >
         <Checkbox.Group
@@ -219,31 +217,21 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
         >
           {riskOptions.map((o) => (
             <Checkbox key={o.value} value={o.value}>
-              <Space size={4}>
-                <Tag color={o.color} bordered={false}>
-                  {o.label}
-                </Tag>
-                {o.escalateRequiresRecall && (
-                  <Tooltip title="该档位升级人审还需 service 同时开启「召回模式」">
-                    <ExclamationCircleOutlined
-                      style={{ color: '#F59E0B', fontSize: 12 }}
-                    />
-                  </Tooltip>
-                )}
-              </Space>
+              <Tag color={o.color} bordered={false}>
+                {o.label}
+              </Tag>
             </Checkbox>
           ))}
         </Checkbox.Group>
         <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
           勾选的风险等级出现时，机审结果升级到人工复审。
-          「低风险」/「敏感」档位升级还需 service 同时开启「召回模式」。
         </Text>
       </Form.Item>
 
       <Form.Item
         label="升级人审的敏感等级"
         required={value.is_enabled && value.risk_levels.includes('敏感')}
-        tooltip="仅当机审结果为「敏感」时生效。S1 永远走脱敏放行（不升级人审）；S2/S3 升级人审还需 service 开启「召回模式」。"
+        tooltip="仅当机审结果为「敏感」时生效。S1 永远走脱敏放行（不升级人审）；勾选 S2/S3 即升级人审。"
         style={{ marginBottom: 0 }}
       >
         <Checkbox.Group
@@ -256,31 +244,15 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
         >
           {sensitiveOptions.map((o) => (
             <Checkbox key={o.value} value={o.value}>
-              <Space size={4}>
-                <Tag color={o.color} bordered={false}>
-                  {o.label}
-                </Tag>
-                {o.value === 'S1' && (
-                  <Tooltip title="S1 永远走脱敏放行（不升级人审）">
-                    <ExclamationCircleOutlined
-                      style={{ color: '#F59E0B', fontSize: 12 }}
-                    />
-                  </Tooltip>
-                )}
-                {(o.value === 'S2' || o.value === 'S3') && (
-                  <Tooltip title="升级还需 service 开启「召回模式」">
-                    <ExclamationCircleOutlined
-                      style={{ color: '#F59E0B', fontSize: 12 }}
-                    />
-                  </Tooltip>
-                )}
-              </Space>
+              <Tag color={o.color} bordered={false}>
+                {o.label}
+              </Tag>
             </Checkbox>
           ))}
         </Checkbox.Group>
         <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
           仅当机审结果为「敏感」时生效。S1 永远走脱敏放行（不升级人审）；
-          S2/S3 升级还需 service 开启「召回模式」。
+          勾选 S2/S3 即升级人审。
         </Text>
       </Form.Item>
 
@@ -316,46 +288,46 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
         />
       </Form.Item>
 
-      <Alert
-        type="info"
-        showIcon
-        style={{ background: 'transparent', border: '1px solid #E2E8F0' }}
-        message={
-          <Space wrap>
-            <Text strong>处置预览</Text>
-            <Segmented
-              size="small"
-              value={previewMode}
-              onChange={(v) => setPreviewMode(v as PreviewMode)}
-              options={[
-                { label: '关人审（默认）', value: 'off' },
-                { label: '开人审 + 当前选项', value: 'on' },
-              ]}
-            />
-          </Space>
-        }
-        description={
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Text type="secondary" style={{ fontSize: 13 }}>
-              {previewMode === 'off'
-                ? '机审节点直接出终态结论，不再走人工复审：'
-                : value.is_enabled
-                  ? '绿色描边 = 你当前的选择会升级到人审 / 脱敏放行 / 通过；其他 cell 走默认动作。'
-                  : '请先打开「启用人审复审」开关，此模式下才能高亮显示你选择的升级 cell。'}
-            </Text>
-            <Descriptions
-              size="small"
-              column={1}
-              bordered
-              items={
-                previewMode === 'off'
-                  ? renderPreviewItems(DEFAULT_DISPOSITION_PREVIEW)
-                  : renderPreviewItems(HUMAN_ON_DISPOSITION_PREVIEW)
-              }
-            />
-          </Space>
-        }
-      />
+      {value.is_enabled && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ background: 'transparent', border: '1px solid #E2E8F0' }}
+          message={
+            <Space wrap>
+              <Text strong>处置预览</Text>
+              <Segmented
+                size="small"
+                value={previewMode}
+                onChange={(v) => setPreviewMode(v as PreviewMode)}
+                options={[
+                  { label: '关人审（默认）', value: 'off' },
+                  { label: '开人审 + 当前选项', value: 'on' },
+                ]}
+              />
+            </Space>
+          }
+          description={
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Text type="secondary" style={{ fontSize: 13 }}>
+                {previewMode === 'off'
+                  ? '机审节点直接出终态结论，不再走人工复审：'
+                  : '绿色描边 = 你当前的选择会升级到人审 / 脱敏放行 / 通过；其他 cell 走默认动作。'}
+              </Text>
+              <Descriptions
+                size="small"
+                column={1}
+                bordered
+                items={
+                  previewMode === 'off'
+                    ? renderPreviewItems(DEFAULT_DISPOSITION_PREVIEW)
+                    : renderPreviewItems(HUMAN_ON_DISPOSITION_PREVIEW)
+                }
+              />
+            </Space>
+          }
+        />
+      )}
     </Space>
   )
 }
