@@ -4,7 +4,6 @@ import {
   Checkbox,
   Descriptions,
   Form,
-  Segmented,
   Select,
   Space,
   Switch,
@@ -22,7 +21,6 @@ import { workflowsApi } from '@/api/workflows'
 import {
   DEFAULT_DISPOSITION_PREVIEW,
   EMPTY_HUMAN_REVIEW,
-  HUMAN_ON_DISPOSITION_PREVIEW,
   SENSITIVE_LEVEL_OPTIONS,
   STRATEGY_RISK_LEVEL_OPTIONS,
   type DispositionRow,
@@ -44,12 +42,9 @@ const ICON_MAP = {
   check: <CheckCircleOutlined />,
 } as const
 
-type PreviewMode = 'off' | 'on'
-
 export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProps) {
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [loading, setLoading] = useState(false)
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('off')
 
   useEffect(() => {
     let cancelled = false
@@ -69,13 +64,6 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
       cancelled = true
     }
   }, [])
-
-  // 关闭人审时，重置预览模式为 'off'（避免下次开启时残留）
-  useEffect(() => {
-    if (!value.is_enabled && previewMode !== 'off') {
-      setPreviewMode('off')
-    }
-  }, [value.is_enabled, previewMode])
 
   const patch = (next: Partial<StrategyHumanReview>) => {
     onChange({ ...value, ...next })
@@ -98,19 +86,6 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
   const riskOptions = STRATEGY_RISK_LEVEL_OPTIONS
   const sensitiveOptions = SENSITIVE_LEVEL_OPTIONS.filter((o) => o.value !== 'S0')
 
-  const riskHitSet = new Set<StrategyRiskLevel>(value.risk_levels)
-  const sensitiveHitSet = new Set(value.sensitive_levels)
-
-  const renderRiskTag = (risk: StrategyRiskLevel) => {
-    const opt = riskOptions.find((o) => o.value === risk)
-    if (!opt) return risk
-    return (
-      <Tag color={opt.color} bordered={false}>
-        {opt.label}
-      </Tag>
-    )
-  }
-
   const renderSensitiveTag = (s: string) => {
     const opt = SENSITIVE_LEVEL_OPTIONS.find((o) => o.value === s)
     if (!opt) return s
@@ -132,14 +107,6 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
     return tag
   }
 
-  const highlightRow = (row: DispositionRow): boolean => {
-    if (!value.is_enabled || previewMode !== 'on') return false
-    if (row.risk === '敏感') {
-      return row.sensitive !== '—' && sensitiveHitSet.has(row.sensitive as never)
-    }
-    return riskHitSet.has(row.risk as StrategyRiskLevel)
-  }
-
   const renderPreviewItems = (rows: ReadonlyArray<DispositionRow>) =>
     rows.map((row) => ({
       key: `${row.risk}-${row.sensitive}`,
@@ -148,7 +115,7 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
           {row.risk === '敏感' ? (
             renderSensitiveTag(row.sensitive as string)
           ) : (
-            <Text strong>{renderRiskTag(row.risk as StrategyRiskLevel)}</Text>
+            <Text strong>{row.risk}</Text>
           )}
           {row.risk !== '敏感' && row.sensitive !== '—' && (
             <Tag bordered={false}>{row.sensitive}</Tag>
@@ -160,11 +127,6 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
           <Tag
             color={row.statusColor}
             icon={row.iconName ? ICON_MAP[row.iconName] : undefined}
-            style={
-              highlightRow(row)
-                ? { boxShadow: '0 0 0 2px #16A34A' }
-                : undefined
-            }
           >
             {row.statusLabel}
           </Tag>
@@ -189,144 +151,127 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
       >
         <Form.Item
           label="启用人审复审"
-          tooltip="关闭后机审按风险等级 + 敏感等级直接出结论。仅低风险/无风险/敏感-S0 通过；中风险与敏感 S2/S3 拒绝；敏感 S1 脱敏放行。不会升级人工复审。开启后下方会显示详细的处置预览。"
+          tooltip="关闭后机审按风险等级 + 敏感等级直接出结论。仅低风险/无风险/敏感-S0 通过；中风险与敏感 S2/S3 拒绝；敏感 S1 脱敏放行。不会升级人工复审。"
           style={{ marginBottom: 0 }}
         >
           <Space>
             <Switch checked={value.is_enabled} onChange={onToggle} />
             <Text type="secondary" style={{ fontSize: 12 }}>
               {value.is_enabled
-                ? '已开启 — 机审按下方配置升级到人工复审'
+                ? '已开启 — 下方配置升级到人工复审的规则'
                 : '已关闭 — 机审按风险等级 + 敏感等级直接出结论'}
             </Text>
           </Space>
         </Form.Item>
       </div>
 
-      <Form.Item
-        label="升级人审的机审风险等级"
-        required={value.is_enabled}
-        tooltip="机审结果出现下列风险等级时升级到人工复审。策略级选择优先于 service 默认设置。"
-        style={{ marginBottom: 0 }}
-      >
-        <Checkbox.Group
-          value={value.risk_levels}
-          onChange={(v) => patch({ risk_levels: v as StrategyRiskLevel[] })}
-          disabled={!value.is_enabled}
-          style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}
-        >
-          {riskOptions.map((o) => (
-            <Checkbox key={o.value} value={o.value}>
-              <Tag color={o.color} bordered={false}>
-                {o.label}
-              </Tag>
-            </Checkbox>
-          ))}
-        </Checkbox.Group>
-        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
-          勾选的风险等级出现时，机审结果升级到人工复审。
-        </Text>
-      </Form.Item>
-
-      <Form.Item
-        label="升级人审的敏感等级"
-        required={value.is_enabled && value.risk_levels.includes('敏感')}
-        tooltip="仅当机审结果为「敏感」时生效。S1 永远走脱敏放行（不升级人审）；勾选 S2/S3 即升级人审。"
-        style={{ marginBottom: 0 }}
-      >
-        <Checkbox.Group
-          value={value.sensitive_levels}
-          onChange={(v) => patch({ sensitive_levels: v as never })}
-          disabled={
-            !value.is_enabled || !value.risk_levels.includes('敏感')
-          }
-          style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}
-        >
-          {sensitiveOptions.map((o) => (
-            <Checkbox key={o.value} value={o.value}>
-              <Tag color={o.color} bordered={false}>
-                {o.label}
-              </Tag>
-            </Checkbox>
-          ))}
-        </Checkbox.Group>
-        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
-          仅当机审结果为「敏感」时生效。S1 永远走脱敏放行（不升级人审）；
-          勾选 S2/S3 即升级人审。
-        </Text>
-      </Form.Item>
-
-      <Form.Item
-        label="人工复审流程模板"
-        required={value.is_enabled}
-        tooltip="选择已创建的人工审核策略（hr_ 前缀），素材按其阶段流转"
-        style={{ marginBottom: 0 }}
-      >
-        <Select
-          value={value.review_rule_id ?? undefined}
-          onChange={(id) => patch({ review_rule_id: id ?? null })}
-          placeholder={
-            templates.length === 0
-              ? loading
-                ? '正在加载人工审核策略…'
-                : '暂无可用人工审核策略，请先到「人工审核策略」页创建'
-              : '选择人工审核策略'
-          }
-          disabled={!value.is_enabled}
-          loading={loading}
-          allowClear
-          style={{ maxWidth: 480 }}
-          options={templates.map((t) => ({
-            value: t.id,
-            label: `${t.name}（${t.code}）`,
-          }))}
-          notFoundContent={
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              暂无可用人工审核策略，请先到「人工审核策略」页面创建
-            </Text>
-          }
-        />
-      </Form.Item>
-
-      {value.is_enabled && (
+      {/* 关人审（默认）：只显示处置预览 */}
+      {!value.is_enabled && (
         <Alert
           type="info"
           showIcon
           style={{ background: 'transparent', border: '1px solid #E2E8F0' }}
-          message={
-            <Space wrap>
-              <Text strong>处置预览</Text>
-              <Segmented
-                size="small"
-                value={previewMode}
-                onChange={(v) => setPreviewMode(v as PreviewMode)}
-                options={[
-                  { label: '关人审（默认）', value: 'off' },
-                  { label: '开人审 + 当前选项', value: 'on' },
-                ]}
-              />
-            </Space>
-          }
+          message={<Text strong>处置预览</Text>}
           description={
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Text type="secondary" style={{ fontSize: 13 }}>
-                {previewMode === 'off'
-                  ? '机审节点直接出终态结论，不再走人工复审：'
-                  : '绿色描边 = 你当前的选择会升级到人审 / 脱敏放行 / 通过；其他 cell 走默认动作。'}
+                机审节点直接出终态结论，不再走人工复审：
               </Text>
               <Descriptions
                 size="small"
                 column={1}
                 bordered
-                items={
-                  previewMode === 'off'
-                    ? renderPreviewItems(DEFAULT_DISPOSITION_PREVIEW)
-                    : renderPreviewItems(HUMAN_ON_DISPOSITION_PREVIEW)
-                }
+                items={renderPreviewItems(DEFAULT_DISPOSITION_PREVIEW)}
               />
             </Space>
           }
         />
+      )}
+
+      {/* 开人审：显示风险 / 敏感 / 流程模板 */}
+      {value.is_enabled && (
+        <>
+          <Form.Item
+            label="升级人审的机审风险等级"
+            required
+            tooltip="机审结果出现下列风险等级时升级到人工复审。策略级选择优先于 service 默认设置。"
+            style={{ marginBottom: 0 }}
+          >
+            <Checkbox.Group
+              value={value.risk_levels}
+              onChange={(v) => patch({ risk_levels: v as StrategyRiskLevel[] })}
+              style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}
+            >
+              {riskOptions.map((o) => (
+                <Checkbox key={o.value} value={o.value}>
+                  <Tag color={o.color} bordered={false}>
+                    {o.label}
+                  </Tag>
+                </Checkbox>
+              ))}
+            </Checkbox.Group>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+              勾选的风险等级出现时，机审结果升级到人工复审。
+            </Text>
+          </Form.Item>
+
+          <Form.Item
+            label="升级人审的敏感等级"
+            required={value.risk_levels.includes('敏感')}
+            tooltip="仅当机审结果为「敏感」时生效。S1 永远走脱敏放行（不升级人审）；勾选 S2/S3 即升级人审。"
+            style={{ marginBottom: 0 }}
+          >
+            <Checkbox.Group
+              value={value.sensitive_levels}
+              onChange={(v) => patch({ sensitive_levels: v as never })}
+              disabled={!value.risk_levels.includes('敏感')}
+              style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}
+            >
+              {sensitiveOptions.map((o) => (
+                <Checkbox key={o.value} value={o.value}>
+                  <Tag color={o.color} bordered={false}>
+                    {o.label}
+                  </Tag>
+                </Checkbox>
+              ))}
+            </Checkbox.Group>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+              仅当机审结果为「敏感」时生效。S1 永远走脱敏放行（不升级人审）；
+              勾选 S2/S3 即升级人审。
+            </Text>
+          </Form.Item>
+
+          <Form.Item
+            label="人工复审流程模板"
+            required
+            tooltip="选择已创建的人工审核策略（hr_ 前缀），素材按其阶段流转"
+            style={{ marginBottom: 0 }}
+          >
+            <Select
+              value={value.review_rule_id ?? undefined}
+              onChange={(id) => patch({ review_rule_id: id ?? null })}
+              placeholder={
+                templates.length === 0
+                  ? loading
+                    ? '正在加载人工审核策略…'
+                    : '暂无可用人工审核策略，请先到「人工审核策略」页创建'
+                  : '选择人工审核策略'
+              }
+              loading={loading}
+              allowClear
+              style={{ maxWidth: 480 }}
+              options={templates.map((t) => ({
+                value: t.id,
+                label: `${t.name}（${t.code}）`,
+              }))}
+              notFoundContent={
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  暂无可用人工审核策略，请先到「人工审核策略」页面创建
+                </Text>
+              }
+            />
+          </Form.Item>
+        </>
       )}
     </Space>
   )
