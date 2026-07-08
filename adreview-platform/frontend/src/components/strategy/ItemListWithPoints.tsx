@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Alert, Empty, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Empty, Table, Tooltip, Typography } from 'antd'
 import { DownOutlined, RightOutlined, StarFilled } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { auditItemsApi } from '@/api/auditItems'
-import type { AuditItem, AuditPoint } from '@/types/domain'
+import type { AuditItem } from '@/types/domain'
 import PointSubTable from './PointSubTable'
 import type { PointMap } from './pointLevel'
 
@@ -30,8 +30,6 @@ export default function ItemListWithPoints({
   const [items, setItems] = useState<AuditItem[]>([])
   const [loading, setLoading] = useState(false)
   const [expandedKeys, setExpandedKeys] = useState<Set<number>>(new Set())
-  // 点开过的 item 缓存其 point 列表，避免每次折叠/展开重新拉接口
-  const [pointCache] = useState<Record<number, AuditPoint[]>>({})
 
   useEffect(() => {
     if (!packageCode) {
@@ -92,9 +90,9 @@ export default function ItemListWithPoints({
       ),
     },
     {
-      title: '业务规则',
+      title: '规则',
       dataIndex: 'name_cn',
-      width: '24%',
+      width: '20%',
       render: (v: string, row) => {
         const overridden = isItemOverriddenFlag(row.id)
         const isExpanded = expandedKeys.has(row.id)
@@ -112,7 +110,7 @@ export default function ItemListWithPoints({
                 </Text>
               </a>
               {overridden && (
-                <Tooltip title="该业务规则下审核点已被细化选择">
+                <Tooltip title="该规则下审核点已被细化选择">
                   <StarFilled style={{ color: '#F59E0B', fontSize: 11 }} />
                 </Tooltip>
               )}
@@ -134,24 +132,6 @@ export default function ItemListWithPoints({
       render: (v: string | null) =>
         v ? <Text>{v}</Text> : <Text type="secondary">—</Text>,
     },
-    {
-      title: '细分点',
-      dataIndex: 'point_count',
-      width: '10%',
-      render: (n: number) => (
-        <Text style={{ color: '#0369A1' }}>{n} 项</Text>
-      ),
-    },
-    {
-      title: '状态',
-      dataIndex: 'is_enabled',
-      width: '12%',
-      render: (enabled: boolean) => (
-        <Tag color={enabled ? 'success' : 'default'} bordered={false}>
-          {enabled ? '系统启用' : '系统停用'}
-        </Tag>
-      ),
-    },
   ]
 
   return (
@@ -160,7 +140,7 @@ export default function ItemListWithPoints({
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="勾选「业务规则」= 启用整条规则；点击行左侧箭头展开后，可对下属审核点逐个细选。未展开的规则 = 该规则下所有点跟随默认（系统启用即启用）。"
+        message="勾选「规则」= 启用整条规则；点击行左侧箭头展开后，可对下属审核点逐个细选。未展开的规则 = 该规则下所有点跟随默认（系统启用即启用）。"
       />
       <Table<AuditItem>
         rowKey="id"
@@ -183,10 +163,6 @@ export default function ItemListWithPoints({
           ),
         }}
       />
-      {/* pointCache 保留扩展位（未来可改成折叠时缓存已加载的点） */}
-      <span style={{ display: 'none' }} aria-hidden>
-        {Object.keys(pointCache).length}
-      </span>
     </div>
   )
 }

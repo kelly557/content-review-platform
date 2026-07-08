@@ -84,7 +84,7 @@ export default function PointSubTable({
     {
       title: '审核点',
       dataIndex: 'label_cn',
-      width: '24%',
+      width: '20%',
       render: (v: string) => (
         <Text strong style={{ color: itemEnabled ? '#020617' : '#94A3B8' }}>
           {v}
@@ -102,25 +102,10 @@ export default function PointSubTable({
       ),
     },
     {
-      title: '阈值（中 / 高）',
-      key: 'thresholds',
-      width: '16%',
-      render: (_v, row) => (
-        <Text style={{ fontVariantNumeric: 'tabular-nums', color: '#475569' }}>
-          {row.medium_threshold} / {row.high_threshold}
-        </Text>
-      ),
-    },
-    {
-      title: '适用范围',
-      dataIndex: 'scope_text',
-      width: '36%',
+      title: '审核内容',
+      dataIndex: 'description',
       render: (v: string | null) =>
-        v ? (
-          <Text type="secondary">{v}</Text>
-        ) : (
-          <Text type="secondary">—</Text>
-        ),
+        v ? <Text>{v}</Text> : <Text type="secondary">—</Text>,
     },
   ]
 
@@ -132,7 +117,7 @@ export default function PointSubTable({
     return (
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description="该业务规则下暂无审核点"
+        description="该规则下暂无审核点"
         style={{ padding: '16px 0' }}
       />
     )
@@ -153,7 +138,7 @@ export default function PointSubTable({
           type="warning"
           showIcon
           style={{ marginBottom: 8, marginRight: 16 }}
-          message="该业务规则未启用，下方审核点不会生效，但已保留你的勾选记录"
+          message="该规则未启用，下方审核点不会生效，但已保留你的勾选记录"
         />
       )}
       <div style={{ marginBottom: 6, marginRight: 16 }}>

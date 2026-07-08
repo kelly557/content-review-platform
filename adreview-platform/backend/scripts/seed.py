@@ -451,6 +451,59 @@ DEFAULT_AUDIT_ITEMS: dict[str, dict[str, tuple[str, list[str]]]] = {
 }
 
 
+# Default description for each default audit_item. Looked up by
+# (package_code, item_code). Picked so the "描述" column in the
+# strategy editor's step-2 规则 list has meaningful text out of the
+# box instead of "—".
+DEFAULT_ITEM_DESCRIPTIONS: dict[tuple[str, str], str] = {
+    # ── ad_compliance_detection_pro ──
+    ("ad_compliance_detection_pro", "pt_water_mark"): "识别画面中的网络社交平台、品牌方等水印信息",
+    ("ad_compliance_detection_pro", "pt_qr_code"):    "识别画面中的二维码、QR 码、小程序码等",
+    ("ad_compliance_detection_pro", "pt_drainage"):   "识别画面中的联系方式、兼职招聘、办证、投资理财等引流内容",
+    # ── image_audit_pro ──
+    ("image_audit_pro", "img_politics"):   "识别政治人物、政治事件、政治符号等涉政内容",
+    ("image_audit_pro", "img_porn"):       "识别色情、低俗、裸露等涉黄内容",
+    ("image_audit_pro", "img_violence"):   "识别血腥、暴力、残忍等涉暴内容",
+    ("image_audit_pro", "img_prohibited"): "识别毒品、赌博、违禁品等违禁内容",
+    ("image_audit_pro", "img_terrorism"):  "识别恐怖组织、恐怖袭击等暴恐内容",
+    ("image_audit_pro", "img_ad"):         "识别画面中的第三方广告、品牌植入",
+    ("image_audit_pro", "img_adlaw"):      "识别极限用语、虚假承诺等广告法违规内容",
+    ("image_audit_pro", "img_religion"):   "识别宗教极端、宗教渗透等宗教敏感内容",
+    ("image_audit_pro", "img_special"):    "专项审核场景",
+    # ── text_audit_pro ──
+    ("text_audit_pro", "tx_politics"):         "识别政治敏感文本",
+    ("text_audit_pro", "tx_terrorism"):        "识别恐怖组织、恐怖袭击等暴恐文本",
+    ("text_audit_pro", "tx_porn"):             "识别色情、低俗文本",
+    ("text_audit_pro", "tx_advertising"):      "识别广告法违规表述（极限用语、虚假承诺）",
+    ("text_audit_pro", "tx_abuse"):            "识别辱骂、人身攻击文本",
+    ("text_audit_pro", "tx_vulgar"):           "识别低俗口头语、不文明用语",
+    ("text_audit_pro", "tx_minor_protection"): "识别涉及未成年人的不良内容",
+    ("text_audit_pro", "tx_values"):           "识别违反主流价值观的内容",
+    ("text_audit_pro", "tx_illegal"):          "识别违法违规文本",
+    ("text_audit_pro", "tx_privacy"):          "识别个人隐私信息泄露",
+    ("text_audit_pro", "tx_promptattack"):     "识别 prompt 注入、越狱攻击",
+    ("text_audit_pro", "bad"):                 "聚合识别不良内容（未成年不适、偏见歧视、不良价值观、攻击辱骂、低俗口头语、封建迷信、灌水）",
+    # ── audio_audit_pro ──
+    ("audio_audit_pro", "au_politics"):   "识别语音中的政治敏感内容",
+    ("audio_audit_pro", "au_porn"):       "识别语音中的色情内容",
+    ("audio_audit_pro", "au_violence"):   "识别语音中的暴恐内容",
+    ("audio_audit_pro", "au_adlaw"):      "识别语音中的广告法违规词",
+    ("audio_audit_pro", "au_abuse"):      "识别语音中的辱骂内容",
+    ("audio_audit_pro", "au_minor"):      "识别语音中涉及未成年人的不良内容",
+    ("audio_audit_pro", "au_illegal"):    "识别语音中的违法违规内容",
+    # ── document_audit_pro ──
+    ("document_audit_pro", "doc_image"):     "识别文档中的图片内容（复用图片审核规则）",
+    ("document_audit_pro", "doc_text"):      "识别文档中的文本内容（复用文本审核规则）",
+    ("document_audit_pro", "doc_sensitive"): "识别文档中的敏感信息",
+    ("document_audit_pro", "doc_illegal"):   "识别文档中的违法违规内容",
+    # ── video_audit_pro ──
+    ("video_audit_pro", "vid_frame"):     "识别视频画面内容（复用图片审核规则）",
+    ("video_audit_pro", "vid_audio"):     "识别视频音轨内容（复用语音审核规则）",
+    ("video_audit_pro", "vid_subtitle"):  "识别视频字幕内容（复用文本审核规则）",
+    ("video_audit_pro", "vid_illegal"):   "识别视频中的违法违规内容",
+}
+
+
 # Each tuple: (item_code, point_code, label_cn, scope_text, medium, high, risk_level)
 # `kind` ∈ {"main", "lib"} controls which config-page table it lands in.
 DEFAULT_AUDIT_POINTS: list[tuple[str, str, str, str, str, float, float, str]] = [
@@ -548,6 +601,7 @@ async def _upsert_audit_items(db: AsyncSession) -> int:
     created = 0
     for package_code, items in DEFAULT_AUDIT_ITEMS.items():
         for item_code, (name_cn, aliases) in items.items():
+            description = DEFAULT_ITEM_DESCRIPTIONS.get((package_code, item_code))
             existing = await db.execute(
                 select(AuditItem).where(
                     AuditItem.package_code == package_code,
@@ -559,6 +613,8 @@ async def _upsert_audit_items(db: AsyncSession) -> int:
                 row.name_cn = name_cn
                 row.aliases = aliases
                 row.is_enabled = True
+                if description is not None:
+                    row.description = description
             else:
                 db.add(
                     AuditItem(
@@ -566,6 +622,7 @@ async def _upsert_audit_items(db: AsyncSession) -> int:
                         code=item_code,
                         name_cn=name_cn,
                         aliases=aliases,
+                        description=description,
                         sort_order=0,
                         is_enabled=True,
                     )
