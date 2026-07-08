@@ -514,10 +514,10 @@ export default function ServiceRuleConfigPage() {
     },
     {
       title: '风险等级定义',
-      dataIndex: 'description',
+      dataIndex: 'risk_level',
       width: '22%',
-      render: (v: string | null) => (
-        <span style={{ color: '#020617' }}>{v ?? '—'}</span>
+      render: (v: AuditPointRisk) => (
+        <span style={{ color: '#020617' }}>{v.replace('风险', '')}</span>
       ),
     },
     {

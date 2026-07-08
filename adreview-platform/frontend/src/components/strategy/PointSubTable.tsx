@@ -97,7 +97,7 @@ export default function PointSubTable({
       width: '12%',
       render: (v: AuditPoint['risk_level']) => (
         <Tag color={RISK_COLOR[v]} bordered={false}>
-          {v}
+          {v.replace('风险', '')}
         </Tag>
       ),
     },
