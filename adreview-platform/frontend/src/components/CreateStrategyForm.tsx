@@ -24,8 +24,17 @@ import {
   EMPTY_HUMAN_REVIEW,
   extractHumanReview,
   type StrategyHumanReview,
+  type StrategyPointRef,
 } from '@/types/domain'
 import type { Strategy } from '@/types/domain'
+import {
+  buildPointMapFromStrategy,
+  countEnabledPoints,
+  countExplicitOverrides,
+  flattenEnabledPoints,
+  hasAnyOverride,
+  type MediaPointMap,
+} from './strategy/pointLevel'
 
 const { Text } = Typography
 
@@ -59,6 +68,14 @@ const EMPTY_ENABLED: Record<CategoryKey, number[]> = {
   audio: [],
   doc: [],
   video: [],
+}
+
+const EMPTY_POINTS: MediaPointMap = {
+  image: {},
+  text: {},
+  audio: {},
+  doc: {},
+  video: {},
 }
 
 function countEnabled(map: Record<CategoryKey, number[]>): number {
@@ -96,6 +113,7 @@ export default function CreateStrategyForm({
   const [enabledItems, setEnabledItems] = useState<Record<CategoryKey, number[]>>(
     EMPTY_ENABLED,
   )
+  const [pointMap, setPointMap] = useState<MediaPointMap>(EMPTY_POINTS)
   const [humanReview, setHumanReview] = useState<StrategyHumanReview>(EMPTY_HUMAN_REVIEW)
   const [hydrated, setHydrated] = useState(mode === 'create')
   const [saveResult, setSaveResult] = useState<{
@@ -117,6 +135,10 @@ export default function CreateStrategyForm({
       }
     }
     setEnabledItems(map)
+    const points = buildPointMapFromStrategy(
+      Array.isArray(initial.enabled_points) ? initial.enabled_points : [],
+    )
+    setPointMap(points)
     setHumanReview(extractHumanReview(initial.definition))
     const from = initial.effective_from ? dayjs(initial.effective_from) : null
     const until = initial.effective_until ? dayjs(initial.effective_until) : null
@@ -196,12 +218,14 @@ export default function CreateStrategyForm({
       return
     }
     const definition = buildDefinitionPayload()
+    const enabledPointsPayload: StrategyPointRef[] = flattenEnabledPoints(pointMap)
     setSubmitting(true)
     try {
       if (mode === 'edit' && strategyId) {
         const savedStrategy = await strategiesApi.update(strategyId, {
           name,
           enabled_items: flattenEnabledItems(enabledItems),
+          enabled_points: enabledPointsPayload,
           effective_from:
             values.durationMode === 'range' && values.range?.[0]
               ? values.range[0].toISOString()
@@ -224,6 +248,7 @@ export default function CreateStrategyForm({
       const savedStrategy = await strategiesApi.create({
         name,
         enabled_items: flattenEnabledItems(enabledItems),
+        enabled_points: enabledPointsPayload,
         effective_from:
           values.durationMode === 'range' && values.range?.[0]
             ? values.range[0].toISOString()
@@ -405,7 +430,9 @@ export default function CreateStrategyForm({
           >
             <StrategyTypeTabs
               value={enabledItems}
+              pointMap={pointMap}
               onChange={setEnabledItems}
+              onPointMapChange={setPointMap}
             />
 
             <div
@@ -414,12 +441,29 @@ export default function CreateStrategyForm({
                 flexWrap: 'wrap',
                 alignItems: 'center',
                 gap: 8,
+                padding: '8px 12px',
+                background: '#F8FAFC',
+                border: '1px solid #E2E8F0',
+                borderRadius: 6,
               }}
             >
               <Text type="secondary">本步合计已选：</Text>
               <Text strong style={{ color: '#0369A1' }}>
-                {countEnabled(enabledItems)} 项
+                {countEnabled(enabledItems)} 条业务规则
               </Text>
+              <Text type="secondary">/</Text>
+              <Text strong style={{ color: '#0369A1' }}>
+                {countEnabledPoints(pointMap)} 个审核点
+              </Text>
+              {hasAnyOverride(pointMap) && (
+                <>
+                  <Text type="secondary">（</Text>
+                  <Text strong style={{ color: '#F59E0B' }}>
+                    {countExplicitOverrides(pointMap)} 个已细化
+                  </Text>
+                  <Text type="secondary">）</Text>
+                </>
+              )}
             </div>
           </div>
         )}

@@ -13,8 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models.audit_item import AuditItem
+from app.models.audit_point import AuditPoint
 from app.models.strategy import Strategy, StrategyScope
 from app.models.strategy_item import StrategyItem
+from app.models.strategy_point import StrategyPoint
 from app.models.user import User
 from app.models.detection_rule import DetectionRule
 from app.models.workflow import WorkflowTemplate
@@ -25,6 +27,7 @@ from app.schemas.strategy import (
     StrategyDuplicateRequest,
     StrategyItemRef,
     StrategyOut,
+    StrategyPointRef,
     StrategyUpdate,
     StrategyValidateResult,
 )
@@ -71,9 +74,24 @@ async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyO
 
     在 commit 之后构造 schema，避免响应序列化阶段触发
     `MissingGreenlet`（访问 server_default 列 / 时间戳字段会触发 lazy IO）。
+
+    额外把 `enabled_points` 聚合摘要写入 `strategy.definition.enabled_points_meta`，
+    避免列表场景下每次都要 N+1 解析所有 point 行。
     """
     await db.refresh(strategy)
     enabled = await _load_enabled_items(db, strategy.id)
+    enabled_points = await _load_enabled_points(db, strategy.id)
+    # JSONB 兜底：聚合摘要写到 definition 里
+    overrides_count = sum(1 for p in enabled_points if not p.is_enabled)
+    definition = dict(strategy.definition or {})
+    if enabled_points:
+        definition["enabled_points_meta"] = {
+            "total": len(enabled_points),
+            "enabled": sum(1 for p in enabled_points if p.is_enabled),
+            "disabled": overrides_count,
+            "has_overrides": overrides_count > 0
+            or _has_explicit_partial_selection(enabled, enabled_points),
+        }
     data = {
         "id": strategy.id,
         "code": strategy.code,
@@ -84,13 +102,30 @@ async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyO
         "priority": strategy.priority,
         "effective_from": strategy.effective_from,
         "effective_until": strategy.effective_until,
-        "definition": strategy.definition or {},
+        "definition": definition,
         "service_config": strategy.service_config or {},
         "enabled_items": enabled,
+        "enabled_points": enabled_points,
         "created_at": strategy.created_at,
         "updated_at": strategy.updated_at,
     }
     return StrategyOut.model_validate(data)
+
+
+def _has_explicit_partial_selection(
+    enabled_items: list[StrategyItemRef],
+    enabled_points: list[StrategyPointRef],
+) -> bool:
+    """True if any item has at least one explicit point-level row (regardless of
+    is_enabled value). 表示该 item 已被用户细化（哪怕所有 point 都仍 enabled）。
+    """
+    items_with_points: set[tuple[str, int]] = {
+        (p.media_type, p.item_id) for p in enabled_points
+    }
+    for it in enabled_items:
+        if it.is_enabled and (it.media_type, it.item_id) in items_with_points:
+            return True
+    return False
 
 
 async def _load_enabled_items(
@@ -145,6 +180,114 @@ async def _replace_enabled_items(
         )
 
 
+async def _load_enabled_points(
+    db: AsyncSession, strategy_id: int
+) -> list[StrategyPointRef]:
+    """Load persisted strategy → point selections. Returns [] on any failure."""
+    try:
+        rows = await db.execute(
+            select(StrategyPoint).where(StrategyPoint.strategy_id == strategy_id)
+        )
+    except Exception:
+        return []
+    out: list[StrategyPointRef] = []
+    for r in rows.scalars():
+        out.append(
+            StrategyPointRef(
+                media_type=r.media_type,
+                item_id=r.item_id,
+                point_id=r.point_id,
+                is_enabled=r.is_enabled,
+            )
+        )
+    return out
+
+
+async def _replace_enabled_points(
+    db: AsyncSession,
+    strategy_id: int,
+    enabled_points: list[StrategyPointRef],
+    enabled_items: list[StrategyItemRef] | None = None,
+) -> None:
+    """Replace strategy_points rows for a strategy with PATCH semantics.
+
+    级联规则（决策：item 关 → point 自动关，但保留用户记忆）：
+
+    - 请求中的 point 显式落库（is_enabled 按请求值）
+    - 不在请求中、但所属 item 仍启用的 point：保留旧行（保留用户记忆）
+    - 不在请求中、且所属 item 被关闭的 point：is_enabled 设为 false
+      （item 级联禁用，point 行保留以便重开时恢复）
+    - 不再属于任何「已启用 item」的孤儿 point（item 已不在 enabled_items
+      中）：保留行但 is_enabled=false
+    """
+    if enabled_items is None:
+        # 调用方未传 enabled_items 时，回退为「该 strategy 的现有 enabled_items」
+        rows = await db.execute(
+            select(StrategyItem).where(StrategyItem.strategy_id == strategy_id)
+        )
+        enabled_item_keys: set[tuple[str, int]] = {
+            (r.media_type, r.item_id) for r in rows.scalars() if r.is_enabled
+        }
+    else:
+        enabled_item_keys = {
+            (ref.media_type, ref.item_id)
+            for ref in enabled_items
+            if ref.is_enabled
+        }
+
+    # 1) 处理请求中显式给定的 point
+    seen: set[tuple[str, int]] = set()
+    for ref in enabled_points:
+        key = (ref.media_type, ref.point_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        point = await db.get(AuditPoint, ref.point_id)
+        if not point:
+            continue
+        if point.item_id != ref.item_id:
+            continue
+        expected_media = MEDIA_BY_PACKAGE.get(point.package_code)
+        if expected_media and expected_media != ref.media_type:
+            pass
+        # upsert: 按 (strategy_id, point_id) 唯一
+        existing = await db.execute(
+            select(StrategyPoint).where(
+                StrategyPoint.strategy_id == strategy_id,
+                StrategyPoint.point_id == ref.point_id,
+            )
+        )
+        existing_row = existing.scalar_one_or_none()
+        if existing_row:
+            existing_row.is_enabled = ref.is_enabled
+            existing_row.media_type = ref.media_type
+            existing_row.item_id = ref.item_id
+        else:
+            db.add(
+                StrategyPoint(
+                    strategy_id=strategy_id,
+                    media_type=ref.media_type,
+                    item_id=ref.item_id,
+                    point_id=ref.point_id,
+                    is_enabled=ref.is_enabled,
+                )
+            )
+
+    # 2) 扫描该 strategy 现存所有 point 行：
+    #    - 若所属 item 不在 enabled_item_keys 中 → 关闭（保留行）
+    #    - 否则保留原 is_enabled 不动（item 启用时不动 point 级记忆）
+    existing_rows = await db.execute(
+        select(StrategyPoint).where(StrategyPoint.strategy_id == strategy_id)
+    )
+    for r in existing_rows.scalars():
+        if r.point_id in seen:
+            continue
+        item_key = (r.media_type, r.item_id)
+        if item_key not in enabled_item_keys:
+            if r.is_enabled:
+                r.is_enabled = False
+
+
 async def _next_code(db: AsyncSession) -> str:
     """Generate next sequential business code like '2016976'."""
     result = await db.execute(select(func.max(Strategy.code)))
@@ -180,6 +323,7 @@ async def list_strategies(
     for s in result.scalars():
         so = StrategyOut.model_validate(s)
         so.enabled_items = await _load_enabled_items(db, s.id)
+        so.enabled_points = await _load_enabled_points(db, s.id)
         items_out.append(so)
     return Page(items=items_out, total=total, page=page, size=size)
 
@@ -230,6 +374,10 @@ async def create_strategy(
 
     if body.enabled_items:
         await _replace_enabled_items(db, strategy.id, body.enabled_items)
+    if body.enabled_points:
+        await _replace_enabled_points(
+            db, strategy.id, body.enabled_points, body.enabled_items
+        )
 
     await audit.write_audit(
         db, actor=user, action="strategy.create",
@@ -238,6 +386,7 @@ async def create_strategy(
             "code": strategy.code,
             "scope": strategy.scope.value,
             "enabled_item_count": len(body.enabled_items or []),
+            "enabled_point_count": len(body.enabled_points or []),
             "human_review_enabled": hr_settings.is_enabled,
         },
     )
@@ -304,6 +453,10 @@ async def update_strategy(
 
     if body.enabled_items is not None and not is_default:
         await _replace_enabled_items(db, strategy.id, body.enabled_items)
+    if body.enabled_points is not None and not is_default:
+        await _replace_enabled_points(
+            db, strategy.id, body.enabled_points, body.enabled_items
+        )
 
     await db.flush()
     await audit.write_audit(
@@ -370,6 +523,9 @@ async def duplicate_strategy(
     src_items = await _load_enabled_items(db, src.id)
     if src_items:
         await _replace_enabled_items(db, dup.id, src_items)
+    src_points = await _load_enabled_points(db, src.id)
+    if src_points:
+        await _replace_enabled_points(db, dup.id, src_points, src_items)
 
     await audit.write_audit(
         db, actor=user, action="strategy.duplicate",
