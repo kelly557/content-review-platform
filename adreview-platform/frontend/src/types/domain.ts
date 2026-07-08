@@ -1264,17 +1264,19 @@ export interface KnowledgeImportResult {
 
 // Stubs for in-progress WIP (HumanReviewSettings / Desensitization / Reply Library) — to be consolidated.
 
-export type StrategyRiskLevel = '低风险' | '中风险' | '高风险' | '零容忍'
+export type StrategyRiskLevel = '低风险' | '中风险' | '高风险' | '无风险' | '敏感'
 
 export interface StrategyHumanReview {
   is_enabled: boolean
   risk_levels: StrategyRiskLevel[]
+  sensitive_levels: SensitiveLevel[]
   review_rule_id: number | null
 }
 
 export const EMPTY_HUMAN_REVIEW: StrategyHumanReview = {
   is_enabled: false,
   risk_levels: [],
+  sensitive_levels: [],
   review_rule_id: null,
 }
 
@@ -1282,10 +1284,14 @@ export const STRATEGY_RISK_LEVEL_OPTIONS: ReadonlyArray<{
   value: StrategyRiskLevel
   label: string
   color: string
+  /** True if escalation also requires the service-level "召回模式" to be on. */
+  escalateRequiresRecall?: boolean
 }> = [
   { value: '高风险', label: '高风险', color: 'red' },
   { value: '中风险', label: '中风险', color: 'orange' },
-  { value: '低风险', label: '低风险', color: 'blue' },
+  { value: '低风险', label: '低风险', color: 'blue', escalateRequiresRecall: true },
+  { value: '无风险', label: '无风险', color: 'default' },
+  { value: '敏感',   label: '敏感',   color: 'purple', escalateRequiresRecall: true },
 ]
 
 // ─── v6 敏感等级 (SensitiveLevel) ─────────────────────────────────────────────
@@ -1399,6 +1405,87 @@ export const DEFAULT_DISPOSITION_PREVIEW: ReadonlyArray<DispositionRow> = [
   },
 ]
 
+// 开启人审 + 召回模式时的处置预览（与 backend _suggest_action_for 严格对齐）
+// 高/中风险：人审开 → review
+// 敏感 S2/S3：人审开 + 召回 → review（否则仍 rejected）
+// 敏感 S1：永远 desensitize（不升级人审）
+// 敏感 S0：approved
+// 低风险：人审开 + 召回 → review（否则 approved）
+// 无风险：approved
+export const HUMAN_ON_DISPOSITION_PREVIEW: ReadonlyArray<DispositionRow> = [
+  {
+    risk: '高风险',
+    sensitive: '—',
+    action: 'review',
+    statusLabel: '升级人审',
+    statusColor: 'gold',
+    iconName: 'check',
+    note: '命中高风险',
+  },
+  {
+    risk: '中风险',
+    sensitive: '—',
+    action: 'review',
+    statusLabel: '升级人审',
+    statusColor: 'gold',
+    iconName: 'check',
+    note: '命中中风险',
+  },
+  {
+    risk: '敏感',
+    sensitive: 'S3',
+    action: 'review',
+    statusLabel: '升级人审（需召回模式）',
+    statusColor: 'gold',
+    iconName: 'check',
+    note: '重度敏感 + 召回模式开启',
+  },
+  {
+    risk: '敏感',
+    sensitive: 'S2',
+    action: 'review',
+    statusLabel: '升级人审（需召回模式）',
+    statusColor: 'gold',
+    iconName: 'check',
+    note: '中度敏感 + 召回模式开启',
+  },
+  {
+    risk: '敏感',
+    sensitive: 'S1',
+    action: 'desensitize',
+    statusLabel: '脱敏放行',
+    statusColor: 'gold',
+    iconName: 'scissor',
+    note: '轻度敏感自动脱敏，不升级人审',
+  },
+  {
+    risk: '敏感',
+    sensitive: 'S0',
+    action: 'approved',
+    statusLabel: '通过',
+    statusColor: 'green',
+    iconName: 'check',
+    note: '未检出敏感内容',
+  },
+  {
+    risk: '低风险',
+    sensitive: '—',
+    action: 'review',
+    statusLabel: '升级人审（需召回模式）',
+    statusColor: 'gold',
+    iconName: 'check',
+    note: '低风险 + 召回模式开启',
+  },
+  {
+    risk: '无风险',
+    sensitive: '—',
+    action: 'approved',
+    statusLabel: '通过',
+    statusColor: 'green',
+    iconName: 'check',
+  },
+]
+
 export function extractHumanReview(
   definition: Record<string, unknown> | null | undefined,
 ): StrategyHumanReview {
@@ -1407,6 +1494,9 @@ export function extractHumanReview(
     is_enabled: Boolean(raw.is_enabled),
     risk_levels: Array.isArray(raw.risk_levels)
       ? (raw.risk_levels as StrategyRiskLevel[])
+      : [],
+    sensitive_levels: Array.isArray(raw.sensitive_levels)
+      ? (raw.sensitive_levels as SensitiveLevel[])
       : [],
     review_rule_id:
       typeof raw.review_rule_id === 'number' ? raw.review_rule_id : null,

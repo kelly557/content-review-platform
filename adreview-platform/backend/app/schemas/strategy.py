@@ -7,23 +7,42 @@ from pydantic import BaseModel, Field
 from app.models.strategy import StrategyScope
 from app.schemas.common import ORMBase
 
-VALID_RISK_LEVELS = ("低风险", "中风险", "高风险", "零容忍")
+VALID_RISK_LEVELS = ("低风险", "中风险", "高风险", "无风险", "敏感")
+VALID_SENSITIVE_LEVELS = ("S0", "S1", "S2", "S3")
 
 
 class HumanReviewSettings(BaseModel):
-    """策略级别的人工审核配置，存入 strategy.definition.human_review JSONB。"""
+    """策略级别的人工审核配置，存入 strategy.definition.human_review JSONB。
+
+    升级人审的判定逻辑（与 backend/app/tasks/machine_review.py:should_escalate_to_human
+    严格对齐）：
+
+    - risk_levels：机审 risk_level 命中任一档即升级
+    - sensitive_levels：仅当 risk_level == "敏感" 时参与；S1 永远走脱敏放行不升级；
+      S2/S3 升级需 service 同时开启「召回模式」
+    """
 
     is_enabled: bool = False
     risk_levels: List[str] = Field(default_factory=list)
+    sensitive_levels: List[str] = Field(default_factory=list)
     review_rule_id: Optional[int] = None
 
     def normalized(self) -> "HumanReviewSettings":
-        """清理后返回：仅保留合法 risk_levels，无意义字段置空。"""
+        """清理后返回：仅保留合法 risk_levels / sensitive_levels，无意义字段置空。"""
         levels = [l for l in self.risk_levels if l in VALID_RISK_LEVELS]
+        sensitives = [s for s in self.sensitive_levels if s in VALID_SENSITIVE_LEVELS]
         if not self.is_enabled:
-            return HumanReviewSettings(is_enabled=False, risk_levels=[], review_rule_id=None)
+            return HumanReviewSettings(
+                is_enabled=False,
+                risk_levels=[],
+                sensitive_levels=[],
+                review_rule_id=None,
+            )
         return HumanReviewSettings(
-            is_enabled=True, risk_levels=levels, review_rule_id=self.review_rule_id
+            is_enabled=True,
+            risk_levels=levels,
+            sensitive_levels=sensitives,
+            review_rule_id=self.review_rule_id,
         )
 
 
