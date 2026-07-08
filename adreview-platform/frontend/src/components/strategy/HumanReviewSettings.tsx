@@ -2,28 +2,24 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   Checkbox,
-  Descriptions,
   Form,
   Select,
   Space,
   Switch,
+  Table,
   Tag,
   Tooltip,
   Typography,
 } from 'antd'
-import {
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
-  ScissorOutlined,
-  StopOutlined,
-} from '@ant-design/icons'
+import type { ColumnsType } from 'antd/es/table'
+import { ExclamationCircleOutlined } from '@ant-design/icons'
 import { workflowsApi } from '@/api/workflows'
 import {
-  DEFAULT_DISPOSITION_PREVIEW,
   EMPTY_HUMAN_REVIEW,
   SENSITIVE_LEVEL_OPTIONS,
   STRATEGY_RISK_LEVEL_OPTIONS,
-  type DispositionRow,
+  type AutoAction,
+  type AutoActionOverrides,
   type StrategyHumanReview,
   type StrategyRiskLevel,
   type WorkflowTemplate,
@@ -35,12 +31,6 @@ interface HumanReviewSettingsProps {
   value: StrategyHumanReview
   onChange: (next: StrategyHumanReview) => void
 }
-
-const ICON_MAP = {
-  stop: <StopOutlined />,
-  scissor: <ScissorOutlined />,
-  check: <CheckCircleOutlined />,
-} as const
 
 export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProps) {
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
@@ -80,64 +70,12 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
         value.risk_levels.length > 0 ? value.risk_levels : ['高风险'],
       sensitive_levels: value.sensitive_levels,
       review_rule_id: value.review_rule_id,
+      auto_action_overrides: value.auto_action_overrides ?? {},
     })
   }
 
   const riskOptions = STRATEGY_RISK_LEVEL_OPTIONS
   const sensitiveOptions = SENSITIVE_LEVEL_OPTIONS.filter((o) => o.value !== 'S0')
-
-  const renderSensitiveTag = (s: string) => {
-    const opt = SENSITIVE_LEVEL_OPTIONS.find((o) => o.value === s)
-    if (!opt) return s
-    const tag = (
-      <Tag color={opt.color} bordered={false}>
-        {opt.label}
-      </Tag>
-    )
-    if (s === 'S1') {
-      return (
-        <Space size={4}>
-          {tag}
-          <Tooltip title="S1 永远走脱敏放行（不升级人审）">
-            <ExclamationCircleOutlined style={{ color: '#F59E0B' }} />
-          </Tooltip>
-        </Space>
-      )
-    }
-    return tag
-  }
-
-  const renderPreviewItems = (rows: ReadonlyArray<DispositionRow>) =>
-    rows.map((row) => ({
-      key: `${row.risk}-${row.sensitive}`,
-      label: (
-        <Space size={6}>
-          {row.risk === '敏感' ? (
-            renderSensitiveTag(row.sensitive as string)
-          ) : (
-            <Text strong>{row.risk}</Text>
-          )}
-          {row.risk !== '敏感' && row.sensitive !== '—' && (
-            <Tag bordered={false}>{row.sensitive}</Tag>
-          )}
-        </Space>
-      ),
-      children: (
-        <Space size={8} align="center">
-          <Tag
-            color={row.statusColor}
-            icon={row.iconName ? ICON_MAP[row.iconName] : undefined}
-          >
-            {row.statusLabel}
-          </Tag>
-          {row.note && (
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {row.note}
-            </Text>
-          )}
-        </Space>
-      ),
-    }))
 
   return (
     <Space direction="vertical" size={20} style={{ width: '100%' }}>
@@ -165,26 +103,11 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
         </Form.Item>
       </div>
 
-      {/* 关人审（默认）：只显示处置预览 */}
+      {/* 关人审（默认）：显示可编辑的处置预览表 */}
       {!value.is_enabled && (
-        <Alert
-          type="info"
-          showIcon
-          style={{ background: 'transparent', border: '1px solid #E2E8F0' }}
-          message={<Text strong>处置预览</Text>}
-          description={
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Text type="secondary" style={{ fontSize: 13 }}>
-                机审节点直接出终态结论，不再走人工复审：
-              </Text>
-              <Descriptions
-                size="small"
-                column={1}
-                bordered
-                items={renderPreviewItems(DEFAULT_DISPOSITION_PREVIEW)}
-              />
-            </Space>
-          }
+        <EditableDispositionTable
+          overrides={value.auto_action_overrides ?? {}}
+          onChange={(next) => patch({ auto_action_overrides: next })}
         />
       )}
 
@@ -274,5 +197,142 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
         </>
       )}
     </Space>
+  )
+}
+
+// ── 关人审时：可编辑的处置预览表 ──────────────────────────────────────────────
+
+interface EditableCell {
+  key: string
+  riskLabel: string
+  sensitiveLabel: string
+  /** 默认（系统内置）动作标签 */
+  defaultLabel: string
+  defaultColor: string
+}
+
+const ACTION_META: Record<
+  AutoAction,
+  { label: string; color: string }
+> = {
+  approved: { label: '通过', color: 'green' },
+  rejected: { label: '拒绝', color: 'volcano' },
+  desensitize: { label: '脱敏放行', color: 'gold' },
+  review: { label: '升级人审', color: 'gold' },
+}
+
+const EDITABLE_CELLS: EditableCell[] = [
+  { key: '高风险|—', riskLabel: '高风险', sensitiveLabel: '—', defaultLabel: '拒绝', defaultColor: 'volcano' },
+  { key: '中风险|—', riskLabel: '中风险', sensitiveLabel: '—', defaultLabel: '拒绝', defaultColor: 'volcano' },
+  { key: '敏感|S3',  riskLabel: '敏感',   sensitiveLabel: 'S3 重度', defaultLabel: '拒绝', defaultColor: 'volcano' },
+  { key: '敏感|S2',  riskLabel: '敏感',   sensitiveLabel: 'S2 中度', defaultLabel: '拒绝', defaultColor: 'volcano' },
+  { key: '敏感|S1',  riskLabel: '敏感',   sensitiveLabel: 'S1 轻度', defaultLabel: '脱敏放行', defaultColor: 'gold' },
+  { key: '敏感|—',   riskLabel: '敏感',   sensitiveLabel: 'S0 未检出', defaultLabel: '通过', defaultColor: 'green' },
+  { key: '低风险|—', riskLabel: '低风险', sensitiveLabel: '—', defaultLabel: '通过', defaultColor: 'green' },
+  { key: '无风险|—', riskLabel: '无风险', sensitiveLabel: '—', defaultLabel: '通过', defaultColor: 'green' },
+]
+
+function EditableDispositionTable({
+  overrides,
+  onChange,
+}: {
+  overrides: AutoActionOverrides
+  onChange: (next: AutoActionOverrides) => void
+}) {
+  const setCell = (key: string, action: AutoAction | null) => {
+    const next = { ...overrides }
+    if (action === null) {
+      delete next[key]
+    } else {
+      next[key] = action
+    }
+    onChange(next)
+  }
+
+  const columns: ColumnsType<EditableCell> = [
+    {
+      title: '风险 / 敏感',
+      key: 'risk',
+      width: '40%',
+      render: (_v, row) => (
+        <Space size={6}>
+          <Text strong>{row.riskLabel}</Text>
+          {row.sensitiveLabel !== '—' && (
+            <Tag bordered={false} color="default">{row.sensitiveLabel}</Tag>
+          )}
+        </Space>
+      ),
+    },
+    {
+      title: '动作（点击可改）',
+      key: 'action',
+      render: (_v, row) => {
+        const userAction = overrides[row.key]
+        const isCustomized = userAction !== undefined
+        const current: { label: string; color: string } = isCustomized
+          ? ACTION_META[userAction]
+          : { label: `默认（${row.defaultLabel}）`, color: row.defaultColor }
+        return (
+          <Select<AutoAction | 'default'>
+            value={isCustomized ? userAction : 'default'}
+            style={{ minWidth: 160 }}
+            onChange={(v) => setCell(row.key, v === 'default' ? null : v)}
+            options={[
+              { value: 'default', label: `默认（${row.defaultLabel}）` },
+              { value: 'approved', label: '通过' },
+              { value: 'rejected', label: '拒绝' },
+              { value: 'desensitize', label: '脱敏放行' },
+            ]}
+            optionRender={(o) => (
+              <Space size={4}>
+                {o.value !== 'default' && (
+                  <Tag color={ACTION_META[o.value as AutoAction].color} bordered={false}>
+                    {ACTION_META[o.value as AutoAction].label}
+                  </Tag>
+                )}
+                <Text>{o.label}</Text>
+              </Space>
+            )}
+            labelRender={() => (
+              <Space size={4}>
+                <Tag color={current.color} bordered={false}>
+                  {current.label}
+                </Tag>
+                {isCustomized && (
+                  <Tooltip title={`已自定义（系统默认：${row.defaultLabel}）`}>
+                    <ExclamationCircleOutlined style={{ color: '#F59E0B', fontSize: 12 }} />
+                  </Tooltip>
+                )}
+              </Space>
+            )}
+          />
+        )
+      },
+    },
+  ]
+
+  return (
+    <Alert
+      type="info"
+      showIcon
+      style={{ background: 'transparent', border: '1px solid #E2E8F0' }}
+      message={<Text strong>处置预览（可编辑）</Text>}
+      description={
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Text type="secondary" style={{ fontSize: 13 }}>
+            关闭人审时，机审节点直接出终态结论。点击每行「动作」下拉可自定义处置。
+            选「默认」= 由机审内置矩阵决定（推荐保留默认）。系统默认：
+            高/中/敏感 S2/S3 拒绝，敏感 S1 脱敏放行，敏感 S0/低/无风险 通过。
+          </Text>
+          <Table<EditableCell>
+            rowKey="key"
+            dataSource={EDITABLE_CELLS}
+            columns={columns}
+            pagination={false}
+            size="small"
+          />
+        </Space>
+      }
+    />
   )
 }
