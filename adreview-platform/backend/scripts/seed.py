@@ -409,6 +409,14 @@ DEFAULT_AUDIT_ITEMS: dict[str, dict[str, tuple[str, list[str]]]] = {
         "img_adlaw":      ("广告法", ["广告法", "极限用语", "adlaw"]),
         "img_religion":   ("宗教",   ["宗教", "religion"]),
         "img_special":    ("专项",   ["专项", "special"]),
+        # ---- 不良内容审核（7 个细分点，追加于图片审核规则下） ----
+        "img_bad_minor":         ("疑似未成年不适内容", ["未成年不适", "儿童不宜", "minor"]),
+        "img_bad_bias":          ("疑似偏见歧视内容",   ["偏见", "歧视", "bias"]),
+        "img_bad_values":        ("疑似不良价值观内容", ["不良价值观", "values"]),
+        "img_bad_abuse":         ("疑似攻击辱骂内容",   ["攻击", "辱骂", "abuse"]),
+        "img_bad_vulgar":        ("疑似低俗口头语内容", ["低俗口头语", "vulgar"]),
+        "img_bad_superstition":  ("疑似封建迷信内容",   ["封建迷信", "superstition"]),
+        "img_bad_spam":          ("疑似无意义灌水内容", ["灌水", "无意义", "spam"]),
     },
     "text_audit_pro": {
         "tx_politics":         ("涉政",       ["涉政", "政治敏感", "politics"]),
@@ -422,6 +430,14 @@ DEFAULT_AUDIT_ITEMS: dict[str, dict[str, tuple[str, list[str]]]] = {
         "tx_illegal":          ("违法违规",   ["违法", "illegal"]),
         "tx_privacy":          ("隐私信息",   ["隐私", "个人信息", "privacy"]),
         "tx_promptattack":     ("prompt攻击", ["prompt", "jailbreak"]),
+        # ---- 不良内容审核（7 个细分点，追加于文本审核规则下） ----
+        "tx_bad_minor":         ("疑似未成年不适内容", ["未成年不适", "儿童不宜", "minor"]),
+        "tx_bad_bias":          ("疑似偏见歧视内容",   ["偏见", "歧视", "bias"]),
+        "tx_bad_values":        ("疑似不良价值观内容", ["不良价值观", "values"]),
+        "tx_bad_abuse":         ("疑似攻击辱骂内容",   ["攻击", "辱骂", "abuse"]),
+        "tx_bad_vulgar":        ("疑似低俗口头语内容", ["低俗口头语", "vulgar"]),
+        "tx_bad_superstition":  ("疑似封建迷信内容",   ["封建迷信", "superstition"]),
+        "tx_bad_spam":          ("疑似无意义灌水内容", ["灌水", "无意义", "spam"]),
     },
     "audio_audit_pro": {
         "au_politics":   ("涉政",     ["涉政", "politics"]),
@@ -496,6 +512,42 @@ DEFAULT_AUDIT_POINTS: list[tuple[str, str, str, str, str, float, float, str]] = 
     ("image_audit_pro", "img_religion",   "religion_general_lib", "自定义宗教图库", "自定义宗教图库",                                   45.0, 70.0, "低风险"),
     ("image_audit_pro", "img_special",    "special_general",      "专项通用",       "专项通用：专项检查任务标识的内容",                 50.0, 75.0, "中风险"),
     ("image_audit_pro", "img_special",    "special_general_lib",  "自定义专项图库", "自定义专项图库",                                   45.0, 70.0, "低风险"),
+    # ---------------- image_audit_pro · 不良内容审核（7 类 × 4 模式） ----------------
+    # 1) 疑似未成年不适内容
+    ("image_audit_pro", "img_bad_minor",        "img_bad_minor_general",     "未成年不适通用（画面）",     "画面出现未成年人涉烟酒/纹身/恋爱/裸露/暴力等不当场景",        60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_minor",        "img_bad_minor_tii",         "未成年不适（图中文字）",     "图中文字涉及未成年人不当场景描述",                            55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_bad_minor",        "img_bad_minor_lib",         "自定义未成年不适图库",       "图库用于命中返回 img_bad_minor",                                55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_bad_minor",        "img_bad_minor_tii_lib",     "未成年不适词库",             "词库用于命中返回 img_bad_minor",                                55.0, 80.0, "高风险"),
+    # 2) 疑似偏见歧视内容
+    ("image_audit_pro", "img_bad_bias",         "img_bad_bias_general",      "偏见歧视通用（画面）",       "画面含种族/民族/地域/性别/职业/宗教等歧视性内容",              60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_bias",         "img_bad_bias_tii",          "偏见歧视（图中文字）",       "图中文字含歧视性表述",                                         60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_bias",         "img_bad_bias_lib",          "自定义偏见歧视图库",         "图库用于命中返回 img_bad_bias",                                 55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_bad_bias",         "img_bad_bias_tii_lib",      "偏见歧视词库",               "词库用于命中返回 img_bad_bias",                                 55.0, 80.0, "高风险"),
+    # 3) 疑似不良价值观内容
+    ("image_audit_pro", "img_bad_values",       "img_bad_values_general",    "不良价值观通用（画面）",     "画面含拜金/炫富/躺平摆烂/啃老/畸形审美/崇洋媚外等",            60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_values",       "img_bad_values_tii",        "不良价值观（图中文字）",     "图中文字含扭曲价值观表述",                                     60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_values",       "img_bad_values_lib",        "自定义不良价值观图库",       "图库用于命中返回 img_bad_values",                               55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_bad_values",       "img_bad_values_tii_lib",    "不良价值观词库",             "词库用于命中返回 img_bad_values",                               55.0, 80.0, "高风险"),
+    # 4) 疑似攻击辱骂内容
+    ("image_audit_pro", "img_bad_abuse",        "img_bad_abuse_general",     "攻击辱骂通用（画面）",       "画面含人身攻击/P图丑化/恶搞谩骂",                              60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_abuse",        "img_bad_abuse_tii",         "攻击辱骂（图中文字）",       "图中文字含人身攻击/恶意诅咒/阴阳怪气/PUA话术",                 60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_abuse",        "img_bad_abuse_lib",         "自定义攻击辱骂图库",         "图库用于命中返回 img_bad_abuse",                                55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_bad_abuse",        "img_bad_abuse_tii_lib",     "攻击辱骂词库",               "词库用于命中返回 img_bad_abuse",                                55.0, 80.0, "高风险"),
+    # 5) 疑似低俗口头语内容
+    ("image_audit_pro", "img_bad_vulgar",       "img_bad_vulgar_general",    "低俗口头语通用（画面）",     "画面含口头脏话/网络黑话脏话/表情包脏话",                      60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_vulgar",       "img_bad_vulgar_tii",        "低俗口头语（图中文字）",     "图中文字含粗口/谐音脏话/缩写脏话",                            60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_vulgar",       "img_bad_vulgar_lib",        "自定义低俗口头语图库",       "图库用于命中返回 img_bad_vulgar",                               55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_bad_vulgar",       "img_bad_vulgar_tii_lib",    "低俗口头语词库",             "词库用于命中返回 img_bad_vulgar",                               55.0, 80.0, "高风险"),
+    # 6) 疑似封建迷信内容
+    ("image_audit_pro", "img_bad_superstition", "img_bad_superstition_general","封建迷信通用（画面）",    "画面含算命/占卜/看相/跳大神/巫术/邪教组织等",                 60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_superstition", "img_bad_superstition_tii", "封建迷信（图中文字）",       "图中文字含算命占卜/伪科学养生/转运改命等表述",                60.0, 85.0, "高风险"),
+    ("image_audit_pro", "img_bad_superstition", "img_bad_superstition_lib", "自定义封建迷信图库",         "图库用于命中返回 img_bad_superstition",                         55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_bad_superstition", "img_bad_superstition_tii_lib","封建迷信词库",           "词库用于命中返回 img_bad_superstition",                         55.0, 80.0, "高风险"),
+    # 7) 疑似无意义灌水内容
+    ("image_audit_pro", "img_bad_spam",         "img_bad_spam_general",      "无意义灌水通用（画面）",     "画面含纯表情堆叠/重复符号/批量复制粘贴等无意义视觉",          55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_bad_spam",         "img_bad_spam_tii",          "无意义灌水（图中文字）",     "图中文字含大量重复字符/凑字数/低质水文",                       55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_bad_spam",         "img_bad_spam_lib",          "自定义无意义灌水图库",       "图库用于命中返回 img_bad_spam",                                 55.0, 80.0, "高风险"),
+    ("image_audit_pro", "img_bad_spam",         "img_bad_spam_tii_lib",      "无意义灌水词库",             "词库用于命中返回 img_bad_spam",                                 55.0, 80.0, "高风险"),
     # ---------------- text_audit_pro ----------------
     ("text_audit_pro", "tx_politics",         "tx_politics",        "涉政",                "涉政违规内容",                60.0, 85.0, "高风险"),
     ("text_audit_pro", "tx_terrorism",        "tx_terrorism",       "暴恐",                "暴恐违规内容",                60.0, 85.0, "高风险"),
@@ -510,6 +562,42 @@ DEFAULT_AUDIT_POINTS: list[tuple[str, str, str, str, str, float, float, str]] = 
     ("text_audit_pro", "tx_privacy",          "tx_privacy_contact", "联系方式检测",        "联系方式检测：地址/邮箱/微信", 55.0, 80.0, "中风险"),
     ("text_audit_pro", "tx_promptattack",     "tx_promptattack_basic","基础越狱指令",      "基础越狱指令识别",          70.0, 90.0, "高风险"),
     ("text_audit_pro", "tx_promptattack",     "tx_promptattack_adv", "高级越狱指令",        "高级越狱指令识别",            65.0, 85.0, "高风险"),
+    # ---------------- text_audit_pro · 不良内容审核（7 类 × 4 模式） ----------------
+    # 1) 疑似未成年不适内容
+    ("text_audit_pro", "tx_bad_minor",        "tx_bad_minor_general",     "未成年不适通用",         "文本涉及未成年人涉烟酒/纹身/恋爱/裸露/暴力等不当场景描述",    60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_bad_minor",        "tx_bad_minor_lib",         "自定义未成年不适词库",   "词库用于命中返回 tx_bad_minor",                                 55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_minor",        "tx_bad_minor_tii",         "未成年不适 OCR",         "OCR 文本中的未成年不适内容识别",                              55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_minor",        "tx_bad_minor_tii_lib",     "未成年不适 OCR 词库",    "词库用于命中返回 tx_bad_minor",                                 55.0, 80.0, "高风险"),
+    # 2) 疑似偏见歧视内容
+    ("text_audit_pro", "tx_bad_bias",         "tx_bad_bias_general",      "偏见歧视通用",           "文本含种族/民族/地域/性别/职业/宗教/性取向等歧视性表述",      60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_bad_bias",         "tx_bad_bias_lib",          "自定义偏见歧视词库",     "词库用于命中返回 tx_bad_bias",                                  55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_bias",         "tx_bad_bias_tii",          "偏见歧视 OCR",           "OCR 文本中的偏见歧视内容识别",                                 55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_bias",         "tx_bad_bias_tii_lib",      "偏见歧视 OCR 词库",      "词库用于命中返回 tx_bad_bias",                                  55.0, 80.0, "高风险"),
+    # 3) 疑似不良价值观内容
+    ("text_audit_pro", "tx_bad_values",       "tx_bad_values_general",    "不良价值观通用",         "文本含拜金/炫富/躺平摆烂/啃老/畸形审美/读书无用等扭曲价值观", 60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_bad_values",       "tx_bad_values_lib",        "自定义不良价值观词库",   "词库用于命中返回 tx_bad_values",                                55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_values",       "tx_bad_values_tii",        "不良价值观 OCR",         "OCR 文本中的不良价值观内容识别",                               55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_values",       "tx_bad_values_tii_lib",    "不良价值观 OCR 词库",    "词库用于命中返回 tx_bad_values",                                55.0, 80.0, "高风险"),
+    # 4) 疑似攻击辱骂内容
+    ("text_audit_pro", "tx_bad_abuse",        "tx_bad_abuse_general",     "攻击辱骂通用",           "文本含人身攻击/恶意诅咒/诽谤中伤/阴阳怪气/PUA话术",          60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_bad_abuse",        "tx_bad_abuse_lib",         "自定义攻击辱骂词库",     "词库用于命中返回 tx_bad_abuse",                                 55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_abuse",        "tx_bad_abuse_tii",         "攻击辱骂 OCR",           "OCR 文本中的攻击辱骂内容识别",                                 55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_abuse",        "tx_bad_abuse_tii_lib",     "攻击辱骂 OCR 词库",      "词库用于命中返回 tx_bad_abuse",                                 55.0, 80.0, "高风险"),
+    # 5) 疑似低俗口头语内容
+    ("text_audit_pro", "tx_bad_vulgar",       "tx_bad_vulgar_general",    "低俗口头语通用",         "文本含粗口/脏话/谐音脏话/缩写脏话/网络黑话脏话部分",        60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_bad_vulgar",       "tx_bad_vulgar_lib",        "自定义低俗口头语词库",   "词库用于命中返回 tx_bad_vulgar",                                55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_vulgar",       "tx_bad_vulgar_tii",        "低俗口头语 OCR",         "OCR 文本中的低俗口头语内容识别",                               55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_vulgar",       "tx_bad_vulgar_tii_lib",    "低俗口头语 OCR 词库",    "词库用于命中返回 tx_bad_vulgar",                                55.0, 80.0, "高风险"),
+    # 6) 疑似封建迷信内容
+    ("text_audit_pro", "tx_bad_superstition", "tx_bad_superstition_general","封建迷信通用",         "文本含算命/占卜/看相/测字/跳大神/巫术/伪科学养生/转运改命等", 60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_bad_superstition", "tx_bad_superstition_lib", "自定义封建迷信词库",     "词库用于命中返回 tx_bad_superstition",                         55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_superstition", "tx_bad_superstition_tii", "封建迷信 OCR",           "OCR 文本中的封建迷信内容识别",                                 55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_superstition", "tx_bad_superstition_tii_lib","封建迷信 OCR 词库",    "词库用于命中返回 tx_bad_superstition",                         55.0, 80.0, "高风险"),
+    # 7) 疑似无意义灌水内容
+    ("text_audit_pro", "tx_bad_spam",         "tx_bad_spam_general",      "无意义灌水通用",         "文本含大量重复字符/无意义符号堆叠/刷屏/纯水贴/凑字数",       55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_spam",         "tx_bad_spam_lib",          "自定义无意义灌水词库",   "词库用于命中返回 tx_bad_spam",                                 55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_spam",         "tx_bad_spam_tii",          "无意义灌水 OCR",         "OCR 文本中的无意义灌水内容识别",                               55.0, 80.0, "高风险"),
+    ("text_audit_pro", "tx_bad_spam",         "tx_bad_spam_tii_lib",      "无意义灌水 OCR 词库",    "词库用于命中返回 tx_bad_spam",                                 55.0, 80.0, "高风险"),
     # ---------------- audio_audit_pro ----------------
     ("audio_audit_pro", "au_politics", "au_politics_general",  "语音涉政",       "语音中涉政表述",              60.0, 85.0, "高风险"),
     ("audio_audit_pro", "au_porn",     "au_porn_general",      "语音色情",       "语音中含色情表述",            60.0, 85.0, "高风险"),
