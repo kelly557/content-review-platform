@@ -1,11 +1,12 @@
 """AuditPoint router (审核点 CRUD)."""
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,8 @@ from app.core.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models.audit_item import AuditItem
 from app.models.audit_point import AuditPoint
+from app.models.audit_point_library import AuditPointLibrary
+from app.models.library import Library
 from app.models.service import Service
 from app.models.user import User
 from app.schemas.audit_point import (
@@ -23,7 +26,10 @@ from app.schemas.audit_point import (
     AuditPointOut,
     AuditPointResetResult,
     AuditPointUpdate,
+    serialize_audit_point,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/packages", tags=["audit-points"])
 
@@ -50,6 +56,82 @@ async def _generate_point_code(db: AsyncSession, package_code: str, item_id: int
     return f"ap_{item_id}_{total + 1}"
 
 
+async def _replace_linked_libraries(
+    db: AsyncSession,
+    point: AuditPoint,
+    library_ids: Optional[list[int]],
+) -> None:
+    """PATCH semantics for audit_point_libraries join rows.
+
+    - library_ids is None  → 不动
+    - library_ids == []     → 清空该点所有关联
+    - library_ids == [非空]  → 校验 ID 存在 + 类型一致 → 全量替换
+
+    Also refreshes the point's `linked_library_links` relationship so the
+    response reflects the new state without stale cache.
+    """
+    if library_ids is None:
+        return
+
+    if library_ids:
+        # 去重，保持顺序
+        unique_ids: list[int] = []
+        seen: set[int] = set()
+        for lid in library_ids:
+            if lid in seen:
+                continue
+            seen.add(lid)
+            unique_ids.append(lid)
+
+        rows = await db.execute(
+            select(Library.id, Library.library_type).where(Library.id.in_(unique_ids))
+        )
+        found = rows.all()
+        found_ids = {r[0] for r in found}
+        missing = set(unique_ids) - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"linked_libraries: libraries not found: {sorted(missing)}",
+            )
+
+        types = {r[1] for r in found}
+        if len(types) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"linked_libraries must share a single library_type; "
+                    f"got {sorted(t.value if hasattr(t, 'value') else t for t in types)}"
+                ),
+            )
+
+    # 全量替换
+    await db.execute(
+        delete(AuditPointLibrary).where(
+            AuditPointLibrary.audit_point_id == point.id
+        )
+    )
+    if library_ids:
+        unique_ids = []
+        seen = set()
+        for lid in library_ids:
+            if lid in seen:
+                continue
+            seen.add(lid)
+            unique_ids.append(lid)
+        await db.execute(
+            insert(AuditPointLibrary).values(
+                [
+                    {"audit_point_id": point.id, "library_id": lid}
+                    for lid in unique_ids
+                ]
+            )
+        )
+
+    # 让 relationship 缓存失效,响应能看到最新行（由外层 commit + refresh）
+    pass
+
+
 @router.get("/{code}/points", response_model=list[AuditPointOut])
 async def list_points(
     code: str,
@@ -58,15 +140,24 @@ async def list_points(
     item_id: Optional[int] = None,
     enabled: Optional[bool] = None,
 ) -> list[AuditPointOut]:
+    from sqlalchemy.orm import selectinload
+
     await _ensure_package(db, code)
-    stmt = select(AuditPoint).where(AuditPoint.package_code == code)
+    stmt = (
+        select(AuditPoint)
+        .where(AuditPoint.package_code == code)
+        .options(
+            selectinload(AuditPoint.linked_library_links),
+            selectinload(AuditPoint.linked_libraries),
+        )
+    )
     if item_id is not None:
         stmt = stmt.where(AuditPoint.item_id == item_id)
     if enabled is not None:
         stmt = stmt.where(AuditPoint.is_enabled.is_(enabled))
     stmt = stmt.order_by(AuditPoint.item_id.asc(), AuditPoint.sort_order.asc(), AuditPoint.id.asc())
     rows = list((await db.execute(stmt)).scalars())
-    return [AuditPointOut.model_validate(r) for r in rows]
+    return [AuditPointOut.model_validate(serialize_audit_point(r)) for r in rows]
 
 
 @router.post("/{code}/points", response_model=AuditPointOut, status_code=status.HTTP_201_CREATED)
@@ -105,9 +196,28 @@ async def create_point(
             status_code=status.HTTP_409_CONFLICT,
             detail="审核点编码生成冲突，请重试",
         )
+    # linked_libraries
+    if body.linked_library_ids is not None:
+        await _replace_linked_libraries(db, point, body.linked_library_ids)
+        await db.commit()
+        db.expire(point, ["linked_library_links", "linked_libraries"])
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        fresh = (
+            await db.execute(
+                select(AuditPoint)
+                .where(AuditPoint.id == point.id)
+                .options(
+                    selectinload(AuditPoint.linked_library_links),
+                    selectinload(AuditPoint.linked_libraries),
+                )
+            )
+        ).scalar_one()
+        return AuditPointOut.model_validate(serialize_audit_point(fresh))
     await db.refresh(point)
     await db.commit()
-    return AuditPointOut.model_validate(point)
+    return AuditPointOut.model_validate(serialize_audit_point(point))
 
 
 @router.put("/{code}/points/{point_id}", response_model=AuditPointOut)
@@ -137,13 +247,39 @@ async def update_point(
     if body.is_enabled is not None:
         point.is_enabled = body.is_enabled
     if body.custom_wordset_id is not None:
+        # 旧列：写入但不进新表；log 一次提示
+        logger.warning(
+            "audit_point(%s) custom_wordset_id being written via legacy field; "
+            "consider migrating to linked_library_ids",
+            point.id,
+        )
         point.custom_wordset_id = body.custom_wordset_id
     if body.sort_order is not None:
         point.sort_order = body.sort_order
+    if body.linked_library_ids is not None:
+        await _replace_linked_libraries(db, point, body.linked_library_ids)
+        await db.flush()
+        await db.commit()
+        # 显式 expire 当前 point 的关联，避免 selectin 拿旧 cache
+        db.expire(point, ["linked_library_links", "linked_libraries"])
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        fresh = (
+            await db.execute(
+                select(AuditPoint)
+                .where(AuditPoint.id == point.id)
+                .options(
+                    selectinload(AuditPoint.linked_library_links),
+                    selectinload(AuditPoint.linked_libraries),
+                )
+            )
+        ).scalar_one()
+        return AuditPointOut.model_validate(serialize_audit_point(fresh))
     await db.flush()
     await db.refresh(point)
     await db.commit()
-    return AuditPointOut.model_validate(point)
+    return AuditPointOut.model_validate(serialize_audit_point(point))
 
 
 @router.delete("/{code}/points/{point_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -167,15 +303,26 @@ async def reset_points(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("admin")),
 ) -> AuditPointResetResult:
+    from sqlalchemy.orm import selectinload
+
     await _ensure_package(db, code)
-    stmt = select(AuditPoint).where(AuditPoint.package_code == code)
+    stmt = (
+        select(AuditPoint)
+        .where(AuditPoint.package_code == code)
+        .options(
+            selectinload(AuditPoint.linked_library_links),
+            selectinload(AuditPoint.linked_libraries),
+        )
+    )
     rows = list((await db.execute(stmt)).scalars())
     for p in rows:
         p.medium_threshold = 60.0
         p.high_threshold = 90.0
     await db.flush()
     await db.commit()
-    return AuditPointResetResult(items=[AuditPointOut.model_validate(p) for p in rows])
+    return AuditPointResetResult(
+        items=[AuditPointOut.model_validate(serialize_audit_point(p)) for p in rows]
+    )
 
 
 @router.post("/{code}/points/batch", response_model=AuditPointBatchResult)
@@ -229,14 +376,34 @@ async def create_points_batch(
             )
             db.add(point)
             await db.flush()
-            await db.refresh(point)
-            await db.commit()
+            if payload.linked_library_ids is not None:
+                await _replace_linked_libraries(db, point, payload.linked_library_ids)
+                await db.commit()
+                db.expire(point, ["linked_library_links", "linked_libraries"])
+                from sqlalchemy import select
+                from sqlalchemy.orm import selectinload
+
+                fresh = (
+                    await db.execute(
+                        select(AuditPoint)
+                        .where(AuditPoint.id == point.id)
+                        .options(
+                            selectinload(AuditPoint.linked_library_links),
+                            selectinload(AuditPoint.linked_libraries),
+                        )
+                    )
+                ).scalar_one()
+                serialized = serialize_audit_point(fresh)
+            else:
+                await db.refresh(point)
+                await db.commit()
+                serialized = serialize_audit_point(point)
             items.append(
                 AuditPointBatchItem(
                     index=idx,
                     label_cn=payload.label_cn,
                     status="ok",
-                    point=AuditPointOut.model_validate(point),
+                    point=AuditPointOut.model_validate(serialized),
                 )
             )
             succeeded += 1

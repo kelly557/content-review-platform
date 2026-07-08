@@ -17,6 +17,7 @@ from app.models.library_item_reference import LibraryItemReference  # noqa: F401
 from app.models.detection_rule import DetectionRule  # noqa: F401
 from app.models.audit_item import AuditItem  # noqa: F401
 from app.models.audit_point import AuditPoint, AuditPointRisk  # noqa: F401
+from app.models.audit_point_library import AuditPointLibrary  # noqa: F401
 from app.models.strategy_item import StrategyItem  # noqa: F401
 from app.models.human_review_config import HumanReviewConfig, RiskLevel  # noqa: F401
 from app.models.material_package import MaterialPackage, MaterialPackageItem  # noqa: F401

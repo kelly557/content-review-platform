@@ -1,13 +1,18 @@
 """AuditPoint: 审核点. Fine-grained detection config under an AuditItem.
 
 Replaces the legacy DetectionRule with explicit item_id parentage.
-Each point has thresholds, scope text, enable switch and optional wordset link.
+Each point has thresholds, scope text, enable switch and optional library
+associations (N:M via audit_point_libraries).
+
+Legacy 1:1 columns (custom_wordset_id, custom_library_id, custom_reply_library_id)
+are kept read-only for backward compatibility. New code only writes through
+the `linked_libraries` relationship.
 """
 from __future__ import annotations
 
 import enum
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -22,9 +27,13 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+
+if TYPE_CHECKING:
+    from app.models.audit_point_library import AuditPointLibrary
+    from app.models.library import Library
 
 
 class AuditPointRisk(str, enum.Enum):
@@ -54,8 +63,15 @@ class AuditPoint(Base):
         Enum(AuditPointRisk), default=AuditPointRisk.MEDIUM, nullable=False
     )
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # ─── 旧列：保留只读，新代码不再写入 ───
     custom_wordset_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("word_sets.id"), nullable=True
+    )
+    custom_library_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("libraries.id"), nullable=True
+    )
+    custom_reply_library_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("libraries.id"), nullable=True
     )
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
@@ -64,6 +80,21 @@ class AuditPoint(Base):
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=False), onupdate=func.now(), nullable=True
+    )
+
+    # ─── N:M 关联：审核点 ↔ 库（互斥约束在应用层） ───
+    linked_libraries: Mapped[list["Library"]] = relationship(
+        "Library",
+        secondary="audit_point_libraries",
+        lazy="selectin",
+        order_by="Library.id",
+        overlaps="back_audit_points",
+    )
+    linked_library_links: Mapped[list["AuditPointLibrary"]] = relationship(
+        "AuditPointLibrary",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        overlaps="linked_libraries",
     )
 
     __table_args__ = (

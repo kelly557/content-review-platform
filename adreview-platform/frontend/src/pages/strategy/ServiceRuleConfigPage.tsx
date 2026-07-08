@@ -26,8 +26,6 @@ import {
   InboxOutlined,
 } from '@ant-design/icons'
 import { useParams, Link, useLocation } from 'react-router-dom'
-import { wordsetsApi } from '@/api/wordsets'
-import { imagesetsApi } from '@/api/imagesets'
 import { librariesApi } from '@/api/libraries'
 import { auditItemsApi } from '@/api/auditItems'
 import { auditPointsApi } from '@/api/auditPoints'
@@ -37,15 +35,9 @@ import type {
   AuditPoint,
   AuditPointBatchResult,
   AuditPointRisk,
-  ImageSetListItem,
   LibraryListItem,
-  WordSet,
+  LibraryType,
 } from '@/types/domain'
-
-type WordSetOption = WordSet
-type ImageSetOption = ImageSetListItem
-type ReplyLibraryOption = LibraryListItem
-type LibType = 'image' | 'wordset' | 'reply'
 
 const { Title, Text } = Typography
 
@@ -69,7 +61,6 @@ const SAMPLE_BATCH_TEXT = `# 在此粘贴批量内容（每行：审核点 | 审
 
 interface DraftPoint extends AuditPoint {
   _dirty?: boolean
-  _libType?: LibType | null
 }
 
 interface ParsedBatchRow {
@@ -80,6 +71,17 @@ interface ParsedBatchRow {
   is_enabled: boolean
   valid: boolean
   error: string | null
+}
+
+const TYPE_LABEL: Record<LibraryType, string> = {
+  image: '图',
+  word: '词',
+  reply: '代答',
+}
+const TYPE_COLOR: Record<LibraryType, string> = {
+  image: 'blue',
+  word: 'green',
+  reply: 'purple',
 }
 
 export default function ServiceRuleConfigPage() {
@@ -114,15 +116,16 @@ export default function ServiceRuleConfigPage() {
   const [points, setPoints] = useState<DraftPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [wordsetOptions, setWordsetOptions] = useState<WordSetOption[]>([])
-  const [imageSetOptions, setImageSetOptions] = useState<ImageSetOption[]>([])
-  const [replyLibraryOptions, setReplyLibraryOptions] = useState<
-    ReplyLibraryOption[]
-  >([])
+  const [libraryOptions, setLibraryOptions] = useState<LibraryListItem[]>([])
+  // 审核点 id → 当前选中的库 id 列表（编辑期本地状态）
+  const [linkedByPoint, setLinkedByPoint] = useState<Record<number, number[]>>({})
   const [activeItemName, setActiveItemName] = useState<string | null>(null)
 
   const [editing, setEditing] = useState(false)
-  const [pendingReset, setPendingReset] = useState<DraftPoint[] | null>(null)
+  const [pendingReset, setPendingReset] = useState<{
+    points: DraftPoint[]
+    linked: Record<number, number[]>
+  } | null>(null)
 
   // 批量新增审核点 modal 状态
   const [batchOpen, setBatchOpen] = useState(false)
@@ -134,51 +137,31 @@ export default function ServiceRuleConfigPage() {
   const [batchResultOpen, setBatchResultOpen] = useState(false)
   const [batchImporting, setBatchImporting] = useState(false)
 
+  // 拉取所有库（含 image/word/reply）+ 审核点 + 审核项
   const fetch = async () => {
     setLoading(true)
     try {
-      const [allPoints, wss, iss, rls, aItems] = await Promise.all([
-        auditPointsApi.list(code),
-        wordsetsApi
-          .list({ size: 200 })
-          .then((p) => p.items)
-          .catch(() => [] as WordSetOption[]),
-        imagesetsApi
-          .list({ size: 200 })
-          .then((p) => p.items)
-          .catch(() => [] as ImageSetOption[]),
+      // backend size 上限 200，按 type 拉取三类
+      const fetchLibsByType = async (t: LibraryType) =>
         librariesApi
-          .list({ type: 'reply', size: 200 })
+          .list({ type: t, size: 200 })
           .then((p) => p.items)
-          .catch(() => [] as ReplyLibraryOption[]),
+          .catch(() => [] as LibraryListItem[])
+      const [allPoints, imageLibs, wordLibs, replyLibs, aItems] = await Promise.all([
+        auditPointsApi.list(code),
+        fetchLibsByType('image'),
+        fetchLibsByType('word'),
+        fetchLibsByType('reply'),
         auditItemsApi.list(code).catch(() => [] as AuditItem[]),
       ])
-      const wordsetIds = new Set(wss.map((w) => w.id))
-      const imageSetIds = new Set(iss.map((i) => i.id))
-      const replyIds = new Set(rls.map((r) => r.id))
-      const hydrateLibType = (p: AuditPoint): DraftPoint => {
-        let _libType: LibType | null = null
-        if (p.custom_reply_library_id != null) {
-          _libType = replyIds.has(p.custom_reply_library_id) ? 'reply' : null
-        } else if (p.custom_wordset_id != null) {
-          _libType = wordsetIds.has(p.custom_wordset_id)
-            ? 'wordset'
-            : imageSetIds.has(p.custom_wordset_id)
-              ? 'image'
-              : null
-        } else if (p.custom_library_id != null) {
-          _libType = wordsetIds.has(p.custom_library_id)
-            ? 'wordset'
-            : imageSetIds.has(p.custom_library_id)
-              ? 'image'
-              : null
-        }
-        return { ...p, _dirty: false, _libType }
+      const libsPage: LibraryListItem[] = [...imageLibs, ...wordLibs, ...replyLibs]
+      const initialLinked: Record<number, number[]> = {}
+      for (const p of allPoints) {
+        initialLinked[p.id] = (p.linked_libraries ?? []).map((l) => l.library_id)
       }
-      setPoints(allPoints.map(hydrateLibType))
-      setWordsetOptions(wss)
-      setImageSetOptions(iss)
-      setReplyLibraryOptions(rls)
+      setPoints(allPoints.map((p) => ({ ...p, _dirty: false })))
+      setLinkedByPoint(initialLinked)
+      setLibraryOptions(libsPage)
       if (activeItemId != null) {
         const found = aItems.find((i) => i.id === activeItemId)
         setActiveItemName(found?.name_cn ?? null)
@@ -217,16 +200,23 @@ export default function ServiceRuleConfigPage() {
   }, [activeItemId, code])
 
   const dirty = points.some((p) => p._dirty)
+    || Object.entries(linkedByPoint).some(([pid, ids]) => {
+      const p = points.find((x) => x.id === Number(pid))
+      if (!p) return false
+      const orig = (p.linked_libraries ?? []).map((l) => l.library_id).sort()
+      const cur = [...ids].sort()
+      if (orig.length !== cur.length) return true
+      for (let i = 0; i < orig.length; i++) {
+        if (orig[i] !== cur[i]) return true
+      }
+      return false
+    })
 
-  const wordsetByAction = useMemo(() => {
-    const map = new Map<string, WordSetOption[]>()
-    for (const w of wordsetOptions) {
-      const a = w.action ?? w.kind ?? '黑名单'
-      if (!map.has(a)) map.set(a, [])
-      map.get(a)!.push(w)
-    }
-    return map
-  }, [wordsetOptions])
+  const libraryById = useMemo(() => {
+    const m = new Map<number, LibraryListItem>()
+    for (const l of libraryOptions) m.set(l.id, l)
+    return m
+  }, [libraryOptions])
 
   const updateLocal = (id: number, patch: Partial<DraftPoint>) => {
     setPoints((prev) =>
@@ -234,33 +224,65 @@ export default function ServiceRuleConfigPage() {
     )
   }
 
+  const setLinked = (pointId: number, ids: number[]) => {
+    setLinkedByPoint((prev) => ({ ...prev, [pointId]: ids }))
+  }
+
   const enterEdit = () => {
-    setPendingReset(points.map((p) => ({ ...p })))
+    setPendingReset({
+      points: points.map((p) => ({ ...p })),
+      linked: Object.fromEntries(
+        Object.entries(linkedByPoint).map(([k, v]) => [Number(k), [...v]]),
+      ),
+    })
     setEditing(true)
   }
 
   const cancelEdit = () => {
-    if (pendingReset) setPoints(pendingReset)
+    if (pendingReset) {
+      setPoints(pendingReset.points)
+      setLinkedByPoint(pendingReset.linked)
+    }
     setPendingReset(null)
     setEditing(false)
   }
 
   const onSave = async () => {
     const dirtyItems = points.filter((p) => p._dirty)
-    if (dirtyItems.length === 0) {
+    const linkedDirty = Object.entries(linkedByPoint)
+      .map(([pid, ids]) => ({ pointId: Number(pid), ids }))
+      .filter(({ pointId, ids }) => {
+        const p = points.find((x) => x.id === pointId)
+        if (!p) return false
+        const orig = (p.linked_libraries ?? []).map((l) => l.library_id).sort()
+        const cur = [...ids].sort()
+        if (orig.length !== cur.length) return true
+        for (let i = 0; i < orig.length; i++) {
+          if (orig[i] !== cur[i]) return true
+        }
+        return false
+      })
+    if (dirtyItems.length === 0 && linkedDirty.length === 0) {
       message.info('没有改动')
       return
     }
     setSaving(true)
     try {
-      for (const p of dirtyItems) {
-        await auditPointsApi.update(code, p.id, {
-          description: p.description ?? '',
-          scope_text: p.scope_text ?? '',
-          is_enabled: p.is_enabled,
-          custom_wordset_id: p.custom_wordset_id ?? undefined,
-          custom_reply_library_id: p.custom_reply_library_id ?? undefined,
-        })
+      const dirtyIds = new Set(dirtyItems.map((p) => p.id))
+      const linkedIds = new Set(linkedDirty.map((d) => d.pointId))
+      const allIds = new Set<number>([...dirtyIds, ...linkedIds])
+      for (const p of points) {
+        if (!allIds.has(p.id)) continue
+        const payload: Parameters<typeof auditPointsApi.update>[2] = {}
+        if (dirtyIds.has(p.id)) {
+          payload.description = p.description ?? ''
+          payload.scope_text = p.scope_text ?? ''
+          payload.is_enabled = p.is_enabled
+        }
+        if (linkedIds.has(p.id)) {
+          payload.linked_library_ids = linkedByPoint[p.id] ?? []
+        }
+        await auditPointsApi.update(code, p.id, payload)
       }
       message.success('已保存')
       await fetch()
@@ -394,35 +416,81 @@ export default function ServiceRuleConfigPage() {
     }
   }
 
-  const setPointLibrary = (
-    row: DraftPoint,
-    rawValue: string | number | undefined,
-  ) => {
-    if (rawValue == null || rawValue === '') {
-      updateLocal(row.id, {
-        custom_wordset_id: null,
-        custom_reply_library_id: null,
-        _libType: null,
-      })
+  const handleLinkedChange = (pointId: number, ids: number[]) => {
+    const prev = linkedByPoint[pointId] ?? []
+    if (ids.length === 0) {
+      setLinked(pointId, [])
       return
     }
-    const [kind, idStr] = String(rawValue).split(':')
-    const id = Number(idStr)
-    if (!Number.isFinite(id)) return
-    if (kind === 'reply') {
-      updateLocal(row.id, {
-        custom_wordset_id: null,
-        custom_reply_library_id: id,
-        _libType: 'reply',
-      })
+    // 推断当前集合的 library_type
+    const types = new Set<LibraryType>()
+    for (const id of ids) {
+      const lib = libraryById.get(id)
+      if (lib) types.add(lib.library_type as LibraryType)
+    }
+    if (types.size > 1) {
+      // 找出与首个不同类型的库
+      const firstLib = libraryById.get(ids[0])
+      const firstType = firstLib?.library_type as LibraryType | undefined
+      const conflicting = ids
+        .map((id) => libraryById.get(id))
+        .filter((l) => l && l.library_type !== firstType)
+      message.error(
+        `不能混合不同类型库：${conflicting.map((l) => `[${TYPE_LABEL[l!.library_type as LibraryType]}]${l!.name}`).join('、')}`,
+      )
+      // 回滚到上一次
+      setLinked(pointId, prev)
       return
     }
-    const libType: LibType = kind === 'image' ? 'image' : 'wordset'
-    updateLocal(row.id, {
-      custom_wordset_id: id,
-      custom_reply_library_id: null,
-      _libType: libType,
-    })
+    setLinked(pointId, ids)
+  }
+
+  const renderLibrarySelect = (row: DraftPoint) => {
+    const currentIds = linkedByPoint[row.id] ?? (row.linked_libraries ?? []).map((l) => l.library_id)
+    // 锁定类型：当前已选项的类型
+    let lockedType: LibraryType | null = null
+    for (const id of currentIds) {
+      const lib = libraryById.get(id)
+      if (lib) {
+        lockedType = lib.library_type as LibraryType
+        break
+      }
+    }
+    const options = libraryOptions
+      .filter((l) => !lockedType || (l.library_type as LibraryType) === lockedType)
+      .map((l) => ({
+        value: l.id,
+        label: (
+          <Space size={6}>
+            <Tag color={TYPE_COLOR[l.library_type as LibraryType]}>
+              {TYPE_LABEL[l.library_type as LibraryType]}
+            </Tag>
+            <span>{l.name}</span>
+          </Space>
+        ),
+      }))
+    const hasAny = libraryOptions.length > 0
+    return (
+      <Select
+        mode="multiple"
+        placeholder={hasAny ? '选择关联库（图库 / 词库 / 代答库）' : '暂无可用关联库'}
+        value={currentIds}
+        onChange={(ids: number[]) => handleLinkedChange(row.id, ids)}
+        allowClear
+        maxTagCount="responsive"
+        style={{ width: '100%', minWidth: 240 }}
+        size="small"
+        disabled={!editing || !hasAny}
+        showSearch
+        optionFilterProp="label"
+        options={options}
+        notFoundContent={
+          lockedType
+            ? `已选为 ${TYPE_LABEL[lockedType]} 类型，请清空后再选其他类型`
+            : '暂无可用关联库'
+        }
+      />
+    )
   }
 
   const mergedColumns: TableColumnsType<DraftPoint> = [
@@ -455,7 +523,7 @@ export default function ServiceRuleConfigPage() {
     {
       title: '检测状态',
       dataIndex: 'is_enabled',
-      width: '10%',
+      width: '8%',
       render: (active: boolean, row) => (
         <Space size={6}>
           <Switch
@@ -473,62 +541,8 @@ export default function ServiceRuleConfigPage() {
     },
     {
       title: '关联库',
-      dataIndex: 'custom_wordset_id',
-      width: '22%',
-      render: (_v, row) => {
-        const libType = row._libType
-        const selectedRaw =
-          libType === 'reply' && row.custom_reply_library_id != null
-            ? `reply:${row.custom_reply_library_id}`
-            : libType != null && row.custom_wordset_id != null
-              ? `${libType}:${row.custom_wordset_id}`
-              : undefined
-        const hasAny =
-          imageSetOptions.length > 0 ||
-          wordsetOptions.length > 0 ||
-          replyLibraryOptions.length > 0
-        return (
-          <Select
-            placeholder={
-              hasAny ? '选择关联库（图库 / 词库 / 代答库）' : '暂无可用关联库'
-            }
-            value={selectedRaw}
-            onChange={(v) => setPointLibrary(row, v)}
-            allowClear
-            style={{ width: '100%', minWidth: 220 }}
-            size="small"
-            disabled={!editing || !hasAny}
-            showSearch
-            optionFilterProp="label"
-            options={[
-              ...imageSetOptions.map((i) => ({
-                value: `image:${i.id}`,
-                label: `[图] [${i.action ?? i.kind ?? '图库'}] ${i.name}`,
-              })),
-              ...(wordsetByAction.get('黑名单') ?? []).map((w) => ({
-                value: `wordset:${w.id}`,
-                label: `[词] [黑名单] ${w.name}`,
-              })),
-              ...(wordsetByAction.get('白名单') ?? []).map((w) => ({
-                value: `wordset:${w.id}`,
-                label: `[词] [白名单] ${w.name}`,
-              })),
-              ...(wordsetByAction.get('需复审') ?? []).map((w) => ({
-                value: `wordset:${w.id}`,
-                label: `[词] [需复审] ${w.name}`,
-              })),
-              ...(wordsetByAction.get('标签') ?? []).map((w) => ({
-                value: `wordset:${w.id}`,
-                label: `[词] [标签] ${w.name}`,
-              })),
-              ...replyLibraryOptions.map((r) => ({
-                value: `reply:${r.id}`,
-                label: `[代答] ${r.name}`,
-              })),
-            ]}
-          />
-        )
-      },
+      width: '28%',
+      render: (_v, row) => renderLibrarySelect(row),
     },
     {
       title: '操作',

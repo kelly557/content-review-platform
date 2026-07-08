@@ -95,6 +95,13 @@ class Library(Base):
         cascade="all, delete-orphan",
         order_by="LibraryItem.id.desc()",
     )
+    back_audit_points: Mapped[list["AuditPoint"]] = relationship(
+        "AuditPoint",
+        secondary="audit_point_libraries",
+        viewonly=True,
+        lazy="selectin",
+        overlaps="linked_libraries",
+    )
 
     __table_args__ = (
         Index(

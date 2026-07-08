@@ -964,6 +964,16 @@ export interface AuditItemUpdate {
 
 export type AuditPointRisk = '低风险' | '中风险' | '高风险'
 
+export interface LinkedLibrary {
+  library_id: number
+  library_type: LibraryType
+  code: string
+  name: string
+  group_id: number | null
+  group_name: string | null
+  sort_order: number
+}
+
 export interface AuditPoint {
   id: number
   package_code: string
@@ -980,6 +990,7 @@ export interface AuditPoint {
   custom_wordset_id: number | null
   custom_library_id?: number | null
   custom_reply_library_id?: number | null
+  linked_libraries: LinkedLibrary[]
   sort_order: number
   created_at: string
   updated_at: string | null
@@ -996,6 +1007,7 @@ export interface AuditPointCreate {
   is_enabled?: boolean
   custom_wordset_id?: number
   sort_order?: number
+  linked_library_ids?: number[]
 }
 
 export interface AuditPointUpdate {
@@ -1010,6 +1022,8 @@ export interface AuditPointUpdate {
   custom_library_id?: number | null
   custom_reply_library_id?: number | null
   sort_order?: number
+  /** PATCH 语义: undefined=不动；[]=清空；[非空]=全量替换 */
+  linked_library_ids?: number[]
 }
 
 export interface AuditPointBatchItem {
