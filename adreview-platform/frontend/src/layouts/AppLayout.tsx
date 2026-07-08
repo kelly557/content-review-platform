@@ -14,6 +14,7 @@ import {
   ClusterOutlined,
   BookOutlined,
   TagsOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
@@ -87,6 +88,16 @@ const NAV_SECTIONS: Array<{
           { key: 'strategies-audio', path: '/strategies/rules-by-type/audio', label: '语音审核规则' },
           { key: 'strategies-doc', path: '/strategies/rules-by-type/doc', label: '文档审核规则' },
           { key: 'strategies-video', path: '/strategies/rules-by-type/video', label: '视频审核规则' },
+        ],
+      },
+      {
+        kind: 'group',
+        key: 'strategy-resources',
+        path: '/strategies/words',
+        label: '策略资源',
+        icon: <DatabaseOutlined style={{ fontSize: ICON_SIZE }} />,
+        roles: ['admin', 'mlr'],
+        children: [
           { key: 'strategies-words', path: '/strategies/words', label: '词库' },
           { key: 'strategies-images', path: '/strategies/images', label: '图片库' },
           { key: 'strategies-replies', path: '/strategies/replies', label: '代答库' },
