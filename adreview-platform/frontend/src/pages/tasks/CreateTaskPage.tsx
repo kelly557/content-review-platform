@@ -1,13 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { App, Breadcrumb, Button, Card, Checkbox, Input, Radio, Steps, Tabs, Typography } from 'antd'
-import { RocketOutlined } from '@ant-design/icons'
+import {
+  App,
+  Breadcrumb,
+  Button,
+  Card,
+  Checkbox,
+  Collapse,
+  Radio,
+  Space,
+  Steps,
+  Tabs,
+  Tag,
+  Tooltip,
+  Typography,
+} from 'antd'
+import { RocketOutlined, RobotOutlined } from '@ant-design/icons'
 import { materialsApi } from '@/api/materials'
-import { packagesApi } from '@/api/materialPackages'
 import StrategyForm, { type StrategyFormValues } from '@/components/task-create/StrategyForm'
+import ReferenceFields from '@/components/task-create/ReferenceFields'
+import type { ReferenceFormValues } from '@/lib/referenceFields'
+import { countFilledReference } from '@/lib/referenceFields'
 import UploadArea, { type UploadItem } from '@/components/task-create/UploadArea'
 import MaterialPicker from '@/components/task-create/MaterialPicker'
-import PackageCreator from '@/components/task-create/PackageCreator'
 import AnalysisPanel, {
   type ParsedFileItem,
   type ParsedPickedItem,
@@ -15,18 +30,21 @@ import AnalysisPanel, {
 import { useAuthStore } from '@/store'
 import type { MaterialType } from '@/types/domain'
 import { colors } from '@/styles/theme'
+import { generateTaskName } from '@/lib/taskName'
 
 const { Text } = Typography
 
-type TabKind = MaterialType | 'audio' | 'package'
+type TabKind = MaterialType | 'audio'
 
+// v11: "素材包" tab is hidden from the create-task entry point per product
+// decision (postponed to a later iteration). The packages API + components
+// are kept untouched for backward compatibility.
 const TYPE_TABS: { key: TabKind; label: string; backendType: MaterialType | null }[] = [
   { key: 'text', label: '文本审核', backendType: 'text' },
   { key: 'image', label: '图片审核', backendType: 'image' },
   { key: 'video', label: '视频审核', backendType: 'video' },
   { key: 'pdf', label: '文档审核', backendType: 'pdf' },
   { key: 'audio', label: '语音审核', backendType: 'video' },
-  { key: 'package', label: '素材包', backendType: null },
 ]
 
 type SourceMode = 'upload' | 'library'
@@ -72,17 +90,12 @@ export default function CreateTaskPage() {
   >()
 
   const [strategyForm, setStrategyForm] = useState<StrategyFormValues>({})
+  const [referenceForm, setReferenceForm] = useState<ReferenceFormValues>({})
   const [submitting, setSubmitting] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
   const stepRefs = useRef<(HTMLDivElement | null)[]>([])
-  const [taskName, setTaskName] = useState('')
-  const [packageName, setPackageName] = useState('')
-  const [packageDescription, setPackageDescription] = useState('')
-  const [packageType, setPackageType] = useState<MaterialType>('image')
-  const [packageMaterialIds, setPackageMaterialIds] = useState<number[]>([])
   const [skipMachineReview, setSkipMachineReview] = useState(false)
 
-  const isPackageTab = type === 'package'
   const currentBackendType: MaterialType = useMemo(
     () => TYPE_TABS.find((t) => t.key === type)?.backendType ?? 'text',
     [type],
@@ -151,18 +164,12 @@ export default function CreateTaskPage() {
   )
 
   const steps = useMemo(() => {
-    if (isPackageTab) {
-      return [
-        { key: 'package', label: '创建素材包', completed: packageName.trim() !== '' && packageMaterialIds.length > 0 },
-        { key: 'config', label: '审核配置', completed: false },
-      ]
-    }
     return [
       { key: 'mode', label: '创建方式', completed: uploadItems.length > 0 || pickedIds.length > 0 },
       { key: 'material', label: '素材', completed: uploadItems.length > 0 || pickedIds.length > 0 },
       { key: 'config', label: '审核配置', completed: false },
     ]
-  }, [isPackageTab, uploadItems.length, pickedIds.length, packageName, packageMaterialIds.length])
+  }, [uploadItems.length, pickedIds.length])
 
   const handleStepClick = (index: number) => {
     const ref = stepRefs.current[index]
@@ -210,10 +217,6 @@ export default function CreateTaskPage() {
     setPickedIds([])
     setPickedCache({})
     setSelectedMaterialDetail(undefined)
-    setPackageName('')
-    setPackageDescription('')
-    setPackageType('image')
-    setPackageMaterialIds([])
   }
 
   const onSourceChange = (next: SourceMode) => {
@@ -234,19 +237,28 @@ export default function CreateTaskPage() {
 
   const effectiveCount = useMemo(
     () => {
-      if (isPackageTab) return packageMaterialIds.length > 0 ? 1 : 0
       return sourceMode === 'upload' ? uploadItems.length : pickedIds.length
     },
-    [isPackageTab, sourceMode, uploadItems, pickedIds, packageMaterialIds],
+    [sourceMode, uploadItems, pickedIds],
   )
 
+  // v11: task name is auto-generated. We cache the random suffix for the
+  // lifetime of the page so siblings in a bulk create share a base.
+  const [sharedSuffix] = useState(() =>
+    Math.random().toString(16).slice(2, 6).toUpperCase().padEnd(4, '0'),
+  )
+  const autoTaskName = useMemo(() => {
+    const label = TYPE_TABS.find((t) => t.key === type)?.label ?? '素材审核'
+    // 去掉"审核"后缀避免重复（如"图片审核" -> "图片"）
+    const shortLabel = label.replace(/审核$/, '')
+    return generateTaskName({
+      typeLabel: shortLabel,
+      count: effectiveCount,
+      sharedSuffix,
+    })
+  }, [type, effectiveCount, sharedSuffix])
+
   const validateBeforeSubmit = (): { ok: true; count: number } | { ok: false; reason: string } => {
-    if (!taskName.trim()) return { ok: false, reason: '请输入任务名称' }
-    if (isPackageTab) {
-      if (!packageName.trim()) return { ok: false, reason: '请输入素材包名称' }
-      if (packageMaterialIds.length === 0) return { ok: false, reason: '请至少选择一个素材' }
-      return { ok: true, count: 1 }
-    }
     if (effectiveCount === 0) return { ok: false, reason: '请先选择或上传至少 1 个素材' }
     if (createMode === 'bulk' && effectiveCount > BULK_LIMIT) {
       return { ok: false, reason: `批量最多 ${BULK_LIMIT} 个素材` }
@@ -265,10 +277,11 @@ export default function CreateTaskPage() {
     if (strategyForm.channels?.length) t.channels = strategyForm.channels
     if (strategyForm.industry) t.industry = strategyForm.industry
     if (strategyForm.keyword) t.keyword = strategyForm.keyword
+    if (referenceForm.product_sku) t.product_sku = referenceForm.product_sku
     return t
   }
 
-  const createOneFromUpload = async (item: UploadItem): Promise<number> => {
+  const createOneFromUpload = async (item: UploadItem, taskName: string): Promise<number> => {
     const title = item.file ? item.file.name.replace(/\.[^.]+$/, '') : '未命名文案'
     const created = await materialsApi.create({
       title,
@@ -286,7 +299,7 @@ export default function CreateTaskPage() {
     return created.id
   }
 
-  const submitPickedMaterial = async (mid: number): Promise<number> => {
+  const submitPickedMaterial = async (mid: number, taskName: string): Promise<number> => {
     const cur = await materialsApi.get(mid)
     const mergedTags = { ...(cur.tags || {}), ...buildTags() }
     await materialsApi.update(mid, { tags: mergedTags })
@@ -302,28 +315,22 @@ export default function CreateTaskPage() {
     }
     setSubmitting(true)
     try {
-      if (isPackageTab) {
-        const createdPackage = await packagesApi.create({
-          name: packageName,
-          description: packageDescription || undefined,
-          material_type: packageType,
-          material_ids: packageMaterialIds,
-        })
-        await packagesApi.submit(createdPackage.id, { task_name: taskName })
-        message.success('已提交素材包审核任务')
-        navigate('/tasks')
-        return
-      }
+      // Build per-task names aligned with autoTaskName.items
+      const names = autoTaskName.items
       if (sourceMode === 'upload') {
         if (createMode === 'bulk') {
-          for (const item of uploadItems) await createOneFromUpload(item)
+          for (let i = 0; i < uploadItems.length; i++) {
+            await createOneFromUpload(uploadItems[i], names[i] ?? names[0])
+          }
         } else {
-          await createOneFromUpload(uploadItems[0])
+          await createOneFromUpload(uploadItems[0], names[0])
         }
       } else if (createMode === 'bulk') {
-        for (const id of pickedIds) await submitPickedMaterial(id)
+        for (let i = 0; i < pickedIds.length; i++) {
+          await submitPickedMaterial(pickedIds[i], names[i] ?? names[0])
+        }
       } else {
-        await submitPickedMaterial(pickedIds[0])
+        await submitPickedMaterial(pickedIds[0], names[0])
       }
       message.success(`已创建 ${v.count} 个审核任务`)
       navigate('/tasks')
@@ -340,16 +347,25 @@ export default function CreateTaskPage() {
     isAudioTab && currentMime?.startsWith('audio/') ? 'audio' : currentBackendType
   const parseItems: ParsedFileItem[] = uploadItems
 
+  const referenceFilledCount = countFilledReference(referenceForm)
+
   const renderReviewConfigCard = (key: string | number) => (
     <Card title="审核配置" key={key}>
-      {canPickStrategy ? (
-        <StrategyForm value={strategyForm} onChange={setStrategyForm} />
-      ) : (
-        <Typography.Text style={{ color: colors.secondary, fontSize: 13, display: 'block', marginBottom: 16 }}>
-          提交者使用默认策略；如需指定审核策略，请联系管理员配置。
-        </Typography.Text>
-      )}
-      <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
+      {/* 第 1 层：策略（必选） */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: colors.foreground, marginBottom: 8 }}>
+          策略 <span style={{ color: colors.destructive }}>*</span>
+        </div>
+        {canPickStrategy ? (
+          <StrategyForm value={strategyForm} onChange={setStrategyForm} />
+        ) : (
+          <Typography.Text style={{ color: colors.secondary, fontSize: 13 }}>
+            提交者使用默认策略；如需指定审核策略，请联系管理员配置。
+          </Typography.Text>
+        )}
+      </div>
+
+      <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 16, marginBottom: 16 }}>
         <Checkbox
           checked={skipMachineReview}
           onChange={(e) => setSkipMachineReview(e.target.checked)}
@@ -360,6 +376,29 @@ export default function CreateTaskPage() {
           勾选后任务将跳过自动 AI 审核，可在任务详情页手动执行
         </div>
       </div>
+
+      {/* 第 2 层：reference 折叠面板 */}
+      <Collapse
+        ghost
+        items={[
+          {
+            key: 'reference',
+            label: (
+              <Space>
+                <span style={{ fontSize: 13 }}>更多配置</span>
+                {referenceFilledCount > 0 && (
+                  <Tag color="blue" style={{ margin: 0 }}>
+                    已填 {referenceFilledCount}
+                  </Tag>
+                )}
+              </Space>
+            ),
+            children: (
+              <ReferenceFields value={referenceForm} onChange={setReferenceForm} />
+            ),
+          },
+        ]}
+      />
     </Card>
   )
 
@@ -385,17 +424,33 @@ export default function CreateTaskPage() {
         </Typography.Title>
       </div>
 
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: colors.foreground, marginBottom: 8 }}>
-          任务名称 <span style={{ color: colors.destructive }}>*</span>
-        </div>
-        <Input
-          value={taskName}
-          onChange={(e) => setTaskName(e.target.value)}
-          placeholder="请输入任务名称"
-          maxLength={255}
-        />
-      </div>
+      {/* 任务名称（自动生成预览） */}
+      <Card size="small" style={{ marginBottom: 24 }}>
+        <Space size={12} wrap>
+          <Text type="secondary">任务名称</Text>
+          <Tag color="blue" icon={<RobotOutlined />} style={{ margin: 0 }}>
+            自动生成
+          </Tag>
+          {effectiveCount > 1 ? (
+            <Tooltip
+              title={
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {autoTaskName.items.map((n) => (
+                    <span key={n}>{n}</span>
+                  ))}
+                </div>
+              }
+            >
+              <Space size={4}>
+                <Text code style={{ fontSize: 12 }}>{autoTaskName.base}</Text>
+                <Tag color="default" style={{ margin: 0 }}>批量 · {effectiveCount} 个</Tag>
+              </Space>
+            </Tooltip>
+          ) : (
+            <Text code style={{ fontSize: 13 }}>{autoTaskName.items[0] ?? autoTaskName.base}</Text>
+          )}
+        </Space>
+      </Card>
 
       <Tabs
         activeKey={type}
@@ -424,104 +479,76 @@ export default function CreateTaskPage() {
         }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {isPackageTab ? (
-            <>
-              <Card
-                title="创建素材包"
-                extra={
-                  <Text style={{ fontSize: 12, color: colors.secondary }}>
-                    已选 {packageMaterialIds.length} 个素材
-                  </Text>
-                }
-              >
-                <PackageCreator
-                  packageName={packageName}
-                  onPackageNameChange={setPackageName}
-                  packageDescription={packageDescription}
-                  onPackageDescriptionChange={setPackageDescription}
-                  packageType={packageType}
-                  onPackageTypeChange={setPackageType}
-                  selectedMaterialIds={packageMaterialIds}
-                  onSelectedMaterialIdsChange={setPackageMaterialIds}
-                  maxCount={BULK_LIMIT}
-                />
-              </Card>
-              {renderReviewConfigCard('pkg-config')}
-            </>
-          ) : (
-            <>
-              <Card
-                title="创建方式与素材来源"
-                extra={
-                  <Text style={{ fontSize: 12, color: colors.secondary }}>
-                    当前选中 <span style={{ color: colors.foreground, fontWeight: 600 }}>{effectiveCount}</span> 个
-                  </Text>
-                }
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: colors.foreground, marginBottom: 8 }}>
-                      创建方式
-                    </div>
-                    <Radio.Group
-                      value={createMode}
-                      onChange={(e) => onCreateModeChange(e.target.value)}
-                    >
-                      {createModeOptions.map((opt) => (
-                        <Radio.Button key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </Radio.Button>
-                      ))}
-                    </Radio.Group>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: colors.foreground, marginBottom: 8 }}>
-                      素材来源
-                    </div>
-                    <Radio.Group
-                      value={sourceMode}
-                      onChange={(e) => onSourceChange(e.target.value)}
-                    >
-                      {sourceOptions.map((opt) => (
-                        <Radio.Button key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </Radio.Button>
-                      ))}
-                    </Radio.Group>
-                  </div>
+          <Card
+            title="创建方式与素材来源"
+            extra={
+              <Text style={{ fontSize: 12, color: colors.secondary }}>
+                当前选中 <span style={{ color: colors.foreground, fontWeight: 600 }}>{effectiveCount}</span> 个
+              </Text>
+            }
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: colors.foreground, marginBottom: 8 }}>
+                  创建方式
                 </div>
-              </Card>
+                <Radio.Group
+                  value={createMode}
+                  onChange={(e) => onCreateModeChange(e.target.value)}
+                >
+                  {createModeOptions.map((opt) => (
+                    <Radio.Button key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </Radio.Button>
+                  ))}
+                </Radio.Group>
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: colors.foreground, marginBottom: 8 }}>
+                  素材来源
+                </div>
+                <Radio.Group
+                  value={sourceMode}
+                  onChange={(e) => onSourceChange(e.target.value)}
+                >
+                  {sourceOptions.map((opt) => (
+                    <Radio.Button key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </Radio.Button>
+                  ))}
+                </Radio.Group>
+              </div>
+            </div>
+          </Card>
 
-              <Card
-                title="素材"
-                extra={
-                  <Text style={{ fontSize: 12, color: colors.secondary }}>
-                    最多 {BULK_LIMIT} 个
-                  </Text>
-                }
-              >
-                {sourceMode === 'upload' ? (
-                  <UploadArea
-                    type={currentBackendType}
-                    allowAudio={isAudioTab}
-                    multiple={createMode === 'bulk'}
-                    value={uploadItems}
-                    onChange={setUploadItems}
-                    maxCount={BULK_LIMIT}
-                  />
-                ) : (
-                  <MaterialPicker
-                    type={currentBackendType}
-                    selectedIds={pickedIds}
-                    onChange={setPickedIds}
-                    maxCount={BULK_LIMIT}
-                  />
-                )}
-              </Card>
+          <Card
+            title="素材"
+            extra={
+              <Text style={{ fontSize: 12, color: colors.secondary }}>
+                最多 {BULK_LIMIT} 个
+              </Text>
+            }
+          >
+            {sourceMode === 'upload' ? (
+              <UploadArea
+                type={currentBackendType}
+                allowAudio={isAudioTab}
+                multiple={createMode === 'bulk'}
+                value={uploadItems}
+                onChange={setUploadItems}
+                maxCount={BULK_LIMIT}
+              />
+            ) : (
+              <MaterialPicker
+                type={currentBackendType}
+                selectedIds={pickedIds}
+                onChange={setPickedIds}
+                maxCount={BULK_LIMIT}
+              />
+            )}
+          </Card>
 
-              {renderReviewConfigCard('normal-config')}
-            </>
-          )}
+          {renderReviewConfigCard('normal-config')}
 
           <div
             style={{
