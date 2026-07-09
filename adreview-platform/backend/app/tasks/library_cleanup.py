@@ -1,14 +1,16 @@
-"""Daily cleanup job for soft-deleted libraries and items.
+"""Daily cleanup job for soft-deleted libraries, items, and old trigger runs.
 
 Removes library_items older than ``RECYCLE_DAYS`` (default 30). For image
 items, the underlying storage object is also deleted. Libraries themselves
 remain soft-deleted; full removal happens once their item count is 0 and the
 window has elapsed.
+
+Also removes trigger_runs older than ``TRIGGER_RUN_TTL_DAYS`` (default 90).
 """
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import and_, func, select
@@ -18,17 +20,24 @@ from app.core.logging import get_logger
 from app.db.session import SessionLocal
 from app.models.library import Library
 from app.models.library_item import LibraryItem
+from app.models.trigger import TriggerRun
 from app.services import storage
 
 logger = get_logger(__name__)
 
 RECYCLE_DAYS = 30
+TRIGGER_RUN_TTL_DAYS = 90
 
 
 async def cleanup_once(session_factory=SessionLocal, recycle_days: int = RECYCLE_DAYS) -> dict:
     """Run one cleanup cycle. Returns counters for visibility/tests."""
     cutoff = datetime.utcnow() - timedelta(days=recycle_days)
-    counters = {"items_deleted": 0, "libraries_deleted": 0, "files_deleted": 0}
+    counters = {
+        "items_deleted": 0,
+        "libraries_deleted": 0,
+        "files_deleted": 0,
+        "trigger_runs_deleted": 0,
+    }
 
     async with session_factory() as db:  # type: AsyncSession
         rows = (
@@ -81,6 +90,21 @@ async def cleanup_once(session_factory=SessionLocal, recycle_days: int = RECYCLE
                 counters["libraries_deleted"] += 1
         if counters["libraries_deleted"]:
             await db.commit()
+
+        # ── trigger_runs retention (default 90 days) ──
+        try:
+            run_cutoff = datetime.now(timezone.utc) - timedelta(days=TRIGGER_RUN_TTL_DAYS)
+            rows = await db.execute(
+                select(TriggerRun).where(TriggerRun.started_at < run_cutoff)
+            )
+            old_runs = list(rows.scalars())
+            for r in old_runs:
+                await db.delete(r)
+            counters["trigger_runs_deleted"] += len(old_runs)
+            if old_runs:
+                await db.commit()
+        except Exception as exc:  # pragma: no cover
+            logger.warning("cleanup: trigger_runs retention failed: %s", exc)
 
     logger.info("library cleanup done: %s", counters)
     return counters

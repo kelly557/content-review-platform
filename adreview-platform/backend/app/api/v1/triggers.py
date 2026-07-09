@@ -1,0 +1,272 @@
+"""Trigger CRUD + manual run + run history APIs."""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.core.deps import get_current_user
+from app.db.session import get_db
+from app.models.strategy import Strategy
+from app.models.trigger import Trigger, TriggerRun, TriggerRunStatus, TriggerType
+from app.models.user import User, UserRole
+from app.models.workflow import WorkflowTemplate
+from app.schemas.common import Page
+from app.schemas.trigger import (
+    TriggerCreate,
+    TriggerOut,
+    TriggerRunListOut,
+    TriggerRunOut,
+    TriggerUpdate,
+)
+from app.services.trigger_engine import fire_trigger, notify_trigger_disabled
+
+router = APIRouter(prefix="/triggers", tags=["triggers"])
+
+
+def _require_admin(user: User) -> None:
+    if user.role.value != UserRole.ADMIN.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
+
+
+def _trigger_to_out(trigger: Trigger, strategy_name: Optional[str]) -> TriggerOut:
+    return TriggerOut(
+        id=trigger.id,
+        code=trigger.code,
+        name=trigger.name,
+        trigger_type=trigger.trigger_type,
+        is_enabled=trigger.is_enabled,
+        spec=trigger.spec or {},
+        workflow_template_code=trigger.workflow_template_code,
+        strategy_id=trigger.strategy_id,
+        strategy_name=strategy_name,
+        match_conditions=trigger.match_conditions or {},
+        scan_interval_sec=trigger.scan_interval_sec,
+        last_run_at=trigger.last_run_at,
+        next_run_at=trigger.next_run_at,
+        run_count=trigger.run_count,
+        last_error=trigger.last_error,
+        created_by=trigger.created_by,
+        created_at=trigger.created_at,
+        updated_at=trigger.updated_at,
+    )
+
+
+async def _load_with_strategy(db: AsyncSession, trigger_id: int) -> tuple[Trigger, Optional[str]]:
+    result = await db.execute(
+        select(Trigger)
+        .where(Trigger.id == trigger_id)
+        .options(selectinload(Trigger.strategy))
+    )
+    trigger = result.scalar_one_or_none()
+    if trigger is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="trigger not found")
+    strategy_name = trigger.strategy.name if trigger.strategy else None
+    return trigger, strategy_name
+
+
+# ── list ───────────────────────────────────────────────────────
+@router.get("", response_model=Page[TriggerOut])
+async def list_triggers(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    trigger_type: Optional[str] = None,
+    is_enabled: Optional[bool] = None,
+    q: Optional[str] = None,
+) -> Page[TriggerOut]:
+    _require_admin(user)
+    base = select(Trigger).options(selectinload(Trigger.strategy))
+    if trigger_type:
+        base = base.where(Trigger.trigger_type == trigger_type)
+    if is_enabled is not None:
+        base = base.where(Trigger.is_enabled.is_(is_enabled))
+    if q:
+        base = base.where(Trigger.name.ilike(f"%{q}%"))
+
+    total = await db.scalar(select(func.count(Trigger.id))) or 0
+    rows = await db.execute(
+        base.order_by(Trigger.id.desc()).offset((page - 1) * size).limit(size)
+    )
+    items = [
+        _trigger_to_out(t, t.strategy.name if t.strategy else None) for t in rows.scalars()
+    ]
+    return Page(items=items, total=total, page=page, size=size)
+
+
+# ── detail ─────────────────────────────────────────────────────
+@router.get("/{trigger_id}", response_model=TriggerOut)
+async def get_trigger(
+    trigger_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TriggerOut:
+    _require_admin(user)
+    trigger, strategy_name = await _load_with_strategy(db, trigger_id)
+    return _trigger_to_out(trigger, strategy_name)
+
+
+# ── create ─────────────────────────────────────────────────────
+@router.post("", response_model=TriggerOut, status_code=status.HTTP_201_CREATED)
+async def create_trigger(
+    body: TriggerCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TriggerOut:
+    _require_admin(user)
+
+    # Uniqueness check on code
+    existing = await db.scalar(select(Trigger).where(Trigger.code == body.code))
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="code already exists")
+
+    # Validate references
+    if body.workflow_template_code:
+        tpl = await db.scalar(
+            select(WorkflowTemplate).where(
+                WorkflowTemplate.code == body.workflow_template_code,
+                WorkflowTemplate.is_active.is_(True),
+            )
+        )
+        if tpl is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"workflow template not found: {body.workflow_template_code}",
+            )
+    if body.strategy_id is not None:
+        strategy = await db.get(Strategy, body.strategy_id)
+        if strategy is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"strategy not found: {body.strategy_id}",
+            )
+
+    trigger = Trigger(
+        code=body.code,
+        name=body.name,
+        trigger_type=body.trigger_type,
+        is_enabled=body.is_enabled,
+        spec=body.spec,
+        workflow_template_code=body.workflow_template_code,
+        strategy_id=body.strategy_id,
+        match_conditions=body.match_conditions,
+        scan_interval_sec=body.scan_interval_sec,
+        created_by=user.id,
+    )
+    db.add(trigger)
+    await db.commit()
+    await db.refresh(trigger)
+    return _trigger_to_out(trigger, None)
+
+
+# ── update ─────────────────────────────────────────────────────
+@router.put("/{trigger_id}", response_model=TriggerOut)
+async def update_trigger(
+    trigger_id: int,
+    body: TriggerUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TriggerOut:
+    _require_admin(user)
+    trigger, _ = await _load_with_strategy(db, trigger_id)
+    was_enabled = trigger.is_enabled
+
+    data = body.model_dump(exclude_unset=True)
+
+    if "workflow_template_code" in data and data["workflow_template_code"]:
+        tpl = await db.scalar(
+            select(WorkflowTemplate).where(
+                WorkflowTemplate.code == data["workflow_template_code"],
+                WorkflowTemplate.is_active.is_(True),
+            )
+        )
+        if tpl is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"workflow template not found: {data['workflow_template_code']}",
+            )
+
+    if "strategy_id" in data and data["strategy_id"] is not None:
+        strategy = await db.get(Strategy, data["strategy_id"])
+        if strategy is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"strategy not found: {data['strategy_id']}",
+            )
+
+    for key, val in data.items():
+        setattr(trigger, key, val)
+
+    trigger.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(trigger)
+
+    # Notify when a trigger is disabled (fail-safe against misconfig).
+    if was_enabled and not trigger.is_enabled:
+        await notify_trigger_disabled(trigger, user)
+
+    return _trigger_to_out(trigger, trigger.strategy.name if trigger.strategy else None)
+
+
+# ── delete ─────────────────────────────────────────────────────
+@router.delete("/{trigger_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_trigger(
+    trigger_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    _require_admin(user)
+    trigger = await db.get(Trigger, trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="trigger not found")
+    await db.delete(trigger)
+    await db.commit()
+
+
+# ── manual run ─────────────────────────────────────────────────
+@router.post("/{trigger_id}/run", response_model=TriggerRunOut)
+async def run_trigger_now(
+    trigger_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TriggerRunOut:
+    _require_admin(user)
+    trigger = await db.get(Trigger, trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="trigger not found")
+    if not trigger.is_enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="trigger is disabled")
+    run = await fire_trigger(trigger, source="manual")
+    return TriggerRunOut.model_validate(run)
+
+
+# ── list runs ──────────────────────────────────────────────────
+@router.get("/{trigger_id}/runs", response_model=TriggerRunListOut)
+async def list_trigger_runs(
+    trigger_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+) -> TriggerRunListOut:
+    _require_admin(user)
+    trigger = await db.get(Trigger, trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="trigger not found")
+    total = await db.scalar(
+        select(func.count(TriggerRun.id)).where(TriggerRun.trigger_id == trigger_id)
+    ) or 0
+    result = await db.execute(
+        select(TriggerRun)
+        .where(TriggerRun.trigger_id == trigger_id)
+        .order_by(TriggerRun.started_at.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    )
+    items = [TriggerRunOut.model_validate(r) for r in result.scalars()]
+    return TriggerRunListOut(items=items, total=total)

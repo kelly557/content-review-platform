@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.core.logging import get_logger
 from app.models.material import Material, MaterialStatus
 from app.models.review import MachineStatus, ReviewAssignment, ReviewDecision, ReviewTask, ReviewType
+from app.models.strategy import Strategy
 from app.models.user import User, UserRole
 from app.models.workflow import WorkflowInstance, WorkflowNode, WorkflowTemplate
 from app.services.audit import write_audit
@@ -57,11 +58,19 @@ async def start_instance(
     task_name: str | None = None,
     skip_machine_review: bool = False,
     strategy_human_review: dict | None = None,
+    strategy: Strategy | None = None,
 ) -> WorkflowInstance:
     definition = template.definition or {}
     stages: list[dict] = definition.get("stages", [])
     if not stages:
         raise WorkflowError("template has no stages")
+
+    # If a Strategy is provided, merge its definition.human_review into
+    # the snapshot used by downstream stages. Explicit strategy_human_review
+    # argument wins (backward compatible with manual submit).
+    effective_human_review = strategy_human_review
+    if effective_human_review is None and strategy is not None:
+        effective_human_review = (strategy.definition or {}).get("human_review")
 
     instance = WorkflowInstance(
         material_id=material.id,
@@ -69,7 +78,7 @@ async def start_instance(
         template_id=template.id,
         state="running",
         current_stage_key=stages[0]["key"],
-        strategy_human_review=strategy_human_review,
+        strategy_human_review=effective_human_review,
     )
     db.add(instance)
     await db.flush()
@@ -110,7 +119,13 @@ async def start_instance(
         action="workflow.start",
         entity_type="workflow_instance",
         entity_id=instance.id,
-        payload={"template": template.code, "material_id": material.id, "force_human_rules": force_human_rules or [], "skip_machine_review": skip_machine_review},
+        payload={
+            "template": template.code,
+            "material_id": material.id,
+            "force_human_rules": force_human_rules or [],
+            "skip_machine_review": skip_machine_review,
+            "strategy_id": strategy.id if strategy else None,
+        },
     )
 
     if review_type == "machine" and not skip_machine_review:

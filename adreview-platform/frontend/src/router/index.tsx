@@ -13,8 +13,8 @@ function LegacyLibraryRedirect() {
   const params = useParams<LegacyLibraryParams>()
   const target =
     params.type === 'image'
-      ? `/strategies/images/${params.id}`
-      : `/strategies/words/${params.id}`
+      ? `/knowledge/images/${params.id}`
+      : `/knowledge/words/${params.id}`
   return <Navigate to={target} replace />
 }
 
@@ -28,7 +28,6 @@ const TaskDetailPage = lazy(() => import('@/pages/tasks/TaskDetailPage'))
 const CreateTaskPage = lazy(() => import('@/pages/tasks/CreateTaskPage'))
 const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage'))
 const QueryPage = lazy(() => import('@/pages/query/QueryPage'))
-const ReviewQueuePage = lazy(() => import('@/pages/query/ReviewQueuePage'))
 const UsersAdminPage = lazy(() => import('@/pages/admin/UsersAdminPage'))
 const StrategyListPage = lazy(() => import('@/pages/strategy/StrategyListPage'))
 const CreateStrategyPage = lazy(() => import('@/pages/strategy/CreateStrategyPage'))
@@ -38,7 +37,6 @@ const WordLibraryDetailPage = lazy(() => import('@/pages/strategy/WordLibraryDet
 const ImageLibraryDetailPage = lazy(() => import('@/pages/strategy/ImageLibraryDetailPage'))
 const ReplyLibraryListPage = lazy(() => import('@/pages/strategy/ReplyLibraryListPage'))
 const ReplyLibraryDetailPage = lazy(() => import('@/pages/strategy/ReplyLibraryDetailPage'))
-const LibraryGroupsPage = lazy(() => import('@/pages/strategy/LibraryGroupsPage'))
 const StrategyRulesByTypePage = lazy(
   () => import('@/pages/strategy/StrategyRulesByTypePage'),
 )
@@ -49,8 +47,12 @@ const AuditPointsPage = lazy(() => import('@/pages/packages/AuditPointsPage'))
 const CreateAuditPointPage = lazy(() => import('@/pages/packages/CreateAuditPointPage'))
 const TagsPage = lazy(() => import('@/pages/tags/TagsPage'))
 const HumanReviewRulesPage = lazy(() => import('@/pages/strategy/HumanReviewRulesPage'))
-const KnowledgeBasePage = lazy(() => import('@/pages/knowledge/KnowledgeBasePage'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
+const TriggersListPage = lazy(() => import('@/pages/triggers/TriggersListPage'))
+const CreateTriggerPage = lazy(() => import('@/pages/triggers/CreateTriggerPage'))
+const TriggerDetailPage = lazy(() => import('@/pages/triggers/TriggerDetailPage'))
+const WebhookAllowlistPage = lazy(() => import('@/pages/settings/WebhookAllowlistPage'))
+const FeatureDisabledPage = lazy(() => import('@/pages/FeatureDisabledPage'))
 
 function Fallback() {
   return <Spin style={{ display: 'block', margin: '20vh auto' }} />
@@ -78,11 +80,22 @@ export default function AppRoutes() {
             <Route element={<ProtectedRoute allow={['reviewer', 'mlr', 'admin']} />}>
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/query" element={<QueryPage />} />
-              <Route path="/query/review" element={<ReviewQueuePage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['admin', 'mlr']} />}>
               <Route path="/strategies" element={<StrategyListPage />} />
+              <Route
+                path="/strategies/rules-by-type/audio"
+                element={<Navigate to="/strategies/rules-by-type/image" replace />}
+              />
+              <Route
+                path="/strategies/rules-by-type/doc"
+                element={<Navigate to="/strategies/rules-by-type/image" replace />}
+              />
+              <Route
+                path="/strategies/rules-by-type/video"
+                element={<Navigate to="/strategies/rules-by-type/image" replace />}
+              />
               <Route
                 path="/strategies/rules-by-type/:mediaType"
                 element={<StrategyRulesByTypePage />}
@@ -93,33 +106,65 @@ export default function AppRoutes() {
               <Route path="/strategies/new" element={<CreateStrategyPage />} />
               <Route path="/strategies/:id/edit" element={<CreateStrategyPage />} />
               <Route path="/strategies/rules/:serviceCode" element={<ServiceRuleConfigPage />} />
-              <Route path="/strategies/words" element={<WordLibraryListPage />} />
-              <Route path="/strategies/words/:id" element={<WordLibraryDetailPage />} />
-              <Route path="/strategies/images" element={<ImageLibraryListPage />} />
-              <Route path="/strategies/images/:id" element={<ImageLibraryDetailPage />} />
-              <Route path="/strategies/replies" element={<ReplyLibraryListPage />} />
-              <Route path="/strategies/replies/:id" element={<ReplyLibraryDetailPage />} />
-              <Route path="/strategies/library-groups" element={<LibraryGroupsPage />} />
+
+              {/* 知识库（原「策略资源」） */}
+              <Route path="/knowledge/words" element={<WordLibraryListPage />} />
+              <Route path="/knowledge/words/:id" element={<WordLibraryDetailPage />} />
+              <Route path="/knowledge/images" element={<ImageLibraryListPage />} />
+              <Route path="/knowledge/images/:id" element={<ImageLibraryDetailPage />} />
+              <Route path="/knowledge/replies" element={<ReplyLibraryListPage />} />
+              <Route path="/knowledge/replies/:id" element={<ReplyLibraryDetailPage />} />
+
+              {/* 旧路径 redirect 到新前缀 */}
+              <Route
+                path="/strategies/words"
+                element={<Navigate to="/knowledge/words" replace />}
+              />
+              <Route
+                path="/strategies/words/:id"
+                element={<Navigate to="/knowledge/words/:id" replace />}
+              />
+              <Route
+                path="/strategies/images"
+                element={<Navigate to="/knowledge/images" replace />}
+              />
+              <Route
+                path="/strategies/images/:id"
+                element={<Navigate to="/knowledge/images/:id" replace />}
+              />
+              <Route
+                path="/strategies/replies"
+                element={<Navigate to="/knowledge/replies" replace />}
+              />
+              <Route
+                path="/strategies/replies/:id"
+                element={<Navigate to="/knowledge/replies/:id" replace />}
+              />
+              <Route
+                path="/strategies/library-groups"
+                element={<Navigate to="/knowledge/words" replace />}
+              />
               <Route
                 path="/strategies/custom-image"
-                element={<Navigate to="/strategies/images" replace />}
+                element={<Navigate to="/knowledge/images" replace />}
               />
               <Route
                 path="/strategies/custom-text"
-                element={<Navigate to="/strategies/words" replace />}
+                element={<Navigate to="/knowledge/words" replace />}
               />
               <Route
                 path="/strategies/library/image"
-                element={<Navigate to="/strategies/images" replace />}
+                element={<Navigate to="/knowledge/images" replace />}
               />
               <Route
                 path="/strategies/library/word"
-                element={<Navigate to="/strategies/words" replace />}
+                element={<Navigate to="/knowledge/words" replace />}
               />
               <Route
                 path="/strategies/library/:type/:id"
                 element={<LegacyLibraryRedirect />}
               />
+
               <Route path="/packages/:code/items" element={<PackageItemsPage />} />
               <Route path="/packages/:code/items/new" element={<CreateAuditItemPage />} />
               <Route
@@ -132,17 +177,26 @@ export default function AppRoutes() {
               />
             </Route>
 
+            <Route path="/packages" element={<FeatureDisabledPage />} />
+            <Route path="/packages/:id" element={<FeatureDisabledPage />} />
+
             <Route element={<ProtectedRoute allow={['admin']} />}>
               <Route path="/admin/users" element={<UsersAdminPage />} />
+              <Route path="/triggers" element={<TriggersListPage />} />
+              <Route path="/triggers/new" element={<CreateTriggerPage />} />
+              <Route path="/triggers/:id" element={<TriggerDetailPage />} />
+              <Route path="/settings/webhook-allowlist" element={<WebhookAllowlistPage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['admin', 'mlr']} />}>
               <Route path="/tags" element={<TagsPage />} />
               <Route path="/human-review-rules" element={<HumanReviewRulesPage />} />
-              <Route path="/knowledge" element={<KnowledgeBasePage />} />
             </Route>
           </Route>
         </Route>
+
+        {/* 老的独立「知识库」页面（已下线） */}
+        <Route path="/knowledge" element={<Navigate to="/knowledge/words" replace />} />
 
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

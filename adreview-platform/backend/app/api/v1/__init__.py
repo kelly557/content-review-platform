@@ -2,16 +2,14 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    alerts,
     annotations,
     audit_items,
     audit_points,
     auth,
     detection_rules,
     health,
-    imagesets,
-    knowledge,
     libraries,
-    library_groups,
     material_packages,
     materials,
     query,
@@ -21,9 +19,11 @@ from app.api.v1 import (
     services,
     strategies,
     tags,
+    triggers,
     users,
+    webhook_allowlist,
+    webhooks,
     workflows,
-    wordsets,
 )
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -33,19 +33,19 @@ api_router.include_router(reviews.router)
 api_router.include_router(workflows.router)
 api_router.include_router(annotations.router)
 api_router.include_router(reports.router)
+api_router.include_router(alerts.router)
 api_router.include_router(strategies.router)
 api_router.include_router(service_categories.router)
 api_router.include_router(services.router)
-api_router.include_router(library_groups.router)
 api_router.include_router(libraries.router)
-api_router.include_router(wordsets.router)
-api_router.include_router(imagesets.router)
 api_router.include_router(detection_rules.router)
 api_router.include_router(detection_rules.hr_router)
 api_router.include_router(audit_items.router)
 api_router.include_router(audit_points.router)
 api_router.include_router(material_packages.router)
 api_router.include_router(tags.router)
-api_router.include_router(knowledge.router)
 api_router.include_router(query.router)
+api_router.include_router(triggers.router)
+api_router.include_router(webhook_allowlist.router)
+api_router.include_router(webhooks.router)
 api_router.include_router(health.router)

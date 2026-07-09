@@ -12,10 +12,11 @@ import {
   UserOutlined,
   SettingOutlined,
   ClusterOutlined,
-  BookOutlined,
   TagsOutlined,
   DatabaseOutlined,
   SearchOutlined,
+  ThunderboltOutlined,
+  SafetyOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
@@ -67,6 +68,7 @@ const NAV_SECTIONS: Array<{
     items: [
       { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
       { kind: 'leaf', key: 'tasks', path: '/tasks', label: '审核任务', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
+      { kind: 'leaf', key: 'triggers', path: '/triggers', label: '触发器', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
       { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
     ],
   },
@@ -86,27 +88,22 @@ const NAV_SECTIONS: Array<{
           { key: 'strategies-list', path: '/strategies', label: '策略列表' },
           { key: 'strategies-image', path: '/strategies/rules-by-type/image', label: '图片审核规则' },
           { key: 'strategies-text', path: '/strategies/rules-by-type/text', label: '文本审核规则' },
-          { key: 'strategies-audio', path: '/strategies/rules-by-type/audio', label: '语音审核规则' },
-          { key: 'strategies-doc', path: '/strategies/rules-by-type/doc', label: '文档审核规则' },
-          { key: 'strategies-video', path: '/strategies/rules-by-type/video', label: '视频审核规则' },
         ],
       },
       {
         kind: 'group',
         key: 'strategy-resources',
-        path: '/strategies/words',
-        label: '策略资源',
+        path: '/knowledge/words',
+        label: '知识库',
         icon: <DatabaseOutlined style={{ fontSize: ICON_SIZE }} />,
         roles: ['admin', 'mlr'],
         children: [
-          { key: 'strategies-words', path: '/strategies/words', label: '词库' },
-          { key: 'strategies-images', path: '/strategies/images', label: '图片库' },
-          { key: 'strategies-replies', path: '/strategies/replies', label: '代答库' },
-          { key: 'strategies-library-groups', path: '/strategies/library-groups', label: '库管理' },
+          { key: 'strategies-words', path: '/knowledge/words', label: '词库' },
+          { key: 'strategies-images', path: '/knowledge/images', label: '图片库' },
+          { key: 'strategies-replies', path: '/knowledge/replies', label: '代答库' },
         ],
       },
       { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
-      { kind: 'leaf', key: 'knowledge', path: '/knowledge', label: '知识库', icon: <BookOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
     ],
   },
 {
@@ -115,7 +112,6 @@ const NAV_SECTIONS: Array<{
     label: '审查结果',
     items: [
       { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
-      { kind: 'leaf', key: 'query-review', path: '/query/review', label: '复审队列', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
       { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
     ],
   },
@@ -136,6 +132,7 @@ const NAV_SECTIONS: Array<{
         ],
       },
       { kind: 'leaf', key: 'admin-tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
+      { kind: 'leaf', key: 'admin-webhook-allowlist', path: '/settings/webhook-allowlist', label: 'Webhook 白名单', icon: <SafetyOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
     ],
   },
 ]

@@ -18,13 +18,13 @@ from app.models.wordset import WordSet, WordSetKind
 from app.models.strategy import Strategy, StrategyScope
 from app.models.user import User, UserRole
 from app.models.workflow import WorkflowTemplate
+from app.models.trigger import Trigger
 from app.models.detection_rule import DetectionRule
 from app.models.human_review_config import HumanReviewConfig
 from app.models.tag import Tag, TagCategory, TagDomain, TagStatus
 from app.models.audit_item import AuditItem
 from app.models.audit_point import AuditPoint, AuditPointRisk
-from app.models.library import Library, LibraryType
-from app.models.library_group import LibraryGroup
+from app.models.library import Library, LibraryType, LibraryKind
 
 
 DEFAULT_TEMPLATES = [
@@ -149,7 +149,6 @@ async def _upsert_default_strategy(db: AsyncSession) -> None:
             scope=StrategyScope.DEFAULT,
             description="当未配置其他策略、或所有策略均未启用/均未达生效时间时生效。",
             is_active=True,
-            priority=99,
             effective_from=None,
             effective_until=None,
             definition={},
@@ -624,6 +623,7 @@ async def _upsert_audit_items(db: AsyncSession) -> int:
                 row.name_cn = name_cn
                 row.aliases = aliases
                 row.is_enabled = True
+                row.is_builtin = True
                 if description is not None:
                     row.description = description
             else:
@@ -636,6 +636,7 @@ async def _upsert_audit_items(db: AsyncSession) -> int:
                         description=description,
                         sort_order=0,
                         is_enabled=True,
+                        is_builtin=True,
                     )
                 )
                 created += 1
@@ -687,6 +688,7 @@ async def _upsert_audit_points(db: AsyncSession) -> int:
             row.high_threshold = high
             row.risk_level = risk_enum
             row.is_enabled = True
+            row.is_builtin = True
         else:
             db.add(
                 AuditPoint(
@@ -701,6 +703,7 @@ async def _upsert_audit_points(db: AsyncSession) -> int:
                     high_threshold=high,
                     risk_level=risk_enum,
                     is_enabled=True,
+                    is_builtin=True,
                     sort_order=0,
                 )
             )
@@ -773,6 +776,49 @@ async def _purge_orphan_audit_data(
     return len(items_to_delete), len(points_to_delete)
 
 
+async def _upsert_sample_triggers(db) -> None:
+    """Insert one sample trigger (disabled by default — admin enables after review).
+
+    The sample exercises both cron scheduling and 5-key match conditions
+    so admins can verify routing end-to-end before enabling.
+    """
+    from sqlalchemy import select
+
+    existing = await db.scalar(select(Trigger).where(Trigger.code == "sample_full_scan"))
+    if existing is not None:
+        return
+
+    # Only create if the 'hybrid' template actually exists in this DB.
+    tpl = await db.scalar(
+        select(WorkflowTemplate).where(
+            WorkflowTemplate.code == "hybrid",
+            WorkflowTemplate.is_active.is_(True),
+        )
+    )
+    if tpl is None:
+        return
+
+    trigger = Trigger(
+        code="sample_full_scan",
+        name="示例 - 全量文本巡检（未启用）",
+        trigger_type="cron",
+        is_enabled=False,
+        spec={
+            "cron": "0 2 * * *",
+            "timezone": "Asia/Shanghai",
+            "repeat": "daily",
+            "time": "02:00",
+        },
+        workflow_template_code="hybrid",
+        strategy_id=None,
+        match_conditions={"material_type": ["text"]},
+        scan_interval_sec=60,
+        created_by=None,
+    )
+    db.add(trigger)
+    print("seed: inserted sample trigger 'sample_full_scan' (disabled)")
+
+
 async def main(
     *,
     purge_removed: bool = False,
@@ -817,7 +863,10 @@ async def main(
         await _upsert_user(db, "reviewer@adreview.example.com", "审核员 Alice", UserRole.REVIEWER, "reviewer123")
         await _upsert_user(db, "mlr@adreview.example.com", "MLR 专家 Bob", UserRole.MLR, "mlr12345")
         await _upsert_user(db, "submitter@adreview.example.com", "提交者 Carol", UserRole.SUBMITTER, "submitter123")
+        await _upsert_sample_triggers(db)
         await db.commit()
+        from app.db.session import engine
+        await engine.dispose()
         if not dry_run and not purge_apply:
             print(
                 f"seed complete (safe mode — no purge). "
@@ -876,10 +925,9 @@ DEFAULT_TAGS = [
 
 # ---------- 不良内容审核默认词库（占位） ----------
 # 为 text_audit_pro.bad item 下 7 个 audit_point 各创建一个空 word 词库，
-# 方便运营在「策略资源 → 词库」中直接看到并填充关键词。
+# 方便运营在「知识库 → 词库」中直接看到并填充关键词。
 # 不会自动关联到 audit_point（按用户要求"暂不关联库"）；运营后续在
 # ServiceRuleConfigPage 的「关联库」列手动绑定即可。
-BAD_LIBRARY_GROUP_NAME = "不良"
 DEFAULT_BAD_LIBRARIES: list[dict[str, str]] = [
     {"code": "lib_w_bad_minor",         "name": "不良词库-未成年不适",   "description": "未成年人涉烟酒、纹身、恋爱、裸露、暴力等不当场景关键词"},
     {"code": "lib_w_bad_bias",          "name": "不良词库-偏见歧视",     "description": "种族/民族/地域/性别/职业/宗教/性取向等歧视性关键词"},
@@ -893,10 +941,9 @@ DEFAULT_BAD_LIBRARIES: list[dict[str, str]] = [
 
 # ---------- 涉政审核默认词库（占位） ----------
 # 为 text_audit_pro.tx_politics item 下 11 个 audit_point 各创建一个空 word 词库，
-# 方便运营在「策略资源 → 词库」中直接看到并填充关键词。
+# 方便运营在「知识库 → 词库」中直接看到并填充关键词。
 # 不会自动关联到 audit_point（按"暂不关联库"约定）；运营后续在
 # ServiceRuleConfigPage 的「关联库」列手动绑定即可。
-POLITICS_LIBRARY_GROUP_NAME = "涉政"
 DEFAULT_POLITICS_LIBRARIES: list[dict[str, str]] = [
     {"code": "lib_w_politics_current_president",     "name": "涉政词库-现任国家主席",     "description": "现任国家主席的姓名、职务、亲昵称呼及影射/负面言论关键词"},
     {"code": "lib_w_politics_former_leaders",        "name": "涉政词库-历任国家核心领导人", "description": "历任核心领导人（主席、总理）的姓名、职务、亲昵称呼及影射/负面言论关键词"},
@@ -913,22 +960,7 @@ DEFAULT_POLITICS_LIBRARIES: list[dict[str, str]] = [
 
 
 async def _upsert_bad_libraries(db: AsyncSession) -> None:
-    """Ensure the '不良' library group + 7 empty word libraries exist (idempotent)."""
-    grp = (
-        await db.execute(
-            select(LibraryGroup).where(LibraryGroup.name == BAD_LIBRARY_GROUP_NAME)
-        )
-    ).scalars().first()
-    if not grp:
-        grp = LibraryGroup(
-            name=BAD_LIBRARY_GROUP_NAME,
-            description="不良内容审核相关词库/图片库/代答库分组",
-            sort_order=0,
-            is_deleted=False,
-        )
-        db.add(grp)
-        await db.flush()
-
+    """Ensure 7 empty word libraries (默认黑名单) exist (idempotent)."""
     for spec in DEFAULT_BAD_LIBRARIES:
         lib = (
             await db.execute(
@@ -938,7 +970,7 @@ async def _upsert_bad_libraries(db: AsyncSession) -> None:
         if lib:
             lib.name = spec["name"]
             lib.description = spec["description"]
-            lib.group_id = grp.id
+            lib.kind = LibraryKind.BLACKLIST
             lib.is_active = True
         else:
             db.add(
@@ -946,7 +978,7 @@ async def _upsert_bad_libraries(db: AsyncSession) -> None:
                     code=spec["code"],
                     name=spec["name"],
                     library_type=LibraryType.WORD,
-                    group_id=grp.id,
+                    kind=LibraryKind.BLACKLIST,
                     description=spec["description"],
                     is_active=True,
                     is_deleted=False,
@@ -956,22 +988,7 @@ async def _upsert_bad_libraries(db: AsyncSession) -> None:
 
 
 async def _upsert_politics_libraries(db: AsyncSession) -> None:
-    """Ensure the '涉政' library group + 11 empty word libraries exist (idempotent)."""
-    grp = (
-        await db.execute(
-            select(LibraryGroup).where(LibraryGroup.name == POLITICS_LIBRARY_GROUP_NAME)
-        )
-    ).scalars().first()
-    if not grp:
-        grp = LibraryGroup(
-            name=POLITICS_LIBRARY_GROUP_NAME,
-            description="涉政审核相关词库/图片库/代答库分组",
-            sort_order=0,
-            is_deleted=False,
-        )
-        db.add(grp)
-        await db.flush()
-
+    """Ensure 11 empty word libraries (默认黑名单) exist (idempotent)."""
     for spec in DEFAULT_POLITICS_LIBRARIES:
         lib = (
             await db.execute(
@@ -981,7 +998,7 @@ async def _upsert_politics_libraries(db: AsyncSession) -> None:
         if lib:
             lib.name = spec["name"]
             lib.description = spec["description"]
-            lib.group_id = grp.id
+            lib.kind = LibraryKind.BLACKLIST
             lib.is_active = True
         else:
             db.add(
@@ -989,7 +1006,7 @@ async def _upsert_politics_libraries(db: AsyncSession) -> None:
                     code=spec["code"],
                     name=spec["name"],
                     library_type=LibraryType.WORD,
-                    group_id=grp.id,
+                    kind=LibraryKind.BLACKLIST,
                     description=spec["description"],
                     is_active=True,
                     is_deleted=False,
@@ -1088,5 +1105,3 @@ if __name__ == "__main__":
             os.unlink(lock_path)
         except OSError:
             pass
-    _await_engine = engine
-    asyncio.run(_await_engine.dispose())
