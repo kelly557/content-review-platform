@@ -52,6 +52,7 @@ export default function TaskBulkActions({
     rejected: '驳回',
     returned: '退回',
     pending: '待处理',
+    canceled: '已取消',
   }
 
   return (

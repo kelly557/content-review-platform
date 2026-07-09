@@ -7,6 +7,7 @@ import {
   UserOutlined,
   CloseCircleOutlined,
   RollbackOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 import { TASK_STATUS_CONFIG, getTaskStatus, type ReviewTask } from '@/types/domain'
 
@@ -18,6 +19,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   UserOutlined: <UserOutlined />,
   CloseCircleOutlined: <CloseCircleOutlined />,
   RollbackOutlined: <RollbackOutlined />,
+  StopOutlined: <StopOutlined />,
 }
 
 interface TaskStatusTagProps {

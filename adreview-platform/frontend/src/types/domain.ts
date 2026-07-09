@@ -3,9 +3,10 @@ export type { User, UserRole } from './auth'
 
 export type MaterialType = 'image' | 'video' | 'pdf' | 'text'
 export type MaterialStatus = 'draft' | 'submitted' | 'in_review' | 'approved' | 'rejected' | 'withdrawn'
-export type ReviewDecision = 'pending' | 'approved' | 'rejected' | 'returned'
+export type ReviewDecision = 'pending' | 'approved' | 'rejected' | 'returned' | 'canceled'
 export type ReviewType = 'machine' | 'human'
 export type MachineStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type WorkflowMode = 'machine_only' | 'machine_then_human'
 export type PackageStatus = 'draft' | 'submitted' | 'in_review' | 'completed'
 
 export interface Page<T> {
@@ -114,6 +115,11 @@ export interface ReviewTask {
   agent_review?: AgentReviewResult | null
   material_type?: MaterialType | null
   material_status?: MaterialStatus | null
+  // v10
+  workflow_mode?: WorkflowMode
+  canceled_at?: string | null
+  canceled_by?: number | null
+  cancel_reason?: string | null
 }
 
 export type AgentRiskLevel = '高风险' | '中风险' | '低风险' | '无风险'
@@ -438,13 +444,11 @@ export interface RiskDistributionBucket {
   count: number
 }
 
-export interface TopRiskItem {
-  task_id: number
-  material_id: number
-  material_title: string
+export interface TopRiskLabelItem {
+  label: string
+  count: number
   risk_level: RiskLevel
-  hit_label: string
-  hit_at: string
+  last_hit_at: string
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -484,6 +488,7 @@ export const DECISION_LABELS: Record<ReviewDecision, string> = {
   approved: '通过',
   rejected: '驳回',
   returned: '退回',
+  canceled: '已取消',
 }
 
 export const PACKAGE_STATUS_LABELS: Record<PackageStatus, string> = {
@@ -515,6 +520,7 @@ export const TASK_STATUS_CONFIG: Record<string, TaskStatusConfig> = {
   approved: { label: '已通过', color: 'success', icon: 'CheckCircleOutlined' },
   rejected: { label: '已驳回', color: 'error', icon: 'CloseCircleOutlined' },
   returned: { label: '已退回', color: 'warning', icon: 'RollbackOutlined' },
+  canceled: { label: '已取消', color: 'default', icon: 'StopOutlined' },
 }
 
 export function getTaskStatus(task: ReviewTask): string {
@@ -528,6 +534,11 @@ export function getTaskStatus(task: ReviewTask): string {
     return 'pending'
   }
   return 'in_review'
+}
+
+export const WORKFLOW_MODE_LABELS: Record<WorkflowMode, string> = {
+  machine_only: '纯机审',
+  machine_then_human: '机审+人审',
 }
 
 

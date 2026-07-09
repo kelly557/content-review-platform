@@ -5,6 +5,7 @@ import {
   Col,
   Drawer,
   Empty,
+  Input,
   Row,
   Space,
   Tag,
@@ -13,6 +14,7 @@ import {
 import {
   ArrowLeftOutlined,
   RobotOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { reviewsApi, annotationsApi } from '@/api/reviews'
@@ -23,6 +25,7 @@ import { useAuthStore } from '@/store'
 import {
   DECISION_LABELS,
   TYPE_LABELS,
+  WORKFLOW_MODE_LABELS,
   type Material,
   type MaterialVersion,
   type ReviewDecision,
@@ -216,6 +219,41 @@ export default function TaskDetailPage() {
     }
   }
 
+  const onCancelTask = () => {
+    if (!task) return
+    let reason = ''
+    modal.confirm({
+      title: '取消任务',
+      content: (
+        <div>
+          <p style={{ marginBottom: 8 }}>确认取消任务「{task.title}」？该操作不可撤销。</p>
+          <Input.TextArea
+            rows={3}
+            maxLength={500}
+            showCount
+            placeholder="请输入取消原因（可选）"
+            onChange={(e) => {
+              reason = e.target.value
+            }}
+          />
+        </div>
+      ),
+      okText: '确认取消',
+      okButtonProps: { danger: true },
+      cancelText: '不取消',
+      onOk: async () => {
+        try {
+          await reviewsApi.cancelTask(task.id, reason || undefined)
+          message.success('任务已取消')
+          await fetchTask(task.id)
+        } catch (e) {
+          const err = e as { response?: { data?: { detail?: string } }; message?: string }
+          message.error(err.response?.data?.detail || err.message || '取消失败')
+        }
+      },
+    })
+  }
+
   const downloadUrl = useMemo(() => {
     if (!task || !version) return null
     return materialsApi.downloadUrl(task.material_id, version.id)
@@ -244,6 +282,18 @@ export default function TaskDetailPage() {
     hasPendingAssignment ||
     (isMachineWithResult && !!user && reviewerRoles.includes(user.role))
 
+  // v10: header visibility for the cancel button. The same predicate as
+  // the list page so behavior stays consistent.
+  const canCancel =
+    task.final_decision === 'pending' &&
+    task.canceled_at == null &&
+    (task.machine_status === 'pending' ||
+      task.machine_status === 'running' ||
+      task.machine_status == null) &&
+    (user?.role === 'admin' ||
+      (user?.role === 'submitter' && material.submitter_id === user.id) ||
+      hasPendingAssignment)
+
   const decisionTagColor =
     task.final_decision === 'approved'
       ? 'success'
@@ -251,7 +301,13 @@ export default function TaskDetailPage() {
         ? 'error'
         : task.final_decision === 'returned'
           ? 'warning'
-          : 'processing'
+          : task.final_decision === 'canceled'
+            ? 'default'
+            : 'processing'
+
+  const workflowMode = task.workflow_mode ?? 'machine_only'
+  const isHybrid = workflowMode === 'machine_then_human'
+  const isCanceled = task.final_decision === 'canceled'
 
   const renderRightPanel = () => {
     const isMachineReview = task.review_type === 'machine'
@@ -297,48 +353,88 @@ export default function TaskDetailPage() {
 
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <Space
-        align="center"
+      {/* v10 PageHeader: task meta + workflow_mode + status + cancel button */}
+      <div
         style={{
           width: '100%',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          rowGap: 8,
+          padding: '12px 16px',
+          background: '#fff',
+          border: `1px solid ${colors.border}`,
+          borderRadius: 8,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
         }}
       >
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tasks')}>
-            返回任务列表
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            {task.title}
-          </Title>
-          <Tag color={task.review_type === 'machine' ? 'blue' : 'orange'}>
-            {task.review_type === 'machine' ? '机审' : '人审'}
-          </Tag>
-          <Tag color={decisionTagColor}>{DECISION_LABELS[task.final_decision]}</Tag>
-          <Tag>{TYPE_LABELS[material.material_type]}</Tag>
-          <Tag color="default">{task.stage_key}</Tag>
-        </Space>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            rowGap: 8,
+            columnGap: 12,
+          }}
+        >
+          <Space size={8} wrap>
+            <Button
+              icon={<ArrowLeftOutlined />}
+              onClick={() => navigate('/tasks')}
+              size="small"
+            >
+              返回任务列表
+            </Button>
+            <Title level={5} style={{ margin: 0 }}>
+              {task.title}
+            </Title>
+            <Tag color={isHybrid ? 'purple' : 'blue'} style={{ margin: 0 }}>
+              {WORKFLOW_MODE_LABELS[workflowMode]}
+            </Tag>
+            <Tag color={decisionTagColor} style={{ margin: 0 }}>
+              {DECISION_LABELS[task.final_decision]}
+            </Tag>
+            <Tag style={{ margin: 0 }}>{TYPE_LABELS[material.material_type]}</Tag>
+            <Tag color="default" style={{ margin: 0 }}>{task.stage_key}</Tag>
+          </Space>
 
-        <Space>
-          <Button
-            icon={<RobotOutlined />}
-            onClick={() => {
-              if (layoutMode === 'triple') {
-                rightPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              } else {
-                setRightDrawerOpen(true)
-              }
-            }}
-          >
-            AI 结论 & 处理动作
-          </Button>
+          <Space size={8} wrap>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              #{task.id} · 创建于 {new Date(task.created_at).toLocaleString('zh-CN')}
+            </Text>
+            {!isCanceled && canCancel && (
+              <Button
+                danger
+                size="small"
+                icon={<StopOutlined />}
+                onClick={onCancelTask}
+              >
+                取消任务
+              </Button>
+            )}
+            <Button
+              size="small"
+              icon={<RobotOutlined />}
+              onClick={() => {
+                if (layoutMode === 'triple') {
+                  rightPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                } else {
+                  setRightDrawerOpen(true)
+                }
+              }}
+            >
+              AI 结论 & 处理动作
+            </Button>
+          </Space>
+        </div>
+        {isCanceled && task.cancel_reason && (
           <Text type="secondary" style={{ fontSize: 12 }}>
-            #{task.id} · 创建于 {new Date(task.created_at).toLocaleString('zh-CN')}
+            取消原因：{task.cancel_reason}
+            {task.canceled_at && (
+              <> · 取消于 {new Date(task.canceled_at).toLocaleString('zh-CN')}</>
+            )}
           </Text>
-        </Space>
-      </Space>
+        )}
+      </div>
 
       <div style={{ height: 'calc(100vh - 200px)', minHeight: 520 }}>
         {layoutMode === 'triple' ? (

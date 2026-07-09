@@ -9,6 +9,7 @@ interface TaskStatusTabsProps {
     approved: number
     rejected: number
     returned: number
+    canceled: number
   }
 }
 
@@ -19,6 +20,7 @@ export default function TaskStatusTabs({ activeKey, onChange, counts }: TaskStat
     { key: 'approved', label: `已通过 (${counts.approved})` },
     { key: 'rejected', label: `已驳回 (${counts.rejected})` },
     { key: 'returned', label: `已退回 (${counts.returned})` },
+    { key: 'canceled', label: `已取消 (${counts.canceled})` },
   ]
 
   return (
