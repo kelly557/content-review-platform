@@ -274,9 +274,9 @@ export default function CreateTaskPage() {
     const t: Record<string, unknown> = { source: 'create_task_page' }
     if (isAudioTab) t.original_kind = 'audio'
     if (strategyForm.strategy_id) t.strategy_id = strategyForm.strategy_id
-    if (strategyForm.channels?.length) t.channels = strategyForm.channels
-    if (strategyForm.industry) t.industry = strategyForm.industry
-    if (strategyForm.keyword) t.keyword = strategyForm.keyword
+    if (referenceForm.channels?.length) t.channels = referenceForm.channels
+    if (referenceForm.industry) t.industry = referenceForm.industry
+    if (referenceForm.keyword) t.keyword = referenceForm.keyword
     if (referenceForm.product_sku) t.product_sku = referenceForm.product_sku
     return t
   }
@@ -365,7 +365,33 @@ export default function CreateTaskPage() {
         )}
       </div>
 
-      <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 16, marginBottom: 16 }}>
+      {/* 第 2 层：reference 折叠面板（默认收起） */}
+      <div style={{ marginBottom: 16 }}>
+        <Collapse
+          ghost
+          items={[
+            {
+              key: 'reference',
+              label: (
+                <Space>
+                  <span style={{ fontSize: 13 }}>更多配置</span>
+                  {referenceFilledCount > 0 && (
+                    <Tag color="blue" style={{ margin: 0 }}>
+                      已填 {referenceFilledCount}
+                    </Tag>
+                  )}
+                </Space>
+              ),
+              children: (
+                <ReferenceFields value={referenceForm} onChange={setReferenceForm} />
+              ),
+            },
+          ]}
+        />
+      </div>
+
+      {/* 第 3 层：跳过机审 */}
+      <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 16 }}>
         <Checkbox
           checked={skipMachineReview}
           onChange={(e) => setSkipMachineReview(e.target.checked)}
@@ -376,29 +402,6 @@ export default function CreateTaskPage() {
           勾选后任务将跳过自动 AI 审核，可在任务详情页手动执行
         </div>
       </div>
-
-      {/* 第 2 层：reference 折叠面板 */}
-      <Collapse
-        ghost
-        items={[
-          {
-            key: 'reference',
-            label: (
-              <Space>
-                <span style={{ fontSize: 13 }}>更多配置</span>
-                {referenceFilledCount > 0 && (
-                  <Tag color="blue" style={{ margin: 0 }}>
-                    已填 {referenceFilledCount}
-                  </Tag>
-                )}
-              </Space>
-            ),
-            children: (
-              <ReferenceFields value={referenceForm} onChange={setReferenceForm} />
-            ),
-          },
-        ]}
-      />
     </Card>
   )
 
