@@ -65,7 +65,7 @@ const NAV_SECTIONS: Array<{
     key: 'workspace',
     label: '工作区',
     items: [
-      { kind: 'leaf', key: 'dashboard', path: '/dashboard', label: '工作台', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
+      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
       { kind: 'leaf', key: 'tasks', path: '/tasks', label: '审核任务', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
       { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
     ],
@@ -109,12 +109,13 @@ const NAV_SECTIONS: Array<{
       { kind: 'leaf', key: 'knowledge', path: '/knowledge', label: '知识库', icon: <BookOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
     ],
   },
-  {
+{
     type: 'group',
     key: 'analytics',
     label: '审查结果',
     items: [
       { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
+      { kind: 'leaf', key: 'query-review', path: '/query/review', label: '复审队列', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
       { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
     ],
   },
@@ -222,7 +223,7 @@ export default function AppLayout() {
       (k) =>
         location.pathname === k ||
         (k.startsWith('/') && location.pathname.startsWith(`${k}/`)),
-    ) || '/dashboard'
+    ) || '/overview'
 
   const openKeys = visibleSections
     .flatMap((section) => section.items)

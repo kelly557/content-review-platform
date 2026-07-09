@@ -283,7 +283,168 @@ export interface OverviewStats {
   in_review: number
   approved: number
   rejected: number
+  submitted: number
   avg_review_hours: number | null
+  reject_rate: number
+  review_rate: number
+  approve_rate: number
+}
+
+// ---------------------------------------------------------------------------
+// Analytics (data-analysis) page
+// ---------------------------------------------------------------------------
+
+export type TrendMetric = 'reject_rate' | 'review_rate' | 'approve_rate' | 'submitted'
+
+export interface TrendPoint {
+  bucket: string
+  value: number
+  sample_count: number
+}
+
+export interface TrendResponse {
+  metric: TrendMetric
+  granularity: string
+  window_start: string
+  window_end: string
+  points: TrendPoint[]
+  delta_pct: number | null
+}
+
+export interface AnomalyCurrent {
+  bucket: string
+  reject_rate: number
+  review_rate: number
+  approve_rate: number
+  submitted: number
+  rejected: number
+  high_risk_accounts: number
+}
+
+export interface AnomalyMetricPoint {
+  bucket: string
+  reject_rate: number
+  review_rate: number
+  approve_rate: number
+  submitted: number
+}
+
+export interface AnomalyAlertSummary {
+  id: number
+  rule_code: string
+  severity: string
+  metric: string
+  window_start: string
+  window_end: string
+  observed_value: number
+  threshold: number
+  status: string
+  created_at: string
+  detail: Record<string, unknown>
+}
+
+export interface AnomalyResponse {
+  window: string
+  current: AnomalyCurrent
+  series: AnomalyMetricPoint[]
+  alerts: AnomalyAlertSummary[]
+}
+
+export interface QualityVerdictCount {
+  misjudge: number
+  miss: number
+  agree: number
+  total: number
+}
+
+export interface QualityDetailRow {
+  task_id: number
+  material_id: number
+  strategy_code: string | null
+  machine_decision: string | null
+  human_decision: string | null
+  verdict: 'misjudge' | 'miss' | 'agree'
+  feedback: string | null
+  completed_at: string | null
+}
+
+export interface ReasonCount {
+  label: string
+  count: number
+}
+
+export interface QualityResponse {
+  window_start: string
+  window_end: string
+  misjudge_rate: number
+  miss_rate: number
+  agree_rate: number
+  avg_review_hours: number | null
+  top_rejection_reasons: ReasonCount[]
+  top_false_positive_tags: ReasonCount[]
+  verdicts: QualityVerdictCount
+  detail: QualityDetailRow[]
+  detail_total: number
+}
+
+export interface AlertEventOut {
+  id: number
+  rule_code: string
+  severity: string
+  metric: string
+  window_start: string
+  window_end: string
+  observed_value: number
+  threshold: number
+  dimension: Record<string, unknown>
+  detail: Record<string, unknown>
+  status: 'open' | 'acknowledged'
+  ack_by: number | null
+  ack_at: string | null
+  ack_note: string | null
+  notified: boolean
+  created_at: string
+}
+
+export interface AlertPage {
+  items: AlertEventOut[]
+  total: number
+  page: number
+  size: number
+}
+
+/**
+ * Risk dashboard types (overview page).
+ * The 5-level enum matches the backend ``RiskLevel`` (高/中/低/敏感/无).
+ * NOTE: ``RiskLevel`` is declared later in this file as a 5-value union
+ * (HumanReviewConfig also uses it). We add the dashboard helpers above
+ * for grouping, but reference the existing ``RiskLevel`` directly to keep
+ * a single source of truth.
+ */
+export const RISK_LEVELS = ['高风险', '中风险', '低风险', '敏感', '无风险'] as const
+
+export interface RiskTimeseriesPoint {
+  date: string
+  total: number
+  high: number
+  medium: number
+  low: number
+  sensitive: number
+  none: number
+}
+
+export interface RiskDistributionBucket {
+  level: RiskLevel
+  count: number
+}
+
+export interface TopRiskItem {
+  task_id: number
+  material_id: number
+  material_title: string
+  risk_level: RiskLevel
+  hit_label: string
+  hit_at: string
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -779,7 +940,7 @@ export interface WordSetOption {
   action?: WordSetAction
 }
 
-export type RiskLevel = "高风险" | "中风险" | "低风险" | "无风险"
+export type RiskLevel = '高风险' | '中风险' | '低风险' | '敏感' | '无风险'
 
 export interface HumanReviewConfig {
   id: number
@@ -1647,3 +1808,47 @@ export const QUERY_COLUMNS: QueryColumnDef[] = [
 export const DEFAULT_VISIBLE_COLUMNS: QueryColumnKey[] = QUERY_COLUMNS.filter(
   (c) => c.defaultVisible,
 ).map((c) => c.key)
+
+// ─── 复审队列 (/query/review) — 卡片视图，只读 ────────────────────────────────
+
+export interface ReviewRecord {
+  id: number
+  title?: string | null
+  review_type?: string | null
+  material_id: number
+  material_version_id: number
+  material_type?: string | null
+  preview_url?: string | null
+  mime_type?: string | null
+  strategy_code?: string | null
+  strategy_name?: string | null
+  risk_level?: string | null
+  machine_decision?: MachineDecision | null
+  machine_request_id?: string | null
+  final_decision?: string | null
+  submitter_id?: number | null
+  submitter_name?: string | null
+  assignee_id?: number | null
+  assignee_name?: string | null
+  hits: MachineHit[]
+  violation_tags: Array<Record<string, unknown>>
+  summary?: string | null
+  requested_at?: string | null
+  finished_at?: string | null
+  ip?: string | null
+  account_id?: string | null
+  bailian_request_id?: string | null
+  data_id?: string | null
+}
+
+export interface ReviewFilters {
+  review_type?: 'human' | 'machine'
+  material_type?: DetectionModality
+  strategy_code?: string
+  task_id?: number
+  machine_request_id?: string
+  data_id?: string
+  final_decision?: ReviewDecision
+  page?: number
+  size?: number
+}

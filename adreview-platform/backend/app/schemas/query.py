@@ -88,4 +88,48 @@ class QueryLabelsOut(BaseModel):
     labels: List[str]
 
 
+class ReviewRecordOut(ORMBase):
+    """Card-view projection of one ``ReviewTask`` for /query/review.
+
+    Read-only; only shows machine and human review dimensions, no
+    re-review (复审) fields.
+    """
+
+    id: int
+    title: Optional[str] = None
+    review_type: Optional[str] = None
+
+    material_id: int
+    material_version_id: int
+    material_type: Optional[str] = None
+    preview_url: Optional[str] = None
+    mime_type: Optional[str] = None
+
+    strategy_code: Optional[str] = None
+    strategy_name: Optional[str] = None
+    risk_level: Optional[str] = None
+    machine_decision: Optional[str] = None
+    machine_request_id: Optional[str] = None
+
+    final_decision: Optional[str] = None
+
+    submitter_id: Optional[int] = None
+    submitter_name: Optional[str] = None
+    assignee_id: Optional[int] = None
+    assignee_name: Optional[str] = None
+
+    hits: List[MachineHitOut] = Field(default_factory=list)
+    violation_tags: List[Dict[str, Any]] = Field(default_factory=list)
+    summary: Optional[str] = None
+
+    requested_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+    ip: Optional[str] = None
+    account_id: Optional[str] = None
+    bailian_request_id: Optional[str] = None
+    data_id: Optional[str] = None
+
+
 QueryPage = Page[MachineReviewRecordOut]
+ReviewPage = Page[ReviewRecordOut]

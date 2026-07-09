@@ -1,11 +1,13 @@
 import { Descriptions, Drawer, Empty, Space, Tag, Typography } from 'antd'
-import type { MachineReviewRecord } from '@/types/domain'
+import type { MachineReviewRecord, ReviewRecord } from '@/types/domain'
 import { MACHINE_DECISION_OPTIONS } from '@/types/domain'
 
 const { Text } = Typography
 
+type DetailRecord = MachineReviewRecord | ReviewRecord
+
 interface Props {
-  record: MachineReviewRecord | null
+  record: DetailRecord | null
   onClose: () => void
 }
 
@@ -93,6 +95,25 @@ export default function RecordDetailDrawer({ record, onClose }: Props) {
                   ? new Date(record.finished_at).toLocaleString('zh-CN')
                   : '-',
               },
+              ...(('machine_request_id' in record && record.machine_request_id) ||
+              ('data_id' in record && record.data_id)
+                ? [
+                    {
+                      key: 'machine_request_id',
+                      label: '机审RequestId',
+                      children:
+                        'machine_request_id' in record
+                          ? record.machine_request_id || '-'
+                          : '-',
+                    },
+                    {
+                      key: 'data_id',
+                      label: 'DataId',
+                      children:
+                        'data_id' in record ? record.data_id || '-' : '-',
+                    },
+                  ]
+                : []),
             ]}
           />
 

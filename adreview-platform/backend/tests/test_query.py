@@ -12,6 +12,7 @@ def test_query_routes_registered():
         "/api/v1/query/results",
         "/api/v1/query/results/export.csv",
         "/api/v1/query/labels",
+        "/api/v1/query/review",
     ):
         assert key in paths, f"missing route: {key}"
 
@@ -24,6 +25,8 @@ def test_query_schemas_present():
         "Page_MachineReviewRecordOut_",
         "QueryLabelsOut",
         "MachineHitOut",
+        "ReviewRecordOut",
+        "Page_ReviewRecordOut_",
     ):
         assert s in schemas, f"missing schema: {s}"
 
@@ -93,3 +96,17 @@ async def test_query_results_invalid_conditions(client):
 
     resp = await client.get("/api/v1/query/results?conditions=not-json")
     assert resp.status_code == 400, resp.text
+
+
+@pytest.mark.asyncio
+async def test_query_review_requires_reviewer_role(client):
+    """submitter cannot access the review page."""
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "submitter@adreview.example.com", "password": "submitter123"},
+    )
+    assert login.status_code == 200, login.text
+    client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+
+    resp = await client.get("/api/v1/query/review")
+    assert resp.status_code == 403, resp.text

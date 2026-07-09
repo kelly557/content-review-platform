@@ -15,12 +15,13 @@ from sqlalchemy.orm import aliased
 
 from app.core.deps import require_roles
 from app.db.session import get_db
-from app.models.material import Material, MaterialType
+from app.models.material import Material, MaterialType, MaterialVersion
 from app.models.review import (
     ReviewAssignment,
     ReviewAssignmentTag,
     ReviewDecision,
     ReviewTask,
+    ReviewType,
 )
 from app.models.user import User
 from app.schemas.query import (
@@ -30,6 +31,8 @@ from app.schemas.query import (
     MachineReviewRecordOut,
     QueryLabelsOut,
     QueryPage,
+    ReviewPage,
+    ReviewRecordOut,
     RISK_TO_DECISION,
 )
 
@@ -488,3 +491,214 @@ async def list_strategies(
             for r in rows
         ]
     }
+
+
+def _to_review_record(
+    task: ReviewTask,
+    material: Material,
+    latest_version: Optional[MaterialVersion],
+    submitter: Optional[User],
+    assignee: Optional[User],
+    tag_snapshots: List[Dict[str, Any]],
+) -> ReviewRecordOut:
+    mr: Dict[str, Any] = dict(task.machine_result or {})
+    strategy = mr.get("strategy") or {}
+    risk_level = mr.get("risk_level")
+    if isinstance(risk_level, str):
+        machine_decision = RISK_TO_DECISION.get(risk_level)
+    else:
+        machine_decision = None
+
+    hits: List[MachineHitOut] = []
+    hits_raw = mr.get("hits") or []
+    if isinstance(hits_raw, list):
+        for h in hits_raw:
+            if not isinstance(h, dict):
+                continue
+            try:
+                hits.append(MachineHitOut(**h))
+            except Exception:
+                continue
+
+    strategy_code = strategy.get("code") if isinstance(strategy, dict) else None
+    strategy_name = strategy.get("name") if isinstance(strategy, dict) else None
+    if not strategy_code:
+        strategy_code = task.stage_key or None
+
+    machine_request_id = mr.get("trace_id") or mr.get("bailian_request_id")
+
+    preview_url: Optional[str] = None
+    mime_type: Optional[str] = None
+    if latest_version is not None:
+        mime_type = latest_version.mime_type
+        preview_url = (
+            f"/api/v1/materials/{latest_version.material_id}"
+            f"/versions/{latest_version.id}/download"
+        )
+
+    metadata: Dict[str, Any] = {}
+    if isinstance(material.extra_metadata, dict):
+        metadata = material.extra_metadata
+    data_id = str(metadata.get("data_id") or material.id)
+
+    requested_at = task.machine_started_at or task.created_at
+
+    return ReviewRecordOut(
+        id=task.id,
+        title=task.title,
+        review_type=_enum_value(task.review_type),
+        material_id=material.id,
+        material_version_id=task.material_version_id,
+        material_type=_enum_value(material.material_type),
+        preview_url=preview_url,
+        mime_type=mime_type,
+        strategy_code=strategy_code,
+        strategy_name=strategy_name or strategy_code,
+        risk_level=risk_level,
+        machine_decision=machine_decision,
+        machine_request_id=machine_request_id,
+        final_decision=_enum_value(task.final_decision),
+        submitter_id=submitter.id if submitter else None,
+        submitter_name=submitter.full_name if submitter else None,
+        assignee_id=assignee.id if assignee else None,
+        assignee_name=assignee.full_name if assignee else None,
+        hits=hits,
+        violation_tags=tag_snapshots,
+        summary=mr.get("summary"),
+        requested_at=requested_at,
+        finished_at=task.completed_at,
+        ip=metadata.get("ip"),
+        account_id=metadata.get("account_id"),
+        bailian_request_id=machine_request_id,
+        data_id=data_id,
+    )
+
+
+@router.get("/review", response_model=ReviewPage)
+async def list_review(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("reviewer", "mlr", "admin")),
+    review_type: ReviewType = Query(ReviewType.HUMAN, description="机审/机审，默认人审"),
+    material_type: Optional[MaterialType] = Query(None, description="检测模态筛选"),
+    strategy_code: Optional[str] = Query(None, description="审核策略 code"),
+    task_id: Optional[int] = Query(None, description="任务 ID 精确匹配"),
+    machine_request_id: Optional[str] = Query(None, description="机审RequestId 模糊匹配"),
+    data_id: Optional[str] = Query(None, description="DataId 精确匹配"),
+    final_decision: Optional[ReviewDecision] = Query(None, description="人审结果筛选"),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=MAX_PAGE_SIZE),
+) -> ReviewPage:
+    """Card view for /query/review. Read-only; no re-review fields."""
+    Submitter = aliased(User, name="submitter")
+    Assignee = aliased(User, name="assignee")
+
+    stmt = (
+        select(ReviewTask, Material, Submitter, Assignee)
+        .join(Material, Material.id == ReviewTask.material_id)
+        .outerjoin(Submitter, Submitter.id == Material.submitter_id)
+        .outerjoin(
+            ReviewAssignment,
+            and_(
+                ReviewAssignment.task_id == ReviewTask.id,
+                ReviewAssignment.decision != ReviewDecision.PENDING,
+            ),
+        )
+        .outerjoin(Assignee, Assignee.id == ReviewAssignment.assignee_id)
+    )
+    count_stmt = (
+        select(func.count(ReviewTask.id))
+        .join(Material, Material.id == ReviewTask.material_id)
+    )
+
+    if review_type is not None:
+        stmt = stmt.where(ReviewTask.review_type == review_type)
+        count_stmt = count_stmt.where(ReviewTask.review_type == review_type)
+
+    if material_type is not None:
+        stmt = stmt.where(Material.material_type == material_type)
+        count_stmt = count_stmt.where(Material.material_type == material_type)
+
+    if task_id is not None:
+        stmt = stmt.where(ReviewTask.id == task_id)
+        count_stmt = count_stmt.where(ReviewTask.id == task_id)
+
+    if final_decision is not None:
+        stmt = stmt.where(ReviewTask.final_decision == final_decision)
+        count_stmt = count_stmt.where(ReviewTask.final_decision == final_decision)
+
+    if strategy_code:
+        stmt = stmt.where(
+            ReviewTask.machine_result["strategy"]["code"].astext == strategy_code
+        )
+        count_stmt = count_stmt.where(
+            ReviewTask.machine_result["strategy"]["code"].astext == strategy_code
+        )
+
+    if machine_request_id:
+        stmt = stmt.where(
+            func.cast(ReviewTask.machine_result, String).ilike(f"%{machine_request_id}%")
+        )
+        count_stmt = count_stmt.where(
+            func.cast(ReviewTask.machine_result, String).ilike(f"%{machine_request_id}%")
+        )
+
+    if data_id:
+        try:
+            data_id_int = int(data_id)
+            stmt = stmt.where(Material.id == data_id_int)
+            count_stmt = count_stmt.where(Material.id == data_id_int)
+        except (TypeError, ValueError):
+            stmt = stmt.where(
+                func.cast(Material.extra_metadata, String).ilike(f'%"data_id": "{data_id}"%')
+            )
+            count_stmt = count_stmt.where(
+                func.cast(Material.extra_metadata, String).ilike(f'%"data_id": "{data_id}"%')
+            )
+
+    total = await db.scalar(count_stmt) or 0
+
+    stmt = stmt.order_by(ReviewTask.id.desc()).offset((page - 1) * size).limit(size)
+    rows = (await db.execute(stmt)).all()
+    if not rows:
+        return ReviewPage(items=[], total=total, page=page, size=size)
+
+    material_ids = list({m.id for _, m, _, _ in rows})
+    version_stmt = (
+        select(MaterialVersion)
+        .where(MaterialVersion.material_id.in_(material_ids))
+        .order_by(MaterialVersion.material_id.asc(), MaterialVersion.version_no.desc())
+    )
+    version_rows = (await db.execute(version_stmt)).scalars().all()
+    latest_by_material: Dict[int, MaterialVersion] = {}
+    for v in version_rows:
+        if v.material_id not in latest_by_material:
+            latest_by_material[v.material_id] = v
+
+    task_ids_out = [t.id for t, _, _, _ in rows]
+    tag_stmt = (
+        select(
+            ReviewAssignmentTag.tag_id,
+            ReviewAssignmentTag.tag_snapshot,
+            ReviewAssignment.task_id,
+        )
+        .join(ReviewAssignment, ReviewAssignment.id == ReviewAssignmentTag.assignment_id)
+        .where(ReviewAssignment.task_id.in_(task_ids_out))
+    )
+    tag_rows = (await db.execute(tag_stmt)).all()
+    tags_by_task: Dict[int, List[Dict[str, Any]]] = {}
+    for tag_id, snap, task_id in tag_rows:
+        tags_by_task.setdefault(task_id, []).append({"id": tag_id, "snapshot": snap})
+
+    items: List[ReviewRecordOut] = []
+    for task, material, submitter, assignee in rows:
+        items.append(
+            _to_review_record(
+                task,
+                material,
+                latest_by_material.get(material.id),
+                submitter,
+                assignee,
+                tags_by_task.get(task.id, []),
+            )
+        )
+    return ReviewPage(items=items, total=total, page=page, size=size)

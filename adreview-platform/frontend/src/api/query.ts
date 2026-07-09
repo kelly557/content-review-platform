@@ -1,5 +1,10 @@
 import { api } from './client'
-import type { MachineReviewRecord, QueryFilters } from '@/types/domain'
+import type {
+  MachineReviewRecord,
+  QueryFilters,
+  ReviewFilters,
+  ReviewRecord,
+} from '@/types/domain'
 
 export interface QueryPage<T> {
   items: T[]
@@ -60,5 +65,20 @@ export const queryApi = {
         items: Array<{ id: number; code: string; name: string; scope: string; is_active: boolean }>
       }>('/query/strategies')
       .then((r) => r.data.items)
+  },
+  review(filters: ReviewFilters) {
+    const params: Record<string, string | number | undefined> = {}
+    if (filters.review_type) params.review_type = filters.review_type
+    if (filters.material_type) params.material_type = filters.material_type
+    if (filters.strategy_code) params.strategy_code = filters.strategy_code
+    if (filters.task_id) params.task_id = filters.task_id
+    if (filters.machine_request_id) params.machine_request_id = filters.machine_request_id
+    if (filters.data_id) params.data_id = filters.data_id
+    if (filters.final_decision) params.final_decision = filters.final_decision
+    if (filters.page) params.page = filters.page
+    if (filters.size) params.size = filters.size
+    return api
+      .get<QueryPage<ReviewRecord>>('/query/review', { params })
+      .then((r) => r.data)
   },
 }

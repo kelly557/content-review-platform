@@ -19,7 +19,7 @@ function LegacyLibraryRedirect() {
 }
 
 const LoginPage = lazy(() => import('@/pages/auth/LoginPage'))
-const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'))
+const OverviewPage = lazy(() => import('@/pages/overview/OverviewPage'))
 const MaterialsListPage = lazy(() => import('@/pages/materials/MaterialsListPage'))
 const MaterialDetailPage = lazy(() => import('@/pages/materials/MaterialDetailPage'))
 const PackageDetailPage = lazy(() => import('@/pages/packages/PackageDetailPage'))
@@ -28,6 +28,7 @@ const TaskDetailPage = lazy(() => import('@/pages/tasks/TaskDetailPage'))
 const CreateTaskPage = lazy(() => import('@/pages/tasks/CreateTaskPage'))
 const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage'))
 const QueryPage = lazy(() => import('@/pages/query/QueryPage'))
+const ReviewQueuePage = lazy(() => import('@/pages/query/ReviewQueuePage'))
 const UsersAdminPage = lazy(() => import('@/pages/admin/UsersAdminPage'))
 const StrategyListPage = lazy(() => import('@/pages/strategy/StrategyListPage'))
 const CreateStrategyPage = lazy(() => import('@/pages/strategy/CreateStrategyPage'))
@@ -63,8 +64,8 @@ export default function AppRoutes() {
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route index element={<Navigate to="/overview" replace />} />
+            <Route path="/overview" element={<OverviewPage />} />
 
             <Route path="/materials" element={<MaterialsListPage />} />
             <Route path="/materials/:id" element={<MaterialDetailPage />} />
@@ -77,6 +78,7 @@ export default function AppRoutes() {
             <Route element={<ProtectedRoute allow={['reviewer', 'mlr', 'admin']} />}>
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/query" element={<QueryPage />} />
+              <Route path="/query/review" element={<ReviewQueuePage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['admin', 'mlr']} />}>
