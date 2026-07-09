@@ -22,6 +22,10 @@ class WorkflowError(Exception):
     pass
 
 
+class TaskNotCancelableError(WorkflowError):
+    """Raised when a task cannot be cancelled in its current state."""
+
+
 def _role_for_stage(stage: dict) -> str:
     return stage.get("role", "reviewer")
 
@@ -367,3 +371,108 @@ async def _current_task_for_node(
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def cancel_task(
+    db: AsyncSession,
+    task: ReviewTask,
+    user: User,
+    reason: Optional[str] = None,
+) -> ReviewTask:
+    """Operator-initiated cancellation.
+
+    Allowed states:
+      - ``final_decision == PENDING`` AND ``machine_status in (PENDING, RUNNING, None)``
+      - i.e. the task is queued, running, or waiting for human review but
+        not yet decided.
+
+    Side effects:
+      - Marks the task ``canceled`` with ``canceled_at`` / ``canceled_by`` /
+        ``cancel_reason``.
+      - Marks the parent ``WorkflowInstance.state = 'canceled'`` and skips
+        any pending nodes.
+      - Marks the linked ``Material.status = WITHDRAWN`` so it no longer
+        shows as IN_REVIEW.
+
+    Note: in-flight machine review workers will still write their result
+    to ``machine_result`` (the asyncio.create_task cannot be revoked),
+    but ``final_decision='canceled'`` short-circuits downstream effects
+    in ``evaluate_stage_completion`` / ``_handle_machine_stage_completion``
+    because the instance is no longer in ``state='running'``.
+    """
+    if task.final_decision != ReviewDecision.PENDING:
+        raise TaskNotCancelableError(
+            f"task already finalized with decision={task.final_decision.value}"
+        )
+
+    if task.machine_status not in (MachineStatus.PENDING, MachineStatus.RUNNING, None):
+        raise TaskNotCancelableError(
+            f"machine review already {task.machine_status.value}; cannot cancel"
+        )
+
+    now = datetime.now(timezone.utc)
+    task.final_decision = ReviewDecision.CANCELED
+    task.canceled_at = now
+    task.canceled_by = user.id
+    task.cancel_reason = (reason or "").strip()[:500] or None
+    task.completed_at = now
+
+    # Cascade to the workflow instance and remaining nodes.
+    instance = await db.get(
+        WorkflowInstance, task.workflow_instance_id, options=[selectinload(WorkflowInstance.nodes)]
+    )
+    if instance is not None and instance.state == "running":
+        instance.state = "canceled"
+        instance.completed_at = now
+        for n in instance.nodes:
+            if n.status == "pending":
+                n.status = "skipped"
+            elif n.status == "active":
+                n.status = "canceled"
+
+    # Release the material out of IN_REVIEW so it stops blocking other flows.
+    material = await db.get(Material, task.material_id)
+    if material is not None and material.status == MaterialStatus.IN_REVIEW:
+        material.status = MaterialStatus.WITHDRAWN
+
+    await write_audit(
+        db,
+        actor=user,
+        action="workflow.cancel",
+        entity_type="review_task",
+        entity_id=task.id,
+        payload={"reason": task.cancel_reason, "stage": task.stage_key},
+    )
+    return task
+
+
+async def get_workflow_mode(
+    db: AsyncSession, workflow_instance_id: int
+) -> str:
+    """Derive the high-level workflow topology from node types.
+
+    Returns one of:
+
+      - ``'machine_only'``         — only machine stages
+      - ``'machine_then_human'``   — at least one machine and one human stage
+
+    Used by the list/detail API to render a ``workflow_mode`` Tag without
+    persisting a redundant field on ``ReviewTask``.
+    """
+    result = await db.execute(
+        select(WorkflowNode.node_type).where(WorkflowNode.instance_id == workflow_instance_id)
+    )
+    types = {row[0] for row in result.all()}
+    if "human" in types:
+        return "machine_then_human"
+    return "machine_only"
+
+
+def is_task_canceled(task: ReviewTask) -> bool:
+    """Lightweight predicate used by polling loops to drop machine results
+    that arrive after the task has been cancelled.
+
+    The worker still writes ``machine_result`` (the asyncio task can't be
+    cancelled), but downstream code should treat canceled tasks as terminal.
+    """
+    return task.final_decision == ReviewDecision.CANCELED

@@ -129,6 +129,23 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
         task.machine_result = machine_result
         task.machine_status = MachineStatus.COMPLETED
         task.machine_completed_at = datetime.now(timezone.utc)
+
+        # v10 cancel guard: if the operator cancelled this task while we
+        # were running, still persist the result (so reports remain
+        # complete) but skip workflow evaluation. The instance is no
+        # longer in 'running' state, so evaluate_stage_completion would
+        # be a no-op anyway — but we make the intent explicit and avoid
+        # any accidental stage re-activation via stale node rows.
+        from app.services.workflow_engine import is_task_canceled
+
+        if is_task_canceled(task):
+            await db.commit()
+            log.info(
+                f"Machine review finished for task {task_id} but task was cancelled; "
+                "skipping stage evaluation"
+            )
+            return
+
         await db.commit()
 
         log.info(
