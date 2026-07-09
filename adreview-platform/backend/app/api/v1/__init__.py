@@ -14,6 +14,7 @@ from app.api.v1 import (
     library_groups,
     material_packages,
     materials,
+    query,
     reports,
     reviews,
     service_categories,
@@ -46,4 +47,5 @@ api_router.include_router(audit_points.router)
 api_router.include_router(material_packages.router)
 api_router.include_router(tags.router)
 api_router.include_router(knowledge.router)
+api_router.include_router(query.router)
 api_router.include_router(health.router)

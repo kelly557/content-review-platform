@@ -1530,3 +1530,120 @@ export interface ReplyLibraryItemCreate {
   trigger: string
   reply: string
 }
+
+// ─── 数据查询 (Inspection Query) ────────────────────────────────────────────────
+
+export type DetectionModality = 'image' | 'video' | 'pdf' | 'text'
+
+export const DETECTION_MODALITIES: { value: DetectionModality; label: string }[] = [
+  { value: 'text', label: '文本' },
+  { value: 'image', label: '图片' },
+  { value: 'video', label: '视频' },
+  { value: 'pdf', label: '文件' },
+]
+
+export type MachineDecision = 'block' | 'review' | 'pass'
+
+export const MACHINE_DECISION_OPTIONS: { value: MachineDecision; label: string; color: string }[] = [
+  { value: 'block', label: '阻断', color: 'red' },
+  { value: 'review', label: '复核', color: 'orange' },
+  { value: 'pass', label: '通过', color: 'green' },
+]
+
+export const FEEDBACK_OPTIONS: { value: ReviewDecision; label: string }[] = [
+  { value: 'pending', label: '待处理' },
+  { value: 'approved', label: '通过' },
+  { value: 'rejected', label: '驳回' },
+  { value: 'returned', label: '退回' },
+]
+
+export interface MachineHit {
+  service_code?: string | null
+  service_name?: string | null
+  label?: string | null
+  label_cn?: string | null
+  score?: number | null
+  quote?: string | null
+}
+
+export interface MachineReviewRecord {
+  id: number
+  title?: string | null
+  review_type?: string | null
+  final_decision?: string | null
+  material_id?: number | null
+  material_version_id?: number | null
+  material_type?: DetectionModality | string | null
+  strategy_code?: string | null
+  strategy_name?: string | null
+  risk_level?: string | null
+  machine_decision?: MachineDecision | null
+  bailian_request_id?: string | null
+  ip?: string | null
+  account_id?: string | null
+  submitter_id?: number | null
+  submitter_name?: string | null
+  assignee_id?: number | null
+  assignee_name?: string | null
+  hits: MachineHit[]
+  violation_tags: Array<Record<string, unknown>>
+  summary?: string | null
+  requested_at?: string | null
+  finished_at?: string | null
+}
+
+export interface AdvancedCondition {
+  op: 'contains' | 'not_contains'
+  value: string
+}
+
+export interface QueryFilters {
+  start?: string
+  end?: string
+  material_types?: DetectionModality[]
+  strategy_code?: string
+  machine_decision?: MachineDecision
+  request_ids?: number[]
+  task_ids?: number[]
+  text_contains?: string
+  labels?: string[]
+  feedback?: ReviewDecision
+  conditions?: AdvancedCondition[]
+  page?: number
+  size?: number
+}
+
+export type QueryColumnKey =
+  | 'strategy_name'
+  | 'machine_decision'
+  | 'feedback'
+  | 'request_id'
+  | 'task_id'
+  | 'labels'
+  | 'risk_level'
+  | 'requested_at'
+  | 'ip'
+  | 'account_id'
+
+export interface QueryColumnDef {
+  key: QueryColumnKey
+  title: string
+  defaultVisible: boolean
+}
+
+export const QUERY_COLUMNS: QueryColumnDef[] = [
+  { key: 'strategy_name', title: '策略名称', defaultVisible: true },
+  { key: 'machine_decision', title: '检测结果', defaultVisible: true },
+  { key: 'feedback', title: '反馈结果', defaultVisible: true },
+  { key: 'request_id', title: 'Request ID', defaultVisible: false },
+  { key: 'task_id', title: 'Task ID', defaultVisible: false },
+  { key: 'labels', title: '命中标签及置信度', defaultVisible: false },
+  { key: 'risk_level', title: '风险等级', defaultVisible: false },
+  { key: 'requested_at', title: '请求时间', defaultVisible: false },
+  { key: 'ip', title: 'IP', defaultVisible: false },
+  { key: 'account_id', title: 'AccountId', defaultVisible: false },
+]
+
+export const DEFAULT_VISIBLE_COLUMNS: QueryColumnKey[] = QUERY_COLUMNS.filter(
+  (c) => c.defaultVisible,
+).map((c) => c.key)

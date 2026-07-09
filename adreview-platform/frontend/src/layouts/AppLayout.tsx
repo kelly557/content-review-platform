@@ -15,6 +15,7 @@ import {
   BookOutlined,
   TagsOutlined,
   DatabaseOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
@@ -111,8 +112,9 @@ const NAV_SECTIONS: Array<{
   {
     type: 'group',
     key: 'analytics',
-    label: '数据分析',
+    label: '审查结果',
     items: [
+      { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
       { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
     ],
   },
