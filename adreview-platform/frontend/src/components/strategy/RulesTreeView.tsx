@@ -2,14 +2,17 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Button,
   Empty,
+  Grid,
   InputNumber,
   Popconfirm,
   Select,
   Space,
+  Table,
   Tag,
   Tooltip,
   Typography,
 } from 'antd'
+import type { TableColumnsType } from 'antd'
 import {
   CheckOutlined,
   DeleteOutlined,
@@ -182,6 +185,14 @@ export default function RulesTreeView({
     )
   }
 
+  const screens = Grid.useBreakpoint()
+  const isStacked = !screens.md
+  const leftColTemplate = screens.xl
+    ? '300px 1fr'
+    : screens.md
+    ? '260px 1fr'
+    : '1fr'
+
   const currentItem =
     selectedItemId != null
       ? items.find((it) => it.id === selectedItemId)
@@ -194,7 +205,7 @@ export default function RulesTreeView({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(220px, 32%) 1fr',
+          gridTemplateColumns: leftColTemplate,
           gap: 16,
           alignItems: 'start',
         }}
@@ -203,11 +214,10 @@ export default function RulesTreeView({
         <div
           style={{
             background: '#fff',
-            border: '1px solid #E2E8F0',
             borderRadius: 8,
             padding: '12px 0',
-            maxHeight: 540,
-            overflowY: 'auto',
+            maxHeight: isStacked ? 'none' : 540,
+            overflowY: isStacked ? 'visible' : 'auto',
           }}
         >
           <ItemGroup
@@ -238,10 +248,9 @@ export default function RulesTreeView({
         <div
           style={{
             background: '#F8FAFC',
-            border: '1px solid #E2E8F0',
             borderRadius: 8,
-            padding: 16,
-            minHeight: 540,
+            padding: '4px 8px',
+            minHeight: isStacked ? 'auto' : 540,
           }}
         >
           {currentItem ? (
@@ -392,6 +401,19 @@ function ItemGroup({
   )
 }
 
+type PointRowRecord = {
+  key: number
+  point: AuditPoint
+  checked: boolean
+  override: {
+    medium_threshold?: number
+    high_threshold?: number
+    linked_library_ids?: number[]
+  }
+  isCustom: boolean
+  editDisabled: boolean
+}
+
 function PointsColumn({
   item,
   points,
@@ -421,172 +443,174 @@ function PointsColumn({
   mediaKey: CategoryKey
   onDeletePoint: (point: AuditPoint) => void
 }) {
-  const picked = points.filter((p) => pointMap[p.id] === true).length
-  return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
-      <Space size={8} align="center">
-        <Text strong style={{ fontSize: 16, color: '#0F172A' }}>
-          {item.name_cn}
-        </Text>
-        <Tag color={item.is_builtin ? 'gold' : 'blue'} style={{ margin: 0 }}>
-          {item.is_builtin ? '通用' : '自定义'}
-        </Tag>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          · 已选 {picked} / {points.length} 个审核点
-        </Text>
-      </Space>
+  const dataSource: PointRowRecord[] = points.map((p) => ({
+    key: p.id,
+    point: p,
+    checked: pointMap[p.id] === true,
+    override: pointOverrides[mediaKey]?.[item.id]?.[p.id] ?? {},
+    isCustom: !p.is_builtin,
+    editDisabled: pointMap[p.id] !== true,
+  }))
 
-      {points.length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="该审核项下暂无审核点"
-          style={{ padding: '40px 0' }}
-        />
-      ) : (
-        points.map((p) => (
-          <PointRow
-            key={p.id}
-            item={item}
-            point={p}
-            pointMap={pointMap}
-            pointOverrides={pointOverrides}
-            onPointMapChange={onPointMapChange}
-            onPointOverrideChange={onPointOverrideChange}
-            libraryOptions={libraryOptions}
-            mediaKey={mediaKey}
-            onDeletePoint={onDeletePoint}
-          />
-        ))
-      )}
-    </Space>
-  )
-}
-
-function PointRow({
-  item,
-  point,
-  pointMap,
-  pointOverrides,
-  onPointMapChange,
-  onPointOverrideChange,
-  libraryOptions,
-  mediaKey,
-  onDeletePoint,
-}: {
-  item: AuditItem
-  point: AuditPoint
-  pointMap: PointMap
-  pointOverrides: MediaPointOverrideMap
-  onPointMapChange: (itemId: number, next: PointMap) => void
-  onPointOverrideChange: (
-    itemId: number,
-    pointId: number,
-    override: {
-      medium_threshold?: number
-      high_threshold?: number
-      linked_library_ids?: number[]
-    },
-  ) => void
-  libraryOptions: LibraryListItem[]
-  mediaKey: CategoryKey
-  onDeletePoint: (point: AuditPoint) => void
-}) {
-  const override = pointOverrides[mediaKey]?.[item.id]?.[point.id] ?? {}
-  const pointChecked = pointMap[point.id] === true
-  const isCustom = !point.is_builtin
-  const editDisabled = !pointChecked
-
-  const togglePoint = (next: boolean) => {
-    onPointMapChange(item.id, { ...pointMap, [point.id]: next })
-  }
-
-  return (
-    <div
-      style={{
-        background: '#fff',
-        border: '1px solid #E2E8F0',
-        borderRadius: 6,
-        padding: '12px 16px',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          marginBottom: pointChecked ? 10 : 0,
-        }}
-      >
+  const columns: TableColumnsType<PointRowRecord> = [
+    {
+      title: '',
+      dataIndex: 'checked',
+      width: 40,
+      render: (_, record) => (
         <input
           type="checkbox"
-          checked={pointChecked}
-          onChange={(e) => togglePoint(e.target.checked)}
-          aria-label={`启用审核点 ${point.label_cn}`}
+          checked={record.checked}
+          onChange={(e) =>
+            onPointMapChange(item.id, {
+              ...pointMap,
+              [record.point.id]: e.target.checked,
+            })
+          }
+          aria-label={`启用审核点 ${record.point.label_cn}`}
+          style={{ margin: 0 }}
         />
-        <Text strong style={{ color: '#0F172A', flex: 1 }}>
-          {point.label_cn || point.label || point.code}
-        </Text>
-        {isCustom && (
-          <Popconfirm
-            title={`确认删除「${point.label_cn || point.code}」？`}
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => onDeletePoint(point)}
-          >
-            <Button
-              size="small"
-              type="link"
-              danger
-              icon={<DeleteOutlined />}
+      ),
+    },
+    {
+      title: '审核点',
+      dataIndex: 'point',
+      render: (_, record) => {
+        const name = record.point.label_cn || record.point.label || record.point.code
+        return (
+          <Space size={6} align="center">
+            <Text strong style={{ color: '#0F172A' }} ellipsis={{ tooltip: name }}>
+              {name}
+            </Text>
+            {record.isCustom && (
+              <Popconfirm
+                title={`确认删除「${record.point.label_cn || record.point.code}」？`}
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => onDeletePoint(record.point)}
+              >
+                <Button
+                  size="small"
+                  type="link"
+                  danger
+                  icon={<DeleteOutlined />}
+                  style={{ padding: 0 }}
+                >
+                  删除
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+        )
+      },
+    },
+    {
+      title: '审核说明',
+      dataIndex: 'description',
+      render: (_, record) => {
+        if (record.point.description) {
+          return (
+            <Text
+              type="secondary"
+              style={{ fontSize: 12, lineHeight: 1.5 }}
+              ellipsis={{ tooltip: record.point.description }}
             >
-              删除
-            </Button>
-          </Popconfirm>
-        )}
-      </div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          paddingLeft: 24,
-          color: editDisabled ? '#94A3B8' : undefined,
-          flexWrap: 'wrap',
-        }}
-      >
+              {record.point.description}
+            </Text>
+          )
+        }
+        return (
+          <Space size={6} align="center">
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              暂无审核说明
+            </Text>
+            <Tag style={{ margin: 0, fontSize: 11, padding: '0 6px' }}>
+              后期导入
+            </Tag>
+          </Space>
+        )
+      },
+    },
+    {
+      title: '中风险分',
+      dataIndex: 'mediumThreshold',
+      width: 110,
+      align: 'left',
+      render: (_, record) => (
         <ThresholdInput
-          disabled={editDisabled}
-          value={override.medium_threshold ?? point.medium_threshold}
+          disabled={record.editDisabled}
+          value={
+            record.override.medium_threshold ?? record.point.medium_threshold
+          }
           onChange={(v) =>
-            onPointOverrideChange(item.id, point.id, {
+            onPointOverrideChange(item.id, record.point.id, {
               medium_threshold: v ?? undefined,
             })
           }
           label="中风险分"
         />
+      ),
+    },
+    {
+      title: '高风险分',
+      dataIndex: 'highThreshold',
+      width: 110,
+      align: 'left',
+      render: (_, record) => (
         <ThresholdInput
-          disabled={editDisabled}
-          value={override.high_threshold ?? point.high_threshold}
+          disabled={record.editDisabled}
+          value={
+            record.override.high_threshold ?? record.point.high_threshold
+          }
           onChange={(v) =>
-            onPointOverrideChange(item.id, point.id, {
+            onPointOverrideChange(item.id, record.point.id, {
               high_threshold: v ?? undefined,
             })
           }
           label="高风险分"
         />
+      ),
+    },
+    {
+      title: '关联库',
+      dataIndex: 'libraries',
+      width: 240,
+      render: (_, record) => (
         <LibrarySelectInline
-          disabled={editDisabled}
+          disabled={record.editDisabled}
           mediaKey={mediaKey}
-          overrideIds={override.linked_library_ids}
+          overrideIds={record.override.linked_library_ids}
           libraryOptions={libraryOptions}
           onChange={(ids) =>
-            onPointOverrideChange(item.id, point.id, {
+            onPointOverrideChange(item.id, record.point.id, {
               linked_library_ids: ids,
             })
           }
         />
-      </div>
+      ),
+    },
+  ]
+
+  return (
+    <div style={{ width: '100%', textAlign: 'left' }}>
+      <Table<PointRowRecord>
+        columns={columns}
+        dataSource={dataSource}
+        pagination={false}
+        size="small"
+        rowKey="key"
+        scroll={{ x: 720 }}
+        locale={{
+          emptyText: (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="该审核项下暂无审核点"
+              style={{ padding: '24px 0' }}
+            />
+          ),
+        }}
+      />
     </div>
   )
 }
@@ -706,7 +730,7 @@ function LibrarySelectInline({
     <Select
       mode="multiple"
       size="small"
-      placeholder={lockedType ? `关联${TYPE_LABEL[lockedType]}库` : '关联库'}
+      placeholder={lockedType ? `选择自定义${TYPE_LABEL[lockedType]}库` : '选择自定义库'}
       value={currentIds}
       onChange={handleChange}
       allowClear
