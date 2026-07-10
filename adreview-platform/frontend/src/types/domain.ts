@@ -1521,6 +1521,144 @@ export function extractHumanReview(
   }
 }
 
+// ─── Voice rule mode (语音审核：复用文本规则 / 独立规则) ─────────────────────────
+// 存入 strategy.definition.voice_rule_mode；默认 'reuse_text'。
+
+export type VoiceRuleMode = 'reuse_text' | 'independent'
+
+export function isVoiceRuleMode(v: unknown): v is VoiceRuleMode {
+  return v === 'reuse_text' || v === 'independent'
+}
+
+export function extractVoiceRuleMode(
+  definition: Record<string, unknown> | null | undefined,
+): VoiceRuleMode {
+  const v = definition?.voice_rule_mode
+  return isVoiceRuleMode(v) ? v : 'reuse_text'
+}
+
+// ─── Audio features (语音专有能力：声纹 / 音频质量，存 JSONB) ─────────────────────
+// 存入 strategy.definition.audio_features。无论复用/独立模式都生效。
+
+export interface AudioFeatures {
+  voiceprint: {
+    /** 娇喘检测 */
+    moaning: boolean
+  }
+  quality: {
+    /** 无语音内容 */
+    no_speech: boolean
+  }
+}
+
+export const DEFAULT_AUDIO_FEATURES: AudioFeatures = {
+  voiceprint: { moaning: true },
+  quality: { no_speech: true },
+}
+
+export function extractAudioFeatures(
+  definition: Record<string, unknown> | null | undefined,
+): AudioFeatures {
+  const raw = (definition?.audio_features ?? {}) as {
+    voiceprint?: { moaning?: unknown }
+    quality?: { no_speech?: unknown }
+  }
+  return {
+    voiceprint: {
+      moaning: typeof raw.voiceprint?.moaning === 'boolean'
+        ? raw.voiceprint.moaning
+        : DEFAULT_AUDIO_FEATURES.voiceprint.moaning,
+    },
+    quality: {
+      no_speech: typeof raw.quality?.no_speech === 'boolean'
+        ? raw.quality.no_speech
+        : DEFAULT_AUDIO_FEATURES.quality.no_speech,
+    },
+  }
+}
+
+// ─── Document/Video compose rule modes ─────────────────────────────────────
+// 文档审核由「文本审核 + 图像审核」组合而成；视频审核由「图像审核 + 语音审核」组合而成。
+// 每组上游类型一个 mode：'reuse_<source>' 表示复用上游类型规则；'independent' 表示独立设置。
+// 文档：doc_text_mode（复用文本审核规则 / independent），doc_image_mode（复用图像审核规则 / independent）
+// 视频：video_frame_mode（复用图像审核规则 / independent），video_audio_mode（复用短音频同步审核规则 / independent）
+
+export type DocTextMode = 'reuse_text' | 'independent'
+export type DocImageMode = 'reuse_image' | 'independent'
+export type VideoFrameMode = 'reuse_image' | 'independent'
+export type VideoAudioMode = 'reuse_audio' | 'independent'
+
+export interface DocComposeModes {
+  text_mode: DocTextMode
+  image_mode: DocImageMode
+}
+
+export interface VideoComposeModes {
+  frame_mode: VideoFrameMode
+  audio_mode: VideoAudioMode
+}
+
+export const DEFAULT_DOC_COMPOSE_MODES: DocComposeModes = {
+  text_mode: 'reuse_text',
+  image_mode: 'reuse_image',
+}
+
+export const DEFAULT_VIDEO_COMPOSE_MODES: VideoComposeModes = {
+  frame_mode: 'reuse_image',
+  audio_mode: 'reuse_audio',
+}
+
+export const DEFAULT_VIDEO_FRAME_INTERVAL_SEC = 5
+export const MIN_VIDEO_FRAME_INTERVAL_SEC = 1
+export const MAX_VIDEO_FRAME_INTERVAL_SEC = 1000
+
+function isDocTextMode(v: unknown): v is DocTextMode {
+  return v === 'reuse_text' || v === 'independent'
+}
+function isDocImageMode(v: unknown): v is DocImageMode {
+  return v === 'reuse_image' || v === 'independent'
+}
+function isVideoFrameMode(v: unknown): v is VideoFrameMode {
+  return v === 'reuse_image' || v === 'independent'
+}
+function isVideoAudioMode(v: unknown): v is VideoAudioMode {
+  return v === 'reuse_audio' || v === 'independent'
+}
+
+export function extractDocComposeModes(
+  definition: Record<string, unknown> | null | undefined,
+): DocComposeModes {
+  const text_mode = isDocTextMode(definition?.doc_text_mode)
+    ? (definition!.doc_text_mode as DocTextMode)
+    : DEFAULT_DOC_COMPOSE_MODES.text_mode
+  const image_mode = isDocImageMode(definition?.doc_image_mode)
+    ? (definition!.doc_image_mode as DocImageMode)
+    : DEFAULT_DOC_COMPOSE_MODES.image_mode
+  return { text_mode, image_mode }
+}
+
+export function extractVideoComposeModes(
+  definition: Record<string, unknown> | null | undefined,
+): VideoComposeModes {
+  const frame_mode = isVideoFrameMode(definition?.video_frame_mode)
+    ? (definition!.video_frame_mode as VideoFrameMode)
+    : DEFAULT_VIDEO_COMPOSE_MODES.frame_mode
+  const audio_mode = isVideoAudioMode(definition?.video_audio_mode)
+    ? (definition!.video_audio_mode as VideoAudioMode)
+    : DEFAULT_VIDEO_COMPOSE_MODES.audio_mode
+  return { frame_mode, audio_mode }
+}
+
+export function extractVideoFrameInterval(
+  definition: Record<string, unknown> | null | undefined,
+): number {
+  const v = definition?.video_frame_interval_sec
+  if (typeof v === 'number' && Number.isFinite(v) && v >= MIN_VIDEO_FRAME_INTERVAL_SEC && v <= MAX_VIDEO_FRAME_INTERVAL_SEC) {
+    return Math.floor(v)
+  }
+  return DEFAULT_VIDEO_FRAME_INTERVAL_SEC
+}
+
 export interface DesensitizeSpan {
   start: number
   end: number

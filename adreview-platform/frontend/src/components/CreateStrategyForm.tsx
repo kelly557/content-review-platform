@@ -21,10 +21,23 @@ import {
 import StrategyTypeTabs from './strategy/StrategyTypeTabs'
 import { HumanReviewSettings } from './strategy/HumanReviewSettings'
 import {
+  DEFAULT_AUDIO_FEATURES,
+  DEFAULT_DOC_COMPOSE_MODES,
+  DEFAULT_VIDEO_COMPOSE_MODES,
+  DEFAULT_VIDEO_FRAME_INTERVAL_SEC,
   EMPTY_HUMAN_REVIEW,
+  extractAudioFeatures,
+  extractDocComposeModes,
   extractHumanReview,
+  extractVideoComposeModes,
+  extractVideoFrameInterval,
+  extractVoiceRuleMode,
+  type AudioFeatures,
+  type DocComposeModes,
   type StrategyHumanReview,
   type StrategyPointRef,
+  type VideoComposeModes,
+  type VoiceRuleMode,
 } from '@/types/domain'
 import type { Strategy } from '@/types/domain'
 import {
@@ -121,6 +134,11 @@ export default function CreateStrategyForm({
     EMPTY_MEDIA_OVERRIDES,
   )
   const [humanReview, setHumanReview] = useState<StrategyHumanReview>(EMPTY_HUMAN_REVIEW)
+  const [voiceRuleMode, setVoiceRuleMode] = useState<VoiceRuleMode>('reuse_text')
+  const [audioFeatures, setAudioFeatures] = useState<AudioFeatures>(DEFAULT_AUDIO_FEATURES)
+  const [docComposeModes, setDocComposeModes] = useState<DocComposeModes>(DEFAULT_DOC_COMPOSE_MODES)
+  const [videoComposeModes, setVideoComposeModes] = useState<VideoComposeModes>(DEFAULT_VIDEO_COMPOSE_MODES)
+  const [videoFrameInterval, setVideoFrameInterval] = useState<number>(DEFAULT_VIDEO_FRAME_INTERVAL_SEC)
   const [hydrated, setHydrated] = useState(mode === 'create')
   const [saveResult, setSaveResult] = useState<{
     open: boolean
@@ -175,6 +193,11 @@ export default function CreateStrategyForm({
     }
     setPointOverrides(overridesFromBackend)
     setHumanReview(extractHumanReview(initial.definition))
+    setVoiceRuleMode(extractVoiceRuleMode(initial.definition))
+    setAudioFeatures(extractAudioFeatures(initial.definition))
+    setDocComposeModes(extractDocComposeModes(initial.definition))
+    setVideoComposeModes(extractVideoComposeModes(initial.definition))
+    setVideoFrameInterval(extractVideoFrameInterval(initial.definition))
     const from = initial.effective_from ? dayjs(initial.effective_from) : null
     const until = initial.effective_until ? dayjs(initial.effective_until) : null
     const useRange = !!(from && until)
@@ -221,20 +244,30 @@ export default function CreateStrategyForm({
   }
 
   const buildDefinitionPayload = (): Record<string, unknown> | undefined => {
-    if (!humanReview.is_enabled) {
-      const hasAny = humanReview.risk_levels.length > 0
-        || humanReview.sensitive_levels.length > 0
-        || humanReview.review_rule_id !== null
-      return hasAny ? { human_review: EMPTY_HUMAN_REVIEW } : undefined
-    }
-    return {
-      human_review: {
+    const out: Record<string, unknown> = {}
+    // 始终写入 compose 字段，保证后端 schema 校验通过。
+    out.voice_rule_mode = voiceRuleMode
+    out.audio_features = audioFeatures
+    out.doc_text_mode = docComposeModes.text_mode
+    out.doc_image_mode = docComposeModes.image_mode
+    out.video_frame_mode = videoComposeModes.frame_mode
+    out.video_audio_mode = videoComposeModes.audio_mode
+    out.video_frame_interval_sec = videoFrameInterval
+
+    if (humanReview.is_enabled) {
+      out.human_review = {
         is_enabled: true,
         risk_levels: humanReview.risk_levels,
         sensitive_levels: humanReview.sensitive_levels,
         review_rule_id: humanReview.review_rule_id,
-      },
+      }
+    } else {
+      const hasAny = humanReview.risk_levels.length > 0
+        || humanReview.sensitive_levels.length > 0
+        || humanReview.review_rule_id !== null
+      if (hasAny) out.human_review = EMPTY_HUMAN_REVIEW
     }
+    return Object.keys(out).length > 0 ? out : undefined
   }
 
   const onSubmit = async () => {
@@ -521,6 +554,16 @@ export default function CreateStrategyForm({
                   return { ...prev, [media]: Array.from(set) }
                 })
               }}
+              voiceRuleMode={voiceRuleMode}
+              onVoiceRuleModeChange={setVoiceRuleMode}
+              audioFeatures={audioFeatures}
+              onAudioFeaturesChange={setAudioFeatures}
+              docComposeModes={docComposeModes}
+              onDocComposeModesChange={setDocComposeModes}
+              videoComposeModes={videoComposeModes}
+              onVideoComposeModesChange={setVideoComposeModes}
+              videoFrameInterval={videoFrameInterval}
+              onVideoFrameIntervalChange={setVideoFrameInterval}
             />
 
             <div
