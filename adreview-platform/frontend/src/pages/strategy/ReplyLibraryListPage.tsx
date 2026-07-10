@@ -6,7 +6,6 @@ import {
   Form,
   Input,
   Popconfirm,
-  Select,
   Space,
   Table,
   Tabs,
@@ -26,11 +25,9 @@ import {
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { librariesApi } from '@/api/libraries'
-import { libraryGroupsApi } from '@/api/libraryGroups'
 import type {
   Library,
   LibraryCreate,
-  LibraryGroup,
   LibraryListItem,
 } from '@/types/domain'
 import { parseReplyFile } from '@/lib/libraryImport'
@@ -42,15 +39,12 @@ const MAX_PAIRS = 1000
 
 interface CreateFormValues {
   name: string
-  group_id: number
   description?: string
   pairsText?: string
 }
 
 export default function ReplyLibraryListPage() {
   const { message } = App.useApp()
-  const [groups, setGroups] = useState<LibraryGroup[]>([])
-  const [filterGroupId, setFilterGroupId] = useState<number | null>(null)
   const [items, setItems] = useState<LibraryListItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -63,17 +57,11 @@ export default function ReplyLibraryListPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<Library | null>(null)
 
-  const fetchGroups = async () => {
-    const data = await libraryGroupsApi.list({ size: 200 })
-    setGroups(data.items)
-  }
-
   const fetchLibraries = async () => {
     setLoading(true)
     try {
       const data = await librariesApi.list({
         type: 'reply',
-        group_id: filterGroupId ?? undefined,
         q: q || undefined,
         size: 50,
       })
@@ -85,22 +73,12 @@ export default function ReplyLibraryListPage() {
   }
 
   useEffect(() => {
-    void fetchGroups()
+    void fetchLibraries()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    void fetchLibraries()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterGroupId])
-
   const openCreate = () => {
-    if (groups.length === 0) {
-      message.warning('请先到「库管理」新建一个分组')
-      return
-    }
     createForm.resetFields()
-    createForm.setFieldsValue({ group_id: filterGroupId ?? groups[0]?.id })
     setCreateOpen(true)
   }
 
@@ -115,7 +93,6 @@ export default function ReplyLibraryListPage() {
     const payload: LibraryCreate = {
       name: v.name.trim(),
       library_type: 'reply',
-      group_id: v.group_id,
       description: v.description,
       words,
     }
@@ -142,11 +119,11 @@ export default function ReplyLibraryListPage() {
     {
       title: '名称',
       dataIndex: 'name',
-      width: '22%',
+      width: '26%',
       render: (v: string, row) => (
         <Space size={6}>
           <Link
-            to={`/strategies/replies/${row.id}`}
+            to={`/knowledge/replies/${row.id}`}
             style={{ color: '#020617', fontWeight: 500 }}
           >
             {v}
@@ -155,18 +132,11 @@ export default function ReplyLibraryListPage() {
         </Space>
       ),
     },
-    {
-      title: '分组',
-      width: '14%',
-      render: (_v, row) => (
-        <span style={{ color: '#475569' }}>{row.group_name ?? `#${row.group_id}`}</span>
-      ),
-    },
     { title: '条数', dataIndex: 'item_count', width: '12%', align: 'right' },
     {
       title: '最近修改',
       dataIndex: 'updated_at',
-      width: '18%',
+      width: '20%',
       render: (v: string | null) => (
         <span style={{ color: '#64748B', fontSize: 12 }}>
           {v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '—'}
@@ -186,7 +156,7 @@ export default function ReplyLibraryListPage() {
       width: '12%',
       render: (_v, row) => (
         <Space size={4}>
-          <Link to={`/strategies/replies/${row.id}`}>
+          <Link to={`/knowledge/replies/${row.id}`}>
             <Button type="link" size="small" icon={<EditOutlined />}>
               编辑
             </Button>
@@ -240,17 +210,9 @@ export default function ReplyLibraryListPage() {
         }}
       >
         <Space>
-          <Select
-            allowClear
-            placeholder="全部分组"
-            style={{ width: 200 }}
-            options={groups.map((g) => ({ value: g.id, label: g.name }))}
-            value={filterGroupId ?? undefined}
-            onChange={(v) => {
-              setFilterGroupId(v ?? null)
-              void fetchLibraries()
-            }}
-          />
+          <span style={{ color: '#64748B', fontSize: 12 }}>
+            代答库条目本身就是命中即触发的规则,无需指定黑/白名单类型。
+          </span>
         </Space>
         <Space>
           <Input.Search
@@ -296,23 +258,7 @@ export default function ReplyLibraryListPage() {
           </Space>
         }
       >
-        <Form<CreateFormValues>
-          form={createForm}
-          layout="vertical"
-          initialValues={{ group_id: filterGroupId ?? undefined }}
-        >
-          <Form.Item
-            name="group_id"
-            label="所属分组"
-            rules={[{ required: true, message: '请选择分组' }]}
-          >
-            <Select
-              options={groups.map((g) => ({ value: g.id, label: g.name }))}
-              placeholder="选择分组"
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
+        <Form<CreateFormValues> form={createForm} layout="vertical">
           <Form.Item
             name="name"
             label="名称"

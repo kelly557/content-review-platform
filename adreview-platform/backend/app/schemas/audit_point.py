@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.audit_point import AuditPointRisk
 from app.schemas.common import ORMBase
@@ -88,6 +88,7 @@ def serialize_audit_point(point: "AuditPoint") -> dict:
         "scope_text": point.scope_text,
         "risk_level": point.risk_level,
         "is_enabled": point.is_enabled,
+        "is_builtin": point.is_builtin,
         "custom_wordset_id": point.custom_wordset_id,
         "sort_order": point.sort_order,
         "linked_libraries": build_linked_libraries(point),
@@ -110,6 +111,7 @@ class AuditPointOut(ORMBase):
     scope_text: Optional[str] = None
     risk_level: AuditPointRisk = AuditPointRisk.MEDIUM
     is_enabled: bool
+    is_builtin: bool = False
     custom_wordset_id: Optional[int] = None
     sort_order: int = 0
     linked_libraries: list[LinkedLibraryOut] = Field(default_factory=list)
@@ -118,11 +120,15 @@ class AuditPointOut(ORMBase):
 
 
 class AuditPointCreate(BaseModel):
+    """写入 schema — is_builtin 不暴露，服务端强制为 False。"""
+
+    model_config = ConfigDict(extra="forbid")
+
     item_id: int
     label_cn: str = Field(min_length=1, max_length=64)
     description: Optional[str] = None
-    medium_threshold: float = Field(default=60.0, ge=0, le=100)
-    high_threshold: float = Field(default=90.0, ge=0, le=100)
+    medium_threshold: float = Field(default=60.0, ge=50.0, le=100.0)
+    high_threshold: float = Field(default=90.0, ge=50.0, le=100.0)
     scope_text: Optional[str] = Field(default=None, max_length=255)
     risk_level: AuditPointRisk = AuditPointRisk.MEDIUM
     is_enabled: bool = False
@@ -138,10 +144,15 @@ class AuditPointCreate(BaseModel):
 
 
 class AuditPointUpdate(BaseModel):
+    """写入 schema — 内置（is_builtin=True）仅允许修改：is_enabled / linked_library_ids
+    / medium_threshold / high_threshold。其余字段在 service 层 422 拦截。"""
+
+    model_config = ConfigDict(extra="forbid")
+
     label_cn: Optional[str] = Field(default=None, min_length=1, max_length=64)
     description: Optional[str] = None
-    medium_threshold: Optional[float] = Field(default=None, ge=0, le=100)
-    high_threshold: Optional[float] = Field(default=None, ge=0, le=100)
+    medium_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+    high_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
     scope_text: Optional[str] = Field(default=None, max_length=255)
     risk_level: Optional[AuditPointRisk] = None
     is_enabled: Optional[bool] = None

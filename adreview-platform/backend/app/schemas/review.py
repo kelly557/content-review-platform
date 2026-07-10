@@ -1,12 +1,15 @@
 """Review + workflow + annotation schemas."""
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, computed_field
 
 from app.models.material import MaterialStatus, MaterialType
 from app.models.review import ReviewDecision, ReviewType, MachineStatus
 from app.schemas.common import ORMBase
+
+
+WorkflowMode = Literal["machine_only", "machine_then_human"]
 
 
 class AnnotationCreate(BaseModel):
@@ -130,6 +133,15 @@ class ReviewTaskOut(ORMBase):
     material_type: Optional[MaterialType] = None
     material_status: Optional[MaterialStatus] = None
 
+    # v10 cancellation surface
+    canceled_at: Optional[datetime] = None
+    canceled_by: Optional[int] = None
+    cancel_reason: Optional[str] = None
+
+    # Derived workflow topology (not persisted). Default 'machine_only' for
+    # legacy rows where we cannot resolve the workflow instance.
+    workflow_mode: WorkflowMode = "machine_only"
+
     @computed_field
     @property
     def agent_review(self) -> Optional[AgentReviewResult]:
@@ -221,3 +233,9 @@ class AddReviewerRequest(BaseModel):
 
     user_id: int
     note: Optional[str] = None
+
+
+class ReviewCancelRequest(BaseModel):
+    """Operator-initiated cancellation of a pending review task."""
+
+    reason: Optional[str] = Field(default=None, max_length=500)

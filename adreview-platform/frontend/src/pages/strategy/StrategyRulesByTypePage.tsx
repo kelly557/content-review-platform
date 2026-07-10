@@ -50,7 +50,7 @@ export default function StrategyRulesByTypePage() {
         }}
       >
         <Title level={4} style={{ margin: 0 }}>
-          {category.label} · 规则列表
+          规则名
         </Title>
         {packageCode && (
           <Space wrap>

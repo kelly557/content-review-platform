@@ -195,7 +195,7 @@ export default function HumanReviewRulesPage() {
     <div style={{ width: '100%' }}>
       <Breadcrumb
         items={[
-          { title: <a onClick={() => navigate('/dashboard')}>工作台</a> },
+          { title: <a onClick={() => navigate('/overview')}>总览</a> },
           { title: '人工审核策略' },
         ]}
         style={{ marginBottom: 16 }}

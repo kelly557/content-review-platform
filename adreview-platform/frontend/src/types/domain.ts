@@ -3,9 +3,10 @@ export type { User, UserRole } from './auth'
 
 export type MaterialType = 'image' | 'video' | 'pdf' | 'text'
 export type MaterialStatus = 'draft' | 'submitted' | 'in_review' | 'approved' | 'rejected' | 'withdrawn'
-export type ReviewDecision = 'pending' | 'approved' | 'rejected' | 'returned'
+export type ReviewDecision = 'pending' | 'approved' | 'rejected' | 'returned' | 'canceled'
 export type ReviewType = 'machine' | 'human'
 export type MachineStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type WorkflowMode = 'machine_only' | 'machine_then_human'
 export type PackageStatus = 'draft' | 'submitted' | 'in_review' | 'completed'
 
 export interface Page<T> {
@@ -114,6 +115,11 @@ export interface ReviewTask {
   agent_review?: AgentReviewResult | null
   material_type?: MaterialType | null
   material_status?: MaterialStatus | null
+  // v10
+  workflow_mode?: WorkflowMode
+  canceled_at?: string | null
+  canceled_by?: number | null
+  cancel_reason?: string | null
 }
 
 export type AgentRiskLevel = '高风险' | '中风险' | '低风险' | '无风险'
@@ -283,7 +289,166 @@ export interface OverviewStats {
   in_review: number
   approved: number
   rejected: number
+  submitted: number
   avg_review_hours: number | null
+  reject_rate: number
+  review_rate: number
+  approve_rate: number
+}
+
+// ---------------------------------------------------------------------------
+// Analytics (data-analysis) page
+// ---------------------------------------------------------------------------
+
+export type TrendMetric = 'reject_rate' | 'review_rate' | 'approve_rate' | 'submitted'
+
+export interface TrendPoint {
+  bucket: string
+  value: number
+  sample_count: number
+}
+
+export interface TrendResponse {
+  metric: TrendMetric
+  granularity: string
+  window_start: string
+  window_end: string
+  points: TrendPoint[]
+  delta_pct: number | null
+}
+
+export interface AnomalyCurrent {
+  bucket: string
+  reject_rate: number
+  review_rate: number
+  approve_rate: number
+  submitted: number
+  rejected: number
+  high_risk_accounts: number
+}
+
+export interface AnomalyMetricPoint {
+  bucket: string
+  reject_rate: number
+  review_rate: number
+  approve_rate: number
+  submitted: number
+}
+
+export interface AnomalyAlertSummary {
+  id: number
+  rule_code: string
+  severity: string
+  metric: string
+  window_start: string
+  window_end: string
+  observed_value: number
+  threshold: number
+  status: string
+  created_at: string
+  detail: Record<string, unknown>
+}
+
+export interface AnomalyResponse {
+  window: string
+  current: AnomalyCurrent
+  series: AnomalyMetricPoint[]
+  alerts: AnomalyAlertSummary[]
+}
+
+export interface QualityVerdictCount {
+  misjudge: number
+  miss: number
+  agree: number
+  total: number
+}
+
+export interface QualityDetailRow {
+  task_id: number
+  material_id: number
+  strategy_code: string | null
+  machine_decision: string | null
+  human_decision: string | null
+  verdict: 'misjudge' | 'miss' | 'agree'
+  feedback: string | null
+  completed_at: string | null
+}
+
+export interface ReasonCount {
+  label: string
+  count: number
+}
+
+export interface QualityResponse {
+  window_start: string
+  window_end: string
+  misjudge_rate: number
+  miss_rate: number
+  agree_rate: number
+  avg_review_hours: number | null
+  top_rejection_reasons: ReasonCount[]
+  top_false_positive_tags: ReasonCount[]
+  verdicts: QualityVerdictCount
+  detail: QualityDetailRow[]
+  detail_total: number
+}
+
+export interface AlertEventOut {
+  id: number
+  rule_code: string
+  severity: string
+  metric: string
+  window_start: string
+  window_end: string
+  observed_value: number
+  threshold: number
+  dimension: Record<string, unknown>
+  detail: Record<string, unknown>
+  status: 'open' | 'acknowledged'
+  ack_by: number | null
+  ack_at: string | null
+  ack_note: string | null
+  notified: boolean
+  created_at: string
+}
+
+export interface AlertPage {
+  items: AlertEventOut[]
+  total: number
+  page: number
+  size: number
+}
+
+/**
+ * Risk dashboard types (overview page).
+ * The 5-level enum matches the backend ``RiskLevel`` (高/中/低/敏感/无).
+ * NOTE: ``RiskLevel`` is declared later in this file as a 5-value union
+ * (HumanReviewConfig also uses it). We add the dashboard helpers above
+ * for grouping, but reference the existing ``RiskLevel`` directly to keep
+ * a single source of truth.
+ */
+export const RISK_LEVELS = ['高风险', '中风险', '低风险', '敏感', '无风险'] as const
+
+export interface RiskTimeseriesPoint {
+  date: string
+  total: number
+  high: number
+  medium: number
+  low: number
+  sensitive: number
+  none: number
+}
+
+export interface RiskDistributionBucket {
+  level: RiskLevel
+  count: number
+}
+
+export interface TopRiskLabelItem {
+  label: string
+  count: number
+  risk_level: RiskLevel
+  last_hit_at: string
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -323,6 +488,7 @@ export const DECISION_LABELS: Record<ReviewDecision, string> = {
   approved: '通过',
   rejected: '驳回',
   returned: '退回',
+  canceled: '已取消',
 }
 
 export const PACKAGE_STATUS_LABELS: Record<PackageStatus, string> = {
@@ -354,6 +520,7 @@ export const TASK_STATUS_CONFIG: Record<string, TaskStatusConfig> = {
   approved: { label: '已通过', color: 'success', icon: 'CheckCircleOutlined' },
   rejected: { label: '已驳回', color: 'error', icon: 'CloseCircleOutlined' },
   returned: { label: '已退回', color: 'warning', icon: 'RollbackOutlined' },
+  canceled: { label: '已取消', color: 'default', icon: 'StopOutlined' },
 }
 
 export function getTaskStatus(task: ReviewTask): string {
@@ -367,6 +534,11 @@ export function getTaskStatus(task: ReviewTask): string {
     return 'pending'
   }
   return 'in_review'
+}
+
+export const WORKFLOW_MODE_LABELS: Record<WorkflowMode, string> = {
+  machine_only: '纯机审',
+  machine_then_human: '机审+人审',
 }
 
 
@@ -385,6 +557,11 @@ export interface StrategyPointRef {
   item_id: number
   point_id: number
   is_enabled: boolean
+  /** 策略级 override（中/高风险分），范围 50~100 */
+  medium_threshold?: number
+  high_threshold?: number
+  /** 策略级 override 关联自定义库 ID 列表 */
+  linked_library_ids?: number[]
 }
 
 export interface StrategyEnabledPointsMeta {
@@ -603,42 +780,34 @@ export const WORD_ACTION_OPTIONS: { value: WordSetAction; label: string }[] = [
 
 export type LibraryType = 'word' | 'image' | 'reply'
 
-export interface LibraryGroup {
-  id: number
-  name: string
-  description: string | null
-  sort_order: number
-  is_deleted: boolean
-  deleted_at: string | null
-  created_at: string
-  updated_at: string | null
-}
+/** 词库/图片库的匹配语义。代答库不暴露此字段（其条目本身就是命中即触发的规则）。 */
+export type LibraryKind = '黑名单' | '白名单'
 
-export interface LibraryGroupCreate {
-  name: string
-  description?: string
-  sort_order?: number
-}
+export const LIBRARY_KIND_OPTIONS: { value: LibraryKind; label: string; color: string }[] = [
+  { value: '黑名单', label: '黑名单', color: 'red' },
+  { value: '白名单', label: '白名单', color: 'green' },
+]
 
-export interface LibraryGroupUpdate {
-  name?: string
-  description?: string
-  sort_order?: number
-}
+export type LibraryEffectiveStatus = '已停用' | '未生效' | '生效中' | '已过期' | '永久'
 
 export interface Library {
   id: number
   code: string
   name: string
   library_type: LibraryType
-  group_id: number
-  group_name: string | null
+  /** 仅 word / image 库返回；reply 库为 null */
+  kind: LibraryKind | null
   description: string | null
   is_active: boolean
   is_deleted: boolean
   deleted_at: string | null
   item_count: number
   ignored_services: string[]
+  /** 有效时间区间（UTC，ISO8601）。两者皆空表示永久。 */
+  effective_from: string | null
+  effective_until: string | null
+  /** 派生：当前是否生效（停用 / 过期 / 未到 都视为不生效） */
+  is_effective: boolean
   created_at: string
   updated_at: string | null
 }
@@ -648,12 +817,14 @@ export interface LibraryListItem {
   code: string
   name: string
   library_type: LibraryType
-  group_id: number
-  group_name: string | null
+  kind: LibraryKind | null
   description: string | null
   is_active: boolean
   is_deleted: boolean
   item_count: number
+  effective_from: string | null
+  effective_until: string | null
+  is_effective: boolean
   created_at: string
   updated_at: string | null
 }
@@ -662,17 +833,23 @@ export interface LibraryCreate {
   code?: string
   name: string
   library_type: LibraryType
-  group_id: number
+  /** word / image 必填；reply 不传 */
+  kind?: LibraryKind | null
   description?: string
   words?: string[]
+  /** 有效时间（UTC ISO8601）。不传或为 null 表示永久。 */
+  effective_from?: string | null
+  effective_until?: string | null
 }
 
 export interface LibraryUpdate {
   name?: string
-  group_id?: number
+  kind?: LibraryKind
   description?: string
   is_active?: boolean
   ignored_services?: string[]
+  effective_from?: string | null
+  effective_until?: string | null
 }
 
 export interface LibraryDeletePayload {
@@ -779,7 +956,7 @@ export interface WordSetOption {
   action?: WordSetAction
 }
 
-export type RiskLevel = "高风险" | "中风险" | "低风险" | "无风险"
+export type RiskLevel = '高风险' | '中风险' | '低风险' | '敏感' | '无风险'
 
 export interface HumanReviewConfig {
   id: number
@@ -937,6 +1114,7 @@ export interface AuditItem {
   description: string | null
   sort_order: number
   is_enabled: boolean
+  is_builtin: boolean
   point_count: number
   created_at: string
   updated_at: string | null
@@ -983,6 +1161,7 @@ export interface AuditPoint {
   scope_text: string | null
   risk_level: AuditPointRisk
   is_enabled: boolean
+  is_builtin: boolean
   custom_wordset_id: number | null
   custom_library_id?: number | null
   custom_reply_library_id?: number | null
@@ -1036,20 +1215,19 @@ export interface AuditPointBatchResult {
   items: AuditPointBatchItem[]
 }
 
-export type LibraryKind = 'word' | 'image' | 'reply'
+export type LibraryKindOfType = 'word' | 'image' | 'reply'
 
 export interface LibraryBatchItemPayload {
   code: string
   name: string
-  library_type: LibraryKind
-  group_id?: number | null
+  library_type: LibraryType
+  kind?: LibraryKind | null
   description?: string | null
   is_active?: boolean
   words?: string[]
 }
 
 export interface LibraryBatchCreateRequest {
-  group_id?: number | null
   libraries: LibraryBatchItemPayload[]
 }
 
@@ -1082,166 +1260,8 @@ export interface SuggestResponse {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Knowledge Base (知识库)
-// ──────────────────────────────────────────────────────────────────────────────
-
-export type KnowledgeScope =
-  | '法律法规'
-  | '行政规定'
-  | '行业规范'
-  | '内部政策'
-
-export const KNOWLEDGE_SCOPE_OPTIONS: { value: KnowledgeScope; label: string }[] = [
-  { value: '法律法规', label: '法律法规' },
-  { value: '行政规定', label: '行政规定' },
-  { value: '行业规范', label: '行业规范' },
-  { value: '内部政策', label: '内部政策' },
-]
-
-export type KnowledgeDocumentStatus =
-  | 'draft'
-  | 'extracting'
-  | 'review'
-  | 'imported'
-  | 'failed'
-
-export const KNOWLEDGE_STATUS_OPTIONS: {
-  value: KnowledgeDocumentStatus
-  label: string
-  color: string
-}[] = [
-  { value: 'draft', label: '草稿', color: 'default' },
-  { value: 'extracting', label: '抽取中', color: 'processing' },
-  { value: 'review', label: '待审', color: 'warning' },
-  { value: 'imported', label: '已导入', color: 'success' },
-  { value: 'failed', label: '失败', color: 'error' },
-]
-
-export interface KnowledgeDocumentSummary {
-  id: string
-  title: string
-  original_filename: string
-  mime_type: string
-  file_size: number
-  domain: TagDomain
-  scope: KnowledgeScope
-  tag_ids: string[]
-  status: KnowledgeDocumentStatus
-  created_at: string
-  updated_at: string | null
-}
-
-export interface KnowledgeDocumentListResponse {
-  items: KnowledgeDocumentSummary[]
-  total: number
-  page: number
-  size: number
-}
-
-export interface KnowledgeExtractionSummary {
-  id: string
-  document_id: string
-  round_no: number
-  model: string | null
-  prompt_tokens: number
-  completion_tokens: number
-  status: string
-  error_message: string | null
-  chunk_count: number
-  created_at: string
-}
-
-export interface KnowledgeDocumentDetail {
-  id: string
-  title: string
-  original_filename: string
-  mime_type: string
-  file_size: number
-  domain: TagDomain
-  scope: KnowledgeScope
-  tag_ids: string[]
-  target_service_code: string | null
-  status: KnowledgeDocumentStatus
-  error_message: string | null
-  created_by_id: number | null
-  created_at: string
-  updated_at: string | null
-  extractions: KnowledgeExtractionSummary[]
-}
-
-export interface KnowledgeJudgmentLogic {
-  type: 'keyword_match' | 'regex' | 'semantic' | 'threshold'
-  expr: string
-  params: Record<string, unknown>
-}
-
-export interface KnowledgeExtractionPoint {
-  id: string
-  extraction_id: string
-  item_draft_id: string
-  code: string
-  label: string
-  label_cn: string
-  description: string | null
-  judgment_logic: KnowledgeJudgmentLogic
-  judgment_rule: string | null
-  judgment_basis: string | null
-  risk_level: AuditPointRisk
-  medium_threshold: number
-  high_threshold: number
-  scope_text: string | null
-  selected: boolean
-  imported_point_id: number | null
-  created_at: string
-}
-
-export interface KnowledgeExtractionItem {
-  id: string
-  extraction_id: string
-  code: string
-  name_cn: string
-  aliases: string[]
-  description: string | null
-  sort_order: number
-  selected: boolean
-  imported_item_id: number | null
-  points: KnowledgeExtractionPoint[]
-  created_at: string
-}
-
-export interface KnowledgeExtraction {
-  id: string
-  document_id: string
-  round_no: number
-  model: string | null
-  prompt_tokens: number
-  completion_tokens: number
-  raw_response: string | null
-  status: string
-  error_message: string | null
-  chunk_count: number
-  created_at: string
-  items: KnowledgeExtractionItem[]
-}
-
-export interface KnowledgeImportRequest {
-  item_ids?: string[]
-  point_overrides?: Record<string, boolean>
-  target_service_code?: string
-  enable_imported?: boolean
-}
-
-export interface KnowledgeImportResult {
-  document_id: string
-  extraction_id: string
-  service_code: string
-  imported_items: number
-  imported_points: number
-  item_id_map: Record<string, number>
-  point_id_map: Record<string, number>
-}
-
 // Stubs for in-progress WIP (HumanReviewSettings / Desensitization / Reply Library) — to be consolidated.
+// ──────────────────────────────────────────────────────────────────────────────
 
 export type StrategyRiskLevel = '低风险' | '中风险' | '高风险' | '无风险' | '敏感'
 
@@ -1501,6 +1521,144 @@ export function extractHumanReview(
   }
 }
 
+// ─── Voice rule mode (语音审核：复用文本规则 / 独立规则) ─────────────────────────
+// 存入 strategy.definition.voice_rule_mode；默认 'reuse_text'。
+
+export type VoiceRuleMode = 'reuse_text' | 'independent'
+
+export function isVoiceRuleMode(v: unknown): v is VoiceRuleMode {
+  return v === 'reuse_text' || v === 'independent'
+}
+
+export function extractVoiceRuleMode(
+  definition: Record<string, unknown> | null | undefined,
+): VoiceRuleMode {
+  const v = definition?.voice_rule_mode
+  return isVoiceRuleMode(v) ? v : 'reuse_text'
+}
+
+// ─── Audio features (语音专有能力：声纹 / 音频质量，存 JSONB) ─────────────────────
+// 存入 strategy.definition.audio_features。无论复用/独立模式都生效。
+
+export interface AudioFeatures {
+  voiceprint: {
+    /** 娇喘检测 */
+    moaning: boolean
+  }
+  quality: {
+    /** 无语音内容 */
+    no_speech: boolean
+  }
+}
+
+export const DEFAULT_AUDIO_FEATURES: AudioFeatures = {
+  voiceprint: { moaning: true },
+  quality: { no_speech: true },
+}
+
+export function extractAudioFeatures(
+  definition: Record<string, unknown> | null | undefined,
+): AudioFeatures {
+  const raw = (definition?.audio_features ?? {}) as {
+    voiceprint?: { moaning?: unknown }
+    quality?: { no_speech?: unknown }
+  }
+  return {
+    voiceprint: {
+      moaning: typeof raw.voiceprint?.moaning === 'boolean'
+        ? raw.voiceprint.moaning
+        : DEFAULT_AUDIO_FEATURES.voiceprint.moaning,
+    },
+    quality: {
+      no_speech: typeof raw.quality?.no_speech === 'boolean'
+        ? raw.quality.no_speech
+        : DEFAULT_AUDIO_FEATURES.quality.no_speech,
+    },
+  }
+}
+
+// ─── Document/Video compose rule modes ─────────────────────────────────────
+// 文档审核由「文本审核 + 图像审核」组合而成；视频审核由「图像审核 + 语音审核」组合而成。
+// 每组上游类型一个 mode：'reuse_<source>' 表示复用上游类型规则；'independent' 表示独立设置。
+// 文档：doc_text_mode（复用文本审核规则 / independent），doc_image_mode（复用图像审核规则 / independent）
+// 视频：video_frame_mode（复用图像审核规则 / independent），video_audio_mode（复用短音频同步审核规则 / independent）
+
+export type DocTextMode = 'reuse_text' | 'independent'
+export type DocImageMode = 'reuse_image' | 'independent'
+export type VideoFrameMode = 'reuse_image' | 'independent'
+export type VideoAudioMode = 'reuse_audio' | 'independent'
+
+export interface DocComposeModes {
+  text_mode: DocTextMode
+  image_mode: DocImageMode
+}
+
+export interface VideoComposeModes {
+  frame_mode: VideoFrameMode
+  audio_mode: VideoAudioMode
+}
+
+export const DEFAULT_DOC_COMPOSE_MODES: DocComposeModes = {
+  text_mode: 'reuse_text',
+  image_mode: 'reuse_image',
+}
+
+export const DEFAULT_VIDEO_COMPOSE_MODES: VideoComposeModes = {
+  frame_mode: 'reuse_image',
+  audio_mode: 'reuse_audio',
+}
+
+export const DEFAULT_VIDEO_FRAME_INTERVAL_SEC = 5
+export const MIN_VIDEO_FRAME_INTERVAL_SEC = 1
+export const MAX_VIDEO_FRAME_INTERVAL_SEC = 1000
+
+function isDocTextMode(v: unknown): v is DocTextMode {
+  return v === 'reuse_text' || v === 'independent'
+}
+function isDocImageMode(v: unknown): v is DocImageMode {
+  return v === 'reuse_image' || v === 'independent'
+}
+function isVideoFrameMode(v: unknown): v is VideoFrameMode {
+  return v === 'reuse_image' || v === 'independent'
+}
+function isVideoAudioMode(v: unknown): v is VideoAudioMode {
+  return v === 'reuse_audio' || v === 'independent'
+}
+
+export function extractDocComposeModes(
+  definition: Record<string, unknown> | null | undefined,
+): DocComposeModes {
+  const text_mode = isDocTextMode(definition?.doc_text_mode)
+    ? (definition!.doc_text_mode as DocTextMode)
+    : DEFAULT_DOC_COMPOSE_MODES.text_mode
+  const image_mode = isDocImageMode(definition?.doc_image_mode)
+    ? (definition!.doc_image_mode as DocImageMode)
+    : DEFAULT_DOC_COMPOSE_MODES.image_mode
+  return { text_mode, image_mode }
+}
+
+export function extractVideoComposeModes(
+  definition: Record<string, unknown> | null | undefined,
+): VideoComposeModes {
+  const frame_mode = isVideoFrameMode(definition?.video_frame_mode)
+    ? (definition!.video_frame_mode as VideoFrameMode)
+    : DEFAULT_VIDEO_COMPOSE_MODES.frame_mode
+  const audio_mode = isVideoAudioMode(definition?.video_audio_mode)
+    ? (definition!.video_audio_mode as VideoAudioMode)
+    : DEFAULT_VIDEO_COMPOSE_MODES.audio_mode
+  return { frame_mode, audio_mode }
+}
+
+export function extractVideoFrameInterval(
+  definition: Record<string, unknown> | null | undefined,
+): number {
+  const v = definition?.video_frame_interval_sec
+  if (typeof v === 'number' && Number.isFinite(v) && v >= MIN_VIDEO_FRAME_INTERVAL_SEC && v <= MAX_VIDEO_FRAME_INTERVAL_SEC) {
+    return Math.floor(v)
+  }
+  return DEFAULT_VIDEO_FRAME_INTERVAL_SEC
+}
+
 export interface DesensitizeSpan {
   start: number
   end: number
@@ -1529,4 +1687,165 @@ export interface ReplyLibraryItemCreate {
   library_id: number
   trigger: string
   reply: string
+}
+
+// ─── 数据查询 (Inspection Query) ────────────────────────────────────────────────
+
+export type DetectionModality = 'image' | 'video' | 'pdf' | 'text'
+
+export const DETECTION_MODALITIES: { value: DetectionModality; label: string }[] = [
+  { value: 'text', label: '文本' },
+  { value: 'image', label: '图片' },
+  { value: 'video', label: '视频' },
+  { value: 'pdf', label: '文件' },
+]
+
+export type MachineDecision = 'block' | 'review' | 'pass'
+
+export const MACHINE_DECISION_OPTIONS: { value: MachineDecision; label: string; color: string }[] = [
+  { value: 'block', label: '阻断', color: 'red' },
+  { value: 'review', label: '复核', color: 'orange' },
+  { value: 'pass', label: '通过', color: 'green' },
+]
+
+export const FEEDBACK_OPTIONS: { value: ReviewDecision; label: string }[] = [
+  { value: 'pending', label: '待处理' },
+  { value: 'approved', label: '通过' },
+  { value: 'rejected', label: '驳回' },
+  { value: 'returned', label: '退回' },
+]
+
+export interface MachineHit {
+  service_code?: string | null
+  service_name?: string | null
+  label?: string | null
+  label_cn?: string | null
+  score?: number | null
+  quote?: string | null
+}
+
+export interface MachineReviewRecord {
+  id: number
+  title?: string | null
+  review_type?: string | null
+  final_decision?: string | null
+  material_id?: number | null
+  material_version_id?: number | null
+  material_type?: DetectionModality | string | null
+  strategy_code?: string | null
+  strategy_name?: string | null
+  risk_level?: string | null
+  machine_decision?: MachineDecision | null
+  bailian_request_id?: string | null
+  ip?: string | null
+  account_id?: string | null
+  submitter_id?: number | null
+  submitter_name?: string | null
+  assignee_id?: number | null
+  assignee_name?: string | null
+  hits: MachineHit[]
+  violation_tags: Array<Record<string, unknown>>
+  summary?: string | null
+  requested_at?: string | null
+  finished_at?: string | null
+}
+
+export interface AdvancedCondition {
+  op: 'contains' | 'not_contains'
+  value: string
+}
+
+export interface QueryFilters {
+  start?: string
+  end?: string
+  material_types?: DetectionModality[]
+  strategy_code?: string
+  machine_decision?: MachineDecision
+  request_ids?: number[]
+  task_ids?: number[]
+  text_contains?: string
+  labels?: string[]
+  feedback?: ReviewDecision
+  conditions?: AdvancedCondition[]
+  page?: number
+  size?: number
+}
+
+export type QueryColumnKey =
+  | 'strategy_name'
+  | 'machine_decision'
+  | 'feedback'
+  | 'request_id'
+  | 'task_id'
+  | 'labels'
+  | 'risk_level'
+  | 'requested_at'
+  | 'ip'
+  | 'account_id'
+
+export interface QueryColumnDef {
+  key: QueryColumnKey
+  title: string
+  defaultVisible: boolean
+}
+
+export const QUERY_COLUMNS: QueryColumnDef[] = [
+  { key: 'strategy_name', title: '策略名称', defaultVisible: true },
+  { key: 'machine_decision', title: '检测结果', defaultVisible: true },
+  { key: 'feedback', title: '反馈结果', defaultVisible: true },
+  { key: 'request_id', title: 'Request ID', defaultVisible: false },
+  { key: 'task_id', title: 'Task ID', defaultVisible: false },
+  { key: 'labels', title: '命中标签及置信度', defaultVisible: false },
+  { key: 'risk_level', title: '风险等级', defaultVisible: false },
+  { key: 'requested_at', title: '请求时间', defaultVisible: false },
+  { key: 'ip', title: 'IP', defaultVisible: false },
+  { key: 'account_id', title: 'AccountId', defaultVisible: false },
+]
+
+export const DEFAULT_VISIBLE_COLUMNS: QueryColumnKey[] = QUERY_COLUMNS.filter(
+  (c) => c.defaultVisible,
+).map((c) => c.key)
+
+// ─── 复审队列 (/query/review) — 卡片视图，只读 ────────────────────────────────
+
+export interface ReviewRecord {
+  id: number
+  title?: string | null
+  review_type?: string | null
+  material_id: number
+  material_version_id: number
+  material_type?: string | null
+  preview_url?: string | null
+  mime_type?: string | null
+  strategy_code?: string | null
+  strategy_name?: string | null
+  risk_level?: string | null
+  machine_decision?: MachineDecision | null
+  machine_request_id?: string | null
+  final_decision?: string | null
+  submitter_id?: number | null
+  submitter_name?: string | null
+  assignee_id?: number | null
+  assignee_name?: string | null
+  hits: MachineHit[]
+  violation_tags: Array<Record<string, unknown>>
+  summary?: string | null
+  requested_at?: string | null
+  finished_at?: string | null
+  ip?: string | null
+  account_id?: string | null
+  bailian_request_id?: string | null
+  data_id?: string | null
+}
+
+export interface ReviewFilters {
+  review_type?: 'human' | 'machine'
+  material_type?: DetectionModality
+  strategy_code?: string
+  task_id?: number
+  machine_request_id?: string
+  data_id?: string
+  final_decision?: ReviewDecision
+  page?: number
+  size?: number
 }

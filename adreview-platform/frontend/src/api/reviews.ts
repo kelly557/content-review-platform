@@ -62,6 +62,11 @@ export const reviewsApi = {
       .post<{ message: string; task_id: number }>(`/reviews/tasks/${taskId}/trigger-machine-review`)
       .then((r) => r.data)
   },
+  cancelTask(taskId: number, reason?: string) {
+    return api
+      .post<ReviewTask>(`/reviews/tasks/${taskId}/cancel`, { reason })
+      .then((r) => r.data)
+  },
 }
 
 export const annotationsApi = {

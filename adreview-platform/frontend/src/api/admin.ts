@@ -1,14 +1,5 @@
 import { api } from './client'
-import type { OverviewStats, User } from '@/types/domain'
-
-export const reportsApi = {
-  overview() {
-    return api.get<OverviewStats>('/reports/overview').then((r) => r.data)
-  },
-  exportAuditUrl() {
-    return '/api/v1/reports/audit/export.csv'
-  },
-}
+import type { User } from '@/types/domain'
 
 export const usersApi = {
   list() {

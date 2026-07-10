@@ -5,7 +5,8 @@ import type { AuditPointRisk } from '@/types/domain'
 export interface ParsedImportRow {
   label_cn: string
   scope_text: string
-  risk_level: string
+  medium_threshold: string
+  high_threshold: string
 }
 
 export interface ParseResult {
@@ -20,7 +21,8 @@ const RISK_SET = new Set<AuditPointRisk>(['低风险', '中风险', '高风险']
 const COL_LABELS = {
   label_cn: ['审核点', 'label_cn', 'label'],
   scope_text: ['审核内容', 'scope_text', 'scope'],
-  risk_level: ['风险等级', 'risk_level', 'risk'],
+  medium_threshold: ['中风险分', 'medium_threshold'],
+  high_threshold: ['高风险分', 'high_threshold'],
 } as const
 
 function normalizeCell(v: unknown): string {
@@ -45,7 +47,7 @@ function isBlankRow(cells: string[]): boolean {
 }
 
 function buildLine(row: ParsedImportRow): string {
-  return `${row.label_cn} | ${row.scope_text} | ${row.risk_level}`
+  return `${row.label_cn} | ${row.scope_text} | ${row.medium_threshold} | ${row.high_threshold}`
 }
 
 function rowFromDelimitedCells(cells: string[]): ParsedImportRow | null {
@@ -53,7 +55,8 @@ function rowFromDelimitedCells(cells: string[]): ParsedImportRow | null {
   return {
     label_cn: cells[0] ?? '',
     scope_text: cells[1] ?? '',
-    risk_level: cells[2] ?? '',
+    medium_threshold: cells[2] ?? '',
+    high_threshold: cells[3] ?? '',
   }
 }
 
@@ -92,12 +95,14 @@ async function parseXlsx(file: File): Promise<ParseResult> {
     const idxMap: Record<keyof typeof COL_LABELS, number> = {
       label_cn: pickColumnIndex(headers, COL_LABELS.label_cn),
       scope_text: pickColumnIndex(headers, COL_LABELS.scope_text),
-      risk_level: pickColumnIndex(headers, COL_LABELS.risk_level),
+      medium_threshold: pickColumnIndex(headers, COL_LABELS.medium_threshold),
+      high_threshold: pickColumnIndex(headers, COL_LABELS.high_threshold),
     }
     const missing: string[] = []
     if (idxMap.label_cn < 0) missing.push('审核点')
     if (idxMap.scope_text < 0) missing.push('审核内容')
-    if (idxMap.risk_level < 0) missing.push('风险等级')
+    if (idxMap.medium_threshold < 0) missing.push('中风险分')
+    if (idxMap.high_threshold < 0) missing.push('高风险分')
     if (missing.length > 0) {
       return { rows: [], errors: [`xlsx 首行缺少必填列：${missing.join('、')}`] }
     }

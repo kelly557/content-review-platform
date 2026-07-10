@@ -11,6 +11,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     TypeDecorator,
@@ -41,6 +42,7 @@ class ReviewDecision(str, enum.Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     RETURNED = "returned"  # sent back to submitter for revision
+    CANCELED = "canceled"  # operator-initiated cancellation (v10)
 
 
 class ReviewType(str, enum.Enum):
@@ -90,6 +92,15 @@ class ReviewTask(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # v10: cancellation fields (operator-initiated cancel from UI / API).
+    canceled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    canceled_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    cancel_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     assignments: Mapped[List["ReviewAssignment"]] = relationship(
         back_populates="task", cascade="all, delete-orphan"

@@ -10,6 +10,7 @@ import type {
   LibraryImageUploadResponse,
   LibraryItem,
   LibraryItemBatchDeleteResponse,
+  LibraryKind,
   LibraryListItem,
   LibraryType,
   LibraryUpdate,
@@ -21,10 +22,11 @@ export const librariesApi = {
     page?: number
     size?: number
     type?: LibraryType
-    group_id?: number
+    kind?: LibraryKind
     q?: string
     is_active?: boolean
     include_deleted?: boolean
+    effective_only?: boolean
   }) {
     return api.get<Page<LibraryListItem>>('/libraries', { params }).then((r) => r.data)
   },

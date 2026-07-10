@@ -22,6 +22,10 @@ from app.models.detection_rule import DetectionRule
 from app.models.workflow import WorkflowTemplate
 from app.schemas.common import Page
 from app.schemas.strategy import (
+    AudioFeatures,
+    DocComposeModes,
+    DocImageMode,
+    DocTextMode,
     HumanReviewSettings,
     StrategyCreate,
     StrategyDuplicateRequest,
@@ -30,6 +34,11 @@ from app.schemas.strategy import (
     StrategyPointRef,
     StrategyUpdate,
     StrategyValidateResult,
+    VideoAudioMode,
+    VideoComposeModes,
+    VideoFrameInterval,
+    VideoFrameMode,
+    VoiceRuleMode,
 )
 from app.services import audit
 
@@ -49,6 +58,45 @@ def _merge_human_review(definition: dict, hr: HumanReviewSettings) -> dict:
     """把 HumanReviewSettings 写入 definition.human_review 键。"""
     merged = dict(definition or {})
     merged["human_review"] = hr.normalized().model_dump()
+    return merged
+
+
+def _merge_voice_features(definition: dict, features: AudioFeatures) -> dict:
+    """写入 definition.audio_features；非破坏性合并（保留 keys，缺失补默认）。"""
+    merged = dict(definition or {})
+    merged["audio_features"] = features.normalized().model_dump()
+    return merged
+
+
+def _merge_voice_rule_mode(definition: dict, mode: VoiceRuleMode) -> dict:
+    """写入 definition.voice_rule_mode。"""
+    merged = dict(definition or {})
+    merged["voice_rule_mode"] = mode.value
+    return merged
+
+
+def _merge_doc_modes(definition: dict, modes: DocComposeModes) -> dict:
+    """写入 definition.doc_text_mode / doc_image_mode。"""
+    merged = dict(definition or {})
+    n = modes.normalized()
+    merged["doc_text_mode"] = n.text_mode.value
+    merged["doc_image_mode"] = n.image_mode.value
+    return merged
+
+
+def _merge_video_modes(definition: dict, modes: VideoComposeModes) -> dict:
+    """写入 definition.video_frame_mode / video_audio_mode。"""
+    merged = dict(definition or {})
+    n = modes.normalized()
+    merged["video_frame_mode"] = n.frame_mode.value
+    merged["video_audio_mode"] = n.audio_mode.value
+    return merged
+
+
+def _merge_video_frame_interval(definition: dict, interval: VideoFrameInterval) -> dict:
+    """写入 definition.video_frame_interval_sec。"""
+    merged = dict(definition or {})
+    merged["video_frame_interval_sec"] = interval.normalized().interval_sec
     return merged
 
 
@@ -182,21 +230,37 @@ async def _replace_enabled_items(
 async def _load_enabled_points(
     db: AsyncSession, strategy_id: int
 ) -> list[StrategyPointRef]:
-    """Load persisted strategy → point selections. Returns [] on any failure."""
+    """Load persisted strategy → point selections. Returns [] on any failure.
+
+    同步从 strategies.definition.enabled_point_overrides 读回阈值 / 关联库的 override。
+    """
     try:
         rows = await db.execute(
             select(StrategyPoint).where(StrategyPoint.strategy_id == strategy_id)
         )
     except Exception:
         return []
+    overrides: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+    strat = await db.get(Strategy, strategy_id)
+    if strat is not None:
+        definition = strat.definition or {}
+        overrides = dict(definition.get("enabled_point_overrides") or {})
     out: list[StrategyPointRef] = []
     for r in rows.scalars():
+        patch = (
+            overrides.get(r.media_type, {})
+            .get(str(r.item_id), {})
+            .get(str(r.point_id), {})
+        )
         out.append(
             StrategyPointRef(
                 media_type=r.media_type,
                 item_id=r.item_id,
                 point_id=r.point_id,
                 is_enabled=r.is_enabled,
+                medium_threshold=patch.get("medium_threshold"),
+                high_threshold=patch.get("high_threshold"),
+                linked_library_ids=patch.get("linked_library_ids"),
             )
         )
     return out
@@ -236,6 +300,7 @@ async def _replace_enabled_points(
 
     # 1) 处理请求中显式给定的 point
     seen: set[tuple[str, int]] = set()
+    overrides: dict[str, dict[str, dict[str, Any]]] = {}
     for ref in enabled_points:
         key = (ref.media_type, ref.point_id)
         if key in seen:
@@ -272,6 +337,19 @@ async def _replace_enabled_points(
                 )
             )
 
+        # 收集 override（中/高风险分 + 关联库）到 strategies.definition
+        patch: dict[str, Any] = {}
+        if ref.medium_threshold is not None:
+            patch["medium_threshold"] = ref.medium_threshold
+        if ref.high_threshold is not None:
+            patch["high_threshold"] = ref.high_threshold
+        if ref.linked_library_ids is not None:
+            patch["linked_library_ids"] = list(ref.linked_library_ids)
+        if patch:
+            overrides.setdefault(ref.media_type, {})
+            overrides[ref.media_type].setdefault(str(ref.item_id), {})
+            overrides[ref.media_type][str(ref.item_id)][str(ref.point_id)] = patch
+
     # 2) 扫描该 strategy 现存所有 point 行：
     #    - 若所属 item 不在 enabled_item_keys 中 → 关闭（保留行）
     #    - 否则保留原 is_enabled 不动（item 启用时不动 point 级记忆）
@@ -285,6 +363,26 @@ async def _replace_enabled_points(
         if item_key not in enabled_item_keys:
             if r.is_enabled:
                 r.is_enabled = False
+
+    # 3) 持久化 point 级 override（中/高风险分 + 关联库）到 strategies.definition。
+    #    决策：override 不写 audit_point 表，只随策略保存。
+    if overrides or not seen:
+        strategy = await db.get(Strategy, strategy_id)
+        if strategy is not None:
+            definition = dict(strategy.definition or {})
+            point_overrides = dict(definition.get("enabled_point_overrides") or {})
+            if not overrides and not seen and "enabled_point_overrides" in definition:
+                # 本次调用未传任何 point 但存在旧 overrides，按全清空处理
+                # （allow point 全清场景下保留，给前端 reset 能力）
+                point_overrides = {}
+            for media_type, by_item in overrides.items():
+                point_overrides.setdefault(media_type, {})
+                for item_id_str, by_point in by_item.items():
+                    point_overrides[media_type].setdefault(item_id_str, {})
+                    for point_id_str, patch in by_point.items():
+                        point_overrides[media_type][item_id_str][point_id_str] = patch
+            definition["enabled_point_overrides"] = point_overrides
+            strategy.definition = definition
 
 
 async def _next_code(db: AsyncSession) -> str:
@@ -352,7 +450,63 @@ async def create_strategy(
     )
     await _validate_review_rule(db, hr_settings.review_rule_id)
 
+    try:
+        voice_mode = VoiceRuleMode(
+            (body.definition or {}).get("voice_rule_mode") or VoiceRuleMode.REUSE_TEXT.value
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"voice_rule_mode 非法: {e}",
+        )
+    try:
+        audio_features = AudioFeatures.model_validate(
+            (body.definition or {}).get("audio_features") or {}
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"audio_features 非法: {e}",
+        )
+
+    try:
+        doc_modes = DocComposeModes.model_validate({
+            "text_mode": (body.definition or {}).get("doc_text_mode") or DocTextMode.REUSE_TEXT.value,
+            "image_mode": (body.definition or {}).get("doc_image_mode") or DocImageMode.REUSE_IMAGE.value,
+        })
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"doc_*_mode 非法: {e}",
+        )
+
+    try:
+        video_modes = VideoComposeModes.model_validate({
+            "frame_mode": (body.definition or {}).get("video_frame_mode") or VideoFrameMode.REUSE_IMAGE.value,
+            "audio_mode": (body.definition or {}).get("video_audio_mode") or VideoAudioMode.REUSE_AUDIO.value,
+        })
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"video_*_mode 非法: {e}",
+        )
+
+    try:
+        video_frame_interval = VideoFrameInterval.model_validate({
+            "interval_sec": (body.definition or {}).get("video_frame_interval_sec") if "video_frame_interval_sec" in (body.definition or {}) else 5,
+        })
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"video_frame_interval_sec 非法: {e}",
+        )
+
     merged_definition = _merge_human_review(body.definition or {}, hr_settings)
+    merged_definition = _merge_voice_rule_mode(merged_definition, voice_mode)
+    merged_definition = _merge_voice_features(merged_definition, audio_features)
+    merged_definition = _merge_doc_modes(merged_definition, doc_modes)
+    merged_definition = _merge_video_modes(merged_definition, video_modes)
+    merged_definition = _merge_video_frame_interval(merged_definition, video_frame_interval)
     merged_definition["services"] = list(body.services or [])
 
     strategy = Strategy(
@@ -438,7 +592,83 @@ async def update_strategy(
             (body.definition or {}).get("human_review") or {}
         )
         await _validate_review_rule(db, hr_settings.review_rule_id)
-        strategy.definition = _merge_human_review(body.definition or {}, hr_settings)
+
+        existing_def = dict(strategy.definition or {})
+        def_in = body.definition or {}
+
+        # voice_rule_mode: 缺省保留旧值；显式传 None 视为保留旧值
+        mode_raw = def_in.get("voice_rule_mode", existing_def.get("voice_rule_mode"))
+        if mode_raw is None:
+            mode_raw = VoiceRuleMode.REUSE_TEXT.value
+        try:
+            voice_mode = VoiceRuleMode(mode_raw)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"voice_rule_mode 非法: {e}",
+            )
+
+        # audio_features: 缺省保留旧值（partial 合并的简化实现：每次全量替换）
+        try:
+            if "audio_features" in def_in:
+                audio_features = AudioFeatures.model_validate(def_in["audio_features"])
+            else:
+                existing_features = existing_def.get("audio_features") or {}
+                audio_features = AudioFeatures.model_validate(existing_features)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"audio_features 非法: {e}",
+            )
+
+        # doc_*_mode: 缺省保留旧值
+        try:
+            doc_raw_text = def_in.get("doc_text_mode", existing_def.get("doc_text_mode", DocTextMode.REUSE_TEXT.value))
+            doc_raw_image = def_in.get("doc_image_mode", existing_def.get("doc_image_mode", DocImageMode.REUSE_IMAGE.value))
+            doc_modes = DocComposeModes.model_validate({
+                "text_mode": doc_raw_text,
+                "image_mode": doc_raw_image,
+            })
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"doc_*_mode 非法: {e}",
+            )
+
+        # video_*_mode: 缺省保留旧值
+        try:
+            video_raw_frame = def_in.get("video_frame_mode", existing_def.get("video_frame_mode", VideoFrameMode.REUSE_IMAGE.value))
+            video_raw_audio = def_in.get("video_audio_mode", existing_def.get("video_audio_mode", VideoAudioMode.REUSE_AUDIO.value))
+            video_modes = VideoComposeModes.model_validate({
+                "frame_mode": video_raw_frame,
+                "audio_mode": video_raw_audio,
+            })
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"video_*_mode 非法: {e}",
+            )
+
+        # video_frame_interval_sec: 缺省保留旧值；范围 1..1000
+        try:
+            if "video_frame_interval_sec" in def_in:
+                raw_interval = def_in["video_frame_interval_sec"]
+            else:
+                raw_interval = existing_def.get("video_frame_interval_sec", 5)
+            video_frame_interval = VideoFrameInterval.model_validate({"interval_sec": raw_interval})
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"video_frame_interval_sec 非法: {e}",
+            )
+
+        merged_def = _merge_human_review(body.definition or {}, hr_settings)
+        merged_def = _merge_voice_rule_mode(merged_def, voice_mode)
+        merged_def = _merge_voice_features(merged_def, audio_features)
+        merged_def = _merge_doc_modes(merged_def, doc_modes)
+        merged_def = _merge_video_modes(merged_def, video_modes)
+        merged_def = _merge_video_frame_interval(merged_def, video_frame_interval)
+        strategy.definition = merged_def
     if body.service_config is not None and not is_default:
         strategy.service_config = body.service_config
 

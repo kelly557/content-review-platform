@@ -249,15 +249,51 @@ async def submit_material(
             status_code=status.HTTP_409_CONFLICT, detail=f"cannot submit from status {material.status.value}"
         )
 
-    template = None
+    # Routing: pick the most-recent enabled trigger that matches this material.
+    # If none matches, fall back to the historical "hybrid" default.
+    from sqlalchemy import select as _select
+    from app.models.trigger import Trigger
+    from app.services.routing import resolve_strategy_for_trigger
+
+    matched_trigger = None
+    matched_strategy = None
     template_code = "hybrid"
+
+    triggers_result = await db.execute(
+        _select(Trigger)
+        .where(Trigger.is_enabled.is_(True))
+        .order_by(Trigger.id.desc())
+    )
+    for cand in triggers_result.scalars():
+        strategy = await resolve_strategy_for_trigger(db, cand, material)
+        if strategy is not None:
+            matched_trigger = cand
+            matched_strategy = strategy
+            template_code = cand.workflow_template_code or "auto_only"
+            break
+
     template = await get_template_by_code(db, template_code)
     if not template:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"unknown workflow template: {template_code}",
         )
-    await start_instance(db, material, template, user, task_name=body.task_name, skip_machine_review=body.skip_machine_review)
+
+    strategy_human_review = (
+        (matched_strategy.definition or {}).get("human_review")
+        if matched_strategy is not None
+        else None
+    )
+    await start_instance(
+        db,
+        material,
+        template,
+        user,
+        task_name=body.task_name,
+        skip_machine_review=body.skip_machine_review,
+        strategy_human_review=strategy_human_review,
+        strategy=matched_strategy,
+    )
     await db.commit()
 
     # FastAPI-safe scheduling of the machine review. `asyncio.create_task` inside

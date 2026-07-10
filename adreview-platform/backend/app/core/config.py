@@ -73,6 +73,19 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    # Analytics — anomaly scanner & notifications
+    alert_scanner_enabled: bool = True
+    alert_scan_interval_sec: int = 300
+    alert_rules_json: str = ""
+    alert_webhook_urls: str = ""
+    alert_webhook_secrets: str = ""
+    alert_notify_emails: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+
     def ensure_storage_dirs(self) -> None:
         for sub in ("uploads", "thumbnails", "exports"):
             (self.storage_root / sub).mkdir(parents=True, exist_ok=True)

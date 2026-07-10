@@ -19,7 +19,7 @@ export function ProtectedRoute({ allow }: { allow?: UserRole[] }) {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
   if (allow && !allow.includes(user.role)) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to="/overview" replace />
   }
   return <Outlet />
 }

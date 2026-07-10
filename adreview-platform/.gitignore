@@ -41,3 +41,9 @@ storage/exports/*
 !storage/uploads/.gitkeep
 !storage/thumbnails/.gitkeep
 !storage/exports/.gitkeep
+
+# OpenAPI / Swagger dev snapshots (regenerated from /docs)
+docs/moderation-openapi*.json
+docs/moderation-openapi*.yaml
+docs/moderation-openapi*.html
+docs/moderation-swagger*.html

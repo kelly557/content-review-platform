@@ -63,6 +63,9 @@ class AuditPoint(Base):
         Enum(AuditPointRisk), default=AuditPointRisk.MEDIUM, nullable=False
     )
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_builtin: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
     # ─── 旧列：保留只读，新代码不再写入 ───
     custom_wordset_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("word_sets.id"), nullable=True

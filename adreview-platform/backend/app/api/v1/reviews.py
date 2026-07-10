@@ -20,6 +20,7 @@ from app.schemas.common import Page
 from app.schemas.review import (
     AddReviewerRequest,
     BulkDecideRequest,
+    ReviewCancelRequest,
     ReviewCommentOut,
     ReviewDecisionRequest,
     ReviewTaskOut,
@@ -29,6 +30,7 @@ from app.services import audit
 from app.services.workflow_engine import (
     assign_reviewer,
     evaluate_stage_completion,
+    get_workflow_mode,
 )
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
@@ -129,6 +131,9 @@ async def list_my_tasks(
         if mat:
             task_out.material_type = mat.material_type
             task_out.material_status = mat.status
+        # v10: derive workflow_mode from the workflow topology. Cheap because
+        # the node_type column is small and indexed on workflow_instance_id.
+        task_out.workflow_mode = await get_workflow_mode(db, t.workflow_instance_id)
         items.append(task_out)
     return Page(items=items, total=total, page=page, size=size)
 
@@ -150,7 +155,9 @@ async def get_task(
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
-    return ReviewTaskOut.model_validate(task)
+    task_out = ReviewTaskOut.model_validate(task)
+    task_out.workflow_mode = await get_workflow_mode(db, task.workflow_instance_id)
+    return task_out
 
 
 @router.post("/tasks/{task_id}/decide", response_model=ReviewTaskOut)
@@ -309,6 +316,75 @@ async def add_reviewer(
     await db.flush()
     await db.commit()
     return ReviewCommentOut.model_validate(comment)
+
+
+@router.post("/tasks/{task_id}/cancel", response_model=ReviewTaskOut)
+async def cancel_task(
+    task_id: int,
+    body: ReviewCancelRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ReviewTaskOut:
+    """Operator-initiated cancellation of a pending task (v10).
+
+    Permissions: submitter (own materials) / admin / reviewer.
+    """
+    from app.services.workflow_engine import (
+        TaskNotCancelableError,
+        cancel_task as cancel_task_svc,
+    )
+
+    result = await db.execute(
+        select(ReviewTask)
+        .where(ReviewTask.id == task_id)
+        .options(
+            selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.tag_links),
+            selectinload(ReviewTask.comments),
+        )
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
+
+    # Permission: admin can cancel any task; submitter only their own materials;
+    # reviewers can cancel anything they have a pending assignment on.
+    mat = await db.get(Material, task.material_id)
+    is_owner_submitter = (
+        user.role.value == "submitter" and mat is not None and mat.submitter_id == user.id
+    )
+    has_pending_assignment = any(
+        a.assignee_id == user.id and a.decision == ReviewDecision.PENDING
+        for a in task.assignments
+    )
+    if user.role.value != "admin" and not is_owner_submitter and not has_pending_assignment:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="not allowed to cancel this task",
+        )
+
+    try:
+        await cancel_task_svc(db, task, user, body.reason)
+    except TaskNotCancelableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    await db.commit()
+
+    # Reload + decorate for response
+    refreshed = await db.execute(
+        select(ReviewTask)
+        .where(ReviewTask.id == task_id)
+        .options(
+            selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.tag_links),
+            selectinload(ReviewTask.comments),
+        )
+    )
+    task = refreshed.scalar_one()
+    task_out = ReviewTaskOut.model_validate(task)
+    task_out.workflow_mode = await get_workflow_mode(db, task.workflow_instance_id)
+    if mat:
+        task_out.material_type = mat.material_type
+        task_out.material_status = mat.status
+    return task_out
 
 
 @router.post("/tasks/bulk-decide")

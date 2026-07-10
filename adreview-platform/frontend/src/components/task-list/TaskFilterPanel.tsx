@@ -1,12 +1,13 @@
 import { Card, Select, DatePicker, Space, Row, Col, Button } from 'antd'
-import type { MaterialType, ReviewType, ReviewDecision } from '@/types/domain'
-import { TYPE_LABELS } from '@/types/domain'
+import type { MaterialType, ReviewType, ReviewDecision, WorkflowMode } from '@/types/domain'
+import { TYPE_LABELS, WORKFLOW_MODE_LABELS } from '@/types/domain'
 
 const { RangePicker } = DatePicker
 
 export interface TaskFilters {
   material_type?: MaterialType
   review_type?: ReviewType
+  workflow_mode?: WorkflowMode
   status?: ReviewDecision
   sort_by?: string
   sort_order?: 'asc' | 'desc'
@@ -34,12 +35,19 @@ const REVIEW_TYPE_OPTIONS = [
   { value: 'human', label: '人审' },
 ]
 
+const WORKFLOW_MODE_OPTIONS = [
+  { value: '', label: '全部流程' },
+  { value: 'machine_only', label: WORKFLOW_MODE_LABELS.machine_only },
+  { value: 'machine_then_human', label: WORKFLOW_MODE_LABELS.machine_then_human },
+]
+
 const STATUS_OPTIONS = [
   { value: '', label: '全部状态' },
   { value: 'pending', label: '待处理' },
   { value: 'approved', label: '已通过' },
   { value: 'rejected', label: '已驳回' },
   { value: 'returned', label: '已退回' },
+  { value: 'canceled', label: '已取消' },
 ]
 
 const SORT_OPTIONS = [
@@ -82,6 +90,15 @@ export default function TaskFilterPanel({ filters, onChange, visible }: TaskFilt
             value={filters.status || ''}
             onChange={(v) => onChange({ ...filters, status: (v || undefined) as ReviewDecision | undefined })}
             options={STATUS_OPTIONS}
+            style={{ width: '100%' }}
+          />
+        </Col>
+        <Col span={6}>
+          <div style={{ marginBottom: 8, fontSize: 12, color: '#666' }}>流程</div>
+          <Select
+            value={filters.workflow_mode || ''}
+            onChange={(v) => onChange({ ...filters, workflow_mode: (v || undefined) as WorkflowMode | undefined })}
+            options={WORKFLOW_MODE_OPTIONS}
             style={{ width: '100%' }}
           />
         </Col>
