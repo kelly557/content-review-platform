@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   App,
+  Alert,
   Button,
   Card,
   Col,
@@ -16,6 +17,7 @@ import {
   Typography,
 } from 'antd'
 import { triggersApi, type Trigger, type TriggerRun } from '@/api/triggers'
+import { describeCron, describeLaunch } from '@/lib/cronDescriber'
 
 const { Text } = Typography
 
@@ -33,29 +35,23 @@ const STATUS_LABEL: Record<string, string> = {
   running: '运行中',
 }
 
-function describeSpec(t: Trigger): string {
-  if (t.trigger_type === 'cron') {
-    const spec = t.spec as { cron?: string; timezone?: string; repeat?: string; time?: string; weekdays?: number[] }
-    const cron = spec.cron ?? '-'
-    if (spec.repeat === 'weekly' && Array.isArray(spec.weekdays)) {
-      const names = ['一', '二', '三', '四', '五', '六', '日']
-      const ws = spec.weekdays.map((d) => `周${names[d - 1]}`).join('、')
-      return `${ws} ${spec.time ?? ''} (${spec.timezone ?? 'Asia/Shanghai'})`
-    }
-    return `${cron} (${spec.timezone ?? 'Asia/Shanghai'})`
-  }
-  const spec = t.spec as { path_token?: string }
-  if (spec.path_token) return `…/${spec.path_token.slice(0, 8)}…`
-  return '回调'
+const ROUTING_LABEL: Record<string, string> = {
+  material_type: '素材类型',
+  business_line: '业务线',
+  country: '国家/区域',
+  channel: '渠道',
+  content_category: '内容分类',
 }
 
 function renderMatchConditions(m: Record<string, string[]>): React.ReactNode {
   const entries = Object.entries(m).filter(([, v]) => v.length > 0)
-  if (entries.length === 0) return <Tag>所有素材</Tag>
+  if (entries.length === 0) return <Tag>全部素材</Tag>
   return (
     <Space wrap size={[4, 4]}>
       {entries.map(([k, vs]) => (
-        <Tag key={k}>{k} = {vs.join(' / ')}</Tag>
+        <Tag key={k}>
+          {ROUTING_LABEL[k] ?? k}={vs.join(' / ')}
+        </Tag>
       ))}
     </Space>
   )
@@ -94,7 +90,7 @@ export default function TriggerDetailPage() {
     if (!trigger) return
     try {
       await triggersApi.update(trigger.id, { is_enabled: next })
-      message.success(next ? '已启用' : '已禁用')
+      message.success(next ? '已开启' : '已关闭')
       load()
     } catch (e) {
       const err = e as { response?: { data?: { detail?: string } } }
@@ -106,24 +102,36 @@ export default function TriggerDetailPage() {
     if (!trigger) return
     let reason = ''
     modal.confirm({
-      title: '立即执行',
+      title: '立即运行一次',
       content: (
         <div>
-          <p style={{ marginBottom: 8 }}>立即执行触发器「{trigger.name}」？该操作不可撤销。</p>
-          <Input.TextArea rows={3} maxLength={500} showCount placeholder="备注（可选）"
-            onChange={(e) => { reason = e.target.value }} />
+          <p style={{ marginBottom: 8 }}>
+            当前规则：<strong>{trigger.name}</strong>
+          </p>
+          <p style={{ marginBottom: 8, color: '#666' }}>
+            本次将立即扫描所有适用素材并创建一次审核任务，不会修改规则的启动时间。
+          </p>
+          <Input.TextArea
+            rows={3}
+            maxLength={500}
+            showCount
+            placeholder="备注（可选）"
+            onChange={(e) => {
+              reason = e.target.value
+            }}
+          />
         </div>
       ),
-      okText: '确认执行',
+      okText: '立即运行',
       cancelText: '取消',
       onOk: async () => {
         try {
           await triggersApi.runNow(trigger.id)
-          message.success('已触发执行')
+          message.success('已运行')
           load()
         } catch (e) {
           const err = e as { response?: { data?: { detail?: string } } }
-          message.error(err.response?.data?.detail || '执行失败')
+          message.error(err.response?.data?.detail || '运行失败')
         }
         void reason
       },
@@ -133,9 +141,9 @@ export default function TriggerDetailPage() {
   const handleDelete = () => {
     if (!trigger) return
     modal.confirm({
-      title: '删除触发器',
-      content: `确认删除触发器「${trigger.name}」？该操作不可撤销，所有历史执行记录也会被级联删除。`,
-      okText: '确认删除',
+      title: '删除自动审核',
+      content: `确认删除「${trigger.name}」？该操作不可撤销。历史执行记录将被保留；进行中的任务将完成后再清理。`,
+      okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
@@ -152,32 +160,48 @@ export default function TriggerDetailPage() {
   }
 
   if (!triggerId || (!trigger && !loading)) {
-    return <Empty description="未找到触发器" />
+    return <Empty description="未找到自动审核" />
   }
   if (!trigger) {
     return <Empty description="加载中" />
   }
 
+  const pathToken = (trigger.spec as { path_token?: string }).path_token ?? ''
+  const cronStr = (trigger.spec as { cron?: string }).cron ?? ''
+  const tzStr = (trigger.spec as { timezone?: string }).timezone ?? 'Asia/Shanghai'
+  const launchLabel = describeLaunch(trigger)
+  const humanCron = describeCron(cronStr).human
+
   const runColumns = [
     { title: '开始时间', dataIndex: 'started_at', render: (v: string) => new Date(v).toLocaleString('zh-CN') },
-    { title: '触发源', dataIndex: 'source', width: 100, render: (v: string) => <Tag>{v}</Tag> },
     {
-      title: '状态',
-      dataIndex: 'status',
+      title: '启动方式',
+      dataIndex: 'source',
       width: 110,
-      render: (v: string | null) =>
-        v ? <Tag color={STATUS_COLOR[v] ?? 'default'}>{STATUS_LABEL[v] ?? v}</Tag> : '-',
+      render: (v: string) => {
+        if (v === 'cron') return <Tag color="blue">按时间计划</Tag>
+        if (v === 'manual') return <Tag color="cyan">手动运行</Tag>
+        if (v === 'callback') return <Tag color="purple">外部通知触发</Tag>
+        return <Tag>{v}</Tag>
+      },
     },
-    { title: '扫描', dataIndex: 'scanned_count', width: 80 },
-    { title: '创建', dataIndex: 'created_count', width: 80 },
-    { title: '跳过', dataIndex: 'skipped_count', width: 80 },
-    { title: '失败', dataIndex: 'failed_count', width: 80 },
+    {
+      title: '结果',
+      dataIndex: 'status',
+      width: 100,
+      render: (v: string | null) =>
+        v ? <Tag color={STATUS_COLOR[v] ?? 'default'}>{STATUS_LABEL[v] ?? v}</Tag> : '—',
+    },
+    { title: '扫描', dataIndex: 'scanned_count', width: 70 },
+    { title: '创建', dataIndex: 'created_count', width: 70 },
+    { title: '跳过', dataIndex: 'skipped_count', width: 70 },
+    { title: '失败', dataIndex: 'failed_count', width: 70 },
     {
       title: '耗时',
       key: 'duration',
-      width: 100,
+      width: 80,
       render: (_: unknown, r: TriggerRun) => {
-        if (!r.finished_at) return '-'
+        if (!r.finished_at) return '—'
         const ms = new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()
         return `${(ms / 1000).toFixed(1)}s`
       },
@@ -193,20 +217,27 @@ export default function TriggerDetailPage() {
       <Card style={{ marginBottom: 16 }}>
         <Row align="middle" justify="space-between">
           <Col>
-            <Space size={12} align="center">
+            <Space size={12} align="center" wrap>
               <span style={{ fontSize: 18, fontWeight: 600 }}>{trigger.name}</span>
               <Tag color={trigger.trigger_type === 'cron' ? 'blue' : 'purple'}>
-                {trigger.trigger_type === 'cron' ? 'Cron' : '回调'}
+                {trigger.trigger_type === 'cron' ? '按时间计划' : '外部通知触发'}
               </Tag>
-              <Text type="secondary">{describeSpec(trigger)}</Text>
+              <Tag color={trigger.is_enabled ? 'green' : 'default'}>
+                {trigger.is_enabled ? '已开启' : '已关闭'}
+              </Tag>
+              <Text type="secondary">{launchLabel}</Text>
             </Space>
           </Col>
           <Col>
             <Space>
-              <span>启用</span>
-              <Switch checked={trigger.is_enabled} onChange={handleToggle} />
+              <Switch
+                checked={trigger.is_enabled}
+                checkedChildren="已开启"
+                unCheckedChildren="已关闭"
+                onChange={handleToggle}
+              />
               <Button onClick={handleRun} disabled={!trigger.is_enabled}>
-                立即执行
+                立即运行
               </Button>
               <Button onClick={() => navigate(`/triggers/${trigger.id}`, { state: { edit: true } })}>
                 编辑
@@ -227,33 +258,67 @@ export default function TriggerDetailPage() {
             children: (
               <Row gutter={16}>
                 <Col span={12}>
-                  <Card title="触发配置" size="small">
+                  <Card title="基本信息" size="small">
                     <Space direction="vertical">
-                      <div><Text type="secondary">类型：</Text>{trigger.trigger_type}</div>
-                      <div><Text type="secondary">调度：</Text>{describeSpec(trigger)}</div>
-                      <div><Text type="secondary">Code：</Text>{trigger.code}</div>
-                      <div><Text type="secondary">创建人：</Text>{trigger.created_by ?? '-'}</div>
-                      <div><Text type="secondary">创建时间：</Text>{new Date(trigger.created_at).toLocaleString('zh-CN')}</div>
+                      <div>
+                        <Text type="secondary">任务编码：</Text>
+                        <Text code>{trigger.code}</Text>
+                      </div>
+                      <div>
+                        <Text type="secondary">启动方式：</Text>
+                        {trigger.trigger_type === 'cron' ? '按时间计划' : '外部通知触发'}
+                      </div>
+                      {trigger.trigger_type === 'cron' && (
+                        <>
+                          <div>
+                            <Text type="secondary">启动时间规则：</Text>
+                            {humanCron}
+                          </div>
+                          <div>
+                            <Text type="secondary">时间基准：</Text>
+                            {tzStr === 'Asia/Shanghai' ? '北京时间' : tzStr}
+                          </div>
+                        </>
+                      )}
+                      <div>
+                        <Text type="secondary">创建时间：</Text>
+                        {new Date(trigger.created_at).toLocaleString('zh-CN')}
+                      </div>
                     </Space>
                   </Card>
                 </Col>
                 <Col span={12}>
-                  <Card title="统计" size="small">
+                  <Card title="当前状态" size="small">
                     <Space direction="vertical">
-                      <div><Text type="secondary">累计执行：</Text>{trigger.run_count} 次</div>
-                      <div><Text type="secondary">上次执行：</Text>{trigger.last_run_at ? new Date(trigger.last_run_at).toLocaleString('zh-CN') : '从未运行'}</div>
-                      <div><Text type="secondary">下次执行：</Text>{trigger.next_run_at ? new Date(trigger.next_run_at).toLocaleString('zh-CN') : '-'}</div>
-                      <div><Text type="secondary">扫描间隔：</Text>{trigger.scan_interval_sec}s</div>
+                      <div>
+                        <Text type="secondary">已触发任务数：</Text>
+                        {trigger.run_count}
+                      </div>
+                      <div>
+                        <Text type="secondary">上次运行：</Text>
+                        {trigger.last_run_at ? new Date(trigger.last_run_at).toLocaleString('zh-CN') : '—'}
+                      </div>
+                      <div>
+                        <Text type="secondary">下次启动：</Text>
+                        {trigger.next_run_at ? new Date(trigger.next_run_at).toLocaleString('zh-CN') : '—'}
+                      </div>
                     </Space>
                   </Card>
                 </Col>
                 <Col span={24} style={{ marginTop: 16 }}>
-                  <Card title="目标策略" size="small">
+                  <Card title="适用素材" size="small">
                     <Space direction="vertical" style={{ width: '100%' }}>
-                      <div><Text type="secondary">工作流模板：</Text>{trigger.workflow_template_code ?? '-'}</div>
-                      <div><Text type="secondary">审核策略：</Text>{trigger.strategy_name ?? <span style={{ color: '#999' }}>未指定</span>}</div>
                       <div>
-                        <Text type="secondary">匹配条件：</Text>{renderMatchConditions(trigger.match_conditions)}
+                        <Text type="secondary">匹配条件：</Text>
+                        {renderMatchConditions(trigger.match_conditions)}
+                      </div>
+                      <div>
+                        <Text type="secondary">命中策略：</Text>
+                        {trigger.strategy_name ?? <span style={{ color: '#999' }}>使用工作流默认策略</span>}
+                      </div>
+                      <div>
+                        <Text type="secondary">工作流模板：</Text>
+                        {trigger.workflow_template_code ?? '-'}
                       </div>
                     </Space>
                   </Card>
@@ -263,7 +328,7 @@ export default function TriggerDetailPage() {
           },
           {
             key: 'runs',
-            label: '执行历史',
+            label: '运行历史',
             children: (
               <Table
                 rowKey="id"
@@ -272,7 +337,7 @@ export default function TriggerDetailPage() {
                 columns={runColumns}
                 pagination={false}
                 size="small"
-                locale={{ emptyText: <Empty description="暂无执行记录" /> }}
+                locale={{ emptyText: <Empty description="暂无运行历史" /> }}
               />
             ),
           },
@@ -280,28 +345,48 @@ export default function TriggerDetailPage() {
             ? [
                 {
                   key: 'webhook',
-                  label: 'Webhook URL',
+                  label: '通知地址',
                   children: (
                     <Card size="small">
                       <Space direction="vertical" style={{ width: '100%' }}>
+                        <Alert
+                          type="info"
+                          showIcon
+                          message="合作方通知接入"
+                          description="请在合作方系统中按下述信息配置回调 URL；通知内容以 JSON 形式 POST 到此地址。"
+                        />
                         <div>
-                          <Text type="secondary">Endpoint：</Text>
+                          <Text type="secondary">通知地址：</Text>
                           <Input.Group compact>
                             <Input
-                              style={{ width: '70%' }}
-                              value={`POST {APP_BASE_URL}/api/v1/webhooks/callback/${(trigger.spec as { path_token?: string }).path_token ?? ''}`}
+                              style={{ width: 'calc(100% - 80px)' }}
+                              value={`POST {APP_BASE_URL}/api/v1/webhooks/callback/${pathToken}`}
                               readOnly
                             />
-                            <Button>复制</Button>
+                            <Button
+                              onClick={() => {
+                                navigator.clipboard?.writeText(
+                                  `{APP_BASE_URL}/api/v1/webhooks/callback/${pathToken}`,
+                                )
+                                void message.success('已复制')
+                              }}
+                            >
+                              复制
+                            </Button>
                           </Input.Group>
                         </div>
-                        <div><Text type="secondary">签名算法：</Text>HMAC-SHA256(secret, X-Timestamp + raw_body)</div>
-                        <div><Text type="secondary">防重放：</Text>X-Timestamp 偏差 &gt; 5 分钟 → 401</div>
                         <div>
-                          <Text type="secondary">IP 白名单：</Text>
-                          <Button type="link" onClick={() => navigate('/settings/webhook-allowlist')}>
-                            管理白名单
-                          </Button>
+                          <Text type="secondary">校验码（合作方系统保存）：</Text>
+                          <Text code>{trigger.code.toUpperCase()}</Text>
+                          <div>
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              别名格式：WEBHOOK_SECRET_&lt;别名&gt;。我方不存储明文校验码。
+                            </Text>
+                          </div>
+                        </div>
+                        <div>
+                          <Text type="secondary">签名与防重放：</Text>
+                          <Text>HMAC-SHA256(secret, X-Timestamp + body)；偏差 ≤ 5 分钟。</Text>
                         </div>
                       </Space>
                     </Card>

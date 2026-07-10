@@ -75,24 +75,6 @@ async def lifespan(app: FastAPI):
     trigger_stop = asyncio.Event()
     trigger_task = asyncio.create_task(trigger_run_loop(trigger_stop), name="trigger_cron")
 
-    # IP allowlist bootstrap (in-memory cache for webhook ingress).
-    try:
-        from app.services import ip_allowlist as _ipal
-
-        async with engine.begin() as conn:
-
-            def _seed(connection) -> None:
-                pass
-
-            await conn.run_sync(_seed)
-        # Use a one-off session for the initial load.
-        from app.db.session import SessionLocal
-
-        async with SessionLocal() as db:
-            await _ipal.refresh(db)
-    except Exception as exc:  # pragma: no cover
-        log.warning("startup: IP allowlist refresh failed: %r", exc)
-
     try:
         yield
     finally:

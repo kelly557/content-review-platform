@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   App,
+  Alert,
   Button,
   Card,
   Checkbox,
-  Collapse,
   Input,
   Radio,
   Select,
@@ -18,6 +18,8 @@ import { strategiesApi } from '@/api/strategies'
 import { workflowsApi } from '@/api/workflows'
 import { triggersApi, type TriggerCreatePayload, type TriggerTypeStr } from '@/api/triggers'
 import { useAuthStore } from '@/store'
+import SchedulePicker, { type SchedulePickerValue } from '@/components/triggers/SchedulePicker'
+import { describeCron } from '@/lib/cronDescriber'
 
 const { Text } = Typography
 
@@ -80,24 +82,21 @@ export default function CreateTriggerPage() {
   const [step, setStep] = useState(0)
   const [submitting, setSubmitting] = useState(false)
 
-  // Step 1
+  // Step 1 — 基本信息
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [triggerType, setTriggerType] = useState<TriggerTypeStr>('cron')
-
-  // Step 2 — cron
-  const [repeatMode, setRepeatMode] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('weekly')
-  const [weekdays, setWeekdays] = useState<number[]>([1, 2])
-  const [days, setDays] = useState<number[]>([1])
-  const [time, setTime] = useState('09:00')
   const [timezone, setTimezone] = useState('Asia/Shanghai')
-  const [customCron, setCustomCron] = useState('0 9 * * 1,2')
 
-  // Step 2 — callback
+  // Step 2 — 运行方式
+  const [schedule, setSchedule] = useState<SchedulePickerValue>({
+    cron: '0 9 * * *',
+    scanIntervalSec: 60,
+  })
   const [pathToken] = useState(() => generatePathToken())
   const [secretAlias, setSecretAlias] = useState('primary')
 
-  // Step 3
+  // Step 3 — 适用素材
   const [workflowTemplateCode, setWorkflowTemplateCode] = useState<string | null>('hybrid')
   const [strategyId, setStrategyId] = useState<number | null>(null)
   const [match, setMatch] = useState<Record<RoutingKey, string[]>>({
@@ -109,10 +108,9 @@ export default function CreateTriggerPage() {
   })
   const [isEnabled, setIsEnabled] = useState(true)
 
-  // Options
+  // 模板与策略
   const [templates, setTemplates] = useState<Array<{ id: number; code: string; name: string }>>([])
   const [strategies, setStrategies] = useState<Array<{ id: number; code: string; name: string }>>([])
-  const [scanInterval, setScanInterval] = useState(60)
 
   useEffect(() => {
     if (user?.role !== 'admin') return
@@ -124,20 +122,8 @@ export default function CreateTriggerPage() {
     }).catch(() => {})
   }, [user])
 
-  const cronExpr = useMemo(() => {
-    const [hh, mm] = time.split(':').map((n) => parseInt(n, 10))
-    if (repeatMode === 'daily') return `${mm ?? 0} ${hh ?? 0} * * *`
-    if (repeatMode === 'weekly') {
-      const w = weekdays.length ? weekdays.sort().join(',') : '*'
-      return `${mm ?? 0} ${hh ?? 0} * * ${w}`
-    }
-    if (repeatMode === 'monthly') {
-      const d = days.length ? days.sort().join(',') : '*'
-      return `${mm ?? 0} ${hh ?? 0} ${d} * *`
-    }
-    return customCron
-  }, [repeatMode, weekdays, days, time, customCron])
-
+  const cronPreview = schedule.cron
+  const cronHuman = useMemo(() => describeCron(cronPreview).human, [cronPreview])
   const matchAllEmpty = ROUTING_KEYS.every((k) => match[k].length === 0)
 
   const handleSubmit = async () => {
@@ -150,12 +136,8 @@ export default function CreateTriggerPage() {
       const spec: Record<string, unknown> =
         triggerType === 'cron'
           ? {
-              cron: cronExpr,
+              cron: cronPreview,
               timezone,
-              repeat: repeatMode,
-              time,
-              weekdays: repeatMode === 'weekly' ? weekdays : undefined,
-              days: repeatMode === 'monthly' ? days : undefined,
             }
           : {
               path_token: pathToken,
@@ -170,7 +152,7 @@ export default function CreateTriggerPage() {
         workflow_template_code: workflowTemplateCode,
         strategy_id: strategyId,
         match_conditions: match,
-        scan_interval_sec: scanInterval,
+        scan_interval_sec: schedule.scanIntervalSec,
       }
       const created = await triggersApi.create(payload)
       message.success('已创建')
@@ -189,9 +171,9 @@ export default function CreateTriggerPage() {
 
   const steps = [
     { title: '基本信息' },
-    { title: triggerType === 'cron' ? 'Cron 调度' : '回调接入' },
-    { title: '目标策略' },
-    { title: '确认' },
+    { title: '启动方式' },
+    { title: '适用素材' },
+    { title: '确认并创建' },
   ]
 
   return (
@@ -204,9 +186,14 @@ export default function CreateTriggerPage() {
           marginBottom: 16,
         }}
       >
-        <div style={{ fontSize: 20, fontWeight: 600 }}>新建触发器</div>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 600 }}>新建自动审核</div>
+          <div style={{ marginTop: 4, color: '#666', fontSize: 13 }}>
+            设置规则后，系统将按时间计划或外部通知自动创建审核任务。
+          </div>
+        </div>
         <Space>
-          <Button onClick={() => navigate('/triggers')}>取消</Button>
+          <Button onClick={() => navigate('/triggers')}>返回列表</Button>
         </Space>
       </div>
 
@@ -220,22 +207,57 @@ export default function CreateTriggerPage() {
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               <div>
                 <div style={{ marginBottom: 4, fontSize: 13 }}>名称 *</div>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：医药-中国-存量扫描" maxLength={128} />
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="例如：医药-中国-存量扫描"
+                  maxLength={128}
+                />
               </div>
               <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>Code * （英数字下划线，创建后不可改）</div>
-                <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="例如：medicine_cn_daily" maxLength={64} />
+                <div style={{ marginBottom: 4, fontSize: 13 }}>
+                  任务编码 *（英数字下划线，创建后不可改）
+                </div>
+                <Input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="例如：medicine_cn_daily"
+                  maxLength={64}
+                />
               </div>
               <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>类型 *</div>
+                <div style={{ marginBottom: 4, fontSize: 13 }}>启动方式 *</div>
                 <Radio.Group value={triggerType} onChange={(e) => setTriggerType(e.target.value)}>
-                  <Radio.Button value="cron">Cron</Radio.Button>
-                  <Radio.Button value="external_callback">外部回调</Radio.Button>
+                  <Radio.Button value="cron">按时间计划</Radio.Button>
+                  <Radio.Button value="external_callback">外部通知触发</Radio.Button>
                 </Radio.Group>
+                <div style={{ marginTop: 8 }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    按时间计划：系统在指定时间自动运行；外部通知触发：当合作方通知"有新内容要审"时立即创建任务。
+                  </Text>
+                </div>
+              </div>
+              <div>
+                <div style={{ marginBottom: 4, fontSize: 13 }}>时间基准</div>
+                <Select
+                  value={timezone}
+                  onChange={setTimezone}
+                  style={{ width: 200 }}
+                  options={[
+                    { value: 'Asia/Shanghai', label: '北京时间' },
+                    { value: 'Asia/Tokyo', label: '东京时间' },
+                    { value: 'Asia/Singapore', label: '新加坡时间' },
+                    { value: 'UTC', label: 'UTC' },
+                  ]}
+                />
               </div>
             </Space>
             <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <Button type="primary" onClick={() => setStep(1)} disabled={!name.trim() || !code.trim()}>
+              <Button
+                type="primary"
+                onClick={() => setStep(1)}
+                disabled={!name.trim() || !code.trim()}
+              >
                 下一步
               </Button>
             </div>
@@ -243,108 +265,13 @@ export default function CreateTriggerPage() {
         )}
 
         {step === 1 && triggerType === 'cron' && (
-          <Card title="Cron 调度">
+          <Card title="按时间计划">
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>重复</div>
-                <Radio.Group value={repeatMode} onChange={(e) => setRepeatMode(e.target.value)}>
-                  <Radio.Button value="daily">每天</Radio.Button>
-                  <Radio.Button value="weekly">每周（多选）</Radio.Button>
-                  <Radio.Button value="monthly">每月（多选）</Radio.Button>
-                  <Radio.Button value="custom">自定义</Radio.Button>
-                </Radio.Group>
-              </div>
-
-              {repeatMode === 'weekly' && (
-                <div>
-                  <div style={{ marginBottom: 4, fontSize: 13 }}>星期</div>
-                  <Checkbox.Group
-                    value={weekdays}
-                    onChange={(v) => setWeekdays(v as number[])}
-                    options={[
-                      { value: 1, label: '周一' },
-                      { value: 2, label: '周二' },
-                      { value: 3, label: '周三' },
-                      { value: 4, label: '周四' },
-                      { value: 5, label: '周五' },
-                      { value: 6, label: '周六' },
-                      { value: 7, label: '周日' },
-                    ]}
-                  />
-                </div>
-              )}
-
-              {repeatMode === 'monthly' && (
-                <div>
-                  <div style={{ marginBottom: 4, fontSize: 13 }}>日期</div>
-                  <Checkbox.Group
-                    value={days}
-                    onChange={(v) => setDays(v as number[])}
-                    options={Array.from({ length: 31 }, (_, i) => ({ value: i + 1, label: `${i + 1} 日` }))}
-                  />
-                </div>
-              )}
-
-              {(repeatMode === 'daily' || repeatMode === 'weekly' || repeatMode === 'monthly') && (
-                <Space>
-                  <div>
-                    <div style={{ marginBottom: 4, fontSize: 13 }}>时间</div>
-                    <Input value={time} onChange={(e) => setTime(e.target.value)} placeholder="HH:MM" style={{ width: 120 }} />
-                  </div>
-                  <div>
-                    <div style={{ marginBottom: 4, fontSize: 13 }}>时区</div>
-                    <Select
-                      value={timezone}
-                      onChange={setTimezone}
-                      style={{ width: 180 }}
-                      options={[
-                        { value: 'Asia/Shanghai', label: 'Asia/Shanghai' },
-                        { value: 'Asia/Tokyo', label: 'Asia/Tokyo' },
-                        { value: 'Asia/Singapore', label: 'Asia/Singapore' },
-                        { value: 'UTC', label: 'UTC' },
-                      ]}
-                    />
-                  </div>
-                </Space>
-              )}
-
-              <Collapse
-                ghost
-                items={[
-                  {
-                    key: 'advanced',
-                    label: '高级模式（自定义 cron 表达式）',
-                    children: (
-                      <Input
-                        value={repeatMode === 'custom' ? customCron : cronExpr}
-                        onChange={(e) => {
-                          setCustomCron(e.target.value)
-                          setRepeatMode('custom')
-                        }}
-                        placeholder="0 9 * * 1,2"
-                      />
-                    ),
-                  },
-                ]}
+              <SchedulePicker
+                value={schedule}
+                onChange={(v) => setSchedule(v)}
+                defaultScanIntervalSec={60}
               />
-
-              <div>
-                <Text type="secondary">预览：</Text>{' '}
-                <Tag color="blue">{cronExpr}</Tag>{' '}
-                <Text type="secondary">时区 {timezone}</Text>
-              </div>
-
-              <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>扫描间隔（秒）</div>
-                <Input
-                  type="number"
-                  min={10}
-                  max={3600}
-                  value={scanInterval}
-                  onChange={(e) => setScanInterval(Number(e.target.value) || 60)}
-                  style={{ width: 120 }}
-                />
-              </div>
             </Space>
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <Space>
@@ -358,24 +285,39 @@ export default function CreateTriggerPage() {
         )}
 
         {step === 1 && triggerType === 'external_callback' && (
-          <Card title="回调接入">
+          <Card title="外部通知触发">
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Alert
+                type="info"
+                showIcon
+                message="合作方通知方式"
+                description="当合作方主动告知'有新内容要审'时，本规则立即创建审核任务。通知地址与校验码由系统生成，请在合作方系统中安全保存。"
+              />
               <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>Endpoint</div>
+                <div style={{ marginBottom: 4, fontSize: 13 }}>通知地址</div>
                 <Input.Group compact>
                   <Input
-                    style={{ width: '70%' }}
+                    style={{ width: 'calc(100% - 80px)' }}
                     value={`POST {APP_BASE_URL}/api/v1/webhooks/callback/${pathToken}`}
                     readOnly
                   />
-                  <Button>复制</Button>
+                  <Button
+                    onClick={() => {
+                      navigator.clipboard?.writeText(
+                        `{APP_BASE_URL}/api/v1/webhooks/callback/${pathToken}`,
+                      )
+                      void message.success('已复制')
+                    }}
+                  >
+                    复制
+                  </Button>
                 </Input.Group>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  path_token 由系统生成 32 字符，不可修改。
+                  系统已生成 32 字符的地址标识，不可修改。
                 </Text>
               </div>
               <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>Secret 别名</div>
+                <div style={{ marginBottom: 4, fontSize: 13 }}>校验码别名</div>
                 <Select
                   value={secretAlias}
                   onChange={setSecretAlias}
@@ -387,20 +329,14 @@ export default function CreateTriggerPage() {
                   ]}
                 />
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  对应环境变量 WEBHOOK_SECRET_&lt;ALIAS&gt;。
+                  对应环境变量 WEBHOOK_SECRET_&lt;别名&gt;。
                 </Text>
               </div>
               <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>签名算法</div>
-                <Text>HMAC-SHA256(secret, X-Timestamp + raw_body)</Text>
-              </div>
-              <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>防重放</div>
-                <Text>X-Timestamp 偏差 &gt; 5 分钟 → 401</Text>
-              </div>
-              <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>IP 白名单</div>
-                <Text>启用（管理页面维护）</Text>
+                <div style={{ marginBottom: 4, fontSize: 13 }}>签名与防重放</div>
+                <Text style={{ fontSize: 13 }}>
+                  HMAC-SHA256(secret, X-Timestamp + body)；X-Timestamp 偏差 ≤ 5 分钟。
+                </Text>
               </div>
             </Space>
             <div style={{ marginTop: 16, textAlign: 'right' }}>
@@ -415,10 +351,36 @@ export default function CreateTriggerPage() {
         )}
 
         {step === 2 && (
-          <Card title="目标策略">
+          <Card title="适用素材">
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Text type="secondary" style={{ fontSize: 13 }}>
+                仅当素材满足以下全部条件时，本规则才会处理它。留空表示不限制。
+              </Text>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  gap: 12,
+                }}
+              >
+                {ROUTING_KEYS.map((k) => (
+                  <div key={k}>
+                    <div style={{ marginBottom: 4, fontSize: 12, color: '#666' }}>{ROUTING_LABEL[k]}</div>
+                    <Select
+                      mode="multiple"
+                      value={match[k]}
+                      onChange={(v) => setMatch({ ...match, [k]: v })}
+                      style={{ width: '100%' }}
+                      allowClear
+                      placeholder="不限"
+                      options={ROUTING_OPTIONS[k]}
+                    />
+                  </div>
+                ))}
+              </div>
+
               <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>工作流模板 *</div>
+                <div style={{ marginBottom: 4, fontSize: 13 }}>工作流模板</div>
                 <Select
                   value={workflowTemplateCode ?? undefined}
                   onChange={setWorkflowTemplateCode}
@@ -429,7 +391,7 @@ export default function CreateTriggerPage() {
                 />
               </div>
               <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>审核策略</div>
+                <div style={{ marginBottom: 4, fontSize: 13 }}>命中策略</div>
                 <Select
                   value={strategyId ?? undefined}
                   onChange={setStrategyId}
@@ -441,38 +403,8 @@ export default function CreateTriggerPage() {
               </div>
 
               <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>匹配条件</div>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  留空表示对所有素材生效。
-                </Text>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                    gap: 12,
-                    marginTop: 12,
-                  }}
-                >
-                  {ROUTING_KEYS.map((k) => (
-                    <div key={k}>
-                      <div style={{ marginBottom: 4, fontSize: 12, color: '#666' }}>{ROUTING_LABEL[k]}</div>
-                      <Select
-                        mode="multiple"
-                        value={match[k]}
-                        onChange={(v) => setMatch({ ...match, [k]: v })}
-                        style={{ width: '100%' }}
-                        allowClear
-                        placeholder="不限"
-                        options={ROUTING_OPTIONS[k]}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
                 <Checkbox checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)}>
-                  启用
+                  启动后立即生效
                 </Checkbox>
               </div>
             </Space>
@@ -488,41 +420,60 @@ export default function CreateTriggerPage() {
         )}
 
         {step === 3 && (
-          <Card title="确认">
+          <Card title="确认并创建">
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              <div><Text type="secondary">名称：</Text>{name}</div>
-              <div><Text type="secondary">Code：</Text>{code}</div>
-              <div><Text type="secondary">类型：</Text>{triggerType === 'cron' ? 'Cron' : '外部回调'}</div>
+              <DescriptionRow label="名称" value={name} />
+              <DescriptionRow label="任务编码" value={code} />
+              <DescriptionRow label="启动方式" value={triggerType === 'cron' ? '按时间计划' : '外部通知触发'} />
+              {triggerType === 'cron' ? (
+                <>
+                  <DescriptionRow label="启动时间" value={cronHuman} />
+                  <DescriptionRow label="时间基准" value={timezone === 'Asia/Shanghai' ? '北京时间' : timezone} />
+                </>
+              ) : (
+                <DescriptionRow label="通知地址" value={`.../webhooks/callback/${pathToken.slice(0, 8)}…`} />
+              )}
+              <DescriptionRow label="工作流模板" value={workflowTemplateCode ?? '-'} />
+              <DescriptionRow
+                label="命中策略"
+                value={
+                  strategyId
+                    ? strategies.find((s) => s.id === strategyId)?.name ?? '-'
+                    : '使用工作流默认策略'
+                }
+              />
               <div>
-                <Text type="secondary">调度 / 路径：</Text>
-                {triggerType === 'cron' ? `${cronExpr} (${timezone})` : `…/${pathToken.slice(0, 8)}…`}
-              </div>
-              <div><Text type="secondary">工作流模板：</Text>{workflowTemplateCode ?? '-'}</div>
-              <div>
-                <Text type="secondary">审核策略：</Text>
-                {strategyId ? strategies.find((s) => s.id === strategyId)?.name ?? '-' : '-'}
-              </div>
-              <div>
-                <Text type="secondary">匹配条件：</Text>
+                <Text type="secondary" style={{ marginRight: 8 }}>
+                  适用素材：
+                </Text>
                 {matchAllEmpty
-                  ? <Tag>所有素材</Tag>
+                  ? <Tag>全部素材</Tag>
                   : ROUTING_KEYS.filter((k) => match[k].length > 0).map((k) => (
                       <Tag key={k}>{ROUTING_LABEL[k]}={match[k].join(' / ')}</Tag>
                     ))}
               </div>
-              <div><Text type="secondary">状态：</Text>{isEnabled ? '启用' : '禁用'}</div>
+              <DescriptionRow label="状态" value={isEnabled ? '已开启' : '已关闭'} />
             </Space>
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <Space>
                 <Button onClick={() => setStep(2)}>上一步</Button>
                 <Button type="primary" loading={submitting} onClick={handleSubmit}>
-                  保存并启用
+                  创建
                 </Button>
               </Space>
             </div>
           </Card>
         )}
       </div>
+    </div>
+  )
+}
+
+function DescriptionRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <Text type="secondary">{label}：</Text>
+      <span>{value}</span>
     </div>
   )
 }

@@ -119,21 +119,3 @@ class TriggerRun(Base):
         Index("ix_trigger_runs_trigger", "trigger_id", "started_at"),
         Index("ix_trigger_runs_started", "started_at"),
     )
-
-
-class WebhookIpAllowlist(Base):
-    __tablename__ = "webhook_ip_allowlist"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    cidr: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_by: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-
-    __table_args__ = (Index("ix_webhook_allowlist_enabled", "is_enabled"),)

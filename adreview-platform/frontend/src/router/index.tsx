@@ -51,7 +51,6 @@ const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 const TriggersListPage = lazy(() => import('@/pages/triggers/TriggersListPage'))
 const CreateTriggerPage = lazy(() => import('@/pages/triggers/CreateTriggerPage'))
 const TriggerDetailPage = lazy(() => import('@/pages/triggers/TriggerDetailPage'))
-const WebhookAllowlistPage = lazy(() => import('@/pages/settings/WebhookAllowlistPage'))
 const FeatureDisabledPage = lazy(() => import('@/pages/FeatureDisabledPage'))
 
 function Fallback() {
@@ -185,7 +184,6 @@ export default function AppRoutes() {
               <Route path="/triggers" element={<TriggersListPage />} />
               <Route path="/triggers/new" element={<CreateTriggerPage />} />
               <Route path="/triggers/:id" element={<TriggerDetailPage />} />
-              <Route path="/settings/webhook-allowlist" element={<WebhookAllowlistPage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['admin', 'mlr']} />}>

@@ -1,4 +1,4 @@
-"""add triggers + trigger_runs + webhook_ip_allowlist
+"""add triggers + trigger_runs
 
 Triggers define *when* and *what strategy* to apply for review tasks.
 A trigger can be time-driven (cron) or external-callback driven. Each
@@ -8,9 +8,6 @@ keys (material_type / business_line / country / channel / content_category).
 
 Trigger runs record execution history with counts and status. They
 cascade-delete with their parent trigger.
-
-Webhook IP allowlist is a separate table, admin-managed, that gates the
-external-callback ingress. Empty list = reject-all (fail-closed).
 
 Revision ID: 20260710_add_triggers
 Revises: 20260709_add_task_cancellation
@@ -97,28 +94,8 @@ def upgrade() -> None:
     op.create_index("ix_trigger_runs_trigger", "trigger_runs", ["trigger_id", "started_at"])
     op.create_index("ix_trigger_runs_started", "trigger_runs", ["started_at"])
 
-    # ── webhook_ip_allowlist ───────────────────────────────────
-    op.create_table(
-        "webhook_ip_allowlist",
-        sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("cidr", sa.String(64), unique=True, nullable=False),
-        sa.Column("label", sa.String(128), nullable=True),
-        sa.Column("note", sa.Text, nullable=True),
-        sa.Column("is_enabled", sa.Boolean, nullable=False, server_default=sa.true()),
-        sa.Column(
-            "created_by",
-            sa.Integer,
-            sa.ForeignKey("users.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-    )
-    op.create_index("ix_webhook_allowlist_enabled", "webhook_ip_allowlist", ["is_enabled"])
-
 
 def downgrade() -> None:
-    op.drop_index("ix_webhook_allowlist_enabled", table_name="webhook_ip_allowlist")
-    op.drop_table("webhook_ip_allowlist")
     op.drop_index("ix_trigger_runs_started", table_name="trigger_runs")
     op.drop_index("ix_trigger_runs_trigger", table_name="trigger_runs")
     op.drop_table("trigger_runs")

@@ -21,7 +21,6 @@ from app.api.v1 import (
     tags,
     triggers,
     users,
-    webhook_allowlist,
     webhooks,
     workflows,
 )
@@ -46,6 +45,5 @@ api_router.include_router(material_packages.router)
 api_router.include_router(tags.router)
 api_router.include_router(query.router)
 api_router.include_router(triggers.router)
-api_router.include_router(webhook_allowlist.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(health.router)

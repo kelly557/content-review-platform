@@ -92,32 +92,3 @@ export const triggersApi = {
       .then((r) => r.data)
   },
 }
-
-// ── Webhook IP Allowlist ─────────────────────────────────────
-export interface WebhookAllowlistEntry {
-  id: number
-  cidr: string
-  label: string | null
-  note: string | null
-  is_enabled: boolean
-  created_by: number | null
-  created_at: string
-}
-
-export const webhookAllowlistApi = {
-  list(params?: { page?: number; size?: number }) {
-    return api.get<Page<WebhookAllowlistEntry>>('/webhook-allowlist', { params }).then((r) => r.data)
-  },
-  create(payload: { cidr: string; label?: string; note?: string; is_enabled?: boolean }) {
-    return api.post<WebhookAllowlistEntry>('/webhook-allowlist', payload).then((r) => r.data)
-  },
-  update(
-    id: number,
-    payload: { cidr?: string; label?: string; note?: string; is_enabled?: boolean },
-  ) {
-    return api.put<WebhookAllowlistEntry>(`/webhook-allowlist/${id}`, payload).then((r) => r.data)
-  },
-  remove(id: number) {
-    return api.delete(`/webhook-allowlist/${id}`).then(() => null)
-  },
-}

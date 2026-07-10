@@ -29,4 +29,4 @@ from app.models.tag import (  # noqa: F401
     TagStatus,
 )
 from app.models.alert_event import AlertEvent  # noqa: F401
-from app.models.trigger import Trigger, TriggerRun, TriggerType, TriggerRunSource, TriggerRunStatus, WebhookIpAllowlist  # noqa: F401
+from app.models.trigger import Trigger, TriggerRun, TriggerType, TriggerRunSource, TriggerRunStatus  # noqa: F401

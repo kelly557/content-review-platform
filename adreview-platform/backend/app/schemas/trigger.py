@@ -1,4 +1,4 @@
-"""Pydantic schemas for triggers, trigger runs, and webhook allowlist."""
+"""Pydantic schemas for triggers and trigger runs."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -106,28 +106,3 @@ class TriggerRunOut(ORMBase):
 class TriggerRunListOut(BaseModel):
     items: List[TriggerRunOut]
     total: int
-
-
-# ── Webhook IP Allowlist ──────────────────────────────────────
-class WebhookAllowlistCreate(BaseModel):
-    cidr: str = Field(min_length=1, max_length=64)
-    label: Optional[str] = Field(default=None, max_length=128)
-    note: Optional[str] = None
-    is_enabled: bool = True
-
-
-class WebhookAllowlistUpdate(BaseModel):
-    cidr: Optional[str] = Field(default=None, min_length=1, max_length=64)
-    label: Optional[str] = Field(default=None, max_length=128)
-    note: Optional[str] = None
-    is_enabled: Optional[bool] = None
-
-
-class WebhookAllowlistOut(ORMBase):
-    id: int
-    cidr: str
-    label: Optional[str]
-    note: Optional[str]
-    is_enabled: bool
-    created_by: Optional[int]
-    created_at: datetime

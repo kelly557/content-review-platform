@@ -16,7 +16,6 @@ import {
   DatabaseOutlined,
   SearchOutlined,
   ThunderboltOutlined,
-  SafetyOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
@@ -68,7 +67,7 @@ const NAV_SECTIONS: Array<{
     items: [
       { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
       { kind: 'leaf', key: 'tasks', path: '/tasks', label: '审核任务', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
-      { kind: 'leaf', key: 'triggers', path: '/triggers', label: '触发器', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
+      { kind: 'leaf', key: 'triggers', path: '/triggers', label: '自动审核', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
       { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
     ],
   },
@@ -132,7 +131,6 @@ const NAV_SECTIONS: Array<{
         ],
       },
       { kind: 'leaf', key: 'admin-tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
-      { kind: 'leaf', key: 'admin-webhook-allowlist', path: '/settings/webhook-allowlist', label: 'Webhook 白名单', icon: <SafetyOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
     ],
   },
 ]

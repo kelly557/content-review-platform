@@ -1,10 +1,9 @@
 """Inbound webhook endpoint for external review model callbacks.
 
 Validates (in order):
-  1. IP allowlist (fail-closed).
-  2. HMAC-SHA256 signature over (X-Timestamp + raw_body) using the
+  1. HMAC-SHA256 signature over (X-Timestamp + raw_body) using the
      trigger's secret_alias (resolved from env vars).
-  3. X-Timestamp within 5 minutes of server clock (replay protection).
+  2. X-Timestamp within 5 minutes of server clock (replay protection).
 """
 from __future__ import annotations
 
@@ -20,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.trigger import Trigger, TriggerType
-from app.services import ip_allowlist
 from app.services.trigger_engine import handle_callback
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -59,16 +57,9 @@ async def webhook_callback(
     x_timestamp: str | None = Header(default=None, alias="X-Timestamp"),
 ):
     """External model callback endpoint."""
-    # 1. IP allowlist
-    client_ip = request.client.host if request.client else None
-    if not ip_allowlist.is_allowed(client_ip):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="IP not in allowlist"
-        )
-
     raw_body = await request.body()
 
-    # 2. Lookup trigger
+    # 1. Lookup trigger
     db_gen = get_db()
     db: AsyncSession = await db_gen.__anext__()
     try:
@@ -89,13 +80,13 @@ async def webhook_callback(
                 status_code=status.HTTP_409_CONFLICT, detail="trigger is disabled"
             )
 
-        # 3. Replay protection
+        # 2. Replay protection
         if not x_timestamp or not _verify_timestamp(x_timestamp):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired timestamp"
             )
 
-        # 4. Signature
+        # 3. Signature
         secret_alias = (trigger.spec or {}).get("secret_alias") or "primary"
         secret = _resolve_secret(secret_alias)
         if not secret:
@@ -108,7 +99,7 @@ async def webhook_callback(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature"
             )
 
-        # 5. Parse + dispatch
+        # 4. Parse + dispatch
         try:
             payload = json.loads(raw_body.decode())
         except Exception as exc:
