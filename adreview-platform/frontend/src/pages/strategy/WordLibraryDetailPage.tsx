@@ -7,6 +7,8 @@ import {
   Popconfirm,
   Space,
   Table,
+  Tag,
+  Tooltip,
   Typography,
   App,
   type TableColumnsType,
@@ -16,12 +18,15 @@ import {
   ArrowLeftOutlined,
   ReloadOutlined,
   DeleteOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons'
 import { Link, useParams } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { librariesApi } from '@/api/libraries'
 import type { Library, LibraryItem } from '@/types/domain'
 import EditWordDrawer from '@/components/library/EditWordDrawer'
+import EditLibraryEffectiveModal from '@/components/library/EditLibraryEffectiveModal'
+import { deriveEffectiveMeta } from '@/lib/libraryEffective'
 
 const { Title, Text } = Typography
 
@@ -41,6 +46,19 @@ export default function WordLibraryDetailPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
 
   const [addOpen, setAddOpen] = useState(false)
+  const [editEffOpen, setEditEffOpen] = useState(false)
+
+  const effectiveMeta = deriveEffectiveMeta(
+    library?.is_active ?? false,
+    library?.effective_from ?? null,
+    library?.effective_until ?? null,
+  )
+
+  function effectiveTooltip(lib: Library): string {
+    if (lib.library_type === 'reply') return '代答库不支持有效时间'
+    if (!lib.effective_from && !lib.effective_until) return '永久：一直生效'
+    return `到期后审核默认不生效`
+  }
 
   const fetchLibrary = async () => {
     if (libraryId == null) return
@@ -162,7 +180,7 @@ export default function WordLibraryDetailPage() {
   return (
     <div style={{ width: '100%' }}>
       <Space style={{ marginBottom: 12 }}>
-        <Link to="/strategies/words" style={{ color: '#0369A1' }}>
+        <Link to="/knowledge/words" style={{ color: '#0369A1' }}>
           <Space size={4} align="center">
             <ArrowLeftOutlined />
             词库
@@ -180,9 +198,38 @@ export default function WordLibraryDetailPage() {
           gap: 12,
         }}
       >
-        <Title level={3} style={{ margin: 0 }}>
-          {library?.name ?? '加载中…'}
-        </Title>
+        <Space size={12} align="center" wrap>
+          <Title level={3} style={{ margin: 0 }}>
+            {library?.name ?? '加载中…'}
+          </Title>
+          {library?.kind && (
+            <Tag color={library.kind === '黑名单' ? 'red' : 'green'}>
+              {library.kind}
+            </Tag>
+          )}
+          {library && (
+            <>
+              <Tooltip title={effectiveTooltip(library)}>
+                <Tag color={effectiveMeta.color}>{effectiveMeta.status}</Tag>
+              </Tooltip>
+              {effectiveMeta.rangeText && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {effectiveMeta.rangeText}
+                </Text>
+              )}
+            </>
+          )}
+          {library && !library.is_active && <Tag>已停用</Tag>}
+          <Button
+            type="link"
+            size="small"
+            icon={<ClockCircleOutlined />}
+            onClick={() => setEditEffOpen(true)}
+            disabled={!library}
+          >
+            编辑有效期
+          </Button>
+        </Space>
       </div>
 
       <div
@@ -273,6 +320,12 @@ export default function WordLibraryDetailPage() {
           void fetchItems(keyword)
           void fetchLibrary()
         }}
+      />
+      <EditLibraryEffectiveModal
+        open={editEffOpen}
+        library={library}
+        onClose={() => setEditEffOpen(false)}
+        onSuccess={(updated) => setLibrary(updated)}
       />
     </div>
   )

@@ -557,6 +557,11 @@ export interface StrategyPointRef {
   item_id: number
   point_id: number
   is_enabled: boolean
+  /** 策略级 override（中/高风险分），范围 50~100 */
+  medium_threshold?: number
+  high_threshold?: number
+  /** 策略级 override 关联自定义库 ID 列表 */
+  linked_library_ids?: number[]
 }
 
 export interface StrategyEnabledPointsMeta {
@@ -775,42 +780,34 @@ export const WORD_ACTION_OPTIONS: { value: WordSetAction; label: string }[] = [
 
 export type LibraryType = 'word' | 'image' | 'reply'
 
-export interface LibraryGroup {
-  id: number
-  name: string
-  description: string | null
-  sort_order: number
-  is_deleted: boolean
-  deleted_at: string | null
-  created_at: string
-  updated_at: string | null
-}
+/** 词库/图片库的匹配语义。代答库不暴露此字段（其条目本身就是命中即触发的规则）。 */
+export type LibraryKind = '黑名单' | '白名单'
 
-export interface LibraryGroupCreate {
-  name: string
-  description?: string
-  sort_order?: number
-}
+export const LIBRARY_KIND_OPTIONS: { value: LibraryKind; label: string; color: string }[] = [
+  { value: '黑名单', label: '黑名单', color: 'red' },
+  { value: '白名单', label: '白名单', color: 'green' },
+]
 
-export interface LibraryGroupUpdate {
-  name?: string
-  description?: string
-  sort_order?: number
-}
+export type LibraryEffectiveStatus = '已停用' | '未生效' | '生效中' | '已过期' | '永久'
 
 export interface Library {
   id: number
   code: string
   name: string
   library_type: LibraryType
-  group_id: number
-  group_name: string | null
+  /** 仅 word / image 库返回；reply 库为 null */
+  kind: LibraryKind | null
   description: string | null
   is_active: boolean
   is_deleted: boolean
   deleted_at: string | null
   item_count: number
   ignored_services: string[]
+  /** 有效时间区间（UTC，ISO8601）。两者皆空表示永久。 */
+  effective_from: string | null
+  effective_until: string | null
+  /** 派生：当前是否生效（停用 / 过期 / 未到 都视为不生效） */
+  is_effective: boolean
   created_at: string
   updated_at: string | null
 }
@@ -820,12 +817,14 @@ export interface LibraryListItem {
   code: string
   name: string
   library_type: LibraryType
-  group_id: number
-  group_name: string | null
+  kind: LibraryKind | null
   description: string | null
   is_active: boolean
   is_deleted: boolean
   item_count: number
+  effective_from: string | null
+  effective_until: string | null
+  is_effective: boolean
   created_at: string
   updated_at: string | null
 }
@@ -834,17 +833,23 @@ export interface LibraryCreate {
   code?: string
   name: string
   library_type: LibraryType
-  group_id: number
+  /** word / image 必填；reply 不传 */
+  kind?: LibraryKind | null
   description?: string
   words?: string[]
+  /** 有效时间（UTC ISO8601）。不传或为 null 表示永久。 */
+  effective_from?: string | null
+  effective_until?: string | null
 }
 
 export interface LibraryUpdate {
   name?: string
-  group_id?: number
+  kind?: LibraryKind
   description?: string
   is_active?: boolean
   ignored_services?: string[]
+  effective_from?: string | null
+  effective_until?: string | null
 }
 
 export interface LibraryDeletePayload {
@@ -1109,6 +1114,7 @@ export interface AuditItem {
   description: string | null
   sort_order: number
   is_enabled: boolean
+  is_builtin: boolean
   point_count: number
   created_at: string
   updated_at: string | null
@@ -1155,6 +1161,7 @@ export interface AuditPoint {
   scope_text: string | null
   risk_level: AuditPointRisk
   is_enabled: boolean
+  is_builtin: boolean
   custom_wordset_id: number | null
   custom_library_id?: number | null
   custom_reply_library_id?: number | null
@@ -1208,20 +1215,19 @@ export interface AuditPointBatchResult {
   items: AuditPointBatchItem[]
 }
 
-export type LibraryKind = 'word' | 'image' | 'reply'
+export type LibraryKindOfType = 'word' | 'image' | 'reply'
 
 export interface LibraryBatchItemPayload {
   code: string
   name: string
-  library_type: LibraryKind
-  group_id?: number | null
+  library_type: LibraryType
+  kind?: LibraryKind | null
   description?: string | null
   is_active?: boolean
   words?: string[]
 }
 
 export interface LibraryBatchCreateRequest {
-  group_id?: number | null
   libraries: LibraryBatchItemPayload[]
 }
 
@@ -1254,166 +1260,8 @@ export interface SuggestResponse {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Knowledge Base (知识库)
-// ──────────────────────────────────────────────────────────────────────────────
-
-export type KnowledgeScope =
-  | '法律法规'
-  | '行政规定'
-  | '行业规范'
-  | '内部政策'
-
-export const KNOWLEDGE_SCOPE_OPTIONS: { value: KnowledgeScope; label: string }[] = [
-  { value: '法律法规', label: '法律法规' },
-  { value: '行政规定', label: '行政规定' },
-  { value: '行业规范', label: '行业规范' },
-  { value: '内部政策', label: '内部政策' },
-]
-
-export type KnowledgeDocumentStatus =
-  | 'draft'
-  | 'extracting'
-  | 'review'
-  | 'imported'
-  | 'failed'
-
-export const KNOWLEDGE_STATUS_OPTIONS: {
-  value: KnowledgeDocumentStatus
-  label: string
-  color: string
-}[] = [
-  { value: 'draft', label: '草稿', color: 'default' },
-  { value: 'extracting', label: '抽取中', color: 'processing' },
-  { value: 'review', label: '待审', color: 'warning' },
-  { value: 'imported', label: '已导入', color: 'success' },
-  { value: 'failed', label: '失败', color: 'error' },
-]
-
-export interface KnowledgeDocumentSummary {
-  id: string
-  title: string
-  original_filename: string
-  mime_type: string
-  file_size: number
-  domain: TagDomain
-  scope: KnowledgeScope
-  tag_ids: string[]
-  status: KnowledgeDocumentStatus
-  created_at: string
-  updated_at: string | null
-}
-
-export interface KnowledgeDocumentListResponse {
-  items: KnowledgeDocumentSummary[]
-  total: number
-  page: number
-  size: number
-}
-
-export interface KnowledgeExtractionSummary {
-  id: string
-  document_id: string
-  round_no: number
-  model: string | null
-  prompt_tokens: number
-  completion_tokens: number
-  status: string
-  error_message: string | null
-  chunk_count: number
-  created_at: string
-}
-
-export interface KnowledgeDocumentDetail {
-  id: string
-  title: string
-  original_filename: string
-  mime_type: string
-  file_size: number
-  domain: TagDomain
-  scope: KnowledgeScope
-  tag_ids: string[]
-  target_service_code: string | null
-  status: KnowledgeDocumentStatus
-  error_message: string | null
-  created_by_id: number | null
-  created_at: string
-  updated_at: string | null
-  extractions: KnowledgeExtractionSummary[]
-}
-
-export interface KnowledgeJudgmentLogic {
-  type: 'keyword_match' | 'regex' | 'semantic' | 'threshold'
-  expr: string
-  params: Record<string, unknown>
-}
-
-export interface KnowledgeExtractionPoint {
-  id: string
-  extraction_id: string
-  item_draft_id: string
-  code: string
-  label: string
-  label_cn: string
-  description: string | null
-  judgment_logic: KnowledgeJudgmentLogic
-  judgment_rule: string | null
-  judgment_basis: string | null
-  risk_level: AuditPointRisk
-  medium_threshold: number
-  high_threshold: number
-  scope_text: string | null
-  selected: boolean
-  imported_point_id: number | null
-  created_at: string
-}
-
-export interface KnowledgeExtractionItem {
-  id: string
-  extraction_id: string
-  code: string
-  name_cn: string
-  aliases: string[]
-  description: string | null
-  sort_order: number
-  selected: boolean
-  imported_item_id: number | null
-  points: KnowledgeExtractionPoint[]
-  created_at: string
-}
-
-export interface KnowledgeExtraction {
-  id: string
-  document_id: string
-  round_no: number
-  model: string | null
-  prompt_tokens: number
-  completion_tokens: number
-  raw_response: string | null
-  status: string
-  error_message: string | null
-  chunk_count: number
-  created_at: string
-  items: KnowledgeExtractionItem[]
-}
-
-export interface KnowledgeImportRequest {
-  item_ids?: string[]
-  point_overrides?: Record<string, boolean>
-  target_service_code?: string
-  enable_imported?: boolean
-}
-
-export interface KnowledgeImportResult {
-  document_id: string
-  extraction_id: string
-  service_code: string
-  imported_items: number
-  imported_points: number
-  item_id_map: Record<string, number>
-  point_id_map: Record<string, number>
-}
-
 // Stubs for in-progress WIP (HumanReviewSettings / Desensitization / Reply Library) — to be consolidated.
+// ──────────────────────────────────────────────────────────────────────────────
 
 export type StrategyRiskLevel = '低风险' | '中风险' | '高风险' | '无风险' | '敏感'
 

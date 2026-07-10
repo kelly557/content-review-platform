@@ -1,20 +1,23 @@
 """Library CRUD + items.
 
-Unified endpoint for both word and image libraries. The single type field
+Unified endpoint for word, image, and reply libraries. The single type field
 selects behavior:
 
-- GET /libraries?type=word|image
-- POST /libraries  body.library_type + group_id
-- POST /libraries/{id}/items  (word: JSON; image: multipart)
+- GET /libraries?type=word|image|reply[&kind=黑名单|白名单]
+- POST /libraries  body.library_type (+body.kind for word/image)
+- POST /libraries/{id}/items  (word: JSON; reply: JSON; image: multipart upload)
 - DELETE /libraries/{id}  body.transfer_to_library_id / body.force
 
-Soft-delete always; the legacy word_sets / image_sets tables remain
-write-through via app/api/v1/wordsets.py and app/api/v1/imagesets.py.
+Word and image libraries require a LibraryKind ('黑名单' / '白名单').
+Reply libraries have no kind (every trigger-reply pair is implicitly a
+hit-on-trigger rule).
+
+Soft-delete always.
 """
 from __future__ import annotations
 
 import re as _re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import (
@@ -34,8 +37,7 @@ from app.core.deps import get_current_user, require_roles
 
 from app.db.session import get_db
 from app.models.audit_point import AuditPoint
-from app.models.library import Library, LibraryType
-from app.models.library_group import LibraryGroup
+from app.models.library import Library, LibraryKind, LibraryType
 from app.models.library_item import LibraryItem
 from app.models.library_item_reference import LibraryItemReference
 from app.models.user import User
@@ -44,6 +46,7 @@ from app.schemas.library import (
     AuditPointRef,
     IgnoreToggleRequest,
     IgnoreToggleResponse,
+    is_effectively_active,
     LibraryBatchCreateError,
     LibraryBatchCreateRequest,
     LibraryBatchCreateResult,
@@ -51,7 +54,7 @@ from app.schemas.library import (
     LibraryCreate,
     LibraryDeletePayload,
     LibraryDeleteResponse,
-LibraryImageUploadResponse,
+    LibraryImageUploadResponse,
     LibraryItemUploadResponse,
     LibraryItemBatchDelete,
     LibraryItemBatchDeleteResponse,
@@ -143,61 +146,70 @@ async def _next_code(db: AsyncSession, prefix: str) -> str:
     return f"{prefix}{n}"
 
 
-def _enrich_group_name(lib: Library, group_name_map: dict[int, str]) -> None:
-    lib.group_name = group_name_map.get(lib.group_id)
-
-
-async def _group_name_map(db: AsyncSession, group_ids: List[int]) -> dict[int, str]:
-    if not group_ids:
-        return {}
-    rows = await db.execute(
-        select(LibraryGroup.id, LibraryGroup.name).where(
-            LibraryGroup.id.in_(group_ids)
-        )
-    )
-    return {i: n for i, n in rows.all()}
-
-
-def _to_out(lib: Library, item_count: int, group_name: Optional[str]) -> LibraryOut:
+def _to_out(lib: Library, item_count: int) -> LibraryOut:
     return LibraryOut.model_validate(
         {
             "id": lib.id,
             "code": lib.code,
             "name": lib.name,
             "library_type": lib.library_type,
-            "group_id": lib.group_id,
-            "group_name": group_name,
+            "kind": lib.kind,
             "description": lib.description,
             "is_active": lib.is_active,
             "is_deleted": lib.is_deleted,
             "deleted_at": lib.deleted_at,
             "item_count": item_count,
             "ignored_services": list(lib.ignored_services or []),
+            "effective_from": lib.effective_from,
+            "effective_until": lib.effective_until,
+            "is_effective": is_effectively_active(
+                lib.is_active, lib.effective_from, lib.effective_until
+            ),
             "created_at": lib.created_at,
             "updated_at": lib.updated_at,
         }
     )
 
 
-def _to_list(
-    lib: Library, item_count: int, group_name: Optional[str]
-) -> LibraryListItem:
+def _to_list(lib: Library, item_count: int) -> LibraryListItem:
     return LibraryListItem.model_validate(
         {
             "id": lib.id,
             "code": lib.code,
             "name": lib.name,
             "library_type": lib.library_type,
-            "group_id": lib.group_id,
-            "group_name": group_name,
+            "kind": lib.kind,
             "description": lib.description,
             "is_active": lib.is_active,
             "is_deleted": lib.is_deleted,
             "item_count": item_count,
+            "effective_from": lib.effective_from,
+            "effective_until": lib.effective_until,
+            "is_effective": is_effectively_active(
+                lib.is_active, lib.effective_from, lib.effective_until
+            ),
             "created_at": lib.created_at,
             "updated_at": lib.updated_at,
         }
     )
+
+
+def _resolve_kind_for_type(
+    library_type: LibraryType, kind: Optional[LibraryKind]
+) -> Optional[LibraryKind]:
+    """代答库强制 kind=None；词库/图片库必传。"""
+    if library_type in (LibraryType.WORD, LibraryType.IMAGE):
+        if kind is None:
+            raise HTTPException(
+                status_code=400,
+                detail="词库/图片库必须指定类型（黑名单 或 白名单）",
+            )
+        return kind
+    if kind is not None:
+        raise HTTPException(
+            status_code=400, detail="代答库不需要类型"
+        )
+    return None
 
 
 async def _counts_for_libraries(
@@ -228,10 +240,14 @@ async def list_libraries(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     type: Optional[LibraryType] = Query(None),
-    group_id: Optional[int] = Query(None),
+    kind: Optional[LibraryKind] = Query(None),
     q: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
     include_deleted: bool = Query(False),
+    effective_only: bool = Query(
+        False,
+        description="仅返回当前生效的库（is_active=true 且 在有效时间区间内）",
+    ),
 ) -> Page[LibraryListItem]:
     stmt = select(Library)
     conds = []
@@ -239,13 +255,28 @@ async def list_libraries(
         conds.append(Library.is_deleted == False)  # noqa: E712
     if type is not None:
         conds.append(Library.library_type == type)
-    if group_id is not None:
-        conds.append(Library.group_id == group_id)
+    if kind is not None:
+        conds.append(Library.kind == kind)
     if is_active is not None:
         conds.append(Library.is_active == is_active)
     if q:
         conds.append(
             or_(Library.name.ilike(f"%{q}%"), Library.code.ilike(f"%{q}%"))
+        )
+    if effective_only:
+        now = datetime.now(timezone.utc)
+        conds.append(Library.is_active == True)  # noqa: E712
+        conds.append(
+            or_(
+                Library.effective_from.is_(None),
+                Library.effective_from <= now,
+            )
+        )
+        conds.append(
+            or_(
+                Library.effective_until.is_(None),
+                Library.effective_until > now,
+            )
         )
     if conds:
         stmt = stmt.where(and_(*conds))
@@ -254,8 +285,7 @@ async def list_libraries(
     stmt = stmt.order_by(Library.id.desc()).offset((page - 1) * size).limit(size)
     libs = list((await db.execute(stmt)).scalars())
     counts = await _counts_for_libraries(db, [l.id for l in libs])
-    group_names = await _group_name_map(db, [l.group_id for l in libs])
-    items = [_to_list(l, counts.get(l.id, 0), group_names.get(l.group_id)) for l in libs]
+    items = [_to_list(l, counts.get(l.id, 0)) for l in libs]
     return Page(items=items, total=total, page=page, size=size)
 
 
@@ -269,8 +299,7 @@ async def get_library(
     if not lib:
         raise HTTPException(status_code=404, detail="库不存在")
     counts = await _counts_for_libraries(db, [lib.id])
-    group_names = await _group_name_map(db, [lib.group_id])
-    return _to_out(lib, counts.get(lib.id, 0), group_names.get(lib.group_id))
+    return _to_out(lib, counts.get(lib.id, 0))
 
 
 @router.get("/{library_id}/references", response_model=List[AuditPointRef])
@@ -295,9 +324,7 @@ async def create_library(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> LibraryOut:
-    grp = await db.get(LibraryGroup, body.group_id)
-    if not grp or grp.is_deleted:
-        raise HTTPException(status_code=400, detail="分组不存在或已删除")
+    kind = _resolve_kind_for_type(body.library_type, body.kind)
 
     if body.code:
         ok = (
@@ -328,10 +355,12 @@ async def create_library(
         code=code,
         name=body.name.strip(),
         library_type=body.library_type,
-        group_id=body.group_id,
+        kind=kind,
         description=body.description,
         is_active=True,
         ignored_services=[],
+        effective_from=body.effective_from,
+        effective_until=body.effective_until,
     )
     db.add(lib)
     await db.flush()
@@ -363,9 +392,8 @@ async def create_library(
 
     await db.refresh(lib)
     counts = await _counts_for_libraries(db, [lib.id])
-    group_names = await _group_name_map(db, [lib.group_id])
     await db.commit()
-    return _to_out(lib, counts.get(lib.id, 0), group_names.get(lib.group_id))
+    return _to_out(lib, counts.get(lib.id, 0))
 
 
 @router.post(
@@ -385,20 +413,9 @@ async def batch_create_libraries(
     created: List[LibraryOut] = []
     errors: List[LibraryBatchCreateError] = []
 
-    default_group_id = body.group_id
-    if default_group_id is not None:
-        grp = await db.get(LibraryGroup, default_group_id)
-        if not grp or grp.is_deleted:
-            default_group_id = None
-
     for idx, item in enumerate(body.libraries):
         try:
-            gid = item.group_id if item.group_id is not None else default_group_id
-            if gid is None:
-                raise ValueError("group_id 必填")
-            grp = await db.get(LibraryGroup, gid)
-            if not grp or grp.is_deleted:
-                raise ValueError("分组不存在或已删除")
+            kind = _resolve_kind_for_type(item.library_type, item.kind)
 
             code = item.code.strip()
             if not code:
@@ -416,10 +433,12 @@ async def batch_create_libraries(
                 code=code,
                 name=item.name.strip(),
                 library_type=item.library_type,
-                group_id=gid,
+                kind=kind,
                 description=item.description,
                 is_active=item.is_active,
                 ignored_services=[],
+                effective_from=item.effective_from,
+                effective_until=item.effective_until,
             )
             db.add(lib)
             await db.flush()
@@ -449,15 +468,8 @@ async def batch_create_libraries(
 
             await db.refresh(lib)
             counts = await _counts_for_libraries(db, [lib.id])
-            group_names = await _group_name_map(db, [lib.group_id])
             await db.commit()
-            created.append(
-                _to_out(
-                    lib,
-                    counts.get(lib.id, 0),
-                    group_names.get(lib.group_id),
-                )
-            )
+            created.append(_to_out(lib, counts.get(lib.id, 0)))
         except Exception as e:  # noqa: BLE001
             await db.rollback()
             errors.append(
@@ -488,23 +500,37 @@ async def update_library(
         raise HTTPException(status_code=404, detail="库不存在")
     if body.name is not None:
         lib.name = body.name.strip()
-    if body.group_id is not None:
-        grp = await db.get(LibraryGroup, body.group_id)
-        if not grp or grp.is_deleted:
-            raise HTTPException(status_code=400, detail="目标分组不存在或已删除")
-        lib.group_id = body.group_id
     if body.description is not None:
         lib.description = body.description
     if body.is_active is not None:
         lib.is_active = body.is_active
     if body.ignored_services is not None:
         lib.ignored_services = list(body.ignored_services)
+    if body.kind is not None:
+        # 代答库禁止改 kind
+        if lib.library_type == LibraryType.REPLY:
+            raise HTTPException(
+                status_code=400, detail="代答库不支持修改类型"
+            )
+        lib.kind = body.kind
+    # 显式字段：只有当客户端真的把 effective_from/until 放进 body 时才生效（区分"不传"与"传null=清空"）
+    sent = body.model_fields_set if hasattr(body, "model_fields_set") else set()
+    if lib.library_type == LibraryType.REPLY:
+        if "effective_from" in sent or "effective_until" in sent:
+            raise HTTPException(
+                status_code=400,
+                detail="代答库不支持设置有效时间",
+            )
+    else:
+        if "effective_from" in sent:
+            lib.effective_from = body.effective_from
+        if "effective_until" in sent:
+            lib.effective_until = body.effective_until
     await db.flush()
     await db.refresh(lib)
     counts = await _counts_for_libraries(db, [lib.id])
-    group_names = await _group_name_map(db, [lib.group_id])
     await db.commit()
-    return _to_out(lib, counts.get(lib.id, 0), group_names.get(lib.group_id))
+    return _to_out(lib, counts.get(lib.id, 0))
 
 
 @router.delete("/{library_id}", response_model=LibraryDeleteResponse)
@@ -861,7 +887,7 @@ async def batch_delete_items(
         it.deleted_at = now
         deleted += 1
         found_ids.add(it.id)
-    skipped = len(body.item_ids) - len(found_ids)
+    skipped = len(body.item_ids) - found_ids
     await db.flush()
     await db.commit()
     return LibraryItemBatchDeleteResponse(deleted=deleted, skipped=skipped)

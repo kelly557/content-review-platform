@@ -5,7 +5,26 @@ export type PointMap = Record<number, boolean>
 export type ItemPointMap = Record<number, PointMap>
 export type MediaPointMap = Record<CategoryKey, ItemPointMap>
 
+/** 单个 point 的策略级 override（中/高风险分 + 关联库） */
+export interface PointOverride {
+  medium_threshold?: number
+  high_threshold?: number
+  linked_library_ids?: number[]
+}
+/** itemId → pointId → override */
+export type ItemPointOverrideMap = Record<number, Record<number, PointOverride>>
+/** media → item → point → override */
+export type MediaPointOverrideMap = Record<CategoryKey, ItemPointOverrideMap>
+
 export const EMPTY_MEDIA_POINTS: MediaPointMap = {
+  image: {},
+  text: {},
+  audio: {},
+  doc: {},
+  video: {},
+}
+
+export const EMPTY_MEDIA_OVERRIDES: MediaPointOverrideMap = {
   image: {},
   text: {},
   audio: {},
@@ -57,6 +76,46 @@ export function flattenEnabledPoints(
       for (const [pointIdStr, is_enabled] of Object.entries(byPoint)) {
         const point_id = Number(pointIdStr)
         out.push({ media_type, item_id, point_id, is_enabled })
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * 同时把 MediaPointOverrideMap 中的覆盖（中/高风险分 + 关联库）合并到结果。
+ * 仅对 is_enabled=true 的 point 输出 override；is_enabled=false 不带。
+ */
+export function flattenEnabledPointsWithOverride(
+  pointMap: MediaPointMap,
+  overrideMap: MediaPointOverrideMap,
+): StrategyPointRef[] {
+  const out: StrategyPointRef[] = []
+  for (const [media_type, byItem] of Object.entries(pointMap) as [
+    CategoryKey,
+    ItemPointMap,
+  ][]) {
+    for (const [itemIdStr, byPoint] of Object.entries(byItem)) {
+      const item_id = Number(itemIdStr)
+      const itemOverride = overrideMap[media_type]?.[item_id] ?? {}
+      for (const [pointIdStr, is_enabled] of Object.entries(byPoint)) {
+        const point_id = Number(pointIdStr)
+        const ov = itemOverride[point_id] ?? {}
+        const ref: StrategyPointRef = {
+          media_type,
+          item_id,
+          point_id,
+          is_enabled,
+        }
+        if (is_enabled) {
+          if (ov.medium_threshold !== undefined)
+            ref.medium_threshold = ov.medium_threshold
+          if (ov.high_threshold !== undefined)
+            ref.high_threshold = ov.high_threshold
+          if (ov.linked_library_ids !== undefined)
+            ref.linked_library_ids = ov.linked_library_ids
+        }
+        out.push(ref)
       }
     }
   }

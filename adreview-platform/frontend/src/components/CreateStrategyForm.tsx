@@ -31,9 +31,12 @@ import {
   buildPointMapFromStrategy,
   countEnabledPoints,
   countExplicitOverrides,
-  flattenEnabledPoints,
+  EMPTY_MEDIA_OVERRIDES,
+  flattenEnabledPointsWithOverride,
   hasAnyOverride,
   type MediaPointMap,
+  type MediaPointOverrideMap,
+  type PointOverride,
 } from './strategy/pointLevel'
 
 const { Text } = Typography
@@ -114,6 +117,9 @@ export default function CreateStrategyForm({
     EMPTY_ENABLED,
   )
   const [pointMap, setPointMap] = useState<MediaPointMap>(EMPTY_POINTS)
+  const [pointOverrides, setPointOverrides] = useState<MediaPointOverrideMap>(
+    EMPTY_MEDIA_OVERRIDES,
+  )
   const [humanReview, setHumanReview] = useState<StrategyHumanReview>(EMPTY_HUMAN_REVIEW)
   const [hydrated, setHydrated] = useState(mode === 'create')
   const [saveResult, setSaveResult] = useState<{
@@ -139,6 +145,35 @@ export default function CreateStrategyForm({
       Array.isArray(initial.enabled_points) ? initial.enabled_points : [],
     )
     setPointMap(points)
+    // 从 initial.enabled_points 还原 override（中/高风险分 + 关联库）
+    const overridesFromBackend: MediaPointOverrideMap = {
+      image: {},
+      text: {},
+      audio: {},
+      doc: {},
+      video: {},
+    }
+    const rawPoints = Array.isArray(initial.enabled_points)
+      ? initial.enabled_points
+      : []
+    for (const p of rawPoints) {
+      if (!p) continue
+      const mt = p.media_type as CategoryKey
+      if (!(mt in overridesFromBackend)) continue
+      const patch: PointOverride = {}
+      if (p.medium_threshold !== undefined)
+        patch.medium_threshold = p.medium_threshold
+      if (p.high_threshold !== undefined)
+        patch.high_threshold = p.high_threshold
+      if (p.linked_library_ids !== undefined)
+        patch.linked_library_ids = [...p.linked_library_ids]
+      if (Object.keys(patch).length > 0) {
+        if (!overridesFromBackend[mt][p.item_id])
+          overridesFromBackend[mt][p.item_id] = {}
+        overridesFromBackend[mt][p.item_id][p.point_id] = patch
+      }
+    }
+    setPointOverrides(overridesFromBackend)
     setHumanReview(extractHumanReview(initial.definition))
     const from = initial.effective_from ? dayjs(initial.effective_from) : null
     const until = initial.effective_until ? dayjs(initial.effective_until) : null
@@ -159,8 +194,8 @@ export default function CreateStrategyForm({
   }
 
   const goToStep2 = () => {
-    if (mode === 'create' && countEnabled(enabledItems) === 0) {
-      message.warning('请在第二步选择至少一个业务规则')
+    if (mode === 'create' && countEnabledPoints(pointMap) === 0) {
+      message.warning('请在第二步选择至少一个审核点')
       return
     }
     setStep(2)
@@ -214,8 +249,8 @@ export default function CreateStrategyForm({
       setStep(0)
       return
     }
-    if (mode === 'create' && countEnabled(enabledItems) === 0) {
-      message.warning('请在第二步选择至少一个业务规则')
+    if (mode === 'create' && countEnabledPoints(pointMap) === 0) {
+      message.warning('请在第二步选择至少一个审核点')
       setStep(1)
       return
     }
@@ -226,7 +261,8 @@ export default function CreateStrategyForm({
       return
     }
     const definition = buildDefinitionPayload()
-    const enabledPointsPayload: StrategyPointRef[] = flattenEnabledPoints(pointMap)
+    const enabledPointsPayload: StrategyPointRef[] =
+      flattenEnabledPointsWithOverride(pointMap, pointOverrides)
     setSubmitting(true)
     try {
       if (mode === 'edit' && strategyId) {
@@ -437,10 +473,54 @@ export default function CreateStrategyForm({
             }}
           >
             <StrategyTypeTabs
-              value={enabledItems}
+              enabledItemIds={enabledItems}
               pointMap={pointMap}
-              onChange={setEnabledItems}
+              pointOverrides={pointOverrides}
               onPointMapChange={setPointMap}
+              onPointOverrideChange={(media, itemId, pointId, override) =>
+                setPointOverrides((prev) => {
+                  const next: MediaPointOverrideMap = { ...prev, [media]: { ...prev[media] } }
+                  const itemBucket = { ...(next[media][itemId] ?? {}) }
+                  const cur = itemBucket[pointId] ?? {}
+                  const merged = { ...cur, ...override }
+                  // 清理 null / empty
+                  if (merged.medium_threshold === null) delete merged.medium_threshold
+                  if (merged.high_threshold === null) delete merged.high_threshold
+                  if (merged.linked_library_ids === null) delete merged.linked_library_ids
+                  if (Object.keys(merged).length === 0) {
+                    delete itemBucket[pointId]
+                  } else {
+                    itemBucket[pointId] = merged as PointOverride
+                  }
+                  if (Object.keys(itemBucket).length === 0) {
+                    delete next[media][itemId]
+                  } else {
+                    next[media][itemId] = itemBucket
+                  }
+                  if (Object.keys(next[media]).length === 0) {
+                    delete next[media]
+                  }
+                  return next
+                })
+              }
+              onPointToggle={(media, itemId, pointId, checked) => {
+                // 同步 enabledItems 集合：point 勾选 → item 加入；point 取消 → 若 item 下无勾选 point 则移除
+                setEnabledItems((prev) => {
+                  const current = prev[media] ?? []
+                  const set = new Set(current)
+                  if (checked) {
+                    set.add(itemId)
+                  } else {
+                    // 检查 pointMap 该 item 下是否还有勾选
+                    const itemMap = pointMap[media]?.[itemId] ?? {}
+                    const hasOther = Object.entries(itemMap).some(
+                      ([pid, v]) => Number(pid) !== pointId && v === true,
+                    )
+                    if (!hasOther) set.delete(itemId)
+                  }
+                  return { ...prev, [media]: Array.from(set) }
+                })
+              }}
             />
 
             <div
@@ -457,7 +537,7 @@ export default function CreateStrategyForm({
             >
               <Text type="secondary">本步合计已选：</Text>
               <Text strong style={{ color: '#0369A1' }}>
-                {countEnabled(enabledItems)} 条业务规则
+                {countEnabled(enabledItems)} 条规则
               </Text>
               <Text type="secondary">/</Text>
               <Text strong style={{ color: '#0369A1' }}>

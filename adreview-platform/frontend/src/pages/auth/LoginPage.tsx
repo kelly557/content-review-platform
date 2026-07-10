@@ -12,14 +12,14 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
 
   if (initialized && user) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to="/overview" replace />
   }
 
   const onFinish = async (values: { email: string; password: string }) => {
     setError(null)
     try {
       await login(values)
-      navigate('/dashboard', { replace: true })
+      navigate('/overview', { replace: true })
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setError(msg || '登录失败，请检查邮箱和密码')

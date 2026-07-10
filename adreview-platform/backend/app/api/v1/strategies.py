@@ -182,21 +182,37 @@ async def _replace_enabled_items(
 async def _load_enabled_points(
     db: AsyncSession, strategy_id: int
 ) -> list[StrategyPointRef]:
-    """Load persisted strategy → point selections. Returns [] on any failure."""
+    """Load persisted strategy → point selections. Returns [] on any failure.
+
+    同步从 strategies.definition.enabled_point_overrides 读回阈值 / 关联库的 override。
+    """
     try:
         rows = await db.execute(
             select(StrategyPoint).where(StrategyPoint.strategy_id == strategy_id)
         )
     except Exception:
         return []
+    overrides: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+    strat = await db.get(Strategy, strategy_id)
+    if strat is not None:
+        definition = strat.definition or {}
+        overrides = dict(definition.get("enabled_point_overrides") or {})
     out: list[StrategyPointRef] = []
     for r in rows.scalars():
+        patch = (
+            overrides.get(r.media_type, {})
+            .get(str(r.item_id), {})
+            .get(str(r.point_id), {})
+        )
         out.append(
             StrategyPointRef(
                 media_type=r.media_type,
                 item_id=r.item_id,
                 point_id=r.point_id,
                 is_enabled=r.is_enabled,
+                medium_threshold=patch.get("medium_threshold"),
+                high_threshold=patch.get("high_threshold"),
+                linked_library_ids=patch.get("linked_library_ids"),
             )
         )
     return out
@@ -236,6 +252,7 @@ async def _replace_enabled_points(
 
     # 1) 处理请求中显式给定的 point
     seen: set[tuple[str, int]] = set()
+    overrides: dict[str, dict[str, dict[str, Any]]] = {}
     for ref in enabled_points:
         key = (ref.media_type, ref.point_id)
         if key in seen:
@@ -272,6 +289,19 @@ async def _replace_enabled_points(
                 )
             )
 
+        # 收集 override（中/高风险分 + 关联库）到 strategies.definition
+        patch: dict[str, Any] = {}
+        if ref.medium_threshold is not None:
+            patch["medium_threshold"] = ref.medium_threshold
+        if ref.high_threshold is not None:
+            patch["high_threshold"] = ref.high_threshold
+        if ref.linked_library_ids is not None:
+            patch["linked_library_ids"] = list(ref.linked_library_ids)
+        if patch:
+            overrides.setdefault(ref.media_type, {})
+            overrides[ref.media_type].setdefault(str(ref.item_id), {})
+            overrides[ref.media_type][str(ref.item_id)][str(ref.point_id)] = patch
+
     # 2) 扫描该 strategy 现存所有 point 行：
     #    - 若所属 item 不在 enabled_item_keys 中 → 关闭（保留行）
     #    - 否则保留原 is_enabled 不动（item 启用时不动 point 级记忆）
@@ -285,6 +315,26 @@ async def _replace_enabled_points(
         if item_key not in enabled_item_keys:
             if r.is_enabled:
                 r.is_enabled = False
+
+    # 3) 持久化 point 级 override（中/高风险分 + 关联库）到 strategies.definition。
+    #    决策：override 不写 audit_point 表，只随策略保存。
+    if overrides or not seen:
+        strategy = await db.get(Strategy, strategy_id)
+        if strategy is not None:
+            definition = dict(strategy.definition or {})
+            point_overrides = dict(definition.get("enabled_point_overrides") or {})
+            if not overrides and not seen and "enabled_point_overrides" in definition:
+                # 本次调用未传任何 point 但存在旧 overrides，按全清空处理
+                # （allow point 全清场景下保留，给前端 reset 能力）
+                point_overrides = {}
+            for media_type, by_item in overrides.items():
+                point_overrides.setdefault(media_type, {})
+                for item_id_str, by_point in by_item.items():
+                    point_overrides[media_type].setdefault(item_id_str, {})
+                    for point_id_str, patch in by_point.items():
+                        point_overrides[media_type][item_id_str][point_id_str] = patch
+            definition["enabled_point_overrides"] = point_overrides
+            strategy.definition = definition
 
 
 async def _next_code(db: AsyncSession) -> str:

@@ -22,6 +22,27 @@ from app.schemas.audit_item import (
 )
 from app.services.nl_match import suggest_items
 
+
+# 内置审核项允许修改的字段白名单（仅允许启停 + 描述）。
+BUILTIN_ITEM_WRITABLE_FIELDS = frozenset({"is_enabled", "description"})
+
+
+def _filter_payload_for_builtin_item(item: AuditItem, body: AuditItemUpdate) -> None:
+    """对「内置审核项」的更新请求拦截非白名单字段（含 aliases / sort_order / name_cn）。"""
+    if not item.is_builtin:
+        return
+    fields_set = getattr(body, "model_fields_set", set())
+    blocked = sorted(k for k in fields_set if k not in BUILTIN_ITEM_WRITABLE_FIELDS)
+    if blocked:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "通用审核项不允许修改字段："
+                + "、".join(blocked)
+                + "；仅允许启停 / 调整描述。"
+            ),
+        )
+
 router = APIRouter(prefix="/packages", tags=["audit-items"])
 
 
@@ -98,6 +119,7 @@ async def list_items_by_media_type(
             description=r.description,
             sort_order=r.sort_order,
             is_enabled=r.is_enabled,
+            is_builtin=r.is_builtin,
             point_count=counts_per_pkg.get(r.package_code, {}).get(r.id, 0),
             created_at=r.created_at,
             updated_at=r.updated_at,
@@ -133,6 +155,7 @@ async def list_items(
             description=r.description,
             sort_order=r.sort_order,
             is_enabled=r.is_enabled,
+            is_builtin=r.is_builtin,
             point_count=counts.get(r.id, 0),
             created_at=r.created_at,
             updated_at=r.updated_at,
@@ -158,6 +181,7 @@ async def create_item(
         description=body.description,
         sort_order=body.sort_order,
         is_enabled=body.is_enabled,
+        is_builtin=False,
     )
     db.add(item)
     try:
@@ -179,6 +203,7 @@ async def create_item(
         description=item.description,
         sort_order=item.sort_order,
         is_enabled=item.is_enabled,
+        is_builtin=item.is_builtin,
         point_count=0,
         created_at=item.created_at,
         updated_at=item.updated_at,
@@ -197,6 +222,7 @@ async def update_item(
     item = await db.get(AuditItem, item_id)
     if not item or item.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在")
+    _filter_payload_for_builtin_item(item, body)
     if body.name_cn is not None:
         item.name_cn = body.name_cn
     if body.aliases is not None:
@@ -220,6 +246,7 @@ async def update_item(
         description=item.description,
         sort_order=item.sort_order,
         is_enabled=item.is_enabled,
+        is_builtin=item.is_builtin,
         point_count=counts.get(item.id, 0),
         created_at=item.created_at,
         updated_at=item.updated_at,
@@ -237,6 +264,11 @@ async def delete_item(
     item = await db.get(AuditItem, item_id)
     if not item or item.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在")
+    if item.is_builtin:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="通用审核项不允许删除。",
+        )
     points = await db.execute(
         select(func.count(AuditPoint.id)).where(AuditPoint.item_id == item_id)
     )

@@ -1,9 +1,11 @@
-"""Library: unified word/image library (replaces word_sets + image_sets).
+"""Library: unified word/image/reply library (replaces word_sets + image_sets).
 
-A library is either of type 'word' or 'image' and belongs to exactly one
-LibraryGroup (user-created). Items (词条/图片) live in `library_items`; the
-legacy Text-blob `words_text` and the legacy `image_set_items` table are
-superseded. Custom_library_id on audit_points now points here.
+A library is one of type 'word', 'image', or 'reply'. Word and image libraries
+carry a LibraryKind ('黑名单' / '白名单') describing match semantics; reply
+libraries implicitly treat every entry as a hit-on-trigger rule and do not
+carry a kind. Items (词条/图片/触发-回复 对) live in `library_items`; the legacy
+Text-blob `words_text` and the legacy `image_set_items` table are superseded.
+Custom_library_id on audit_points now points here.
 """
 from __future__ import annotations
 
@@ -15,7 +17,6 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum,
-    ForeignKey,
     Index,
     Integer,
     String,
@@ -47,6 +48,20 @@ class LibraryType(str, enum.Enum):
     REPLY = "reply"
 
 
+class LibraryKind(str, enum.Enum):
+    """Match semantics for word/image libraries.
+
+    - BLACKLIST: hit on any entry rejects/forwards according to the rule.
+    - WHITELIST: hit on any entry explicitly allows/short-circuits.
+
+    Reply libraries (LibraryType.REPLY) implicitly treat every trigger as a
+    hit-on-trigger rule and therefore do not carry a kind.
+    """
+
+    BLACKLIST = "黑名单"
+    WHITELIST = "白名单"
+
+
 class Library(Base):
     __tablename__ = "libraries"
 
@@ -61,11 +76,14 @@ class Library(Base):
         ),
         nullable=False,
     )
-    group_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("library_groups.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
+    # 仅 word / image 库必填；reply 库存 NULL（其规则即包含命中，不需要类型概念）
+    kind: Mapped[Optional[LibraryKind]] = mapped_column(
+        Enum(
+            LibraryKind,
+            name="librarykind",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
+        nullable=True,
     )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(
@@ -80,6 +98,17 @@ class Library(Base):
     ignored_services: Mapped[Any] = mapped_column(
         _JSONType, default=list, nullable=False
     )
+    # 词库/图片库的有效时间区间；UTC。
+    # - 两者都为 NULL → 永久生效
+    # - 仅 effective_until 设了值 → 永久生效到该时刻
+    # - 仅 effective_from 设了值 → 从该时刻起永久生效
+    # - 两者都设了值 → [from, until] 闭区间生效（区间为空校验不允许）
+    effective_from: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    effective_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), nullable=False
     )
@@ -87,9 +116,6 @@ class Library(Base):
         DateTime(timezone=False), onupdate=func.now(), nullable=True
     )
 
-    group: Mapped["LibraryGroup"] = relationship(  # type: ignore[name-defined]
-        back_populates="libraries",
-    )
     items: Mapped[list["LibraryItem"]] = relationship(
         back_populates="library",
         cascade="all, delete-orphan",
@@ -105,10 +131,15 @@ class Library(Base):
 
     __table_args__ = (
         Index(
-            "ix_libraries_type_group_active",
+            "ix_libraries_type_kind_active",
             "library_type",
-            "group_id",
+            "kind",
             "is_deleted",
             "is_active",
+        ),
+        Index(
+            "ix_libraries_effective_range",
+            "effective_from",
+            "effective_until",
         ),
     )

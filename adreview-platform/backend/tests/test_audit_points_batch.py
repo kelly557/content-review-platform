@@ -38,6 +38,7 @@ def patched_deps(monkeypatch: pytest.MonkeyPatch):
     item = MagicMock(spec=AuditItem)
     item.id = 100
     item.package_code = "image_audit_pro"
+    item.is_builtin = False
 
     async def fake_ensure(_db, _code):
         return svc
@@ -64,6 +65,7 @@ async def test_batch_create_all_success(monkeypatch, patched_deps):
 
     async def fake_refresh(_point):
         _point.id = counter["n"] + 1
+        _point.is_builtin = False
         from datetime import datetime, timezone
         _point.created_at = datetime.now(timezone.utc)
         counter["n"] += 1

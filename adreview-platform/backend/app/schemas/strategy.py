@@ -57,6 +57,10 @@ class StrategyPointRef(BaseModel):
     item_id: int
     point_id: int
     is_enabled: bool = True
+    # 策略级 override；提交时透传到 strategies.definition.enabled_points，不写 audit_point
+    medium_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+    high_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+    linked_library_ids: Optional[List[int]] = None
 
 
 class StrategyOut(ORMBase):

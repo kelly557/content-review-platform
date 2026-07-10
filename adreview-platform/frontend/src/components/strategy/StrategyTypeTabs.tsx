@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Tabs, type TabsProps } from 'antd'
 import { CATEGORIES, type CategoryKey } from './constants'
-import ItemListWithPoints from './ItemListWithPoints'
+import RulesTreeView from './RulesTreeView'
 import {
-  isItemOverridden,
   type MediaPointMap,
+  type MediaPointOverrideMap,
   type PointMap,
 } from './pointLevel'
 
@@ -17,46 +17,58 @@ const PACKAGE_BY_MEDIA: Record<CategoryKey, string> = {
 }
 
 interface Props {
-  value: Record<CategoryKey, number[]>
+  /** 已选 item id 集合（由父级根据 point 勾选反推） */
+  enabledItemIds: Record<CategoryKey, number[]>
   pointMap: MediaPointMap
-  onChange: (next: Record<CategoryKey, number[]>) => void
+  pointOverrides: MediaPointOverrideMap
   onPointMapChange: (next: MediaPointMap) => void
+  onPointOverrideChange: (
+    media: CategoryKey,
+    itemId: number,
+    pointId: number,
+    override: { medium_threshold?: number; high_threshold?: number; linked_library_ids?: number[] },
+  ) => void
+  onPointToggle: (
+    media: CategoryKey,
+    itemId: number,
+    pointId: number,
+    checked: boolean,
+  ) => void
   defaultActiveKey?: CategoryKey
 }
 
 export default function StrategyTypeTabs({
-  value,
+  enabledItemIds,
   pointMap,
-  onChange,
+  pointOverrides,
   onPointMapChange,
+  onPointOverrideChange,
+  onPointToggle,
   defaultActiveKey = 'image',
 }: Props) {
   const [activeCategory, setActiveCategory] = useState<CategoryKey>(defaultActiveKey)
-
-  const toggleItem = (media: CategoryKey, itemId: number, checked: boolean) => {
-    const current = value[media] ?? []
-    const set = new Set(current)
-    if (checked) set.add(itemId)
-    else set.delete(itemId)
-    onChange({ ...value, [media]: Array.from(set) })
-  }
 
   const setPointsForItem = (media: CategoryKey, itemId: number, next: PointMap) => {
     onPointMapChange({ ...pointMap, [media]: { ...pointMap[media], [itemId]: next } })
   }
 
   const items: TabsProps['items'] = CATEGORIES.map((cat) => {
-    const selected = value[cat.key] ?? []
+    const selectedItems = enabledItemIds[cat.key] ?? []
     const overriddenCount = Object.keys(pointMap[cat.key] ?? {}).filter((itemIdStr) => {
       const itemId = Number(itemIdStr)
-      return isItemOverridden(pointMap, cat.key, itemId)
+      const itemMap = pointMap[cat.key]?.[itemId] ?? {}
+      return Object.values(itemMap).some((v) => v === false)
     }).length
+    const totalPoints = Object.values(pointMap[cat.key] ?? {}).reduce(
+      (n, itemMap) => n + Object.values(itemMap).filter((v) => v === true).length,
+      0,
+    )
     return {
       key: cat.key,
       label: (
         <span>
           {cat.label}
-          {selected.length > 0 ? ` (${selected.length})` : ''}
+          {totalPoints > 0 ? ` (${totalPoints})` : ''}
           {overriddenCount > 0 ? (
             <span style={{ color: '#F59E0B', marginLeft: 4 }}>
               ·{overriddenCount} 已细化
@@ -65,15 +77,18 @@ export default function StrategyTypeTabs({
         </span>
       ),
       children: (
-        <ItemListWithPoints
+        <RulesTreeView
           packageCode={PACKAGE_BY_MEDIA[cat.key]}
-          selectedItemIds={selected}
+          enabledItemIds={selectedItems}
           getPointMap={(itemId) => pointMap[cat.key]?.[itemId] ?? {}}
-          isItemOverriddenFlag={(itemId) =>
-            isItemOverridden(pointMap, cat.key, itemId)
-          }
-          onItemToggle={(itemId, checked) => toggleItem(cat.key, itemId, checked)}
           onPointMapChange={(itemId, next) => setPointsForItem(cat.key, itemId, next)}
+          pointOverrides={pointOverrides}
+          onPointOverrideChange={(itemId, pointId, override) =>
+            onPointOverrideChange(cat.key, itemId, pointId, override)
+          }
+          onPointToggle={(itemId, pointId, checked) =>
+            onPointToggle(cat.key, itemId, pointId, checked)
+          }
         />
       ),
     }

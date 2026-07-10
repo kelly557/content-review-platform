@@ -56,6 +56,45 @@ async def _generate_point_code(db: AsyncSession, package_code: str, item_id: int
     return f"ap_{item_id}_{total + 1}"
 
 
+async def _ensure_item_writable(
+    db: AsyncSession,
+    package_code: str,
+    item_id: int,
+) -> AuditItem:
+    """返回 item 实例，便于调用方读取 is_builtin。"""
+    item = await db.get(AuditItem, item_id)
+    if not item or item.package_code != package_code:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在")
+    return item
+
+
+# 内置审核点允许修改的字段白名单。
+# 其余字段（如 label_cn / description / scope_text / risk_level / custom_wordset_id /
+# sort_order）由下列 _filter_payload_for_builtin_point 函数在 router 层拦截；
+# 即便绕过前端直接请求，也兜底 422。
+BUILTIN_POINT_WRITABLE_FIELDS = frozenset(
+    {"is_enabled", "medium_threshold", "high_threshold", "linked_library_ids"}
+)
+
+
+def _filter_payload_for_builtin_point(point: AuditPoint, body: AuditPointUpdate) -> None:
+    """对「内置审核点」的更新请求拦截非白名单字段。"""
+    if not point.is_builtin:
+        return
+    # Pydantic v2: model_fields_set 记录显式提供字段（含 null）
+    fields_set = getattr(body, "model_fields_set", set())
+    blocked = sorted(k for k in fields_set if k not in BUILTIN_POINT_WRITABLE_FIELDS)
+    if blocked:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "通用审核点不允许修改字段："
+                + "、".join(blocked)
+                + "；仅允许启用 / 中/高风险分 / 关联自定义库。"
+            ),
+        )
+
+
 async def _replace_linked_libraries(
     db: AsyncSession,
     point: AuditPoint,
@@ -168,9 +207,12 @@ async def create_point(
     _: User = Depends(require_roles("admin")),
 ) -> AuditPointOut:
     await _ensure_package(db, code)
-    item = await db.get(AuditItem, body.item_id)
-    if not item or item.package_code != code:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在")
+    item = await _ensure_item_writable(db, code, body.item_id)
+    if item.is_builtin:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="通用审核项下不允许新增审核点；如需扩展，请在知识库新建个性化审核项。",
+        )
     generated_code = await _generate_point_code(db, code, body.item_id)
     point = AuditPoint(
         package_code=code,
@@ -232,6 +274,7 @@ async def update_point(
     point = await db.get(AuditPoint, point_id)
     if not point or point.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核点不存在")
+    _filter_payload_for_builtin_point(point, body)
     if body.label_cn is not None:
         point.label_cn = body.label_cn
     if body.description is not None:
@@ -293,6 +336,11 @@ async def delete_point(
     point = await db.get(AuditPoint, point_id)
     if not point or point.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核点不存在")
+    if point.is_builtin:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="通用审核点不允许删除。",
+        )
     await db.delete(point)
     await db.commit()
 
@@ -333,10 +381,11 @@ async def create_points_batch(
     _: User = Depends(require_roles("admin")),
 ) -> AuditPointBatchResult:
     await _ensure_package(db, code)
-    item = await db.get(AuditItem, body.item_id)
-    if not item or item.package_code != code:
+    item = await _ensure_item_writable(db, code, body.item_id)
+    if item.is_builtin:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在"
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="通用审核项下不允许批量新增审核点；请新建个性化审核项。",
         )
 
     items: list[AuditPointBatchItem] = []
