@@ -113,7 +113,7 @@ export default function TriggersListPage() {
       title: '启动方式',
       dataIndex: 'trigger_type',
       width: 100,
-      render: (v) => <Tag color={v === 'cron' ? 'blue' : 'purple'}>{v === 'cron' ? '按时间计划' : '外部通知触发'}</Tag>,
+      render: () => <Tag color="blue">按时间计划</Tag>,
     },
     { title: '启动时间', key: 'launch', width: 240, render: (_, r) => describeLaunchSpec(r) },
     {

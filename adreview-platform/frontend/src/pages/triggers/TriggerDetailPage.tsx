@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   App,
-  Alert,
   Button,
   Card,
   Col,
@@ -166,7 +165,6 @@ export default function TriggerDetailPage() {
     return <Empty description="加载中" />
   }
 
-  const pathToken = (trigger.spec as { path_token?: string }).path_token ?? ''
   const cronStr = (trigger.spec as { cron?: string }).cron ?? ''
   const tzStr = (trigger.spec as { timezone?: string }).timezone ?? 'Asia/Shanghai'
   const launchLabel = describeLaunch(trigger)
@@ -181,7 +179,6 @@ export default function TriggerDetailPage() {
       render: (v: string) => {
         if (v === 'cron') return <Tag color="blue">按时间计划</Tag>
         if (v === 'manual') return <Tag color="cyan">手动运行</Tag>
-        if (v === 'callback') return <Tag color="purple">外部通知触发</Tag>
         return <Tag>{v}</Tag>
       },
     },
@@ -219,9 +216,7 @@ export default function TriggerDetailPage() {
           <Col>
             <Space size={12} align="center" wrap>
               <span style={{ fontSize: 18, fontWeight: 600 }}>{trigger.name}</span>
-              <Tag color={trigger.trigger_type === 'cron' ? 'blue' : 'purple'}>
-                {trigger.trigger_type === 'cron' ? '按时间计划' : '外部通知触发'}
-              </Tag>
+              <Tag color="blue">按时间计划</Tag>
               <Tag color={trigger.is_enabled ? 'green' : 'default'}>
                 {trigger.is_enabled ? '已开启' : '已关闭'}
               </Tag>
@@ -261,25 +256,17 @@ export default function TriggerDetailPage() {
                   <Card title="基本信息" size="small">
                     <Space direction="vertical">
                       <div>
-                        <Text type="secondary">任务编码：</Text>
-                        <Text code>{trigger.code}</Text>
+                        <Text type="secondary">启动方式：</Text>
+                        按时间计划
                       </div>
                       <div>
-                        <Text type="secondary">启动方式：</Text>
-                        {trigger.trigger_type === 'cron' ? '按时间计划' : '外部通知触发'}
+                        <Text type="secondary">启动时间规则：</Text>
+                        {humanCron}
                       </div>
-                      {trigger.trigger_type === 'cron' && (
-                        <>
-                          <div>
-                            <Text type="secondary">启动时间规则：</Text>
-                            {humanCron}
-                          </div>
-                          <div>
-                            <Text type="secondary">时间基准：</Text>
-                            {tzStr === 'Asia/Shanghai' ? '北京时间' : tzStr}
-                          </div>
-                        </>
-                      )}
+                      <div>
+                        <Text type="secondary">时间基准：</Text>
+                        {tzStr === 'Asia/Shanghai' ? '北京时间' : tzStr}
+                      </div>
                       <div>
                         <Text type="secondary">创建时间：</Text>
                         {new Date(trigger.created_at).toLocaleString('zh-CN')}
@@ -341,59 +328,6 @@ export default function TriggerDetailPage() {
               />
             ),
           },
-          ...(trigger.trigger_type === 'external_callback'
-            ? [
-                {
-                  key: 'webhook',
-                  label: '通知地址',
-                  children: (
-                    <Card size="small">
-                      <Space direction="vertical" style={{ width: '100%' }}>
-                        <Alert
-                          type="info"
-                          showIcon
-                          message="合作方通知接入"
-                          description="请在合作方系统中按下述信息配置回调 URL；通知内容以 JSON 形式 POST 到此地址。"
-                        />
-                        <div>
-                          <Text type="secondary">通知地址：</Text>
-                          <Input.Group compact>
-                            <Input
-                              style={{ width: 'calc(100% - 80px)' }}
-                              value={`POST {APP_BASE_URL}/api/v1/webhooks/callback/${pathToken}`}
-                              readOnly
-                            />
-                            <Button
-                              onClick={() => {
-                                navigator.clipboard?.writeText(
-                                  `{APP_BASE_URL}/api/v1/webhooks/callback/${pathToken}`,
-                                )
-                                void message.success('已复制')
-                              }}
-                            >
-                              复制
-                            </Button>
-                          </Input.Group>
-                        </div>
-                        <div>
-                          <Text type="secondary">校验码（合作方系统保存）：</Text>
-                          <Text code>{trigger.code.toUpperCase()}</Text>
-                          <div>
-                            <Text type="secondary" style={{ fontSize: 12 }}>
-                              别名格式：WEBHOOK_SECRET_&lt;别名&gt;。我方不存储明文校验码。
-                            </Text>
-                          </div>
-                        </div>
-                        <div>
-                          <Text type="secondary">签名与防重放：</Text>
-                          <Text>HMAC-SHA256(secret, X-Timestamp + body)；偏差 ≤ 5 分钟。</Text>
-                        </div>
-                      </Space>
-                    </Card>
-                  ),
-                },
-              ]
-            : []),
         ]}
       />
     </div>

@@ -14,7 +14,7 @@ TriggerTypeStr = Literal["cron", "external_callback"]
 
 # ── Trigger ────────────────────────────────────────────────────
 class TriggerBase(BaseModel):
-    code: str = Field(min_length=1, max_length=64)
+    code: Optional[str] = Field(default=None, max_length=64)
     name: str = Field(min_length=1, max_length=128)
     trigger_type: TriggerTypeStr
     is_enabled: bool = True

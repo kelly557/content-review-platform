@@ -25,7 +25,7 @@ export interface Trigger {
 }
 
 export interface TriggerCreatePayload {
-  code: string
+  code?: string
   name: string
   trigger_type: TriggerTypeStr
   is_enabled: boolean

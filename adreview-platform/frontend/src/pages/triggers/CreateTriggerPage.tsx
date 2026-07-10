@@ -2,12 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   App,
-  Alert,
   Button,
   Card,
   Checkbox,
   Input,
-  Radio,
   Select,
   Space,
   Steps,
@@ -64,16 +62,6 @@ const ROUTING_OPTIONS: Record<RoutingKey, Array<{ value: string; label: string }
   ],
 }
 
-function generatePathToken(): string {
-  const arr = new Uint8Array(16)
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(arr)
-  } else {
-    for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256)
-  }
-  return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
 export default function CreateTriggerPage() {
   const { message } = App.useApp()
   const navigate = useNavigate()
@@ -84,17 +72,14 @@ export default function CreateTriggerPage() {
 
   // Step 1 — 基本信息
   const [name, setName] = useState('')
-  const [code, setCode] = useState('')
-  const [triggerType, setTriggerType] = useState<TriggerTypeStr>('cron')
+  const [triggerType] = useState<TriggerTypeStr>('cron')
   const [timezone, setTimezone] = useState('Asia/Shanghai')
 
-  // Step 2 — 运行方式
+  // Step 2 — 启动时间
   const [schedule, setSchedule] = useState<SchedulePickerValue>({
     cron: '0 9 * * *',
     scanIntervalSec: 60,
   })
-  const [pathToken] = useState(() => generatePathToken())
-  const [secretAlias, setSecretAlias] = useState('primary')
 
   // Step 3 — 适用素材
   const [workflowTemplateCode, setWorkflowTemplateCode] = useState<string | null>('hybrid')
@@ -127,24 +112,17 @@ export default function CreateTriggerPage() {
   const matchAllEmpty = ROUTING_KEYS.every((k) => match[k].length === 0)
 
   const handleSubmit = async () => {
-    if (!code.trim() || !name.trim()) {
-      message.warning('请填写名称与 code')
+    if (!name.trim()) {
+      message.warning('请填写名称')
       return
     }
     setSubmitting(true)
     try {
-      const spec: Record<string, unknown> =
-        triggerType === 'cron'
-          ? {
-              cron: cronPreview,
-              timezone,
-            }
-          : {
-              path_token: pathToken,
-              secret_alias: secretAlias,
-            }
+      const spec: Record<string, unknown> = {
+        cron: cronPreview,
+        timezone,
+      }
       const payload: TriggerCreatePayload = {
-        code: code.trim(),
         name: name.trim(),
         trigger_type: triggerType,
         is_enabled: isEnabled,
@@ -171,7 +149,7 @@ export default function CreateTriggerPage() {
 
   const steps = [
     { title: '基本信息' },
-    { title: '启动方式' },
+    { title: '启动时间' },
     { title: '适用素材' },
     { title: '确认并创建' },
   ]
@@ -189,7 +167,7 @@ export default function CreateTriggerPage() {
         <div>
           <div style={{ fontSize: 20, fontWeight: 600 }}>新建自动审核</div>
           <div style={{ marginTop: 4, color: '#666', fontSize: 13 }}>
-            设置规则后，系统将按时间计划或外部通知自动创建审核任务。
+            设置规则后，系统将按时间计划自动创建审核任务。
           </div>
         </div>
         <Space>
@@ -215,29 +193,6 @@ export default function CreateTriggerPage() {
                 />
               </div>
               <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>
-                  任务编码 *（英数字下划线，创建后不可改）
-                </div>
-                <Input
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  placeholder="例如：medicine_cn_daily"
-                  maxLength={64}
-                />
-              </div>
-              <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>启动方式 *</div>
-                <Radio.Group value={triggerType} onChange={(e) => setTriggerType(e.target.value)}>
-                  <Radio.Button value="cron">按时间计划</Radio.Button>
-                  <Radio.Button value="external_callback">外部通知触发</Radio.Button>
-                </Radio.Group>
-                <div style={{ marginTop: 8 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    按时间计划：系统在指定时间自动运行；外部通知触发：当合作方通知"有新内容要审"时立即创建任务。
-                  </Text>
-                </div>
-              </div>
-              <div>
                 <div style={{ marginBottom: 4, fontSize: 13 }}>时间基准</div>
                 <Select
                   value={timezone}
@@ -253,91 +208,21 @@ export default function CreateTriggerPage() {
               </div>
             </Space>
             <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <Button
-                type="primary"
-                onClick={() => setStep(1)}
-                disabled={!name.trim() || !code.trim()}
-              >
+              <Button type="primary" onClick={() => setStep(1)} disabled={!name.trim()}>
                 下一步
               </Button>
             </div>
           </Card>
         )}
 
-        {step === 1 && triggerType === 'cron' && (
-          <Card title="按时间计划">
+        {step === 1 && (
+          <Card title="启动时间">
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               <SchedulePicker
                 value={schedule}
                 onChange={(v) => setSchedule(v)}
                 defaultScanIntervalSec={60}
               />
-            </Space>
-            <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <Space>
-                <Button onClick={() => setStep(0)}>上一步</Button>
-                <Button type="primary" onClick={() => setStep(2)}>
-                  下一步
-                </Button>
-              </Space>
-            </div>
-          </Card>
-        )}
-
-        {step === 1 && triggerType === 'external_callback' && (
-          <Card title="外部通知触发">
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              <Alert
-                type="info"
-                showIcon
-                message="合作方通知方式"
-                description="当合作方主动告知'有新内容要审'时，本规则立即创建审核任务。通知地址与校验码由系统生成，请在合作方系统中安全保存。"
-              />
-              <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>通知地址</div>
-                <Input.Group compact>
-                  <Input
-                    style={{ width: 'calc(100% - 80px)' }}
-                    value={`POST {APP_BASE_URL}/api/v1/webhooks/callback/${pathToken}`}
-                    readOnly
-                  />
-                  <Button
-                    onClick={() => {
-                      navigator.clipboard?.writeText(
-                        `{APP_BASE_URL}/api/v1/webhooks/callback/${pathToken}`,
-                      )
-                      void message.success('已复制')
-                    }}
-                  >
-                    复制
-                  </Button>
-                </Input.Group>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  系统已生成 32 字符的地址标识，不可修改。
-                </Text>
-              </div>
-              <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>校验码别名</div>
-                <Select
-                  value={secretAlias}
-                  onChange={setSecretAlias}
-                  style={{ width: 240 }}
-                  options={[
-                    { value: 'primary', label: 'primary' },
-                    { value: 'secondary', label: 'secondary' },
-                    { value: 'backup', label: 'backup' },
-                  ]}
-                />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  对应环境变量 WEBHOOK_SECRET_&lt;别名&gt;。
-                </Text>
-              </div>
-              <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>签名与防重放</div>
-                <Text style={{ fontSize: 13 }}>
-                  HMAC-SHA256(secret, X-Timestamp + body)；X-Timestamp 偏差 ≤ 5 分钟。
-                </Text>
-              </div>
             </Space>
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <Space>
@@ -423,16 +308,9 @@ export default function CreateTriggerPage() {
           <Card title="确认并创建">
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               <DescriptionRow label="名称" value={name} />
-              <DescriptionRow label="任务编码" value={code} />
-              <DescriptionRow label="启动方式" value={triggerType === 'cron' ? '按时间计划' : '外部通知触发'} />
-              {triggerType === 'cron' ? (
-                <>
-                  <DescriptionRow label="启动时间" value={cronHuman} />
-                  <DescriptionRow label="时间基准" value={timezone === 'Asia/Shanghai' ? '北京时间' : timezone} />
-                </>
-              ) : (
-                <DescriptionRow label="通知地址" value={`.../webhooks/callback/${pathToken.slice(0, 8)}…`} />
-              )}
+              <DescriptionRow label="启动方式" value="按时间计划" />
+              <DescriptionRow label="启动时间" value={cronHuman} />
+              <DescriptionRow label="时间基准" value={timezone === 'Asia/Shanghai' ? '北京时间' : timezone} />
               <DescriptionRow label="工作流模板" value={workflowTemplateCode ?? '-'} />
               <DescriptionRow
                 label="命中策略"
