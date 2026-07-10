@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
   App,
+  Button,
   Empty,
+  Input,
   Popconfirm,
   Space,
   Table,
@@ -13,7 +15,10 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
+  EditOutlined,
   LockOutlined,
+  RollbackOutlined,
+  SaveOutlined,
   UnlockOutlined,
 } from '@ant-design/icons'
 import { Link, useLocation, useParams } from 'react-router-dom'
@@ -29,6 +34,10 @@ const PACKAGE_BY_MEDIA: Record<string, string> = {
   audio: 'audio_audit_pro',
   doc: 'document_audit_pro',
   video: 'video_audit_pro',
+}
+
+interface DraftPoint extends AuditPoint {
+  _dirty?: boolean
 }
 
 export default function ServiceRuleConfigPage() {
@@ -52,10 +61,13 @@ export default function ServiceRuleConfigPage() {
     backState.fromStep != null ? { step: backState.fromStep } : undefined
   const backLabel = backState.from ? '返回策略审核规则' : '返回规则列表'
 
-  const [points, setPoints] = useState<AuditPoint[]>([])
+  const [points, setPoints] = useState<DraftPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [activeItemName, setActiveItemName] = useState<string | null>(null)
   const [activeItemBuiltin, setActiveItemBuiltin] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [pendingReset, setPendingReset] = useState<DraftPoint[] | null>(null)
 
   useEffect(() => {
     if (!code || activeItemId == null) return
@@ -67,7 +79,7 @@ export default function ServiceRuleConfigPage() {
     ])
       .then(([ps, items]) => {
         if (cancel) return
-        setPoints(ps)
+        setPoints(ps.map((p) => ({ ...p })))
         const found = items.find((it) => it.id === activeItemId)
         setActiveItemName(found?.name_cn ?? null)
         setActiveItemBuiltin(found?.is_builtin ?? false)
@@ -80,7 +92,58 @@ export default function ServiceRuleConfigPage() {
     }
   }, [code, activeItemId])
 
-  const onDeletePoint = async (row: AuditPoint) => {
+  const enterEdit = () => {
+    setPendingReset(points.map((p) => ({ ...p })))
+    setEditing(true)
+  }
+
+  const cancelEdit = () => {
+    if (pendingReset) setPoints(pendingReset.map((p) => ({ ...p })))
+    setPendingReset(null)
+    setEditing(false)
+  }
+
+  const updateLocal = (id: number, patch: Partial<DraftPoint>) => {
+    setPoints((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, ...patch, _dirty: true } : p)),
+    )
+  }
+
+  const onSave = async () => {
+    if (!code) return
+    const dirty = points.filter((p) => p._dirty)
+    if (dirty.length === 0) {
+      message.info('没有改动')
+      setEditing(false)
+      setPendingReset(null)
+      return
+    }
+    setSaving(true)
+    try {
+      for (const p of dirty) {
+        const payload: { label_cn?: string; scope_text?: string } = {}
+        if (p.label_cn !== undefined) payload.label_cn = p.label_cn
+        if (p.scope_text !== undefined) payload.scope_text = p.scope_text ?? ''
+        await auditPointsApi.update(code, p.id, payload)
+      }
+      message.success('已保存')
+      // 重新拉取
+      const fresh = await auditPointsApi
+        .list(code, { item_id: activeItemId! })
+        .catch(() => [] as AuditPoint[])
+      setPoints(fresh.map((p) => ({ ...p })))
+      setPendingReset(null)
+      setEditing(false)
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data
+        ?.detail
+      message.error(detail ?? '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onDeletePoint = async (row: DraftPoint) => {
     if (!code) return
     try {
       await auditPointsApi.remove(code, row.id)
@@ -93,41 +156,73 @@ export default function ServiceRuleConfigPage() {
     }
   }
 
-  const columns: ColumnsType<AuditPoint> = [
+  const dirty = points.some((p) => p._dirty)
+
+  const columns: ColumnsType<DraftPoint> = [
     {
       title: '审核点',
       dataIndex: 'label_cn',
-      width: '28%',
-      render: (v: string | null, row) => (
-        <Space size={6} align="center">
-          <span style={{ color: '#020617', fontWeight: 500 }}>
-            {v || row.label || row.code}
-          </span>
-          {row.is_builtin ? (
-            <Tag color="gold" style={{ margin: 0 }}>
-              通用
-            </Tag>
-          ) : (
-            <Tag color="blue" style={{ margin: 0 }}>
-              个性化
-            </Tag>
-          )}
-        </Space>
-      ),
+      width: '32%',
+      render: (v: string | null, row) => {
+        if (editing && !row.is_builtin) {
+          return (
+            <Space size={6} align="center">
+              <Input
+                size="small"
+                value={v ?? ''}
+                onChange={(e) =>
+                  updateLocal(row.id, { label_cn: e.target.value })
+                }
+                style={{ maxWidth: 320 }}
+                placeholder="审核点名称"
+              />
+            </Space>
+          )
+        }
+        return (
+          <Space size={6} align="center">
+            <Text strong>{v || row.label || row.code}</Text>
+            {row.is_builtin ? (
+              <Tag color="gold" style={{ margin: 0 }}>
+                通用
+              </Tag>
+            ) : (
+              <Tag color="blue" style={{ margin: 0 }}>
+                个性化
+              </Tag>
+            )}
+          </Space>
+        )
+      },
     },
     {
       title: '审核内容',
       dataIndex: 'scope_text',
-      render: (v: string | null, row) => (
-        <div>
-          <Text style={{ color: '#020617' }}>{v ?? '—'}</Text>
-          {row.description && (
-            <div style={{ marginTop: 4, color: '#64748B', fontSize: 12 }}>
-              {row.description}
-            </div>
-          )}
-        </div>
-      ),
+      render: (v: string | null, row) => {
+        if (editing && !row.is_builtin) {
+          return (
+            <Input.TextArea
+              size="small"
+              value={v ?? ''}
+              onChange={(e) =>
+                updateLocal(row.id, { scope_text: e.target.value })
+              }
+              autoSize={{ minRows: 1, maxRows: 4 }}
+              placeholder="审核内容"
+            />
+          )
+        }
+        return (
+          <div>
+            <Text>{v ?? '—'}</Text>
+            {row.description && (
+              <div style={{ marginTop: 4, color: '#64748B', fontSize: 12 }}>
+                {row.description}
+              </div>
+            )}
+          </div>
+        )
+      },
     },
     {
       title: '操作',
@@ -181,7 +276,8 @@ export default function ServiceRuleConfigPage() {
       <Space
         size={12}
         align="center"
-        style={{ marginBottom: 16, flexWrap: 'wrap' }}
+        wrap
+        style={{ marginBottom: 16 }}
       >
         <Title level={3} style={{ margin: 0 }}>
           审核范围配置
@@ -192,33 +288,83 @@ export default function ServiceRuleConfigPage() {
           </Text>
         )}
         {activeItemBuiltin ? (
-          <Tooltip title="通用规则由平台预置，仅可删除/查阅；启用 / 风险分 / 关联自定义库请到「创建策略」按需配置">
-            <Tag
-              color="gold"
-              icon={<LockOutlined />}
-              style={{ margin: 0 }}
-            >
+          <Tooltip title="通用规则由平台预置，不可编辑">
+            <Tag color="gold" icon={<LockOutlined />} style={{ margin: 0 }}>
               通用规则
             </Tag>
           </Tooltip>
         ) : (
-          <Tooltip title="个性化规则可在此删除">
-            <Tag
-              color="blue"
-              icon={<UnlockOutlined />}
-              style={{ margin: 0 }}
-            >
+          <Tooltip title="个性化规则可在下方点击「编辑」修改审核点名称与审核内容">
+            <Tag color="blue" icon={<UnlockOutlined />} style={{ margin: 0 }}>
               个性化规则
             </Tag>
           </Tooltip>
         )}
       </Space>
 
-      <div style={{ marginBottom: 12 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 12,
+        }}
+      >
         <Text strong>审核点列表</Text>
+        <Space wrap size={12} align="center">
+          {editing ? (
+            <>
+              <Button
+                icon={<RollbackOutlined />}
+                onClick={cancelEdit}
+                disabled={saving}
+              >
+                取消
+              </Button>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                onClick={onSave}
+                loading={saving}
+                disabled={!dirty}
+              >
+                保存
+              </Button>
+            </>
+          ) : (
+            <>
+              {!activeItemBuiltin && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  个性化规则可编辑审核点名称与审核内容
+                </Text>
+              )}
+              <Tooltip
+                title={
+                  activeItemBuiltin
+                    ? '通用规则不可编辑'
+                    : '编辑审核点名称与审核内容'
+                }
+              >
+                <Button
+                  type="primary"
+                  icon={<EditOutlined />}
+                  onClick={enterEdit}
+                  disabled={loading || points.length === 0}
+                  aria-label={
+                    activeItemBuiltin
+                      ? '通用规则不可编辑'
+                      : '编辑审核点名称与审核内容'
+                  }
+                >
+                  编辑
+                </Button>
+              </Tooltip>
+            </>
+          )}
+        </Space>
       </div>
 
-      <Table<AuditPoint>
+      <Table<DraftPoint>
         rowKey="id"
         loading={loading}
         dataSource={points}

@@ -37,14 +37,12 @@ export default function AuditItemListTable({ mediaType }: Props) {
       .finally(() => setLoading(false))
   }, [packageCode])
 
-  const { builtinItems, customItems } = useMemo(() => {
-    const b: AuditItem[] = []
+  const { customItems } = useMemo(() => {
     const c: AuditItem[] = []
     items.forEach((it) => {
-      if (it.is_builtin) b.push(it)
-      else c.push(it)
+      if (!it.is_builtin) c.push(it)
     })
-    return { builtinItems: b, customItems: c }
+    return { customItems: c }
   }, [items])
 
   const columns: ColumnsType<AuditItem> = [
@@ -148,9 +146,8 @@ export default function AuditItemListTable({ mediaType }: Props) {
 
   return (
     <div style={{ width: '100%' }}>
-      {renderGroup(builtinItems, '通用规则（平台预置，仅允许启用 / 调整风险分 / 关联自定义库）')}
       {renderGroup(customItems, '个性化规则')}
-      {items.length === 0 && !loading && empty}
+      {customItems.length === 0 && !loading && empty}
     </div>
   )
 }
