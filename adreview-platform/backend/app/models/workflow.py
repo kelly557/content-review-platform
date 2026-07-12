@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class WorkflowTemplate(Base):
@@ -17,6 +18,9 @@ class WorkflowTemplate(Base):
     __tablename__ = "workflow_templates"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
@@ -37,6 +41,9 @@ class WorkflowInstance(Base):
     __tablename__ = "workflow_instances"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     material_id: Mapped[int] = mapped_column(
         ForeignKey("materials.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -69,6 +76,9 @@ class WorkflowNode(Base):
     __tablename__ = "workflow_nodes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     instance_id: Mapped[int] = mapped_column(
         ForeignKey("workflow_instances.id", ondelete="CASCADE"), nullable=False, index=True
     )

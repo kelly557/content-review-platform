@@ -27,6 +27,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, TypeDecorator
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class _JSONType(TypeDecorator):
@@ -67,6 +68,9 @@ class ImageSet(Base):
     __tablename__ = "image_sets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     group: Mapped[ImageSetGroup] = mapped_column(
@@ -109,6 +113,9 @@ class ImageSetItem(Base):
     __tablename__ = "image_set_items"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     set_id: Mapped[int] = mapped_column(
         ForeignKey("image_sets.id", ondelete="CASCADE"), nullable=False, index=True
     )

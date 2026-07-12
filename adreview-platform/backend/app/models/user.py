@@ -8,6 +8,7 @@ from typing import List, Optional
 from sqlalchemy import Boolean, DateTime, Enum, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.id_generator import new_public_id
 from app.db.session import Base
 
 
@@ -23,6 +24,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(128), nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)

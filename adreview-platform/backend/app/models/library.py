@@ -28,6 +28,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, TypeDecorator
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class _JSONType(TypeDecorator):
@@ -66,6 +67,9 @@ class Library(Base):
     __tablename__ = "libraries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     library_type: Mapped[LibraryType] = mapped_column(

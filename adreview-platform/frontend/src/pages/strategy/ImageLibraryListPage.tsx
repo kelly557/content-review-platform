@@ -124,7 +124,6 @@ export default function ImageLibraryListPage() {
   }
 
   const cols: TableColumnsType<LibraryListItem> = [
-    { title: 'ID', dataIndex: 'id', width: '6%' },
     {
       title: '名称',
       dataIndex: 'name',

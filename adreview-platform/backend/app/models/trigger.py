@@ -26,6 +26,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class TriggerType(str, enum.Enum):
@@ -50,6 +51,9 @@ class Trigger(Base):
     __tablename__ = "triggers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     trigger_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -99,6 +103,9 @@ class TriggerRun(Base):
     __tablename__ = "trigger_runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     trigger_id: Mapped[int] = mapped_column(
         ForeignKey("triggers.id", ondelete="CASCADE"), nullable=False
     )

@@ -18,6 +18,7 @@ export interface Page<T> {
 
 export interface MaterialVersion {
   id: number
+  public_id?: string
   material_id: number
   version_no: number
   original_filename: string
@@ -30,6 +31,7 @@ export interface MaterialVersion {
 
 export interface Material {
   id: number
+  public_id?: string
   title: string
   description?: string | null
   material_type: MaterialType
@@ -45,6 +47,7 @@ export interface Material {
 
 export interface MaterialListItem {
   id: number
+  public_id?: string
   title: string
   material_type: MaterialType
   status: MaterialStatus
@@ -72,6 +75,7 @@ export interface ReviewAssignmentTagSnapshot {
 
 export interface ReviewAssignmentTag {
   id: number
+  public_id?: string
   tag_id: string
   tag_snapshot: ReviewAssignmentTagSnapshot
   created_at: string
@@ -79,6 +83,7 @@ export interface ReviewAssignmentTag {
 
 export interface ReviewAssignment {
   id: number
+  public_id?: string
   task_id: number
   assignee_id: number
   decision: ReviewDecision
@@ -89,6 +94,7 @@ export interface ReviewAssignment {
 
 export interface ReviewComment {
   id: number
+  public_id?: string
   task_id: number
   author_id: number
   body: string
@@ -97,6 +103,7 @@ export interface ReviewComment {
 
 export interface ReviewTask {
   id: number
+  public_id?: string
   material_id: number
   material_version_id: number
   workflow_instance_id: number
@@ -138,6 +145,7 @@ export interface AgentHit {
 
 export interface AgentStrategyRef {
   id: number
+  public_id?: string
   code: string
   name: string
 }
@@ -161,6 +169,7 @@ export interface AgentReviewResult {
 
 export interface MaterialPackageItem {
   id: number
+  public_id?: string
   package_id: number
   material_id: number
   position: number
@@ -170,6 +179,7 @@ export interface MaterialPackageItem {
 
 export interface MaterialPackage {
   id: number
+  public_id?: string
   name: string
   description: string | null
   material_type: string
@@ -182,6 +192,7 @@ export interface MaterialPackage {
 
 export interface MaterialPackageListItem {
   id: number
+  public_id?: string
   name: string
   material_type: string
   status: PackageStatus
@@ -206,6 +217,7 @@ export interface MaterialPackageUpdatePayload {
 
 export interface Annotation {
   id: number
+  public_id?: string
   material_version_id: number
   author_id: number
   page?: number | null
@@ -226,6 +238,7 @@ export interface Annotation {
 
 export interface WorkflowNode {
   id: number
+  public_id?: string
   position: number
   stage_key: string
   name: string
@@ -236,6 +249,7 @@ export interface WorkflowNode {
 
 export interface WorkflowInstance {
   id: number
+  public_id?: string
   material_id: number
   material_version_id: number
   template_id: number
@@ -256,6 +270,7 @@ export interface WorkflowStage {
 
 export interface WorkflowTemplate {
   id: number
+  public_id?: string
   code: string
   name: string
   description?: string | null
@@ -337,6 +352,7 @@ export interface AnomalyMetricPoint {
 
 export interface AnomalyAlertSummary {
   id: number
+  public_id?: string
   rule_code: string
   severity: string
   metric: string
@@ -395,6 +411,7 @@ export interface QualityResponse {
 
 export interface AlertEventOut {
   id: number
+  public_id?: string
   rule_code: string
   severity: string
   metric: string
@@ -574,6 +591,7 @@ export interface StrategyEnabledPointsMeta {
 
 export interface Strategy {
   id: number
+  public_id?: string
   code: string
   name: string
   scope: StrategyScope
@@ -634,6 +652,7 @@ export type ServiceScope = "业务场景" | "特殊场景" | "通用场景" | "A
 
 export interface ServiceCategory {
   id: number
+  public_id?: string
   code: string
   name: string
   description: string | null
@@ -660,6 +679,7 @@ export interface ServiceCategoryUpdatePayload {
 
 export interface Service {
   id: number
+  public_id?: string
   code: string
   name: string
   scope: ServiceScope
@@ -703,6 +723,7 @@ export type WordSetAction = "黑名单" | "白名单" | "需复审" | "标签"
 
 export interface WordSet {
   id: number
+  public_id?: string
   code: string
   name: string
   group: WordSetGroup
@@ -731,6 +752,7 @@ export type ImageSetKind = "黑名单" | "白名单"
 
 export interface ImageSet {
   id: number
+  public_id?: string
   code: string
   name: string
   group: ImageSetGroup
@@ -747,6 +769,7 @@ export interface ImageSet {
 
 export interface ImageSetListItem {
   id: number
+  public_id?: string
   code: string
   name: string
   group: ImageSetGroup
@@ -793,6 +816,7 @@ export type LibraryEffectiveStatus = '已停用' | '未生效' | '生效中' | '
 
 export interface Library {
   id: number
+  public_id?: string
   code: string
   name: string
   library_type: LibraryType
@@ -817,6 +841,7 @@ export interface Library {
 
 export interface LibraryListItem {
   id: number
+  public_id?: string
   code: string
   name: string
   library_type: LibraryType
@@ -882,6 +907,7 @@ export interface LibraryDeleteResponse {
 
 export interface LibraryItem {
   id: number
+  public_id?: string
   library_id: number
   word: string | null
   original_filename: string | null
@@ -923,6 +949,7 @@ export const IMAGE_ACTION_OPTIONS: { value: ImageSetAction; label: string }[] = 
 
 export interface ImageSetItem {
   id: number
+  public_id?: string
   set_id: number
   original_filename: string
   mime_type: string
@@ -942,6 +969,7 @@ export interface ImageSetUploadResponse {
 
 export interface DetectionRule {
   id: number
+  public_id?: string
   service_code: string
   label: string
   label_cn: string
@@ -958,6 +986,7 @@ export interface DetectionRule {
 
 export interface WordSetOption {
   id: number
+  public_id?: string
   code: string
   name: string
   kind?: WordSetKind | null
@@ -969,6 +998,7 @@ export type RiskLevel = '高风险' | '中风险' | '低风险' | '敏感' | '�
 
 export interface HumanReviewConfig {
   id: number
+  public_id?: string
   service_code: string
   is_enabled: boolean
   risk_levels: RiskLevel[]
@@ -1116,6 +1146,7 @@ export const TAG_JURISDICTION_OPTIONS: { value: string; label: string }[] = [
 
 export interface AuditItem {
   id: number
+  public_id?: string
   package_code: string
   code: string
   name_cn: string
@@ -1159,6 +1190,7 @@ export interface LinkedLibrary {
 
 export interface AuditPoint {
   id: number
+  public_id?: string
   package_code: string
   item_id: number
   code: string
@@ -1693,6 +1725,7 @@ export interface DesensitizeSpan {
 
 export interface LibraryItem {
   id: number
+  public_id?: string
   library_id: number
   word: string | null
   trigger?: string | null
@@ -1703,6 +1736,7 @@ export interface LibraryItem {
 
 export interface ReplyLibraryItem {
   id: number
+  public_id?: string
   library_id: number
   trigger: string
   reply: string
@@ -1752,6 +1786,7 @@ export interface MachineHit {
 
 export interface MachineReviewRecord {
   id: number
+  public_id?: string
   title?: string | null
   review_type?: string | null
   final_decision?: string | null
@@ -1836,6 +1871,7 @@ export const DEFAULT_VISIBLE_COLUMNS: QueryColumnKey[] = QUERY_COLUMNS.filter(
 
 export interface ReviewRecord {
   id: number
+  public_id?: string
   title?: string | null
   review_type?: string | null
   material_id: number

@@ -14,6 +14,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class RiskLevel(str, enum.Enum):
@@ -28,6 +29,9 @@ class HumanReviewConfig(Base):
     __tablename__ = "human_review_configs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     service_code: Mapped[str] = mapped_column(
         String(64), ForeignKey("services.code"), unique=True, index=True, nullable=False
     )

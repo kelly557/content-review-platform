@@ -77,6 +77,7 @@ def serialize_audit_point(point: "AuditPoint") -> dict:
     the linked_libraries list here."""
     data = {
         "id": point.id,
+        "public_id": point.public_id,
         "package_code": point.package_code,
         "item_id": point.item_id,
         "code": point.code,

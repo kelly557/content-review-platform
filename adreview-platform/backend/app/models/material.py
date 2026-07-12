@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class MaterialType(str, enum.Enum):
@@ -45,6 +46,9 @@ class Material(Base):
     __tablename__ = "materials"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     material_type: Mapped[MaterialType] = mapped_column(Enum(MaterialType), nullable=False)
@@ -80,6 +84,9 @@ class MaterialVersion(Base):
     __tablename__ = "material_versions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     material_id: Mapped[int] = mapped_column(
         ForeignKey("materials.id", ondelete="CASCADE"), nullable=False, index=True
     )

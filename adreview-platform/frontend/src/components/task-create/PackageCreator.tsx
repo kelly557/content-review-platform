@@ -247,7 +247,6 @@ export default function PackageCreator({
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <span style={{ color: colors.secondary, fontSize: 12 }}>#{item.id}</span>
                       <span style={{ color: colors.foreground, fontSize: 13 }}>{item.title}</span>
                       <Tag color={item.status === 'draft' ? 'default' : 'error'}>
                         {STATUS_LABELS[item.status as keyof typeof STATUS_LABELS]}

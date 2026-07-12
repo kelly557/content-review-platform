@@ -142,6 +142,7 @@ async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyO
         }
     data = {
         "id": strategy.id,
+        "public_id": strategy.public_id,
         "code": strategy.code,
         "name": strategy.name,
         "scope": strategy.scope,

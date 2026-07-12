@@ -165,12 +165,6 @@ export default function StrategyListPage() {
           ),
       },
       {
-        title: '策略 ID',
-        dataIndex: 'code',
-        width: '8%',
-        render: (v: string) => <span style={{ color: '#64748B' }}>{v}</span>,
-      },
-      {
         title: '生效状态',
         dataIndex: 'is_active',
         width: '8%',

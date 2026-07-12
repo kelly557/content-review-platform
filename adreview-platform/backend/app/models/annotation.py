@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class Annotation(Base):
@@ -17,6 +18,9 @@ class Annotation(Base):
     __tablename__ = "annotations"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     material_version_id: Mapped[int] = mapped_column(
         ForeignKey("material_versions.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -53,6 +57,9 @@ class ReviewComment(Base):
     __tablename__ = "review_comments"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     task_id: Mapped[int] = mapped_column(
         ForeignKey("review_tasks.id", ondelete="CASCADE"), nullable=False, index=True
     )

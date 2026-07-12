@@ -104,7 +104,6 @@ export default function MaterialsListPage() {
   }, [page, size])
 
   const columns: TableColumnsType<MaterialListItem> = [
-    { title: 'ID', dataIndex: 'id', width: 80 },
     {
       title: '标题',
       dataIndex: 'title',
@@ -436,9 +435,6 @@ export default function MaterialsListPage() {
                       item.ok ? (
                         <Space size={4}>
                           <Tag color="blue">{TYPE_LABELS[item.material?.material_type as MaterialType]}</Tag>
-                          <Text type="secondary" style={{ fontSize: 11 }}>
-                            ID #{item.material?.id}
-                          </Text>
                           <a
                             style={{ fontSize: 12 }}
                             onClick={() => {

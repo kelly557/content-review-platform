@@ -30,7 +30,6 @@ export default function RecordDetailDrawer({ record, onClose }: Props) {
             size="small"
             bordered
             items={[
-              { key: 'id', label: 'Request ID', children: record.id },
               {
                 key: 'strategy',
                 label: '策略名称',

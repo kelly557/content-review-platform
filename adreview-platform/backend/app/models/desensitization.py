@@ -20,6 +20,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, fun
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class DesensitizeCategory(str, enum.Enum):
@@ -35,6 +36,9 @@ class DesensitizationRule(Base):
     __tablename__ = "desensitization_rules"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     category: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     pattern: Mapped[str] = mapped_column(Text, nullable=False)
     mask_template: Mapped[str] = mapped_column(String(64), nullable=False, default="****")

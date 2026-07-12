@@ -13,6 +13,7 @@ from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class ServiceScope(str, enum.Enum):
@@ -27,6 +28,9 @@ class Service(Base):
     __tablename__ = "services"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     scope: Mapped[ServiceScope] = mapped_column(

@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class _JSONType(TypeDecorator):
@@ -63,6 +64,9 @@ class ReviewTask(Base):
     __tablename__ = "review_tasks"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     material_id: Mapped[int] = mapped_column(
         ForeignKey("materials.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -118,6 +122,9 @@ class ReviewAssignment(Base):
     __tablename__ = "review_assignments"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     task_id: Mapped[int] = mapped_column(
         ForeignKey("review_tasks.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -151,6 +158,9 @@ class ReviewAssignmentTag(Base):
     __tablename__ = "review_assignment_tags"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     assignment_id: Mapped[int] = mapped_column(
         ForeignKey("review_assignments.id", ondelete="CASCADE"),
         nullable=False,

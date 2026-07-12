@@ -30,6 +30,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 if TYPE_CHECKING:
     from app.models.audit_point_library import AuditPointLibrary
@@ -46,6 +47,9 @@ class AuditPoint(Base):
     __tablename__ = "audit_points"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     package_code: Mapped[str] = mapped_column(
         String(64), ForeignKey("services.code"), nullable=False, index=True
     )

@@ -28,12 +28,16 @@ from sqlalchemy import JSON, DateTime, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+from app.core.id_generator import new_public_id
 
 
 class OpsLog(Base):
     __tablename__ = "ops_log"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
     actor: Mapped[str] = mapped_column(String(64), nullable=False, default="manual")
     action: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)

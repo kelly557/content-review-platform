@@ -97,7 +97,6 @@ export default function MaterialDetailPage() {
 
       <Card>
         <Descriptions column={{ xs: 1, sm: 2, md: 3 }} size="small">
-          <Descriptions.Item label="素材ID">{material.id}</Descriptions.Item>
           <Descriptions.Item label="创建时间">{new Date(material.created_at).toLocaleString('zh-CN')}</Descriptions.Item>
           <Descriptions.Item label="更新时间">{new Date(material.updated_at).toLocaleString('zh-CN')}</Descriptions.Item>
           <Descriptions.Item label="描述" span={3}>

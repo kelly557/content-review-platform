@@ -263,11 +263,6 @@ export default function PackageDetailPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <Card
             title="基础信息"
-            extra={
-              <Text style={{ fontSize: 12, color: colors.secondary }}>
-                #{pkg.id}
-              </Text>
-            }
           >
             <Row gutter={[24, 16]}>
               <Col span={12}>
@@ -350,7 +345,7 @@ export default function PackageDetailPage() {
                           marginTop: 2,
                         }}
                       >
-                        #{item.id} · {TYPE_LABELS[(mat?.material_type || pkg.material_type) as MaterialType] || ''}
+                        {TYPE_LABELS[(mat?.material_type || pkg.material_type) as MaterialType] || ''}
                       </div>
                     </div>
                     <Tag color={status.color}>
@@ -364,13 +359,6 @@ export default function PackageDetailPage() {
 
           <Card
             title="当前素材"
-            extra={
-              currentTask && (
-                <Text style={{ fontSize: 12, color: colors.secondary }}>
-                  任务 #{currentTask.id} · {currentTask.stage_key}
-                </Text>
-              )
-            }
             bodyStyle={{ padding: 0 }}
           >
             {currentMaterial ? (

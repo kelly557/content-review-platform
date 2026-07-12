@@ -400,9 +400,6 @@ export default function TaskDetailPage() {
           </Space>
 
           <Space size={8} wrap>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              #{task.id} · 创建于 {new Date(task.created_at).toLocaleString('zh-CN')}
-            </Text>
             {!isCanceled && canCancel && (
               <Button
                 danger

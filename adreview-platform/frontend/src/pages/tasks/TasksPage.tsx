@@ -172,7 +172,6 @@ export default function TasksPage() {
   }
 
   const columns: TableColumnsType<ReviewTask> = [
-    { title: 'ID', dataIndex: 'id', width: 70 },
     {
       title: '任务',
       dataIndex: 'title',

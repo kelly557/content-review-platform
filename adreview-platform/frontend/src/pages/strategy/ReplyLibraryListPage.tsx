@@ -122,7 +122,6 @@ export default function ReplyLibraryListPage() {
   }
 
   const cols: TableColumnsType<LibraryListItem> = [
-    { title: 'ID', dataIndex: 'id', width: '8%' },
     {
       title: '名称',
       dataIndex: 'name',

@@ -14,6 +14,12 @@ class ORMBase(BaseModel):
         populate_by_name=True,
     )
 
+    # Phase 1 of public_id rollout. Optional so schemas wrapping entities
+    # without a `public_id` column (e.g. Tag, which is already UUID-keyed)
+    # validate cleanly. Populated from the ORM's `public_id` attribute
+    # when present.
+    public_id: Optional[str] = None
+
 
 class Page(BaseModel, Generic[T]):
     items: List[T]
