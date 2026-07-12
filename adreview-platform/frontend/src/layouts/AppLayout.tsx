@@ -34,6 +34,7 @@ type NavChild = {
   key: string
   path: string
   label: string
+  roles?: string[]
 }
 
 type NavNode =
@@ -124,11 +125,12 @@ const NAV_SECTIONS: Array<{
         kind: 'group',
         key: 'admin',
         path: '/admin/users',
-        label: '用户管理',
+        label: '账号管理',
         icon: <TeamOutlined style={{ fontSize: ICON_SIZE }} />,
         roles: ['admin', 'superadmin'],
         children: [
-          { key: 'admin-users', path: '/admin/users', label: '用户列表' },
+          { key: 'admin-users', path: '/admin/users', label: '用户管理' },
+          { key: 'admin-roles', path: '/admin/roles', label: '角色管理', roles: ['superadmin'] },
         ],
       },
       // { kind: 'leaf', key: 'admin-tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
@@ -202,11 +204,14 @@ export default function AppLayout() {
           label: <Link to={node.path}>{node.label}</Link>,
         })
       } else {
+        const visibleChildren = node.children.filter(
+          (c) => !c.roles || c.roles.includes(user.role),
+        )
         items.push({
           key: node.key,
           icon: node.icon,
           label: node.label,
-          children: node.children.map((c) => ({
+          children: visibleChildren.map((c) => ({
             key: c.path,
             label: <Link to={c.path}>{c.label}</Link>,
           })),
@@ -218,7 +223,10 @@ export default function AppLayout() {
   const allPaths = visibleSections.flatMap((section) =>
     section.items.flatMap((node) => {
       if (node.kind === 'leaf') return [node.path]
-      return [node.key, ...node.children.map((c) => c.path)]
+      const visibleChildren = node.children.filter(
+        (c) => !c.roles || c.roles.includes(user.role),
+      )
+      return [node.key, ...visibleChildren.map((c) => c.path)]
     }),
   )
   const candidates = allPaths
@@ -235,8 +243,11 @@ export default function AppLayout() {
     .flatMap((section) => section.items)
     .filter((n): n is Extract<NavNode, { kind: 'group' }> => n.kind === 'group')
     .filter((n) => {
+      const visibleChildren = n.children.filter(
+        (c) => !c.roles || c.roles.includes(user.role),
+      )
       if (location.pathname.startsWith(n.path)) return true
-      return n.children.some((c) => location.pathname.startsWith(c.path))
+      return visibleChildren.some((c) => location.pathname.startsWith(c.path))
     })
     .map((n) => n.key)
 

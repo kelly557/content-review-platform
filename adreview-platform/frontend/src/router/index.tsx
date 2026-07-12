@@ -29,6 +29,7 @@ const CreateTaskPage = lazy(() => import('@/pages/tasks/CreateTaskPage'))
 const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage'))
 const QueryPage = lazy(() => import('@/pages/query/QueryPage'))
 const UsersAdminPage = lazy(() => import('@/pages/admin/UsersAdminPage'))
+const RolesAdminPage = lazy(() => import('@/pages/admin/RolesAdminPage'))
 const StrategyListPage = lazy(() => import('@/pages/strategy/StrategyListPage'))
 const CreateStrategyPage = lazy(() => import('@/pages/strategy/CreateStrategyPage'))
 const WordLibraryListPage = lazy(() => import('@/pages/strategy/WordLibraryListPage'))
@@ -190,6 +191,10 @@ export default function AppRoutes() {
               <Route path="/triggers" element={<TriggersListPage />} />
               <Route path="/triggers/new" element={<CreateTriggerPage />} />
               <Route path="/triggers/:id" element={<TriggerDetailPage />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allow={['superadmin']} />}>
+              <Route path="/admin/roles" element={<RolesAdminPage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin']} />}>
