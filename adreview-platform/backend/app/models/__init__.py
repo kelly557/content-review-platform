@@ -19,6 +19,8 @@ from app.models.audit_point import AuditPoint, AuditPointRisk  # noqa: F401
 from app.models.audit_point_library import AuditPointLibrary  # noqa: F401
 from app.models.strategy_item import StrategyItem  # noqa: F401
 from app.models.strategy_point import StrategyPoint  # noqa: F401
+from app.models.rule_set import RuleSet, StrategyPointV2  # noqa: F401
+from app.models.disposition_rule import DispositionRule  # noqa: F401
 from app.models.human_review_config import HumanReviewConfig, RiskLevel  # noqa: F401
 from app.models.sensitive_level import SensitiveLevel, SENSITIVE_LEVEL_RANK, sensitive_level_rank  # noqa: F401
 from app.models.material_package import MaterialPackage, MaterialPackageItem  # noqa: F401

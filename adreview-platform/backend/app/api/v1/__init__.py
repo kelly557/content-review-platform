@@ -9,6 +9,7 @@ from app.api.v1 import (
     audit_points,
     auth,
     detection_rules,
+    dispositions,
     health,
     libraries,
     material_packages,
@@ -16,6 +17,7 @@ from app.api.v1 import (
     query,
     reports,
     reviews,
+    rule_sets,
     service_categories,
     services,
     strategies,
@@ -48,4 +50,6 @@ api_router.include_router(query.router)
 api_router.include_router(triggers.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(health.router)
+api_router.include_router(rule_sets.router)
+api_router.include_router(dispositions.router)
 api_router.include_router(admin_import_rules.router)
