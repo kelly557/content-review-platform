@@ -183,7 +183,7 @@ export default function CreateStrategyForm({
         patch.medium_threshold = p.medium_threshold
       if (p.high_threshold !== undefined)
         patch.high_threshold = p.high_threshold
-      if (p.linked_library_ids !== undefined)
+      if (p.linked_library_ids != null)
         patch.linked_library_ids = [...p.linked_library_ids]
       if (Object.keys(patch).length > 0) {
         if (!overridesFromBackend[mt][p.item_id])
