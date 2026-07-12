@@ -65,12 +65,23 @@ async def start_instance(
     if not stages:
         raise WorkflowError("template has no stages")
 
-    # If a Strategy is provided, merge its definition.human_review into
-    # the snapshot used by downstream stages. Explicit strategy_human_review
-    # argument wins (backward compatible with manual submit).
+    # Phase B：effective_human_review 来源切换到 disposition_rule_id。
+    # 优先级：显式 strategy_human_review 参数 > strategy.disposition_rule_id
+    # （读 DispositionRule 行 normalize 后）。旧路径 strategy.definition.human_review
+    # 暂作 history channel（PR B7 删 definition 字段时一并移除）。
     effective_human_review = strategy_human_review
     if effective_human_review is None and strategy is not None:
-        effective_human_review = (strategy.definition or {}).get("human_review")
+        if strategy.disposition_rule_id is not None:
+            from app.services.disposition_engine import compose_effective
+            effective_human_review = await compose_effective(
+                db,
+                strategy_disposition_id=strategy.disposition_rule_id,
+                override_disposition_id=None,
+            )
+        elif (strategy.definition or {}).get("human_review"):
+            # Legacy fallback：PR B1 阶段 migrate_phase_b 可能漏迁极少数记录时
+            # 不让 workflow 直接挂掉；正常 PR B3 完成后此分支不会命中。
+            effective_human_review = (strategy.definition or {}).get("human_review")
 
     instance = WorkflowInstance(
         material_id=material.id,

@@ -2,6 +2,13 @@
 
 Default strategy (scope='default') is a singleton; its code/name/scope are
 immutable and it cannot be deleted or duplicated.
+
+Phase B：
+- create / update 接受 rule_set_id + disposition_rule_id 并写入新 FK 列。
+- 不再向 strategies.definition 写入 human_review JSONB；workflow_engine 走
+  disposition_rule_id → disposition_engine.compose_effective。
+- 旧的 definition.human_review / voice_rule_mode / audio_features / doc_* / video_*
+  仍可读（兼容 Phase A），但写入路径不再产出。
 """
 from datetime import datetime, timezone
 from typing import Optional
@@ -12,6 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require_roles
 from app.db.session import get_db
+from app.models import (
+    DispositionRule,
+    RuleSet,
+)
 from app.models.audit_item import AuditItem
 from app.models.audit_point import AuditPoint
 from app.models.strategy import Strategy, StrategyScope
@@ -26,7 +37,6 @@ from app.schemas.strategy import (
     DocComposeModes,
     DocImageMode,
     DocTextMode,
-    HumanReviewSettings,
     StrategyCreate,
     StrategyDuplicateRequest,
     StrategyItemRef,
@@ -52,13 +62,6 @@ MEDIA_BY_PACKAGE = {
     "document_audit_pro": "doc",
     "video_audit_pro": "video",
 }
-
-
-def _merge_human_review(definition: dict, hr: HumanReviewSettings) -> dict:
-    """把 HumanReviewSettings 写入 definition.human_review 键。"""
-    merged = dict(definition or {})
-    merged["human_review"] = hr.normalized().model_dump()
-    return merged
 
 
 def _merge_voice_features(definition: dict, features: AudioFeatures) -> dict:
@@ -100,21 +103,32 @@ def _merge_video_frame_interval(definition: dict, interval: VideoFrameInterval) 
     return merged
 
 
-async def _validate_review_rule(db: AsyncSession, review_rule_id: int | None) -> None:
-    """校验 review_rule_id 存在且 code 以 hr_ 开头。"""
-    if review_rule_id is None:
-        return
-    template = await db.get(WorkflowTemplate, review_rule_id)
-    if not template:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"人工复审模板不存在 (id={review_rule_id})",
-        )
-    if not (template.code or "").startswith("hr_"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="人工复审模板必须以 hr_ 开头",
-        )
+async def _validate_phase_b_fk(
+    db: AsyncSession,
+    rule_set_id: Optional[int],
+    disposition_rule_id: Optional[int],
+) -> None:
+    """Phase B：校验 rule_set_id / disposition_rule_id 真实存在。
+
+    业务约束：
+    - 创建策略时，若传了 rule_set_id / disposition_rule_id，必须指向真实行
+    - 内置资源 is_editable=False 时，本接口以 admin 创建策略不应被指向（不允许
+      创建「绑定到内置 resource」的对外策略）—— 此校验留 PR B4 UI 阶段
+    """
+    if rule_set_id is not None:
+        rs = await db.get(RuleSet, rule_set_id)
+        if rs is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"rule_set 不存在 (id={rule_set_id})",
+            )
+    if disposition_rule_id is not None:
+        dr = await db.get(DispositionRule, disposition_rule_id)
+        if dr is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"disposition_rule 不存在 (id={disposition_rule_id})",
+            )
 
 
 async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyOut:
@@ -125,11 +139,14 @@ async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyO
 
     额外把 `enabled_points` 聚合摘要写入 `strategy.definition.enabled_points_meta`，
     避免列表场景下每次都要 N+1 解析所有 point 行。
+
+    Phase B：序列化时同时暴露 rule_set_id / disposition_rule_id；老的
+    ``definition.human_review`` 字段保留在 definition dict 里供前端降级展示，
+    但真相源是 disposition_rule_id。
     """
     await db.refresh(strategy)
     enabled = await _load_enabled_items(db, strategy.id)
     enabled_points = await _load_enabled_points(db, strategy.id)
-    # JSONB 兜底：聚合摘要写到 definition 里
     overrides_count = sum(1 for p in enabled_points if not p.is_enabled)
     definition = dict(strategy.definition or {})
     if enabled_points:
@@ -154,6 +171,8 @@ async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyO
         "service_config": strategy.service_config or {},
         "enabled_items": enabled,
         "enabled_points": enabled_points,
+        "rule_set_id": strategy.rule_set_id,
+        "disposition_rule_id": strategy.disposition_rule_id,
         "created_at": strategy.created_at,
         "updated_at": strategy.updated_at,
     }
@@ -446,10 +465,10 @@ async def create_strategy(
     else:
         code = await _next_code(db)
 
-    hr_settings = HumanReviewSettings.model_validate(
-        (body.definition or {}).get("human_review") or {}
+    # Phase B：rule_set / disposition FK 校验
+    await _validate_phase_b_fk(
+        db, body.rule_set_id, body.disposition_rule_id
     )
-    await _validate_review_rule(db, hr_settings.review_rule_id)
 
     try:
         voice_mode = VoiceRuleMode(
@@ -502,8 +521,8 @@ async def create_strategy(
             detail=f"video_frame_interval_sec 非法: {e}",
         )
 
-    merged_definition = _merge_human_review(body.definition or {}, hr_settings)
-    merged_definition = _merge_voice_rule_mode(merged_definition, voice_mode)
+    # Phase B：human_review 不再写入 definition（真相源是 disposition_rule_id）
+    merged_definition = _merge_voice_rule_mode(body.definition or {}, voice_mode)
     merged_definition = _merge_voice_features(merged_definition, audio_features)
     merged_definition = _merge_doc_modes(merged_definition, doc_modes)
     merged_definition = _merge_video_modes(merged_definition, video_modes)
@@ -521,6 +540,8 @@ async def create_strategy(
         definition=merged_definition,
         service_config=body.service_config or {},
         created_by_id=user.id,
+        rule_set_id=body.rule_set_id,
+        disposition_rule_id=body.disposition_rule_id,
     )
     db.add(strategy)
     await db.flush()
@@ -540,7 +561,8 @@ async def create_strategy(
             "scope": strategy.scope.value,
             "enabled_item_count": len(body.enabled_items or []),
             "enabled_point_count": len(body.enabled_points or []),
-            "human_review_enabled": hr_settings.is_enabled,
+            "rule_set_id": body.rule_set_id,
+            "disposition_rule_id": body.disposition_rule_id,
         },
     )
     await db.commit()
@@ -588,12 +610,27 @@ async def update_strategy(
         strategy.effective_from = body.effective_from
     if body.effective_until is not None:
         strategy.effective_until = body.effective_until
-    if body.definition is not None and not is_default:
-        hr_settings = HumanReviewSettings.model_validate(
-            (body.definition or {}).get("human_review") or {}
-        )
-        await _validate_review_rule(db, hr_settings.review_rule_id)
 
+    # Phase B：rule_set / disposition 绑定 — 仅非 default 策略可改
+    if not is_default:
+        if body.rule_set_id is not None:
+            rs = await db.get(RuleSet, body.rule_set_id)
+            if rs is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"rule_set 不存在 (id={body.rule_set_id})",
+                )
+            strategy.rule_set_id = body.rule_set_id
+        if body.disposition_rule_id is not None:
+            dr = await db.get(DispositionRule, body.disposition_rule_id)
+            if dr is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"disposition_rule 不存在 (id={body.disposition_rule_id})",
+                )
+            strategy.disposition_rule_id = body.disposition_rule_id
+
+    if body.definition is not None and not is_default:
         existing_def = dict(strategy.definition or {})
         def_in = body.definition or {}
 
@@ -663,12 +700,15 @@ async def update_strategy(
                 detail=f"video_frame_interval_sec 非法: {e}",
             )
 
-        merged_def = _merge_human_review(body.definition or {}, hr_settings)
+        # Phase B：human_review 不再回写到 definition。保留旧值（如有）作历史。
+        merged_def = dict(existing_def)
+        merged_def.pop("human_review", None)
         merged_def = _merge_voice_rule_mode(merged_def, voice_mode)
         merged_def = _merge_voice_features(merged_def, audio_features)
         merged_def = _merge_doc_modes(merged_def, doc_modes)
         merged_def = _merge_video_modes(merged_def, video_modes)
         merged_def = _merge_video_frame_interval(merged_def, video_frame_interval)
+        # 保留 enabled_point_overrides（已被 _replace_enabled_points 写过）
         strategy.definition = merged_def
     if body.service_config is not None and not is_default:
         strategy.service_config = body.service_config
@@ -731,6 +771,11 @@ async def duplicate_strategy(
 
     new_code = await _next_code(db)
     new_name = body.name or f"{src.name} - 副本"
+
+    # Phase B：duplicate 时清掉 definition.human_review（迁移后兜底），FK 沿用源策略的。
+    dup_definition = dict(src.definition or {})
+    dup_definition.pop("human_review", None)
+
     dup = Strategy(
         code=new_code,
         name=new_name,
@@ -739,9 +784,11 @@ async def duplicate_strategy(
         is_active=False,
         effective_from=src.effective_from,
         effective_until=src.effective_until,
-        definition=src.definition or {},
+        definition=dup_definition,
         service_config=src.service_config or {},
         created_by_id=user.id,
+        rule_set_id=src.rule_set_id,
+        disposition_rule_id=src.disposition_rule_id,
     )
     db.add(dup)
     await db.flush()

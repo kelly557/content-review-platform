@@ -47,6 +47,18 @@ class Strategy(Base):
 
     definition: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
     service_config: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+
+    # Phase B: 审核规则集（rule_set）+ 处置规则（disposition_rule）。
+    # PR B1 仅加列；NOT NULL 强约束到 PR B3 接管策略创建路径后置。
+    rule_set_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("rule_sets.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    disposition_rule_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("disposition_rules.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -55,3 +67,7 @@ class Strategy(Base):
     )
 
     creator = relationship("User", foreign_keys=[created_by_id])
+    rule_set = relationship("RuleSet", back_populates="strategies", foreign_keys=[rule_set_id])
+    disposition_rule = relationship(
+        "DispositionRule", back_populates="strategies", foreign_keys=[disposition_rule_id]
+    )

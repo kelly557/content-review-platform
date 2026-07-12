@@ -201,8 +201,10 @@ class StrategyOut(ORMBase):
     service_config: Dict[str, Any] = Field(default_factory=dict)
     enabled_items: List[StrategyItemRef] = Field(default_factory=list)
     enabled_points: List[StrategyPointRef] = Field(default_factory=list)
+    rule_set_id: Optional[int] = None
+    disposition_rule_id: Optional[int] = None
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime]   
 
 
 class StrategyCreate(BaseModel):
@@ -218,6 +220,9 @@ class StrategyCreate(BaseModel):
     enabled_points: List[StrategyPointRef] = Field(default_factory=list)
     definition: Dict[str, Any] = Field(default_factory=dict)
     service_config: Dict[str, Any] = Field(default_factory=dict)
+    # Phase B: 审批规则集 + 处置规则；新建策略必填（编辑接受 Optional）
+    rule_set_id: Optional[int] = None
+    disposition_rule_id: Optional[int] = None
 
 
 class StrategyUpdate(BaseModel):
@@ -231,6 +236,9 @@ class StrategyUpdate(BaseModel):
     enabled_points: Optional[List[StrategyPointRef]] = None
     definition: Optional[Dict[str, Any]] = None
     service_config: Optional[Dict[str, Any]] = None
+    # Phase B：编辑可改 rule_set / disposition 绑定
+    rule_set_id: Optional[int] = None
+    disposition_rule_id: Optional[int] = None
 
 
 class StrategyDuplicateRequest(BaseModel):
