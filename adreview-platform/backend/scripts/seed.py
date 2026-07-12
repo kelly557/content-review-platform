@@ -1144,6 +1144,29 @@ if __name__ == "__main__":
             )
             print("    python scripts/seed.py --dry-run", file=sys.stderr)
             print("=" * 72, file=sys.stderr)
+            # Audit the refusal — best effort; never raises.
+            try:
+                from app.core.ops_log import record_op
+
+                record_op(
+                    action="scripts.seed.run",
+                    status="refused",
+                    detail={
+                        "argv": sys.argv,
+                        "env_RESEED_ALLOWED": os.environ.get("RESEED_ALLOWED"),
+                        "env_SEED_CONFIRM_DELETE": os.environ.get(
+                            "SEED_CONFIRM_DELETE"
+                        ),
+                        "args_purge_removed": args.purge_removed,
+                        "args_purge_user_data": args.purge_user_data,
+                        "args_dry_run": args.dry_run,
+                        "args_allow_reseed": args.allow_reseed,
+                        "reason": "non-empty DB without RESEED_ALLOWED+--allow-reseed",
+                    },
+                    message="seed.py refused: live-data guard tripped",
+                )
+            except Exception:
+                pass
             sys.exit(2)
 
     if (args.purge_removed or args.purge_user_data) and not args.dry_run:
@@ -1180,12 +1203,67 @@ if __name__ == "__main__":
         print("Another seed.py is already running (lock file held).", file=sys.stderr)
         sys.exit(1)
 
+    # Audit: record the attempt as 'started' before main(), flip to
+    # 'succeeded' on clean exit or 'failed' on exception.
     try:
-        asyncio.run(main(
-            purge_removed=args.purge_removed,
-            purge_user_data=args.purge_user_data,
-            dry_run=args.dry_run,
-        ))
+        from app.core.ops_log import record_op
+
+        record_op(
+            action="scripts.seed.run",
+            status="started",
+            detail={
+                "argv": sys.argv,
+                "env_RESEED_ALLOWED": os.environ.get("RESEED_ALLOWED"),
+                "env_SEED_CONFIRM_DELETE": os.environ.get("SEED_CONFIRM_DELETE"),
+                "args_purge_removed": args.purge_removed,
+                "args_purge_user_data": args.purge_user_data,
+                "args_dry_run": args.dry_run,
+                "args_allow_reseed": args.allow_reseed,
+            },
+        )
+    except Exception:
+        pass
+
+    run_status = "succeeded"
+    try:
+        try:
+            asyncio.run(main(
+                purge_removed=args.purge_removed,
+                purge_user_data=args.purge_user_data,
+                dry_run=args.dry_run,
+            ))
+        except SystemExit as _ex:
+            run_status = "aborted"
+            raise
+        except Exception as _ex:
+            run_status = "failed"
+            try:
+                from app.core.ops_log import record_op
+
+                record_op(
+                    action="scripts.seed.run",
+                    status="failed",
+                    detail={"argv": sys.argv, "error": repr(_ex)},
+                )
+            except Exception:
+                pass
+            raise
+        else:
+            try:
+                from app.core.ops_log import record_op
+
+                record_op(
+                    action="scripts.seed.run",
+                    status=("dry-run" if args.dry_run else "succeeded"),
+                    detail={
+                        "argv": sys.argv,
+                        "purge_removed": args.purge_removed,
+                        "purge_user_data": args.purge_user_data,
+                        "dry_run": args.dry_run,
+                    },
+                )
+            except Exception:
+                pass
     finally:
         try:
             os.unlink(lock_path)
