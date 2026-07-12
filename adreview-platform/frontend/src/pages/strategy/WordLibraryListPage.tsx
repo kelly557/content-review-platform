@@ -39,6 +39,7 @@ import { LIBRARY_KIND_OPTIONS } from '@/types/domain'
 import { parseWordsFile } from '@/lib/libraryImport'
 import { deriveEffectiveMeta } from '@/lib/libraryEffective'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
+import { useAuthStore } from '@/store'
 
 const { Title, Text } = Typography
 
@@ -55,6 +56,8 @@ interface CreateFormValues {
 
 export default function WordLibraryListPage() {
   const { message } = App.useApp()
+  const { user } = useAuthStore()
+  const isSuperadmin = user?.role === 'superadmin'
   const [filterKind, setFilterKind] = useState<LibraryKind | null>(null)
   const [effectiveOnly, setEffectiveOnly] = useState(false)
   const [items, setItems] = useState<LibraryListItem[]>([])
@@ -161,6 +164,19 @@ export default function WordLibraryListPage() {
         v ? <Tag color={v === '黑名单' ? 'red' : 'green'}>{v}</Tag> : '—',
     },
     {
+      title: '归属',
+      dataIndex: 'is_platform',
+      width: '10%',
+      render: (v: boolean) =>
+        v ? (
+          <Tooltip title="通用平台库:仅超级管理员可编辑/删除">
+            <Tag color="purple" style={{ margin: 0 }}>通用平台</Tag>
+          </Tooltip>
+        ) : (
+          <Tag style={{ margin: 0 }}>个性化</Tag>
+        ),
+    },
+    {
       title: '有效时间',
       key: 'effective',
       width: '18%',
@@ -209,26 +225,44 @@ export default function WordLibraryListPage() {
     {
       title: '操作',
       width: '12%',
-      render: (_v, row) => (
-        <Space size={4}>
-          <Link to={`/knowledge/words/${row.id}`}>
-            <Button type="link" size="small" icon={<EditOutlined />}>
-              编辑
-            </Button>
-          </Link>
-          <Popconfirm
-            title="确认删除该词库？"
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => setDeleteTarget(row as Library)}
-          >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_v, row) => {
+        const isPlatform = row.is_platform
+        const deleteDisabled = isPlatform && !isSuperadmin
+        return (
+          <Space size={4}>
+            <Link to={`/knowledge/words/${row.id}`}>
+              <Button type="link" size="small" icon={<EditOutlined />}>
+                编辑
+              </Button>
+            </Link>
+            {deleteDisabled ? (
+              <Tooltip title="通用平台库:仅超级管理员可删除">
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled
+                >
+                  删除
+                </Button>
+              </Tooltip>
+            ) : (
+              <Popconfirm
+                title="确认删除该词库？"
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => setDeleteTarget(row as Library)}
+              >
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+        )
+      },
     },
   ]
 

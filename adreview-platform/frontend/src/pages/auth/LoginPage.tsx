@@ -95,7 +95,7 @@ export default function LoginPage() {
 
           <div style={{ textAlign: 'center' }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              默认账号: admin@adreview.example.com / reviewer@adreview.example.com / submitter@adreview.example.com
+              默认账号: superadmin@adreview.example.com / admin@adreview.example.com / reviewer@adreview.example.com / submitter@adreview.example.com
             </Text>
           </div>
         </Space>

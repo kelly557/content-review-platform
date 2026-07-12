@@ -10,6 +10,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   App,
   Upload,
@@ -32,6 +33,7 @@ import type {
 } from '@/types/domain'
 import { parseReplyFile } from '@/lib/libraryImport'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
+import { useAuthStore } from '@/store'
 
 const { Title } = Typography
 
@@ -45,6 +47,8 @@ interface CreateFormValues {
 
 export default function ReplyLibraryListPage() {
   const { message } = App.useApp()
+  const { user } = useAuthStore()
+  const isSuperadmin = user?.role === 'superadmin'
   const [items, setItems] = useState<LibraryListItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -134,6 +138,19 @@ export default function ReplyLibraryListPage() {
     },
     { title: '条数', dataIndex: 'item_count', width: '12%', align: 'right' },
     {
+      title: '归属',
+      dataIndex: 'is_platform',
+      width: '10%',
+      render: (v: boolean) =>
+        v ? (
+          <Tooltip title="通用平台库:仅超级管理员可编辑/删除">
+            <Tag color="purple" style={{ margin: 0 }}>通用平台</Tag>
+          </Tooltip>
+        ) : (
+          <Tag style={{ margin: 0 }}>个性化</Tag>
+        ),
+    },
+    {
       title: '最近修改',
       dataIndex: 'updated_at',
       width: '20%',
@@ -154,26 +171,44 @@ export default function ReplyLibraryListPage() {
     {
       title: '操作',
       width: '12%',
-      render: (_v, row) => (
-        <Space size={4}>
-          <Link to={`/knowledge/replies/${row.id}`}>
-            <Button type="link" size="small" icon={<EditOutlined />}>
-              编辑
-            </Button>
-          </Link>
-          <Popconfirm
-            title="确认删除该代答库？"
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => setDeleteTarget(row as Library)}
-          >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_v, row) => {
+        const isPlatform = row.is_platform
+        const deleteDisabled = isPlatform && !isSuperadmin
+        return (
+          <Space size={4}>
+            <Link to={`/knowledge/replies/${row.id}`}>
+              <Button type="link" size="small" icon={<EditOutlined />}>
+                编辑
+              </Button>
+            </Link>
+            {deleteDisabled ? (
+              <Tooltip title="通用平台库:仅超级管理员可删除">
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled
+                >
+                  删除
+                </Button>
+              </Tooltip>
+            ) : (
+              <Popconfirm
+                title="确认删除该代答库？"
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => setDeleteTarget(row as Library)}
+              >
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+        )
+      },
     },
   ]
 

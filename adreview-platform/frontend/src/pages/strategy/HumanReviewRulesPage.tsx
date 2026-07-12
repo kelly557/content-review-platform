@@ -208,9 +208,9 @@ export default function HumanReviewRulesPage() {
       </Text>
 
       <Card
-        bordered={false}
+        variant="borderless"
         style={{ border: '1px solid #E2E8F0', borderRadius: 6 }}
-        bodyStyle={{ padding: 16 }}
+        styles={{ body: { padding: 16 } }}
       >
         <div
           style={{

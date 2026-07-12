@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Button,
   Empty,
   Grid,
   InputNumber,
-  Popconfirm,
   Select,
   Space,
   Table,
@@ -263,19 +261,6 @@ export default function RulesTreeView({
               onPointOverrideChange={onPointOverrideChange}
               libraryOptions={libraryOptions}
               mediaKey={mediaKey}
-              onDeletePoint={async (point) => {
-                try {
-                  await auditPointsApi.remove(packageCode, point.id)
-                  setPointsByItem((prev) => ({
-                    ...prev,
-                    [currentItem.id]: (prev[currentItem.id] ?? []).filter(
-                      (p) => p.id !== point.id,
-                    ),
-                  }))
-                } catch (e) {
-                  console.error(e)
-                }
-              }}
             />
           ) : (
             <Empty
@@ -423,7 +408,6 @@ function PointsColumn({
   onPointOverrideChange,
   libraryOptions,
   mediaKey,
-  onDeletePoint,
 }: {
   item: AuditItem
   points: AuditPoint[]
@@ -441,7 +425,6 @@ function PointsColumn({
   ) => void
   libraryOptions: LibraryListItem[]
   mediaKey: CategoryKey
-  onDeletePoint: (point: AuditPoint) => void
 }) {
   const dataSource: PointRowRecord[] = points.map((p) => ({
     key: p.id,
@@ -482,25 +465,6 @@ function PointsColumn({
             <Text strong style={{ color: '#0F172A' }} ellipsis={{ tooltip: name }}>
               {name}
             </Text>
-            {record.isCustom && (
-              <Popconfirm
-                title={`确认删除「${record.point.label_cn || record.point.code}」？`}
-                okText="删除"
-                cancelText="取消"
-                okButtonProps={{ danger: true }}
-                onConfirm={() => onDeletePoint(record.point)}
-              >
-                <Button
-                  size="small"
-                  type="link"
-                  danger
-                  icon={<DeleteOutlined />}
-                  style={{ padding: 0 }}
-                >
-                  删除
-                </Button>
-              </Popconfirm>
-            )}
           </Space>
         )
       },
@@ -744,3 +708,6 @@ function LibrarySelectInline({
     />
   )
 }
+
+// 保留 DeleteOutlined 供将来"自定义审核点管理"页使用
+void DeleteOutlined

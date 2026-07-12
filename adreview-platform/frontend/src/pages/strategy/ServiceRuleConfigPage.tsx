@@ -25,6 +25,7 @@ import { Link, useLocation, useParams } from 'react-router-dom'
 import { auditItemsApi } from '@/api/auditItems'
 import { auditPointsApi } from '@/api/auditPoints'
 import type { AuditItem, AuditPoint } from '@/types/domain'
+import { useAuthStore } from '@/store'
 
 const { Title, Text } = Typography
 
@@ -68,6 +69,11 @@ export default function ServiceRuleConfigPage() {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [pendingReset, setPendingReset] = useState<DraftPoint[] | null>(null)
+  const { user } = useAuthStore()
+  const isSuperadmin = user?.role === 'superadmin'
+  // 通用规则 (is_builtin=true) 编辑权限:admin 与 superadmin 都可;删除权限:仅 superadmin。
+  const canEditBuiltin = isSuperadmin || user?.role === 'admin' || user?.role === 'mlr'
+  const canDeleteBuiltin = isSuperadmin
 
   useEffect(() => {
     if (!code || activeItemId == null) return
@@ -227,10 +233,33 @@ export default function ServiceRuleConfigPage() {
     {
       title: '操作',
       width: 100,
-      render: (_v, row) =>
-        row.is_builtin ? (
-          <Text type="secondary">—</Text>
-        ) : (
+      render: (_v, row) => {
+        if (row.is_builtin) {
+          return canDeleteBuiltin ? (
+            <Popconfirm
+              title={`确认删除「${row.label_cn || row.code}」？`}
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => onDeletePoint(row)}
+            >
+              <a
+                style={{ color: '#DC2626' }}
+                aria-label={`删除 ${row.label_cn || row.code}`}
+              >
+                <Space size={4}>
+                  <DeleteOutlined />
+                  删除
+                </Space>
+              </a>
+            </Popconfirm>
+          ) : (
+            <Tooltip title="通用审核点:仅超级管理员可删除">
+              <Text type="secondary" style={{ cursor: 'not-allowed' }}>—</Text>
+            </Tooltip>
+          )
+        }
+        return (
           <Popconfirm
             title={`确认删除「${row.label_cn || row.code}」？`}
             okText="删除"
@@ -248,7 +277,8 @@ export default function ServiceRuleConfigPage() {
               </Space>
             </a>
           </Popconfirm>
-        ),
+        )
+      },
     },
   ]
 
@@ -288,7 +318,7 @@ export default function ServiceRuleConfigPage() {
           </Text>
         )}
         {activeItemBuiltin ? (
-          <Tooltip title="通用规则由平台预置，不可编辑">
+          <Tooltip title={canEditBuiltin ? '通用规则:管理员/超级管理员可编辑,仅超级管理员可删除' : '通用规则:仅管理员或超级管理员可编辑'}>
             <Tag color="gold" icon={<LockOutlined />} style={{ margin: 0 }}>
               通用规则
             </Tag>
@@ -341,7 +371,9 @@ export default function ServiceRuleConfigPage() {
               <Tooltip
                 title={
                   activeItemBuiltin
-                    ? '通用规则不可编辑'
+                    ? (canEditBuiltin
+                        ? '通用规则:可编辑 (字段受白名单限制)'
+                        : '通用规则:您无编辑权限')
                     : '编辑审核点名称与审核内容'
                 }
               >
@@ -349,10 +381,14 @@ export default function ServiceRuleConfigPage() {
                   type="primary"
                   icon={<EditOutlined />}
                   onClick={enterEdit}
-                  disabled={loading || points.length === 0}
+                  disabled={
+                    loading ||
+                    points.length === 0 ||
+                    (activeItemBuiltin && !canEditBuiltin)
+                  }
                   aria-label={
                     activeItemBuiltin
-                      ? '通用规则不可编辑'
+                      ? (canEditBuiltin ? '通用规则可编辑' : '通用规则不可编辑')
                       : '编辑审核点名称与审核内容'
                   }
                 >
