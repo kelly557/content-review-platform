@@ -299,6 +299,7 @@ export default function ServiceRuleConfigPage() {
   }
 
   const dirty = points.some((p) => p._dirty)
+  const dirtyCount = points.filter((p) => p._dirty).length
 
   const columns: ColumnsType<DraftPoint> = [
     {
@@ -306,7 +307,7 @@ export default function ServiceRuleConfigPage() {
       dataIndex: 'label_cn',
       width: '32%',
       render: (v: string | null, row) => {
-        if (editing && !row.is_builtin) {
+        if (editing) {
           return (
             <Space size={6} align="center">
               <Input
@@ -324,15 +325,6 @@ export default function ServiceRuleConfigPage() {
         return (
           <Space size={6} align="center">
             <Text strong>{v || row.label || row.code}</Text>
-            {row.is_builtin ? (
-              <Tag color="gold" style={{ margin: 0 }}>
-                通用
-              </Tag>
-            ) : (
-              <Tag color="blue" style={{ margin: 0 }}>
-                个性化
-              </Tag>
-            )}
           </Space>
         )
       },
@@ -341,7 +333,7 @@ export default function ServiceRuleConfigPage() {
       title: '审核内容',
       dataIndex: 'scope_text',
       render: (v: string | null, row) => {
-        if (editing && !row.is_builtin) {
+        if (editing) {
           return (
             <Input.TextArea
               size="small"
@@ -370,15 +362,25 @@ export default function ServiceRuleConfigPage() {
       title: '操作',
       width: 100,
       render: (_v, row) => {
-        if (row.is_builtin) {
-          return canDeleteBuiltin ? (
-            <Popconfirm
-              title={`确认删除「${row.label_cn || row.code}」？`}
-              okText="删除"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => onDeletePoint(row)}
-            >
+        const deleteDisabled = row.is_builtin && !canDeleteBuiltin
+        return (
+          <Popconfirm
+            title={`确认删除「${row.label_cn || row.code}」？`}
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => onDeletePoint(row)}
+          >
+            {deleteDisabled ? (
+              <Tooltip title="通用审核点:仅超级管理员可删除">
+                <Text type="secondary" style={{ cursor: 'not-allowed' }}>
+                  <Space size={4}>
+                    <DeleteOutlined />
+                    删除
+                  </Space>
+                </Text>
+              </Tooltip>
+            ) : (
               <a
                 style={{ color: '#DC2626' }}
                 aria-label={`删除 ${row.label_cn || row.code}`}
@@ -388,30 +390,7 @@ export default function ServiceRuleConfigPage() {
                   删除
                 </Space>
               </a>
-            </Popconfirm>
-          ) : (
-            <Tooltip title="通用审核点:仅超级管理员可删除">
-              <Text type="secondary" style={{ cursor: 'not-allowed' }}>—</Text>
-            </Tooltip>
-          )
-        }
-        return (
-          <Popconfirm
-            title={`确认删除「${row.label_cn || row.code}」？`}
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => onDeletePoint(row)}
-          >
-            <a
-              style={{ color: '#DC2626' }}
-              aria-label={`删除 ${row.label_cn || row.code}`}
-            >
-              <Space size={4}>
-                <DeleteOutlined />
-                删除
-              </Space>
-            </a>
+            )}
           </Popconfirm>
         )
       },
@@ -532,7 +511,7 @@ export default function ServiceRuleConfigPage() {
                 loading={saving}
                 disabled={!dirty}
               >
-                保存
+                {dirtyCount > 0 ? `保存 ${dirtyCount} 处修改` : '保存'}
               </Button>
             </>
           ) : (
