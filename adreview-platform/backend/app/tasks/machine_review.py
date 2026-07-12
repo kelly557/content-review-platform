@@ -104,9 +104,19 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
         recall_mode = await _get_recall_mode_for_services(db, services)
         # 用户覆盖嵌在 strategy_human_review dict 里
         auto_overrides = hr_cfg.get("auto_action_overrides") if isinstance(hr_cfg, dict) else None
+        # 抽审比例（默认 100 = 全部升级，向后兼容）
+        sample_ratio = hr_cfg.get("sample_ratio") if isinstance(hr_cfg, dict) else None
+        # 用 material_id 做确定性 hash seed，保证同一素材结论稳定
+        sample_seed = (
+            str(getattr(task, "material_id", "") or "")
+            + ":"
+            + str(getattr(task, "id", "") or "")
+        )
         suggested_action = _suggest_action_for(
             risk_level, sensitive_level, human_enabled, recall_mode,
             auto_action_overrides=auto_overrides,
+            sample_seed=sample_seed,
+            sample_ratio=sample_ratio,
         )
 
         # 5. 写 machine_result
@@ -407,6 +417,8 @@ def _suggest_action_for(
     human_enabled: bool,
     recall_mode: bool,  # noqa: ARG001  保留签名兼容，不再参与决策
     auto_action_overrides: Dict[str, str] | None = None,
+    sample_seed: str | None = None,
+    sample_ratio: float | None = None,
 ) -> str:
     """决策矩阵（5 risk × 4 sensitive × 2 human = 40 组合）。
 
@@ -419,6 +431,13 @@ def _suggest_action_for(
       - value ∈ {approved, rejected, desensitize, review}
       - 用户配过的 cell 直接返回用户值（不再走默认矩阵）
       - "review" 在关人审时自动转 rejected（兜底，避免误用）
+
+    抽审（sample_ratio）：
+      - 仅在默认矩阵结论为 ``review`` 且 ``human_enabled=True`` 时生效
+      - ``sample_ratio=None`` 或 ``>= 100``：全部升级（向后兼容）
+      - ``sample_ratio=0``：不升级，按矩阵默认（高/中拒绝；低风险通过）
+      - ``0 < sample_ratio < 100``：用 sample_seed 确定性 hash 抽样
+      - 抽样 hash 使用 md5 前 8 字节（精度 0.01%），同素材同结论
 
     核心规则（用户未覆盖时的默认值）：
       - 高风险 / 中风险 → 人审开 → review；人审关 → rejected（不放行）
@@ -451,40 +470,62 @@ def _suggest_action_for(
 
     # 2) 默认矩阵
     if risk_level == RiskLevel.HIGH.value:
-        return (
+        base_action = (
             SUGGESTED_ACTION_REVIEW
             if human_enabled
             else SUGGESTED_ACTION_REJECTED
         )
-
-    if risk_level == RiskLevel.MEDIUM.value:
-        return (
+    elif risk_level == RiskLevel.MEDIUM.value:
+        base_action = (
             SUGGESTED_ACTION_REVIEW
             if human_enabled
             else SUGGESTED_ACTION_REJECTED
         )
-
-    if risk_level == RiskLevel.SENSITIVE.value:
+    elif risk_level == RiskLevel.SENSITIVE.value:
         if sensitive_level in (SensitiveLevel.S3.value, SensitiveLevel.S2.value):
-            return (
+            base_action = (
                 SUGGESTED_ACTION_REVIEW
                 if human_enabled
                 else SUGGESTED_ACTION_REJECTED
             )
-        if sensitive_level == SensitiveLevel.S1.value:
-            return SUGGESTED_ACTION_DESENSITIZE
-        # S0：没检出敏感内容，放行
-        return SUGGESTED_ACTION_APPROVED
-
-    if risk_level == RiskLevel.LOW.value:
-        return (
+        elif sensitive_level == SensitiveLevel.S1.value:
+            base_action = SUGGESTED_ACTION_DESENSITIZE
+        else:
+            # S0：没检出敏感内容，放行
+            base_action = SUGGESTED_ACTION_APPROVED
+    elif risk_level == RiskLevel.LOW.value:
+        base_action = (
             SUGGESTED_ACTION_REVIEW
             if human_enabled
             else SUGGESTED_ACTION_APPROVED
         )
+    else:
+        # RiskLevel.NONE / 未知
+        base_action = SUGGESTED_ACTION_APPROVED
 
-    # RiskLevel.NONE
-    return SUGGESTED_ACTION_APPROVED
+    # 3) 抽样决策（仅在需要升级时介入）
+    if (
+        base_action == SUGGESTED_ACTION_REVIEW
+        and human_enabled
+        and sample_ratio is not None
+        and 0 <= sample_ratio < 100
+        and sample_seed
+    ):
+        import hashlib
+        h = int(hashlib.md5(sample_seed.encode("utf-8")).hexdigest()[:8], 16)
+        bucket = h % 10000  # 精度 0.01%
+        if bucket >= int(sample_ratio * 100):
+            # 未抽中：按矩阵降级
+            # 高/中/敏感 S2/S3 → 拒绝；低风险 → 通过
+            if risk_level in (
+                RiskLevel.HIGH.value,
+                RiskLevel.MEDIUM.value,
+                RiskLevel.SENSITIVE.value,
+            ):
+                return SUGGESTED_ACTION_REJECTED
+            return SUGGESTED_ACTION_APPROVED
+
+    return base_action
 
 
 async def _simulate_network_delay() -> None:

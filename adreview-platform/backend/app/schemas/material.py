@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.models.material import MaterialStatus, MaterialType
 from app.schemas.common import ORMBase
+from app.schemas.strategy import HumanReviewSettings
 
 
 class MaterialVersionOut(ORMBase):
@@ -72,6 +73,10 @@ class MaterialSubmitRequest(BaseModel):
     note: Optional[str] = None
     task_name: Optional[str] = Field(default=None, max_length=255)
     skip_machine_review: bool = Field(default=False, description="Skip automatic machine review, require manual trigger")
+    override_human_review: Optional[HumanReviewSettings] = Field(
+        default=None,
+        description="任务级 step-3 处置覆盖。字段级合并：非空字段覆盖策略默认值，空字段走 strategy。",
+    )
 
 
 class MaterialBatchUploadItem(ORMBase):

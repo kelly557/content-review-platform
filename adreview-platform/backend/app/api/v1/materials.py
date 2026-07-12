@@ -279,10 +279,15 @@ async def submit_material(
             detail=f"unknown workflow template: {template_code}",
         )
 
-    strategy_human_review = (
+    strategy_human_review_raw = (
         (matched_strategy.definition or {}).get("human_review")
         if matched_strategy is not None
         else None
+    )
+    # 字段级合并 strategy 默认 + 任务级 override，再走 normalized() 一致性清洗
+    from app.services.human_review_merge import merge_and_normalize_human_review
+    strategy_human_review = merge_and_normalize_human_review(
+        strategy_human_review_raw, body.override_human_review
     )
     await start_instance(
         db,

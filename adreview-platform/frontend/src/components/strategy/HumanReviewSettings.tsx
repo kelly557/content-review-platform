@@ -4,6 +4,7 @@ import {
   Checkbox,
   Form,
   Select,
+  Slider,
   Space,
   Switch,
   Table,
@@ -71,6 +72,7 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
       sensitive_levels: value.sensitive_levels,
       review_rule_id: value.review_rule_id,
       auto_action_overrides: value.auto_action_overrides ?? {},
+      sample_ratio: value.sample_ratio ?? 100,
     })
   }
 
@@ -162,6 +164,29 @@ export function HumanReviewSettings({ value, onChange }: HumanReviewSettingsProp
               仅当机审结果为「敏感」时生效。S1 永远走脱敏放行（不升级人审）；
               勾选 S2/S3 即升级人审。
             </Text>
+          </Form.Item>
+
+          <Form.Item
+            label="抽审比例"
+            tooltip="在符合升级条件的素材中按此比例抽样进入人审。未抽中的素材按默认矩阵处理（高/中风险拒绝，低风险/敏感 S0 通过；敏感 S1 脱敏放行）。100% = 全部升级（默认）。"
+            style={{ marginBottom: 0 }}
+          >
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Slider
+                min={0}
+                max={100}
+                step={1}
+                value={value.sample_ratio ?? 100}
+                onChange={(v) => patch({ sample_ratio: v })}
+                marks={{ 0: '0%', 25: '25%', 50: '50%', 75: '75%', 100: '全部升级' }}
+                tooltip={{ formatter: (v) => `${v}%` }}
+                style={{ maxWidth: 520 }}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                预估：每 100 条触发升级的素材，约 {value.sample_ratio ?? 100}{' '}
+                条进入人工复审。抽样基于素材 ID 确定性计算，结论稳定可复现。
+              </Text>
+            </Space>
           </Form.Item>
 
           <Form.Item

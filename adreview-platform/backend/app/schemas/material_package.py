@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.models.material_package import PackageStatus
 from app.schemas.common import ORMBase
 from app.schemas.material import MaterialOut
+from app.schemas.strategy import HumanReviewSettings
 
 
 class MaterialPackageItemOut(ORMBase):
@@ -58,3 +59,7 @@ class MaterialPackageSubmitRequest(BaseModel):
     workflow_template_code: Optional[str] = None
     force_human_rules: Optional[List[str]] = None
     task_name: Optional[str] = Field(default=None, max_length=255)
+    override_human_review: Optional[HumanReviewSettings] = Field(
+        default=None,
+        description="批量任务级 step-3 处置覆盖，所有 item 共享。字段级合并语义同 MaterialSubmitRequest。",
+    )

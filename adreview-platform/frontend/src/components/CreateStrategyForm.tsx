@@ -240,6 +240,10 @@ export default function CreateStrategyForm({
     ) {
       return '已选「敏感」风险等级，请至少选择一个敏感等级，否则「敏感」档位不会触发升级'
     }
+    const ratio = humanReview.sample_ratio ?? 100
+    if (ratio < 0 || ratio > 100) {
+      return '抽审比例必须在 0~100 之间'
+    }
     return null
   }
 
@@ -260,11 +264,14 @@ export default function CreateStrategyForm({
         risk_levels: humanReview.risk_levels,
         sensitive_levels: humanReview.sensitive_levels,
         review_rule_id: humanReview.review_rule_id,
+        sample_ratio: humanReview.sample_ratio ?? 100,
+        auto_action_overrides: humanReview.auto_action_overrides ?? {},
       }
     } else {
       const hasAny = humanReview.risk_levels.length > 0
         || humanReview.sensitive_levels.length > 0
         || humanReview.review_rule_id !== null
+        || humanReview.sample_ratio !== undefined
       if (hasAny) out.human_review = EMPTY_HUMAN_REVIEW
     }
     return Object.keys(out).length > 0 ? out : undefined

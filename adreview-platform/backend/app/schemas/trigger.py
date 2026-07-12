@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.common import ORMBase
+from app.schemas.strategy import HumanReviewSettings
 
 
 TriggerTypeStr = Literal["cron", "external_callback"]
@@ -24,6 +25,10 @@ class TriggerBase(BaseModel):
     strategy_id: Optional[int] = None
     match_conditions: Dict[str, Any] = Field(default_factory=dict)
     scan_interval_sec: int = Field(default=60, ge=10, le=3600)
+    override_human_review: Optional[HumanReviewSettings] = Field(
+        default=None,
+        description="触发器级 step-3 处置覆盖；cron 触发时与 strategy 字段级合并",
+    )
 
     @field_validator("match_conditions")
     @classmethod
@@ -61,6 +66,10 @@ class TriggerUpdate(BaseModel):
     strategy_id: Optional[int] = None
     match_conditions: Optional[Dict[str, Any]] = None
     scan_interval_sec: Optional[int] = Field(default=None, ge=10, le=3600)
+    override_human_review: Optional[HumanReviewSettings] = Field(
+        default=None,
+        description="触发器级 step-3 处置覆盖；设为 None 可清空已有 override",
+    )
 
 
 class TriggerOut(ORMBase):
@@ -76,6 +85,7 @@ class TriggerOut(ORMBase):
     strategy_name: Optional[str] = None
     match_conditions: Dict[str, Any]
     scan_interval_sec: int
+    override_human_review: Optional[Dict[str, Any]] = None
     last_run_at: Optional[datetime]
     next_run_at: Optional[datetime]
     run_count: int

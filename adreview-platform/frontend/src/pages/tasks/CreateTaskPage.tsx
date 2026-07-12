@@ -18,6 +18,7 @@ import {
 import { RocketOutlined, RobotOutlined } from '@ant-design/icons'
 import { materialsApi } from '@/api/materials'
 import StrategyForm, { type StrategyFormValues } from '@/components/task-create/StrategyForm'
+import { TaskDispositionOverridePanel } from '@/components/task-create/TaskDispositionOverridePanel'
 import ReferenceFields from '@/components/task-create/ReferenceFields'
 import type { ReferenceFormValues } from '@/lib/referenceFields'
 import { countFilledReference } from '@/lib/referenceFields'
@@ -28,7 +29,9 @@ import AnalysisPanel, {
   type ParsedPickedItem,
 } from '@/components/task-create/AnalysisPanel'
 import { useAuthStore } from '@/store'
-import type { MaterialType } from '@/types/domain'
+import { canManageBackend } from '@/lib/permissions'
+import type { MaterialType, StrategyHumanReview } from '@/types/domain'
+import { strategiesApi } from '@/api/strategies'
 import { colors } from '@/styles/theme'
 import { generateTaskName } from '@/lib/taskName'
 
@@ -68,7 +71,7 @@ export default function CreateTaskPage() {
   const { user } = useAuthStore()
   const [params] = useSearchParams()
 
-  const canPickStrategy = user?.role === 'admin' || user?.role === 'mlr'
+  const canPickStrategy = canManageBackend(user) || user?.role === 'mlr'
 
   const initialType = (params.get('type') as TabKind | null) || 'text'
   const initialMaterialId = params.get('material') ? Number(params.get('material')) : null
@@ -95,6 +98,25 @@ export default function CreateTaskPage() {
   const [currentStep, setCurrentStep] = useState(0)
   const stepRefs = useRef<(HTMLDivElement | null)[]>([])
   const [skipMachineReview, setSkipMachineReview] = useState(false)
+  // 任务级 step-3 处置覆盖：undefined 或全空对象表示「走策略默认值」
+  const [overrideHumanReview, setOverrideHumanReview] = useState<Partial<StrategyHumanReview> | undefined>(undefined)
+  // 选中策略的完整定义（用于预览 step-3 默认值）
+  const [selectedStrategyDefault, setSelectedStrategyDefault] = useState<Record<string, unknown> | null>(null)
+
+  // 当策略变化时拉取完整定义
+  useEffect(() => {
+    const sid = strategyForm.strategy_id
+    if (!sid) {
+      setSelectedStrategyDefault(null)
+      return
+    }
+    strategiesApi
+      .get(sid)
+      .then((s) => {
+        setSelectedStrategyDefault((s.definition as Record<string, unknown>) ?? null)
+      })
+      .catch(() => setSelectedStrategyDefault(null))
+  }, [strategyForm.strategy_id])
 
   const currentBackendType: MaterialType = useMemo(
     () => TYPE_TABS.find((t) => t.key === type)?.backendType ?? 'text',
@@ -295,7 +317,11 @@ export default function CreateTaskPage() {
       const file = new File([blob], 'text.txt', { type: 'text/plain' })
       await materialsApi.uploadVersion(created.id, file, item.textBody)
     }
-    await materialsApi.submit(created.id, { task_name: taskName, skip_machine_review: skipMachineReview })
+    await materialsApi.submit(created.id, {
+      task_name: taskName,
+      skip_machine_review: skipMachineReview,
+      override_human_review: overrideHumanReview,
+    })
     return created.id
   }
 
@@ -303,7 +329,11 @@ export default function CreateTaskPage() {
     const cur = await materialsApi.get(mid)
     const mergedTags = { ...(cur.tags || {}), ...buildTags() }
     await materialsApi.update(mid, { tags: mergedTags })
-    await materialsApi.submit(mid, { task_name: taskName, skip_machine_review: skipMachineReview })
+    await materialsApi.submit(mid, {
+      task_name: taskName,
+      skip_machine_review: skipMachineReview,
+      override_human_review: overrideHumanReview,
+    })
     return mid
   }
 
@@ -390,7 +420,19 @@ export default function CreateTaskPage() {
         />
       </div>
 
-      {/* 第 3 层：跳过机审 */}
+      {/* 第 3 层：本任务处置覆盖（仅 admin/mlr 可改 step-3 字段；submitter 也能预览） */}
+      {canPickStrategy && (
+        <div style={{ marginBottom: 16 }}>
+          <TaskDispositionOverridePanel
+            strategyId={strategyForm.strategy_id}
+            strategyDefaultHumanReview={selectedStrategyDefault?.['human_review'] as Record<string, unknown> | undefined ?? null}
+            value={overrideHumanReview}
+            onChange={setOverrideHumanReview}
+          />
+        </div>
+      )}
+
+      {/* 第 4 层：跳过机审 */}
       <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 16 }}>
         <Checkbox
           checked={skipMachineReview}

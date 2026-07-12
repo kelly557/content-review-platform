@@ -269,8 +269,14 @@ async def submit_package(
                 status_code=409,
                 detail=f"material '{material.title}' cannot be submitted (status: {material.status.value})",
             )
+        from app.services.human_review_merge import merge_and_normalize_human_review
+        strategy_hr = None  # 批量提交不解析 strategy；override 直接生效
+        merged_hr = merge_and_normalize_human_review(strategy_hr, body.override_human_review)
         await start_instance(
-            db, material, template, user, force_human_rules=body.force_human_rules, task_name=body.task_name
+            db, material, template, user,
+            force_human_rules=body.force_human_rules,
+            task_name=body.task_name,
+            strategy_human_review=merged_hr,
         )
 
     await db.flush()

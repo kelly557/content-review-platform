@@ -456,6 +456,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   reviewer: '审核员',
   mlr: 'MLR 专家',
   admin: '管理员',
+  superadmin: '超级管理员',
 }
 
 export const STATUS_LABELS: Record<MaterialStatus, string> = {
@@ -799,6 +800,8 @@ export interface Library {
   kind: LibraryKind | null
   description: string | null
   is_active: boolean
+  /** 通用平台库标记:true 表示仅超级管理员可见可改可删 */
+  is_platform: boolean
   is_deleted: boolean
   deleted_at: string | null
   item_count: number
@@ -820,6 +823,8 @@ export interface LibraryListItem {
   kind: LibraryKind | null
   description: string | null
   is_active: boolean
+  /** 通用平台库标记:true 表示仅超级管理员可见可改可删 */
+  is_platform: boolean
   is_deleted: boolean
   item_count: number
   effective_from: string | null
@@ -1286,6 +1291,13 @@ export interface StrategyHumanReview {
   review_rule_id: number | null
   /** 用户对每个 cell 动作的覆盖。嵌进 strategy.definition.human_review dict。 */
   auto_action_overrides?: AutoActionOverrides
+  /**
+   * 抽审比例（0~100，百分比）。在符合升级条件的素材中按此比例抽样进入人审。
+   * - 100 = 全部升级（默认，向后兼容）
+   * - 0   = 不升级，全部按默认矩阵处理
+   * 未抽中的素材按默认矩阵（高/中/敏感 S2/S3 拒绝；低风险通过）。
+   */
+  sample_ratio?: number
 }
 
 export const EMPTY_HUMAN_REVIEW: StrategyHumanReview = {
@@ -1294,6 +1306,7 @@ export const EMPTY_HUMAN_REVIEW: StrategyHumanReview = {
   sensitive_levels: [],
   review_rule_id: null,
   auto_action_overrides: {},
+  sample_ratio: 100,
 }
 
 export const STRATEGY_RISK_LEVEL_OPTIONS: ReadonlyArray<{
@@ -1505,6 +1518,12 @@ export function extractHumanReview(
   definition: Record<string, unknown> | null | undefined,
 ): StrategyHumanReview {
   const raw = (definition?.human_review ?? {}) as Partial<StrategyHumanReview>
+  const sampleRatio =
+    typeof raw.sample_ratio === 'number' &&
+    raw.sample_ratio >= 0 &&
+    raw.sample_ratio <= 100
+      ? raw.sample_ratio
+      : 100
   return {
     is_enabled: Boolean(raw.is_enabled),
     risk_levels: Array.isArray(raw.risk_levels)
@@ -1518,6 +1537,7 @@ export function extractHumanReview(
     auto_action_overrides: isAutoActionOverrides(raw.auto_action_overrides)
       ? raw.auto_action_overrides
       : {},
+    sample_ratio: sampleRatio,
   }
 }
 

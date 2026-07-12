@@ -62,6 +62,9 @@ class Trigger(Base):
         ForeignKey("strategies.id", ondelete="SET NULL"), nullable=True
     )
     match_conditions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # 触发器级 step-3 处置覆盖：cron 触发时与 strategy.definition.human_review 合并。
+    # 字段级合并语义：非空字段覆盖策略默认值；空字段走 strategy。
+    override_human_review: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     scan_interval_sec: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

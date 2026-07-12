@@ -126,12 +126,17 @@ class HumanReviewSettings(BaseModel):
     - risk_levels：机审 risk_level 命中任一档即升级
     - sensitive_levels：仅当 risk_level == "敏感" 时参与；S1 永远走脱敏放行不升级；
       S2/S3 升级需 service 同时开启「召回模式」
+    - sample_ratio：抽审比例（0~100，百分比），仅在符合升级条件时按比例抽样。
+      None / 缺省 = 100%（即全部升级，向后兼容）。
+    - auto_action_overrides：用户对每个 (risk, sensitive) cell 动作的覆盖。
     """
 
     is_enabled: bool = False
     risk_levels: List[str] = Field(default_factory=list)
     sensitive_levels: List[str] = Field(default_factory=list)
     review_rule_id: Optional[int] = None
+    sample_ratio: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    auto_action_overrides: Dict[str, str] = Field(default_factory=dict)
 
     def normalized(self) -> "HumanReviewSettings":
         """清理后返回：仅保留合法 risk_levels / sensitive_levels，无意义字段置空。"""
@@ -143,13 +148,27 @@ class HumanReviewSettings(BaseModel):
                 risk_levels=[],
                 sensitive_levels=[],
                 review_rule_id=None,
+                sample_ratio=None,
+                auto_action_overrides={},
             )
+        sr = self.sample_ratio if self.sample_ratio is not None else 100.0
         return HumanReviewSettings(
             is_enabled=True,
             risk_levels=levels,
             sensitive_levels=sensitives,
             review_rule_id=self.review_rule_id,
+            sample_ratio=sr,
+            auto_action_overrides=dict(self.auto_action_overrides),
         )
+
+    def has_any_value(self) -> bool:
+        """判断 override 是否有任何字段被显式设置（区分\"空 override\"和\"显式 override\"）。
+
+        使用 ``model_fields_set`` 区分「未传」和「传了默认值」——例如：
+        - ``HumanReviewSettings(is_enabled=False)`` → set, has_value=True
+        - ``HumanReviewSettings()`` → set 为空, has_value=False
+        """
+        return len(self.model_fields_set) > 0
 
 
 class StrategyItemRef(BaseModel):

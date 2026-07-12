@@ -66,7 +66,21 @@ export const materialsApi = {
         return r.data
       })
   },
-  submit(materialId: number, payload?: { task_name?: string; skip_machine_review?: boolean }) {
+  submit(
+    materialId: number,
+    payload?: {
+      task_name?: string
+      skip_machine_review?: boolean
+      override_human_review?: Partial<{
+        is_enabled: boolean
+        risk_levels: string[]
+        sensitive_levels: string[]
+        review_rule_id: number | null
+        sample_ratio: number
+        auto_action_overrides: Record<string, string>
+      }>
+    },
+  ) {
     return api
       .post<Material>(`/materials/${materialId}/submit`, payload || {})
       .then((r) => r.data)

@@ -172,10 +172,23 @@ async def fire_trigger(
             for material in materials:
                 try:
                     strategy = await resolve_strategy_for_trigger(db, trigger, material)
-                    strategy_human_review = (
+                    strategy_hr_raw = (
                         (strategy.definition or {}).get("human_review")
                         if strategy is not None
                         else None
+                    )
+                    # trigger 级 override + strategy 默认字段级合并
+                    from app.schemas.strategy import HumanReviewSettings
+                    from app.services.human_review_merge import (
+                        merge_and_normalize_human_review,
+                    )
+                    trigger_override = None
+                    if trigger.override_human_review:
+                        trigger_override = HumanReviewSettings.model_validate(
+                            trigger.override_human_review
+                        )
+                    strategy_human_review = merge_and_normalize_human_review(
+                        strategy_hr_raw, trigger_override
                     )
                     instance = await start_instance(
                         db=db,
