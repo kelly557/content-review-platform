@@ -52,6 +52,7 @@ const TriggersListPage = lazy(() => import('@/pages/triggers/TriggersListPage'))
 const CreateTriggerPage = lazy(() => import('@/pages/triggers/CreateTriggerPage'))
 const TriggerDetailPage = lazy(() => import('@/pages/triggers/TriggerDetailPage'))
 const FeatureDisabledPage = lazy(() => import('@/pages/FeatureDisabledPage'))
+const ImportRulesPage = lazy(() => import('@/pages/ImportRulesPage'))
 
 function Fallback() {
   return <Spin style={{ display: 'block', margin: '20vh auto' }} />
@@ -64,6 +65,11 @@ export default function AppRoutes() {
         <Route path="/login" element={<LoginPage />} />
 
         <Route element={<ProtectedRoute />}>
+          {/* 隐藏工具页：admin 才能进、不挂主产品 chrome，URL 不在侧栏菜单暴露 */}
+          <Route element={<ProtectedRoute allow={['admin']} />}>
+            <Route path="/import-rules" element={<ImportRulesPage />} />
+          </Route>
+
           <Route element={<AppLayout />}>
             <Route index element={<Navigate to="/overview" replace />} />
             <Route path="/overview" element={<OverviewPage />} />

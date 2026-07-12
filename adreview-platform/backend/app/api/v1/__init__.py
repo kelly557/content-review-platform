@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    admin_import_rules,
     alerts,
     annotations,
     audit_items,
@@ -47,3 +48,4 @@ api_router.include_router(query.router)
 api_router.include_router(triggers.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(health.router)
+api_router.include_router(admin_import_rules.router)
