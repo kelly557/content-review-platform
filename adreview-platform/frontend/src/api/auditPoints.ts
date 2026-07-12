@@ -15,6 +15,16 @@ export const auditPointsApi = {
       .get<AuditPoint[]>(`/packages/${packageCode}/points`, { params })
       .then((r) => r.data)
   },
+  async get(packageCode: string, pointId: number): Promise<AuditPoint> {
+    const list = await api
+      .get<AuditPoint[]>(`/packages/${packageCode}/points`)
+      .then((r) => r.data)
+    const found = list.find((p) => p.id === pointId)
+    if (!found) {
+      throw new Error(`审核点不存在: ${pointId}`)
+    }
+    return found
+  },
   create(packageCode: string, payload: AuditPointCreate) {
     return api
       .post<AuditPoint>(`/packages/${packageCode}/points`, payload)

@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { Link } from 'react-router-dom'
 import { auditItemsApi } from '@/api/auditItems'
+import { useAuthStore } from '@/store'
 import type { AuditItem } from '@/types/domain'
 
 const { Text } = Typography
@@ -24,6 +25,8 @@ export default function AuditItemListTable({ mediaType }: Props) {
   const packageCode = PACKAGE_BY_MEDIA[mediaType] ?? null
   const [items, setItems] = useState<AuditItem[]>([])
   const [loading, setLoading] = useState(false)
+  const { user } = useAuthStore()
+  const isSuperadmin = user?.role === 'superadmin'
 
   useEffect(() => {
     if (!packageCode) {
@@ -37,12 +40,11 @@ export default function AuditItemListTable({ mediaType }: Props) {
       .finally(() => setLoading(false))
   }, [packageCode])
 
-  const { customItems } = useMemo(() => {
+  const { builtinItems, customItems } = useMemo(() => {
+    const b: AuditItem[] = []
     const c: AuditItem[] = []
-    items.forEach((it) => {
-      if (!it.is_builtin) c.push(it)
-    })
-    return { customItems: c }
+    items.forEach((it) => (it.is_builtin ? b.push(it) : c.push(it)))
+    return { builtinItems: b, customItems: c }
   }, [items])
 
   const columns: ColumnsType<AuditItem> = [
@@ -146,8 +148,9 @@ export default function AuditItemListTable({ mediaType }: Props) {
 
   return (
     <div style={{ width: '100%' }}>
+      {isSuperadmin && renderGroup(builtinItems, '通用规则')}
       {renderGroup(customItems, '个性化规则')}
-      {customItems.length === 0 && !loading && empty}
+      {builtinItems.length + customItems.length === 0 && !loading && empty}
     </div>
   )
 }

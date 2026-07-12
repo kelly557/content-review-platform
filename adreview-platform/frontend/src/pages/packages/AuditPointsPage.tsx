@@ -8,6 +8,7 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
@@ -31,6 +32,7 @@ export default function AuditPointsPage() {
   const { code = '', itemId = '' } = useParams<{ code: string; itemId: string }>()
   const { user } = useAuthStore()
   const isAdmin = canManageBackend(user)
+  const isSuperadmin = user?.role === 'superadmin'
 
   const [item, setItem] = useState<AuditItem | null>(null)
   const [points, setPoints] = useState<AuditPoint[]>([])
@@ -127,16 +129,42 @@ export default function AuditPointsPage() {
     {
       title: '操作',
       width: '16%',
-      render: (_, row) => (
-        <Space size={4}>
-          <Link to={`/packages/${code}/items/${itemId}/points/${row.id}`}>编辑</Link>
-          {isAdmin && (
-            <Popconfirm title="确认删除该审核点？" onConfirm={() => remove(row)}>
-              <a style={{ color: '#ef4444' }}>删除</a>
-            </Popconfirm>
-          )}
-        </Space>
-      ),
+      render: (_, row) => {
+        const showSuperadminLabel = row.is_builtin && isSuperadmin
+        const showLimitedLabel = row.is_builtin && !isSuperadmin
+        return (
+          <Space size={4}>
+            {showSuperadminLabel ? (
+              <Tooltip title="通用审核点:超级管理员可编辑全部字段">
+                <Link
+                  to={`/packages/${code}/items/${itemId}/points/${row.id}`}
+                  style={{ color: '#7C3AED' }}
+                >
+                  编辑（全部）
+                </Link>
+              </Tooltip>
+            ) : showLimitedLabel ? (
+              <Tooltip title="通用审核点:仅允许修改启用 / 中/高风险分 / 关联自定义库">
+                <Link
+                  to={`/packages/${code}/items/${itemId}/points/${row.id}`}
+                  style={{ color: '#94A3B8' }}
+                >
+                  编辑
+                </Link>
+              </Tooltip>
+            ) : (
+              <Link to={`/packages/${code}/items/${itemId}/points/${row.id}`}>
+                编辑
+              </Link>
+            )}
+            {isAdmin && (
+              <Popconfirm title="确认删除该审核点？" onConfirm={() => remove(row)}>
+                <a style={{ color: '#ef4444' }}>删除</a>
+              </Popconfirm>
+            )}
+          </Space>
+        )
+      },
     },
   ]
 

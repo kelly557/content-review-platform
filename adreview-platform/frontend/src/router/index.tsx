@@ -46,6 +46,7 @@ const PackageItemsPage = lazy(() => import('@/pages/packages/PackageItemsPage'))
 const CreateAuditItemPage = lazy(() => import('@/pages/packages/CreateAuditItemPage'))
 const AuditPointsPage = lazy(() => import('@/pages/packages/AuditPointsPage'))
 const CreateAuditPointPage = lazy(() => import('@/pages/packages/CreateAuditPointPage'))
+const EditAuditPointPage = lazy(() => import('@/pages/packages/EditAuditPointPage'))
 const TagsPage = lazy(() => import('@/pages/tags/TagsPage'))
 const HumanReviewRulesPage = lazy(() => import('@/pages/strategy/HumanReviewRulesPage'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
@@ -180,6 +181,10 @@ export default function AppRoutes() {
               <Route
                 path="/packages/:code/items/:itemId/points/new"
                 element={<CreateAuditPointPage />}
+              />
+              <Route
+                path="/packages/:code/items/:itemId/points/:pointId"
+                element={<EditAuditPointPage />}
               />
             </Route>
 

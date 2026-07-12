@@ -211,17 +211,15 @@ async def create_point(
     code: str,
     body: AuditPointCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin", "superadmin")),
+    current_user: User = Depends(require_roles("admin", "superadmin")),
 ) -> AuditPointOut:
     await _ensure_package(db, code)
     item = await _ensure_item_writable(db, code, body.item_id)
-    # 通用审核项下不允许新增审核点（无论角色,包括超级管理员）——
-    # 约束意图:通用规则由 seed 预置完毕,扩展请新建个性化 item;
-    # 此限制在用户确认的范围内保留。
-    if item.is_builtin:
+    # 通用审核项下:仅超级管理员可新增审核点;其他角色需新建个性化 item
+    if item.is_builtin and current_user.role != UserRole.SUPERADMIN:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="通用审核项下不允许新增审核点；如需扩展，请在知识库新建个性化审核项。",
+            detail="通用审核项下不允许新增审核点；如需扩展，请在知识库新建个性化审核项，或由超级管理员操作。",
         )
     generated_code = await _generate_point_code(db, code, body.item_id)
     point = AuditPoint(
@@ -388,15 +386,15 @@ async def create_points_batch(
     code: str,
     body: AuditPointBatchCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin", "superadmin")),
+    current_user: User = Depends(require_roles("admin", "superadmin")),
 ) -> AuditPointBatchResult:
     await _ensure_package(db, code)
     item = await _ensure_item_writable(db, code, body.item_id)
-    # 通用审核项下不允许批量新增审核点（与单条 POST 一致）
-    if item.is_builtin:
+    # 通用审核项下:仅超级管理员可批量新增审核点;其他角色需新建个性化 item
+    if item.is_builtin and current_user.role != UserRole.SUPERADMIN:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="通用审核项下不允许批量新增审核点；请新建个性化审核项。",
+            detail="通用审核项下不允许批量新增审核点；请新建个性化审核项，或由超级管理员操作。",
         )
 
     items: list[AuditPointBatchItem] = []
