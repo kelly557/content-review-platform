@@ -15,7 +15,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.get("", response_model=list[UserOut])
 async def list_users(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_roles("admin", "superadmin")),
 ) -> list[User]:
     result = await db.execute(select(User).order_by(User.id.desc()))
     return list(result.scalars())
@@ -25,7 +25,7 @@ async def list_users(
 async def create_user(
     body: UserCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_roles("admin", "superadmin")),
 ) -> User:
     exists = await db.execute(select(User).where(User.email == body.email))
     if exists.scalar_one_or_none():
@@ -47,7 +47,7 @@ async def update_user(
     user_id: int,
     body: UserUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_roles("admin", "superadmin")),
 ) -> User:
     user = await db.get(User, user_id)
     if not user:
@@ -59,5 +59,3 @@ async def update_user(
     if body.is_active is not None:
         user.is_active = body.is_active
     await db.flush()
-    await db.commit()
-    return user

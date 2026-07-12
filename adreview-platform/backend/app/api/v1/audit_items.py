@@ -12,7 +12,7 @@ from app.db.session import get_db
 from app.models.audit_item import AuditItem
 from app.models.audit_point import AuditPoint
 from app.models.service import Service
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.audit_item import (
     AuditItemCreate,
     AuditItemOut,
@@ -27,9 +27,16 @@ from app.services.nl_match import suggest_items
 BUILTIN_ITEM_WRITABLE_FIELDS = frozenset({"is_enabled", "description"})
 
 
-def _filter_payload_for_builtin_item(item: AuditItem, body: AuditItemUpdate) -> None:
-    """对「内置审核项」的更新请求拦截非白名单字段（含 aliases / sort_order / name_cn）。"""
+def _filter_payload_for_builtin_item(
+    item: AuditItem, body: AuditItemUpdate, user: User
+) -> None:
+    """对「内置审核项」的更新请求拦截非白名单字段（含 aliases / sort_order / name_cn）。
+
+    超级管理员不受白名单限制,可任意修改通用审核项的任意字段。
+    """
     if not item.is_builtin:
+        return
+    if user.role == UserRole.SUPERADMIN:
         return
     fields_set = getattr(body, "model_fields_set", set())
     blocked = sorted(k for k in fields_set if k not in BUILTIN_ITEM_WRITABLE_FIELDS)
@@ -39,7 +46,7 @@ def _filter_payload_for_builtin_item(item: AuditItem, body: AuditItemUpdate) -> 
             detail=(
                 "通用审核项不允许修改字段："
                 + "、".join(blocked)
-                + "；仅允许启停 / 调整描述。"
+                + "；仅允许启停 / 调整描述（超级管理员可改任意字段）。"
             ),
         )
 
@@ -169,7 +176,7 @@ async def create_item(
     code: str,
     body: AuditItemCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_roles("admin", "superadmin")),
 ) -> AuditItemOut:
     await _ensure_package(db, code)
     generated_code = await _generate_item_code(db, code)
@@ -216,13 +223,13 @@ async def update_item(
     item_id: int,
     body: AuditItemUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    current_user: User = Depends(require_roles("admin", "superadmin")),
 ) -> AuditItemOut:
     await _ensure_package(db, code)
     item = await db.get(AuditItem, item_id)
     if not item or item.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在")
-    _filter_payload_for_builtin_item(item, body)
+    _filter_payload_for_builtin_item(item, body, current_user)
     if body.name_cn is not None:
         item.name_cn = body.name_cn
     if body.aliases is not None:
@@ -258,16 +265,16 @@ async def delete_item(
     code: str,
     item_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    current_user: User = Depends(require_roles("admin", "superadmin")),
 ) -> None:
     await _ensure_package(db, code)
     item = await db.get(AuditItem, item_id)
     if not item or item.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在")
-    if item.is_builtin:
+    if item.is_builtin and current_user.role != UserRole.SUPERADMIN:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="通用审核项不允许删除。",
+            detail="通用审核项不允许删除;仅超级管理员可操作。",
         )
     points = await db.execute(
         select(func.count(AuditPoint.id)).where(AuditPoint.item_id == item_id)

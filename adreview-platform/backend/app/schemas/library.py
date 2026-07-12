@@ -70,6 +70,7 @@ class LibraryOut(ORMBase):
     kind: Optional[LibraryKind] = None
     description: Optional[str] = None
     is_active: bool
+    is_platform: bool = False
     is_deleted: bool
     deleted_at: Optional[datetime] = None
     item_count: int = 0
@@ -91,6 +92,7 @@ class LibraryListItem(ORMBase):
     kind: Optional[LibraryKind] = None
     description: Optional[str] = None
     is_active: bool
+    is_platform: bool = False
     is_deleted: bool
     item_count: int = 0
     effective_from: Optional[datetime] = None

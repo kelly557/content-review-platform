@@ -17,7 +17,7 @@ from app.models.audit_point import AuditPoint
 from app.models.audit_point_library import AuditPointLibrary
 from app.models.library import Library
 from app.models.service import Service
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.audit_point import (
     AuditPointBatchCreate,
     AuditPointBatchItem,
@@ -77,9 +77,16 @@ BUILTIN_POINT_WRITABLE_FIELDS = frozenset(
 )
 
 
-def _filter_payload_for_builtin_point(point: AuditPoint, body: AuditPointUpdate) -> None:
-    """对「内置审核点」的更新请求拦截非白名单字段。"""
+def _filter_payload_for_builtin_point(
+    point: AuditPoint, body: AuditPointUpdate, user: User
+) -> None:
+    """对「内置审核点」的更新请求拦截非白名单字段。
+
+    超级管理员不受白名单限制,可任意修改通用审核点的任意字段。
+    """
     if not point.is_builtin:
+        return
+    if user.role == UserRole.SUPERADMIN:
         return
     # Pydantic v2: model_fields_set 记录显式提供字段（含 null）
     fields_set = getattr(body, "model_fields_set", set())
@@ -90,7 +97,7 @@ def _filter_payload_for_builtin_point(point: AuditPoint, body: AuditPointUpdate)
             detail=(
                 "通用审核点不允许修改字段："
                 + "、".join(blocked)
-                + "；仅允许启用 / 中/高风险分 / 关联自定义库。"
+                + "；仅允许启用 / 中/高风险分 / 关联自定义库（超级管理员可改任意字段）。"
             ),
         )
 
@@ -204,10 +211,13 @@ async def create_point(
     code: str,
     body: AuditPointCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_roles("admin", "superadmin")),
 ) -> AuditPointOut:
     await _ensure_package(db, code)
     item = await _ensure_item_writable(db, code, body.item_id)
+    # 通用审核项下不允许新增审核点（无论角色,包括超级管理员）——
+    # 约束意图:通用规则由 seed 预置完毕,扩展请新建个性化 item;
+    # 此限制在用户确认的范围内保留。
     if item.is_builtin:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -268,13 +278,13 @@ async def update_point(
     point_id: int,
     body: AuditPointUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    current_user: User = Depends(require_roles("admin", "superadmin")),
 ) -> AuditPointOut:
     await _ensure_package(db, code)
     point = await db.get(AuditPoint, point_id)
     if not point or point.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核点不存在")
-    _filter_payload_for_builtin_point(point, body)
+    _filter_payload_for_builtin_point(point, body, current_user)
     if body.label_cn is not None:
         point.label_cn = body.label_cn
     if body.description is not None:
@@ -330,16 +340,16 @@ async def delete_point(
     code: str,
     point_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    current_user: User = Depends(require_roles("admin", "superadmin")),
 ) -> None:
     await _ensure_package(db, code)
     point = await db.get(AuditPoint, point_id)
     if not point or point.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核点不存在")
-    if point.is_builtin:
+    if point.is_builtin and current_user.role != UserRole.SUPERADMIN:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="通用审核点不允许删除。",
+            detail="通用审核点不允许删除;仅超级管理员可操作。",
         )
     await db.delete(point)
     await db.commit()
@@ -349,7 +359,7 @@ async def delete_point(
 async def reset_points(
     code: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_roles("admin", "superadmin")),
 ) -> AuditPointResetResult:
     from sqlalchemy.orm import selectinload
 
@@ -378,10 +388,11 @@ async def create_points_batch(
     code: str,
     body: AuditPointBatchCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_roles("admin", "superadmin")),
 ) -> AuditPointBatchResult:
     await _ensure_package(db, code)
     item = await _ensure_item_writable(db, code, body.item_id)
+    # 通用审核项下不允许批量新增审核点（与单条 POST 一致）
     if item.is_builtin:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

@@ -40,7 +40,7 @@ from app.models.audit_point import AuditPoint
 from app.models.library import Library, LibraryKind, LibraryType
 from app.models.library_item import LibraryItem
 from app.models.library_item_reference import LibraryItemReference
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.common import Page
 from app.schemas.library import (
     AuditPointRef,
@@ -78,6 +78,38 @@ MAX_WORDS = 1000
 WORD_CODE_RE = _re.compile(r"^ws_\d+$")
 IMAGE_CODE_RE = _re.compile(r"^is_\d+$")
 GENERIC_CODE_RE = _re.compile(r"^lib_[a-z]?\d+$")
+
+
+# 通用平台库允许修改的字段白名单（与 AuditItem.is_builtin 的保护模式一致）。
+# 超级管理员不受此白名单限制,可任意修改甚至删除。
+PLATFORM_LIBRARY_WRITABLE_FIELDS = frozenset(
+    {"is_active", "description", "ignored_services", "effective_from", "effective_until"}
+)
+
+
+def _enforce_platform_library_guard(
+    lib: Library, body: "LibraryUpdate", user: User
+) -> None:
+    """对「通用平台库」的更新请求拦截非白名单字段。
+
+    通用平台库 (is_platform=true) 仅超级管理员可以修改任意字段;
+    其他角色只能修改白名单内的字段。服务端兜底,避免前端绕开。
+    """
+    if not lib.is_platform:
+        return
+    if user.role == UserRole.SUPERADMIN:
+        return
+    fields_set = getattr(body, "model_fields_set", set())
+    blocked = sorted(k for k in fields_set if k not in PLATFORM_LIBRARY_WRITABLE_FIELDS)
+    if blocked:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "通用平台库不允许修改字段:"
+                + "、".join(blocked)
+                + ";仅超级管理员可改任意字段,其他角色仅允许启停/调整描述/调整有效期/调整忽略服务。"
+            ),
+        )
 
 
 # ─── helpers ────────────────────────────────────────────────────────────
@@ -156,6 +188,7 @@ def _to_out(lib: Library, item_count: int) -> LibraryOut:
             "kind": lib.kind,
             "description": lib.description,
             "is_active": lib.is_active,
+            "is_platform": lib.is_platform,
             "is_deleted": lib.is_deleted,
             "deleted_at": lib.deleted_at,
             "item_count": item_count,
@@ -181,6 +214,7 @@ def _to_list(lib: Library, item_count: int) -> LibraryListItem:
             "kind": lib.kind,
             "description": lib.description,
             "is_active": lib.is_active,
+            "is_platform": lib.is_platform,
             "is_deleted": lib.is_deleted,
             "item_count": item_count,
             "effective_from": lib.effective_from,
@@ -236,7 +270,7 @@ async def _counts_for_libraries(
 @router.get("", response_model=Page[LibraryListItem])
 async def list_libraries(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     type: Optional[LibraryType] = Query(None),
@@ -278,6 +312,9 @@ async def list_libraries(
                 Library.effective_until > now,
             )
         )
+    # 通用平台库 (is_platform=true) 仅超级管理员可见;其他角色自动过滤。
+    if current_user.role != UserRole.SUPERADMIN:
+        conds.append(Library.is_platform == False)  # noqa: E712
     if conds:
         stmt = stmt.where(and_(*conds))
 
@@ -293,10 +330,13 @@ async def list_libraries(
 async def get_library(
     library_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> LibraryOut:
     lib = await db.get(Library, library_id)
     if not lib:
+        raise HTTPException(status_code=404, detail="库不存在")
+    # 通用平台库对非超级管理员不可见（避免泄漏存在性,用 404 而非 403）
+    if lib.is_platform and current_user.role != UserRole.SUPERADMIN:
         raise HTTPException(status_code=404, detail="库不存在")
     counts = await _counts_for_libraries(db, [lib.id])
     return _to_out(lib, counts.get(lib.id, 0))
@@ -358,6 +398,8 @@ async def create_library(
         kind=kind,
         description=body.description,
         is_active=True,
+        # 通用平台库只能由 seed / 内部工具创建；客户端 POST 一律创建个性化库
+        is_platform=False,
         ignored_services=[],
         effective_from=body.effective_from,
         effective_until=body.effective_until,
@@ -409,6 +451,7 @@ async def batch_create_libraries(
     """Create up to 20 libraries in one call.
 
     Each library is its own transaction — failures do not abort the batch.
+    All created libraries are 个性化 (is_platform=false).
     """
     created: List[LibraryOut] = []
     errors: List[LibraryBatchCreateError] = []
@@ -436,6 +479,7 @@ async def batch_create_libraries(
                 kind=kind,
                 description=item.description,
                 is_active=item.is_active,
+                is_platform=False,
                 ignored_services=[],
                 effective_from=item.effective_from,
                 effective_until=item.effective_until,
@@ -493,11 +537,16 @@ async def update_library(
     library_id: int,
     body: LibraryUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> LibraryOut:
     lib = await db.get(Library, library_id)
     if not lib or lib.is_deleted:
         raise HTTPException(status_code=404, detail="库不存在")
+    # 通用平台库对非超级管理员不可见（避免泄漏存在性,用 404 而非 403）
+    if lib.is_platform and current_user.role != UserRole.SUPERADMIN:
+        raise HTTPException(status_code=404, detail="库不存在")
+    # 通用平台库白名单守卫: 非超管只能改白名单字段
+    _enforce_platform_library_guard(lib, body, current_user)
     if body.name is not None:
         lib.name = body.name.strip()
     if body.description is not None:
@@ -538,11 +587,20 @@ async def delete_library(
     library_id: int,
     body: LibraryDeletePayload,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> LibraryDeleteResponse:
     lib = await db.get(Library, library_id)
     if not lib or lib.is_deleted:
         raise HTTPException(status_code=404, detail="库不存在")
+    # 通用平台库对非超级管理员不可见（避免泄漏存在性,用 404 而非 403）
+    if lib.is_platform and current_user.role != UserRole.SUPERADMIN:
+        raise HTTPException(status_code=404, detail="库不存在")
+    # 通用平台库仅超级管理员可删
+    if lib.is_platform and current_user.role != UserRole.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="通用平台库不允许删除;仅超级管理员可操作。",
+        )
 
     refs_rows = await db.execute(
         select(AuditPoint.id, AuditPoint.package_code, AuditPoint.label).where(

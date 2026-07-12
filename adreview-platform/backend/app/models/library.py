@@ -89,6 +89,11 @@ class Library(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="true"
     )
+    # 通用平台库标记: True = 平台预置共享库,仅超级管理员可见可改可删;
+    # False = 用户自建个性化库 (默认)。
+    is_platform: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
     is_deleted: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
     )
