@@ -130,6 +130,10 @@ source .venv/bin/activate
 PYTHONPATH=. python scripts/seed.py
 ```
 
+⚠️ **不要在已有业务数据的数据库上跑这条命令。**
+
+`seed.py` 是幂等 upsert，但它会把所有 `audit_items` / `audit_points` / 阈值 / `is_builtin` 标记覆盖回 `DEFAULT_*` 字面值——你手动导入的审核规则会被静默改写。如果一定要跑，加上 `RESEED_ALLOWED=YES` 和 `--allow-reseed` 双确认，参考 `CLAUDE.md`「不允许用 seed.py 重置数据库」一节。
+
 默认账号（密码可在脚本中修改）：
 
 | 角色 | 邮箱 | 密码 |

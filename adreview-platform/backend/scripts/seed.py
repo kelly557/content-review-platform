@@ -869,6 +869,7 @@ async def main(
         await _upsert_user(db, "reviewer@adreview.example.com", "审核员 Alice", UserRole.REVIEWER, "reviewer123")
         await _upsert_user(db, "mlr@adreview.example.com", "MLR 专家 Bob", UserRole.MLR, "mlr12345")
         await _upsert_user(db, "submitter@adreview.example.com", "提交者 Carol", UserRole.SUBMITTER, "submitter123")
+        await _upsert_user(db, "superadmin@adreview.example.com", "超级管理员", UserRole.SUPERADMIN, settings.app_secret + "-superadmin")
         await _upsert_sample_triggers(db)
         await db.commit()
         from app.db.session import engine
@@ -978,6 +979,8 @@ async def _upsert_bad_libraries(db: AsyncSession) -> None:
             lib.description = spec["description"]
             lib.kind = LibraryKind.BLACKLIST
             lib.is_active = True
+            # 标记为通用平台库:仅超级管理员可见可改可删
+            lib.is_platform = True
         else:
             db.add(
                 Library(
@@ -988,6 +991,7 @@ async def _upsert_bad_libraries(db: AsyncSession) -> None:
                     description=spec["description"],
                     is_active=True,
                     is_deleted=False,
+                    is_platform=True,
                     ignored_services=[],
                 )
             )
@@ -1006,6 +1010,7 @@ async def _upsert_politics_libraries(db: AsyncSession) -> None:
             lib.description = spec["description"]
             lib.kind = LibraryKind.BLACKLIST
             lib.is_active = True
+            lib.is_platform = True
         else:
             db.add(
                 Library(
@@ -1016,6 +1021,7 @@ async def _upsert_politics_libraries(db: AsyncSession) -> None:
                     description=spec["description"],
                     is_active=True,
                     is_deleted=False,
+                    is_platform=True,
                     ignored_services=[],
                 )
             )
@@ -1064,7 +1070,81 @@ if __name__ == "__main__":
         action="store_true",
         help="Print what would be deleted; do not actually DELETE rows.",
     )
+    parser.add_argument(
+        "--allow-reseed",
+        action="store_true",
+        help=argparse.SUPPRESS,  # advanced: paired with RESEED_ALLOWED + --reason
+    )
     args = parser.parse_args()
+
+    # ──────────────────────────────────────────────────────────────────
+    # Safety gate: refuse to run on a DB that already has user data.
+    #
+    # History: a developer (or typo) ran plain `python scripts/seed.py`
+    # against a populated DB on 2026-07-12 16:30, silently overwriting
+    # manually-imported audit points back to DEFAULT_* values. The
+    # project rule is: NEVER re-seed a live DB. To run seed.py at all,
+    # the operator must supply BOTH:
+    #
+    #   1. RESEED_ALLOWED=YES  (env var, exact match)
+    #   2. --allow-reseed     (CLI flag, hidden behind SUPPRESS)
+    #
+    # Plain `python scripts/seed.py` on a non-empty DB will refuse and
+    # print a remediation hint.
+    #
+    # The check is on COUNT(*) of audit_items / strategies / libraries
+    # — any of which being non-zero means "live data is present".
+    # ──────────────────────────────────────────────────────────────────
+    from sqlalchemy import text as _sa_text  # local import to avoid top-level noise
+    from sqlalchemy.ext.asyncio import create_async_engine as _cae
+
+    async def _has_user_data() -> bool:
+        async with engine.begin() as conn:
+            res = await conn.execute(
+                _sa_text(
+                    "SELECT (SELECT count(*) FROM audit_items) + "
+                    "       (SELECT count(*) FROM strategies) + "
+                    "       (SELECT count(*) FROM libraries)"
+                )
+            )
+            row = res.scalar_one()
+            return (row or 0) > 0
+
+    reseed_armed = (
+        os.environ.get("RESEED_ALLOWED") == "YES" and args.allow_reseed
+    )
+
+    if not reseed_armed:
+        try:
+            has_data = asyncio.run(_has_user_data())
+        except Exception:
+            has_data = False
+        if has_data:
+            print("=" * 72, file=sys.stderr)
+            print("  ✗ seed.py REFUSED to run.", file=sys.stderr)
+            print("", file=sys.stderr)
+            print(
+                "  This database already has user data (audit_items / strategies /\n"
+                "  libraries count > 0). Running seed.py on a populated database\n"
+                "  overwrites manually-imported audit points / items / thresholds\n"
+                "  back to the bundled DEFAULT_* values. See CLAUDE.md for the\n"
+                "  project policy that forbids this.",
+                file=sys.stderr,
+            )
+            print("", file=sys.stderr)
+            print("  To bypass (e.g. on a fresh empty DB):", file=sys.stderr)
+            print(
+                "    RESEED_ALLOWED=YES python scripts/seed.py --allow-reseed",
+                file=sys.stderr,
+            )
+            print("", file=sys.stderr)
+            print(
+                "  To preview what seed would touch without writing:",
+                file=sys.stderr,
+            )
+            print("    python scripts/seed.py --dry-run", file=sys.stderr)
+            print("=" * 72, file=sys.stderr)
+            sys.exit(2)
 
     if (args.purge_removed or args.purge_user_data) and not args.dry_run:
         print(

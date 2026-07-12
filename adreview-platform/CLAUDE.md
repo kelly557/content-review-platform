@@ -19,6 +19,33 @@
 
 ## 数据库重建
 
+**🚫 不允许用 `seed.py` / `init_db.py` 重置数据库**。已踩坑：
+
+- `seed.py` 即使非 purgeme 也是 idempotent upsert，会把已经手工调过的 `is_builtin=true/false` 标记、阈值、enabled 全部覆盖回 DEFAULT_* 的字面值
+- `init_db.py` 是 `DROP SCHEMA public CASCADE`，所有业务数据（导入的通用/个性化规则、strategy、人审配置、库、词条、trigger、alert_event …）**全部归零**
+- 历史上 2026-07-12 16:30 误触 `seed.py` 导致前一轮手工导入的规则被静默盖写，事后无审计日志确认
+
+**允许的做法**：
+
+```bash
+# 需要补种子/修默认 item 时，用 --dry-run 看清改了什么、确认无 --apply 才落
+cd backend && source .venv/bin/activate
+PYTHONPATH=. python3 scripts/seed.py --dry-run --purge-removed
+PYTHONPATH=. python3 scripts/init_db.py   # 这个会直接拒绝，要求 RESET_DATABASE=YES I_KNOW=YES 双确认
+```
+
+**禁止**：
+
+- ❌ 在已部署/含业务数据的 PG 上无脑跑 `python scripts/seed.py`
+- ❌ 直接 `init_db.py` 不带双 env 验证
+- ❌ 自动起/重启时跑 seed.py
+
+`scripts/seed.py` 内部加了环境守门：未携带 `RESEED_ALLOWED=YES --reason <文本>` 时**直接 exit 1**，需要在 `seed.py` 头部对比 `/tmp/adreview.seed.lock`。
+
+---
+
+## 数据库重建（仅冷启动/dev 全新库）
+
 **WARNING**: `init_db.py` 会 **DROP SCHEMA public CASCADE**，所有数据永久丢失。必须设置环境变量 `AGREE_RESET=YES` 确认。
 
 ```bash
