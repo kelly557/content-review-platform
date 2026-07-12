@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_token
 from app.db.session import get_db
-from app.models.user import User
+from app.models.user import User, UserRole
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -31,9 +31,15 @@ async def get_current_user(
 
 
 def require_roles(*roles: str):
-    """Dependency factory: enforce user role membership."""
+    """Dependency factory: enforce user role membership.
+
+    superadmin 隐式拥有所有角色权限（platform operator 全权），
+    不需要在每个 require_roles 调用里手动列出。
+    """
 
     async def _check(user: User = Depends(get_current_user)) -> User:
+        if user.role == UserRole.SUPERADMIN:
+            return user
         if user.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -42,3 +48,18 @@ def require_roles(*roles: str):
         return user
 
     return _check
+
+
+async def require_superadmin(user: User = Depends(get_current_user)) -> User:
+    """Dependency: ensure the caller is the superadmin role.
+
+    Used to gate administrative actions that should only be reachable by the
+    platform operator (e.g. editing 通用 AuditItem/AuditPoint, viewing the
+    通用 platform libraries).
+    """
+    if user.role != UserRole.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Requires role: superadmin",
+        )
+    return user
