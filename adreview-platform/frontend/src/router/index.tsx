@@ -82,12 +82,12 @@ export default function AppRoutes() {
             <Route path="/tasks/:id" element={<TaskDetailPage />} />
             <Route path="/tasks/package/:id" element={<PackageDetailPage />} />
 
-            <Route element={<ProtectedRoute allow={['reviewer', 'mlr', 'admin']} />}>
+            <Route element={<ProtectedRoute allow={['reviewer', 'mlr', 'admin', 'superadmin']} />}>
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/query" element={<QueryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute allow={['admin', 'mlr']} />}>
+            <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin']} />}>
               <Route path="/strategies" element={<StrategyListPage />} />
               <Route
                 path="/strategies/rules-by-type/audio"
@@ -185,14 +185,14 @@ export default function AppRoutes() {
             <Route path="/packages" element={<FeatureDisabledPage />} />
             <Route path="/packages/:id" element={<FeatureDisabledPage />} />
 
-            <Route element={<ProtectedRoute allow={['admin']} />}>
+            <Route element={<ProtectedRoute allow={['admin', 'superadmin']} />}>
               <Route path="/admin/users" element={<UsersAdminPage />} />
               <Route path="/triggers" element={<TriggersListPage />} />
               <Route path="/triggers/new" element={<CreateTriggerPage />} />
               <Route path="/triggers/:id" element={<TriggerDetailPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute allow={['admin', 'mlr']} />}>
+            <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin']} />}>
               <Route path="/tags" element={<TagsPage />} />
               <Route path="/human-review-rules" element={<HumanReviewRulesPage />} />
             </Route>

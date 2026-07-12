@@ -16,6 +16,7 @@ import { strategiesApi } from '@/api/strategies'
 import { workflowsApi } from '@/api/workflows'
 import { triggersApi, type TriggerCreatePayload, type TriggerTypeStr } from '@/api/triggers'
 import { useAuthStore } from '@/store'
+import { canManageBackend } from '@/lib/permissions'
 import SchedulePicker, { type SchedulePickerValue } from '@/components/triggers/SchedulePicker'
 import { describeCron } from '@/lib/cronDescriber'
 
@@ -98,7 +99,7 @@ export default function CreateTriggerPage() {
   const [strategies, setStrategies] = useState<Array<{ id: number; code: string; name: string }>>([])
 
   useEffect(() => {
-    if (user?.role !== 'admin') return
+    if (!canManageBackend(user)) return
     workflowsApi.list({ include_inactive: false }).then((d) => {
       setTemplates(d.map((t) => ({ id: t.id, code: t.code, name: t.name })))
     }).catch(() => {})
@@ -143,7 +144,7 @@ export default function CreateTriggerPage() {
     }
   }
 
-  if (user?.role !== 'admin') {
+  if (!canManageBackend(user)) {
     return <div>仅管理员可访问</div>
   }
 

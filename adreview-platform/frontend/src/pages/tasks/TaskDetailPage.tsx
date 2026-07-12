@@ -22,6 +22,7 @@ import { materialsApi } from '@/api/materials'
 import { usersApi } from '@/api/admin'
 import { tagsApi } from '@/api/tags'
 import { useAuthStore } from '@/store'
+import { canHandleTask } from '@/lib/permissions'
 import {
   DECISION_LABELS,
   TYPE_LABELS,
@@ -112,7 +113,7 @@ export default function TaskDetailPage() {
     fetchTask(taskId).catch(() => {
       message.error('加载任务失败')
     })
-    if (user?.role === 'admin' || user?.role === 'reviewer' || user?.role === 'mlr') {
+    if (canHandleTask(user)) {
       usersApi.list().then(setUsers).catch(() => {})
     }
     tagsApi
@@ -291,6 +292,7 @@ export default function TaskDetailPage() {
       task.machine_status === 'running' ||
       task.machine_status == null) &&
     (user?.role === 'admin' ||
+      user?.role === 'superadmin' ||
       (user?.role === 'submitter' && material.submitter_id === user.id) ||
       hasPendingAssignment)
 

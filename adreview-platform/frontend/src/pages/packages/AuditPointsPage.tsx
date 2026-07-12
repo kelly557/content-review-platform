@@ -17,6 +17,7 @@ import { auditItemsApi } from '@/api/auditItems'
 import { auditPointsApi } from '@/api/auditPoints'
 import type { AuditItem, AuditPoint, AuditPointRisk } from '@/types/domain'
 import { useAuthStore } from '@/store'
+import { canManageBackend } from '@/lib/permissions'
 
 const { Text } = Typography
 
@@ -29,7 +30,7 @@ const RISK_COLORS: Record<AuditPointRisk, string> = {
 export default function AuditPointsPage() {
   const { code = '', itemId = '' } = useParams<{ code: string; itemId: string }>()
   const { user } = useAuthStore()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = canManageBackend(user)
 
   const [item, setItem] = useState<AuditItem | null>(null)
   const [points, setPoints] = useState<AuditPoint[]>([])

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { App, Button, Empty, Input, Space, Table, Tag, type TableColumnsType } from 'antd'
 import { PlusOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { reviewsApi } from '@/api/reviews'
+import { canCreateTask } from '@/lib/permissions'
 import { useAuthStore } from '@/store'
 import {
   MACHINE_DECISION_OPTIONS,
@@ -43,7 +44,7 @@ export default function TasksPage() {
     canceled: 0,
   })
 
-  const canCreate = user?.role === 'submitter' || user?.role === 'admin'
+  const canCreate = canCreateTask(user)
   const canCancel = (task: ReviewTask) =>
     task.final_decision === 'pending' &&
     task.canceled_at == null &&

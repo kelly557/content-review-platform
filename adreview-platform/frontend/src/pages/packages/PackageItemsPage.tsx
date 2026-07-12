@@ -18,11 +18,12 @@ import { auditItemsApi } from '@/api/auditItems'
 import { servicesApi } from '@/api/services'
 import type { AuditItem, Service } from '@/types/domain'
 import { useAuthStore } from '@/store'
+import { canManageBackend } from '@/lib/permissions'
 
 export default function PackageItemsPage() {
   const { code = '' } = useParams<{ code: string }>()
   const { user } = useAuthStore()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = canManageBackend(user)
 
   const [pkg, setPkg] = useState<Service | null>(null)
   const [items, setItems] = useState<AuditItem[]>([])

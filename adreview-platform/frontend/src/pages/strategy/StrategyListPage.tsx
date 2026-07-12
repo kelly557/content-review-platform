@@ -28,6 +28,7 @@ import dayjs, { type Dayjs } from 'dayjs'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { strategiesApi } from '@/api/strategies'
 import { useAuthStore } from '@/store'
+import { canManageBackend } from '@/lib/permissions'
 import {
   type Strategy,
   type StrategyValidateResult,
@@ -63,7 +64,7 @@ export default function StrategyListPage() {
   const location = useLocation()
   const refreshFlag = (location.state as { refresh?: boolean } | null)?.refresh
   const { user } = useAuthStore()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = canManageBackend(user)
 
   const [items, setItems] = useState<Strategy[]>([])
   const [total, setTotal] = useState(0)

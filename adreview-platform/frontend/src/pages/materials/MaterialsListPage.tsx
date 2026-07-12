@@ -32,6 +32,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { materialsApi, type BatchUploadResponse } from '@/api/materials'
 import { useAuthStore } from '@/store'
+import { canCreateTask } from '@/lib/permissions'
 import {
   STATUS_LABELS,
   STATUS_COLORS,
@@ -78,7 +79,7 @@ export default function MaterialsListPage() {
   const [progress, setProgress] = useState(0)
   const [batchResult, setBatchResult] = useState<BatchUploadResponse | null>(null)
 
-  const isSubmitter = user?.role === 'submitter' || user?.role === 'admin'
+  const isSubmitter = canCreateTask(user)
 
   const fetch = async () => {
     setLoading(true)

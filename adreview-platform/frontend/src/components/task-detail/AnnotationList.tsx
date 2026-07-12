@@ -3,6 +3,7 @@ import { App, Badge, Empty, List, Space, Spin, Tag, Tooltip, Typography } from '
 import { CheckCircleOutlined } from '@ant-design/icons'
 import { annotationsApi } from '@/api/reviews'
 import { useAuthStore } from '@/store'
+import { canResolveAnnotation } from '@/lib/permissions'
 import type { Annotation } from '@/types/domain'
 import { colors } from '@/styles/theme'
 
@@ -81,7 +82,7 @@ export default function AnnotationList({ versionId, refreshKey, onJumpToImage }:
             dataSource={items}
             renderItem={(a) => {
               const coord = fmtCoord(a)
-              const canResolve = !a.resolved && (user?.id === a.author_id || user?.role === 'admin')
+              const canResolve = !a.resolved && canResolveAnnotation(user, a.author_id)
               return (
                 <List.Item
                   style={{

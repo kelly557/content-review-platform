@@ -14,6 +14,7 @@ import {
 } from 'antd'
 import { triggersApi, type Trigger } from '@/api/triggers'
 import { useAuthStore } from '@/store'
+import { canManageBackend } from '@/lib/permissions'
 import { describeLaunch } from '@/lib/cronDescriber'
 
 function describeLaunchSpec(t: Trigger): string {
@@ -32,7 +33,7 @@ export default function TriggersListPage() {
   const [typeFilter, setTypeFilter] = useState<string>('all')
   const [enabledFilter, setEnabledFilter] = useState<string>('all')
 
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = canManageBackend(user)
 
   const fetchTriggers = useCallback(async () => {
     if (!isAdmin) return

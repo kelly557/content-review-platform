@@ -1,4 +1,4 @@
-export type UserRole = 'submitter' | 'reviewer' | 'mlr' | 'admin'
+export type UserRole = 'submitter' | 'reviewer' | 'mlr' | 'admin' | 'superadmin'
 
 export interface User {
   id: number

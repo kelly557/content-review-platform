@@ -26,6 +26,7 @@ import { reviewsApi } from '@/api/reviews'
 import { materialsApi } from '@/api/materials'
 import { usersApi } from '@/api/admin'
 import { useAuthStore } from '@/store'
+import { canHandleTask } from '@/lib/permissions'
 import {
   DECISION_LABELS,
   TYPE_LABELS,
@@ -106,7 +107,7 @@ export default function PackageDetailPage() {
     fetchPackage(packageId).catch(() => {
       message.error('加载素材包失败')
     })
-    if (user?.role === 'admin' || user?.role === 'reviewer' || user?.role === 'mlr') {
+    if (canHandleTask(user)) {
       usersApi.list().then(setUsers).catch(() => {})
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
