@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Layout, Menu, Avatar, Dropdown, Space, Typography, Button, Tag, type MenuProps } from 'antd'
+import { App, Layout, Menu, Avatar, Dropdown, Space, Typography, Button, Tag, type MenuProps } from 'antd'
 import {
   DashboardOutlined,
   FileImageOutlined,
@@ -10,9 +10,9 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   UserOutlined,
+  UserSwitchOutlined,
   SettingOutlined,
   ClusterOutlined,
-  TagsOutlined,
   DatabaseOutlined,
   SearchOutlined,
   ThunderboltOutlined,
@@ -21,6 +21,7 @@ import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
 import { ROLE_LABELS } from '@/types/domain'
 import { SystemHealthBanner } from '@/components/SystemHealthBanner'
+import { DEV_ACCOUNTS, IS_DEV, type DevAccount } from '@/lib/devAccounts'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -65,10 +66,10 @@ const NAV_SECTIONS: Array<{
     key: 'workspace',
     label: '工作区',
     items: [
-      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
-      { kind: 'leaf', key: 'tasks', path: '/tasks', label: '审核任务', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
-      { kind: 'leaf', key: 'triggers', path: '/triggers', label: '自动审核', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
-      { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin'] },
+      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin'] },
+      { kind: 'leaf', key: 'tasks', path: '/tasks', label: '审核任务', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin'] },
+{ kind: 'leaf', key: 'triggers', path: '/triggers', label: '自动审核', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'superadmin'] },
+      { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin'] },
     ],
   },
   {
@@ -82,7 +83,7 @@ const NAV_SECTIONS: Array<{
         path: '/strategies',
         label: '审核策略',
         icon: <SettingOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'mlr'],
+        roles: ['admin', 'mlr', 'superadmin'],
         children: [
           { key: 'strategies-list', path: '/strategies', label: '策略列表' },
           { key: 'strategies-image', path: '/strategies/rules-by-type/image', label: '图片审核规则' },
@@ -95,23 +96,23 @@ const NAV_SECTIONS: Array<{
         path: '/knowledge/words',
         label: '知识库',
         icon: <DatabaseOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'mlr'],
+        roles: ['admin', 'mlr', 'superadmin'],
         children: [
           { key: 'strategies-words', path: '/knowledge/words', label: '词库' },
           { key: 'strategies-images', path: '/knowledge/images', label: '图片库' },
           { key: 'strategies-replies', path: '/knowledge/replies', label: '代答库' },
         ],
       },
-      { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr'] },
+      { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr', 'superadmin'] },
     ],
   },
-{
+  {
     type: 'group',
     key: 'analytics',
     label: '审查结果',
     items: [
-      { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
-      { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin'] },
+      { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'superadmin'] },
+      { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'superadmin'] },
     ],
   },
   {
@@ -125,12 +126,12 @@ const NAV_SECTIONS: Array<{
         path: '/admin/users',
         label: '用户管理',
         icon: <TeamOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin'],
+        roles: ['admin', 'superadmin'],
         children: [
           { key: 'admin-users', path: '/admin/users', label: '用户列表' },
         ],
       },
-      { kind: 'leaf', key: 'admin-tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
+      // { kind: 'leaf', key: 'admin-tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
     ],
   },
 ]
@@ -138,9 +139,19 @@ const NAV_SECTIONS: Array<{
 export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout } = useAuthStore()
+  const { message } = App.useApp()
+  const { user, login, logout } = useAuthStore()
   const { sidebarCollapsed, toggleSidebar } = useUiStore()
   const [isMobile, setIsMobile] = useState(false)
+
+  const switchTo = async (acc: DevAccount) => {
+    try {
+      await login({ email: acc.email, password: acc.password })
+      message.success(`已切换为 ${ROLE_LABELS[acc.role]}`)
+    } catch {
+      message.error('切换失败')
+    }
+  }
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)')
@@ -231,6 +242,29 @@ export default function AppLayout() {
 
   const dropdownItems: MenuProps['items'] = [
     { key: 'profile', label: `${user.full_name}`, disabled: true },
+    ...(IS_DEV
+      ? [
+          { type: 'divider' as const },
+          {
+            key: 'switch-header',
+            label: '切换为',
+            disabled: true,
+            style: { fontSize: 11, color: '#94A3B8' },
+          },
+          ...DEV_ACCOUNTS.map((acc) => {
+            const isCurrent = user.role === acc.role
+            return {
+              key: `switch-${acc.role}`,
+              label: isCurrent
+                ? `✓ 当前 ${ROLE_LABELS[acc.role]}`
+                : `⇄ ${ROLE_LABELS[acc.role]}`,
+              disabled: isCurrent,
+              icon: isCurrent ? undefined : <UserSwitchOutlined />,
+              onClick: isCurrent ? undefined : () => switchTo(acc),
+            }
+          }),
+        ]
+      : []),
     { type: 'divider' },
     {
       key: 'logout',
