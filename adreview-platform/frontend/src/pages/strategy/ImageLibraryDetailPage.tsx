@@ -22,6 +22,8 @@ import { librariesApi } from '@/api/libraries'
 import type { Library, LibraryItem } from '@/types/domain'
 import ImageUploadDrawer from '@/components/library/ImageUploadDrawer'
 import EditLibraryEffectiveModal from '@/components/library/EditLibraryEffectiveModal'
+import EditPlatformToggleModal from '@/components/library/EditPlatformToggleModal'
+import { useAuthStore } from '@/store'
 import { deriveEffectiveMeta } from '@/lib/libraryEffective'
 
 const { Title, Text } = Typography
@@ -31,6 +33,8 @@ export default function ImageLibraryDetailPage() {
   const libraryId =
     rawId != null && !Number.isNaN(Number(rawId)) ? Number(rawId) : null
   const { message } = App.useApp()
+  const { user } = useAuthStore()
+  const isSuperadmin = user?.role === 'superadmin'
 
   const [library, setLibrary] = useState<Library | null>(null)
   const [loading, setLoading] = useState(false)
@@ -38,6 +42,7 @@ export default function ImageLibraryDetailPage() {
   const [itemsLoading, setItemsLoading] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [editEffOpen, setEditEffOpen] = useState(false)
+  const [editPlatformOpen, setEditPlatformOpen] = useState(false)
 
   const effectiveMeta = deriveEffectiveMeta(
     library?.is_active ?? false,
@@ -141,6 +146,11 @@ export default function ImageLibraryDetailPage() {
             </>
           )}
           {library && !library.is_active && <Tag>已停用</Tag>}
+          {library?.is_platform && (
+            <Tooltip title="通用平台库:仅超级管理员可见可改可删">
+              <Tag color="purple">通用平台</Tag>
+            </Tooltip>
+          )}
           <Button
             type="link"
             size="small"
@@ -150,6 +160,15 @@ export default function ImageLibraryDetailPage() {
           >
             编辑有效期
           </Button>
+          {isSuperadmin && library && (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => setEditPlatformOpen(true)}
+            >
+              {library.is_platform ? '改为个性化' : '设为通用平台'}
+            </Button>
+          )}
         </Space>
       </div>
 
@@ -260,6 +279,12 @@ export default function ImageLibraryDetailPage() {
         open={editEffOpen}
         library={library}
         onClose={() => setEditEffOpen(false)}
+        onSuccess={(updated) => setLibrary(updated)}
+      />
+      <EditPlatformToggleModal
+        open={editPlatformOpen}
+        library={library}
+        onClose={() => setEditPlatformOpen(false)}
         onSuccess={(updated) => setLibrary(updated)}
       />
     </div>

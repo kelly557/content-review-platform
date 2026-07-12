@@ -33,6 +33,7 @@ import type {
 } from '@/types/domain'
 import { parseReplyFile } from '@/lib/libraryImport'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
+import PlatformToggle from '@/components/library/PlatformToggle'
 import { useAuthStore } from '@/store'
 
 const { Title } = Typography
@@ -43,6 +44,7 @@ interface CreateFormValues {
   name: string
   description?: string
   pairsText?: string
+  is_platform?: boolean
 }
 
 export default function ReplyLibraryListPage() {
@@ -99,6 +101,7 @@ export default function ReplyLibraryListPage() {
       library_type: 'reply',
       description: v.description,
       words,
+      is_platform: v.is_platform ?? false,
     }
     setCreating(true)
     try {
@@ -307,6 +310,7 @@ export default function ReplyLibraryListPage() {
           <Form.Item name="description" label="说明">
             <Input.TextArea rows={2} maxLength={200} />
           </Form.Item>
+          <PlatformToggle />
           <Form.Item
             name="pairsText"
             label="代答条目（可选,创建时可一并填入）"

@@ -7,6 +7,8 @@ import {
   Popconfirm,
   Space,
   Table,
+  Tag,
+  Tooltip,
   Typography,
   App,
   type TableColumnsType,
@@ -23,6 +25,8 @@ import dayjs from 'dayjs'
 import { librariesApi } from '@/api/libraries'
 import type { Library, LibraryItem } from '@/types/domain'
 import EditReplyDrawer from '@/components/library/EditReplyDrawer'
+import EditPlatformToggleModal from '@/components/library/EditPlatformToggleModal'
+import { useAuthStore } from '@/store'
 
 const { Title, Text } = Typography
 
@@ -31,6 +35,8 @@ export default function ReplyLibraryDetailPage() {
   const libraryId =
     rawId != null && !Number.isNaN(Number(rawId)) ? Number(rawId) : null
   const { message } = App.useApp()
+  const { user } = useAuthStore()
+  const isSuperadmin = user?.role === 'superadmin'
 
   const [library, setLibrary] = useState<Library | null>(null)
   const [loading, setLoading] = useState(false)
@@ -40,6 +46,7 @@ export default function ReplyLibraryDetailPage() {
   const [keyword, setKeyword] = useState('')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [addOpen, setAddOpen] = useState(false)
+  const [editPlatformOpen, setEditPlatformOpen] = useState(false)
   const [editing, setEditing] = useState<LibraryItem | null>(null)
   const [editTrigger, setEditTrigger] = useState('')
   const [editReply, setEditReply] = useState('')
@@ -229,9 +236,25 @@ export default function ReplyLibraryDetailPage() {
           gap: 12,
         }}
       >
-        <Title level={3} style={{ margin: 0 }}>
-          {library?.name ?? '加载中…'}
-        </Title>
+        <Space size={12} align="center" wrap>
+          <Title level={3} style={{ margin: 0 }}>
+            {library?.name ?? '加载中…'}
+          </Title>
+          {library?.is_platform && (
+            <Tooltip title="通用平台库:仅超级管理员可见可改可删">
+              <Tag color="purple">通用平台</Tag>
+            </Tooltip>
+          )}
+          {isSuperadmin && library && (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => setEditPlatformOpen(true)}
+            >
+              {library.is_platform ? '改为个性化' : '设为通用平台'}
+            </Button>
+          )}
+        </Space>
       </div>
 
       <div
@@ -322,6 +345,13 @@ export default function ReplyLibraryDetailPage() {
           void fetchItems(keyword)
           void fetchLibrary()
         }}
+      />
+
+      <EditPlatformToggleModal
+        open={editPlatformOpen}
+        library={library}
+        onClose={() => setEditPlatformOpen(false)}
+        onSuccess={(updated) => setLibrary(updated)}
       />
 
       <Modal

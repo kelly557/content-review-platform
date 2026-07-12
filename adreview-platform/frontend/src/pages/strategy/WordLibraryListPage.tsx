@@ -39,6 +39,7 @@ import { LIBRARY_KIND_OPTIONS } from '@/types/domain'
 import { parseWordsFile } from '@/lib/libraryImport'
 import { deriveEffectiveMeta } from '@/lib/libraryEffective'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
+import PlatformToggle from '@/components/library/PlatformToggle'
 import { useAuthStore } from '@/store'
 
 const { Title, Text } = Typography
@@ -52,6 +53,7 @@ interface CreateFormValues {
   durationMode: 'permanent' | 'range'
   effectiveRange?: [Dayjs, Dayjs]
   wordsText?: string
+  is_platform?: boolean
 }
 
 export default function WordLibraryListPage() {
@@ -123,6 +125,7 @@ export default function WordLibraryListPage() {
       words,
       effective_from: hasRange ? v.effectiveRange![0].toISOString() : null,
       effective_until: hasRange ? v.effectiveRange![1].toISOString() : null,
+      is_platform: v.is_platform ?? false,
     }
     setCreating(true)
     try {
@@ -405,6 +408,8 @@ export default function WordLibraryListPage() {
           <Form.Item name="description" label="说明">
             <Input.TextArea rows={2} maxLength={200} />
           </Form.Item>
+
+          <PlatformToggle />
 
           <Form.Item
             name="durationMode"

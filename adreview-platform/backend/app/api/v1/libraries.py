@@ -362,9 +362,17 @@ async def list_library_references(
 async def create_library(
     body: LibraryCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> LibraryOut:
     kind = _resolve_kind_for_type(body.library_type, body.kind)
+
+    # 「通用平台库」标记:仅超级管理员可设为 true。
+    # 非超管请求即使带 is_platform=true,服务端兜底抹为 false 并返回 422。
+    if body.is_platform and current_user.role != UserRole.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="仅超级管理员可将库设为「通用平台库」",
+        )
 
     if body.code:
         ok = (
@@ -398,8 +406,9 @@ async def create_library(
         kind=kind,
         description=body.description,
         is_active=True,
-        # 通用平台库只能由 seed / 内部工具创建；客户端 POST 一律创建个性化库
-        is_platform=False,
+        # 通用平台库现在仅超级管理员通过 UI / API 可创建;
+        # 非超管请求时上面已经 422 拒绝,这里直接透传 body 值。
+        is_platform=body.is_platform,
         ignored_services=[],
         effective_from=body.effective_from,
         effective_until=body.effective_until,
@@ -446,12 +455,13 @@ async def create_library(
 async def batch_create_libraries(
     body: LibraryBatchCreateRequest,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    current_user: User = Depends(require_roles("admin")),
 ) -> LibraryBatchCreateResult:
     """Create up to 20 libraries in one call.
 
     Each library is its own transaction — failures do not abort the batch.
-    All created libraries are 个性化 (is_platform=false).
+    仅超级管理员可指定 is_platform=true;非超管请求里携带的 is_platform=true
+    会被服务端兜底抹为 false。
     """
     created: List[LibraryOut] = []
     errors: List[LibraryBatchCreateError] = []
@@ -472,6 +482,10 @@ async def batch_create_libraries(
             if not _is_valid_code(code, item.library_type):
                 raise ValueError("code 格式不合法")
 
+            # 「通用平台库」标记:仅超管可设
+            if item.is_platform and current_user.role != UserRole.SUPERADMIN:
+                raise ValueError("仅超级管理员可将库设为「通用平台库」")
+
             lib = Library(
                 code=code,
                 name=item.name.strip(),
@@ -479,7 +493,7 @@ async def batch_create_libraries(
                 kind=kind,
                 description=item.description,
                 is_active=item.is_active,
-                is_platform=False,
+                is_platform=item.is_platform,
                 ignored_services=[],
                 effective_from=item.effective_from,
                 effective_until=item.effective_until,
@@ -547,6 +561,8 @@ async def update_library(
         raise HTTPException(status_code=404, detail="库不存在")
     # 通用平台库白名单守卫: 非超管只能改白名单字段
     _enforce_platform_library_guard(lib, body, current_user)
+    # 显式字段集合:只有当客户端真的把 key 放进 body 时才生效（区分"不传"与"传 null")
+    sent = body.model_fields_set if hasattr(body, "model_fields_set") else set()
     if body.name is not None:
         lib.name = body.name.strip()
     if body.description is not None:
@@ -562,8 +578,14 @@ async def update_library(
                 status_code=400, detail="代答库不支持修改类型"
             )
         lib.kind = body.kind
-    # 显式字段：只有当客户端真的把 effective_from/until 放进 body 时才生效（区分"不传"与"传null=清空"）
-    sent = body.model_fields_set if hasattr(body, "model_fields_set") else set()
+    # 「通用平台库」标记:仅超级管理员可切换,且仅当客户端显式把 is_platform 放进 body 时才生效
+    if "is_platform" in sent:
+        if current_user.role != UserRole.SUPERADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="仅超级管理员可切换「通用平台库」属性",
+            )
+        lib.is_platform = body.is_platform
     if lib.library_type == LibraryType.REPLY:
         if "effective_from" in sent or "effective_until" in sent:
             raise HTTPException(

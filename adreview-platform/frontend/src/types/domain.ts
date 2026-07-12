@@ -845,6 +845,8 @@ export interface LibraryCreate {
   /** 有效时间（UTC ISO8601）。不传或为 null 表示永久。 */
   effective_from?: string | null
   effective_until?: string | null
+  /** 「通用平台库」标记：仅超级管理员可设为 true；服务端会兜底守卫。 */
+  is_platform?: boolean
 }
 
 export interface LibraryUpdate {
@@ -855,6 +857,8 @@ export interface LibraryUpdate {
   ignored_services?: string[]
   effective_from?: string | null
   effective_until?: string | null
+  /** 「通用平台库」标记：仅超级管理员可设置。仅当 key 显式传进 body 时才会落库。 */
+  is_platform?: boolean | null
 }
 
 export interface LibraryDeletePayload {
@@ -1230,6 +1234,8 @@ export interface LibraryBatchItemPayload {
   description?: string | null
   is_active?: boolean
   words?: string[]
+  /** 「通用平台库」标记：仅超级管理员可设为 true。 */
+  is_platform?: boolean
 }
 
 export interface LibraryBatchCreateRequest {

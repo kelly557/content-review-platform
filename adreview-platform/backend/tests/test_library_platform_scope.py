@@ -86,8 +86,12 @@ def test_role_filter_is_wired_in_source():
     )
 
 
-def test_post_library_forces_personal():
-    """POST /libraries hard-codes is_platform=False regardless of body."""
+def test_post_library_superadmin_can_set_platform():
+    """POST /libraries allows superadmin to set is_platform=true; non-super is blocked.
+
+    Static check on the source code so we don't depend on the fragile
+    end-to-end async + per-test schema stack.
+    """
     from pathlib import Path
 
     src_path = (
@@ -98,7 +102,31 @@ def test_post_library_forces_personal():
         / "libraries.py"
     )
     text = src_path.read_text(encoding="utf-8")
-    # In create_library(): is_platform=False
-    assert "is_platform=False" in text, (
-        "create_library must force is_platform=False"
+    # Non-super POST with is_platform=true must be rejected with 422
+    assert "body.is_platform and current_user.role != UserRole.SUPERADMIN" in text, (
+        "create_library must gate is_platform=true to superadmin only"
+    )
+    # The create_library body must forward body.is_platform rather than hard-code false
+    assert "is_platform=body.is_platform" in text, (
+        "create_library must honor body.is_platform when caller is superadmin"
+    )
+
+
+def test_update_library_superadmin_can_toggle_platform():
+    """PUT /libraries/{id} allows superadmin to toggle is_platform; non-super is blocked."""
+    from pathlib import Path
+
+    src_path = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "api"
+        / "v1"
+        / "libraries.py"
+    )
+    text = src_path.read_text(encoding="utf-8")
+    assert (
+        '"is_platform" in sent' in text
+    ), "update_library should check 'is_platform' in sent fields"
+    assert "仅超级管理员可切换「通用平台库」属性" in text, (
+        "update_library must raise 422 when non-superadmin tries to toggle is_platform"
     )

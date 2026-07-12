@@ -34,6 +34,7 @@ import type {
 import { LIBRARY_KIND_OPTIONS } from '@/types/domain'
 import { deriveEffectiveMeta } from '@/lib/libraryEffective'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
+import PlatformToggle from '@/components/library/PlatformToggle'
 import { useAuthStore } from '@/store'
 
 const { Title, Text } = Typography
@@ -44,6 +45,7 @@ interface CreateFormValues {
   description?: string
   durationMode: 'permanent' | 'range'
   effectiveRange?: [Dayjs, Dayjs]
+  is_platform?: boolean
 }
 
 export default function ImageLibraryListPage() {
@@ -105,6 +107,7 @@ export default function ImageLibraryListPage() {
       description: v.description,
       effective_from: hasRange ? v.effectiveRange![0].toISOString() : null,
       effective_until: hasRange ? v.effectiveRange![1].toISOString() : null,
+      is_platform: v.is_platform ?? false,
     }
     setCreating(true)
     try {
@@ -387,6 +390,8 @@ export default function ImageLibraryListPage() {
           <Form.Item name="description" label="说明">
             <Input.TextArea rows={2} maxLength={200} />
           </Form.Item>
+
+          <PlatformToggle />
 
           <Form.Item
             name="durationMode"

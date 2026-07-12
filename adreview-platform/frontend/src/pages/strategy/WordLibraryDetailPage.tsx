@@ -26,6 +26,8 @@ import { librariesApi } from '@/api/libraries'
 import type { Library, LibraryItem } from '@/types/domain'
 import EditWordDrawer from '@/components/library/EditWordDrawer'
 import EditLibraryEffectiveModal from '@/components/library/EditLibraryEffectiveModal'
+import EditPlatformToggleModal from '@/components/library/EditPlatformToggleModal'
+import { useAuthStore } from '@/store'
 import { deriveEffectiveMeta } from '@/lib/libraryEffective'
 
 const { Title, Text } = Typography
@@ -35,6 +37,8 @@ export default function WordLibraryDetailPage() {
   const libraryId =
     rawId != null && !Number.isNaN(Number(rawId)) ? Number(rawId) : null
   const { message } = App.useApp()
+  const { user } = useAuthStore()
+  const isSuperadmin = user?.role === 'superadmin'
 
   const [library, setLibrary] = useState<Library | null>(null)
   const [loading, setLoading] = useState(false)
@@ -47,6 +51,7 @@ export default function WordLibraryDetailPage() {
 
   const [addOpen, setAddOpen] = useState(false)
   const [editEffOpen, setEditEffOpen] = useState(false)
+  const [editPlatformOpen, setEditPlatformOpen] = useState(false)
 
   const effectiveMeta = deriveEffectiveMeta(
     library?.is_active ?? false,
@@ -219,6 +224,11 @@ export default function WordLibraryDetailPage() {
               )}
             </>
           )}
+          {library?.is_platform && (
+            <Tooltip title="通用平台库:仅超级管理员可见可改可删">
+              <Tag color="purple">通用平台</Tag>
+            </Tooltip>
+          )}
           {library && !library.is_active && <Tag>已停用</Tag>}
           <Button
             type="link"
@@ -229,6 +239,15 @@ export default function WordLibraryDetailPage() {
           >
             编辑有效期
           </Button>
+          {isSuperadmin && library && (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => setEditPlatformOpen(true)}
+            >
+              {library.is_platform ? '改为个性化' : '设为通用平台'}
+            </Button>
+          )}
         </Space>
       </div>
 
@@ -325,6 +344,12 @@ export default function WordLibraryDetailPage() {
         open={editEffOpen}
         library={library}
         onClose={() => setEditEffOpen(false)}
+        onSuccess={(updated) => setLibrary(updated)}
+      />
+      <EditPlatformToggleModal
+        open={editPlatformOpen}
+        library={library}
+        onClose={() => setEditPlatformOpen(false)}
         onSuccess={(updated) => setLibrary(updated)}
       />
     </div>

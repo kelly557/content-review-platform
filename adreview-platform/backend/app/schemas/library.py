@@ -125,6 +125,9 @@ class LibraryCreate(BaseModel):
     # 有效时间区间；不传或为 null = 永久
     effective_from: Optional[datetime] = None
     effective_until: Optional[datetime] = None
+    # 「通用平台库」标记:仅超级管理员可设为 true;
+    # 服务端在 create_library() 中会兜底守卫,非超管 POST 即使带 true 也会被抹为 false 并返回 422。
+    is_platform: bool = False
 
     @field_validator("words")
     @classmethod
@@ -160,6 +163,9 @@ class LibraryUpdate(BaseModel):
     # 允许显式置 null 来"清除有效期（永久）"
     effective_from: Optional[datetime] = None
     effective_until: Optional[datetime] = None
+    # 「通用平台库」标记:仅超级管理员可在 PATCH 里设置;
+    # 缺省 / null = 不动该字段。仅超管请求且 key 显式在 body 里时才会落库。
+    is_platform: Optional[bool] = None
 
     @model_validator(mode="after")
     def _v_kind(self) -> "LibraryUpdate":
@@ -273,6 +279,7 @@ class LibraryBatchItem(BaseModel):
     words: List[str] = Field(default_factory=list)
     effective_from: Optional[datetime] = None
     effective_until: Optional[datetime] = None
+    is_platform: bool = False
 
     @field_validator("words")
     @classmethod
