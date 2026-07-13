@@ -55,6 +55,22 @@ export const reviewsApi = {
       .post<ReviewTask>(`/reviews/tasks/${taskId}/cancel`, { reason })
       .then((r) => r.data)
   },
+  autoCreateTasks(payload: {
+    material_ids: number[]
+    strategy_id?: number | null
+    workflow_template_code?: string | null
+    override_human_review?: Record<string, unknown> | null
+  }) {
+    return api
+      .post<{
+        requested: number
+        created: number
+        skipped: number
+        workflow_instance_ids: number[]
+        errors: Array<{ material_id: number; reason: string }>
+      }>('/reviews/tasks/auto', payload)
+      .then((r) => r.data)
+  },
 }
 
 export const annotationsApi = {

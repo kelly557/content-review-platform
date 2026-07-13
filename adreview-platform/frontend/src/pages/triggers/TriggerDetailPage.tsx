@@ -304,7 +304,7 @@ export default function TriggerDetailPage() {
                         {trigger.strategy_name ?? <span style={{ color: '#999' }}>使用工作流默认策略</span>}
                       </div>
                       <div>
-                        <Text type="secondary">工作流模板：</Text>
+                        <Text type="secondary">人审设置：</Text>
                         {trigger.workflow_template_code ?? '-'}
                       </div>
                     </Space>

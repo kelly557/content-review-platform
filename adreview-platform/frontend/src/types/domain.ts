@@ -1846,6 +1846,7 @@ export interface QueryFilters {
 }
 
 export type QueryColumnKey =
+  | 'task_title'
   | 'strategy_name'
   | 'machine_decision'
   | 'feedback'
@@ -1864,12 +1865,13 @@ export interface QueryColumnDef {
 }
 
 export const QUERY_COLUMNS: QueryColumnDef[] = [
+  { key: 'task_title', title: '任务名称', defaultVisible: true },
   { key: 'strategy_name', title: '策略名称', defaultVisible: true },
   { key: 'machine_decision', title: '检测结果', defaultVisible: true },
   { key: 'feedback', title: '反馈结果', defaultVisible: true },
   { key: 'request_id', title: 'Request ID', defaultVisible: false },
   { key: 'task_id', title: 'Task ID', defaultVisible: false },
-  { key: 'labels', title: '命中标签及置信度', defaultVisible: false },
+  { key: 'labels', title: '命中审核点及置信度', defaultVisible: false },
   { key: 'risk_level', title: '风险等级', defaultVisible: false },
   { key: 'requested_at', title: '请求时间', defaultVisible: false },
   { key: 'ip', title: 'IP', defaultVisible: false },

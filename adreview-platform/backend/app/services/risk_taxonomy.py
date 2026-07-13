@@ -7,6 +7,13 @@
   2) LABEL_RISK_MAP[(service_code, label_prefix)] 查表   -> 命中即采用
   3) keyword_risk_fallback(label_cn)                  -> 关键字兜底
   4) 默认 "低风险"
+
+字段收敛规则 (v3):
+- "敏感" 档只承载 PII 语义. 涉政/暴恐/医疗等不再用 "敏感" 修饰.
+  - 当 hit.risk ∈ {高风险, 中风险} 时, _normalize_label_cn 从 label_cn
+    中剔除"敏感"两个字, 避免 "涉政敏感" 这种合成词.
+  - 当 hit.risk ≠ 敏感 时, hit 上的 sensitive_grade 强制回写为 S0,
+    防止演示数据跨档挂高 S 等级.
 """
 from __future__ import annotations
 
@@ -161,11 +168,24 @@ def aggregate_risk_level_v2(hits: Iterable[Mapping[str, Any]]) -> str:
     与 v1 不同:
     - 不再用 label_cn substring 猜——先信 LLM risk, 再查静态表, 再走扩展关键字
     - 无命中返回 "无风险"
+
+    同时 (v3 字段收敛):
+    - 对每条 hit 写入 hit.risk = 本档
+    - 非"敏感"档 hit 的 sensitive_grade/sensitive_level 强制 S0
+    - 高/中风险档 hit 的 label_cn 剔除"敏感"两个字
     """
     max_rank = -1
     best = RiskLevel.NONE.value
     for hit in hits:
         risk = _hit_risk(hit)
+        hit["risk"] = risk
+        try:
+            coerce_sensitive_grade_for_hit(hit)
+        except TypeError:
+            pass
+        label_cn = hit.get("label_cn")
+        if isinstance(label_cn, str):
+            hit["label_cn"] = normalize_label_cn(risk, label_cn)
         rank = _RISK_RANK.get(risk, _RISK_RANK[RiskLevel.LOW.value])
         if rank > max_rank:
             max_rank = rank
@@ -178,3 +198,52 @@ def aggregate_risk_level_v2(hits: Iterable[Mapping[str, Any]]) -> str:
 def risk_rank(value: str) -> int:
     """暴露给上游 (例如 _suggest_action_for) 的 risk 排名, 便于做更高层决策."""
     return _RISK_RANK.get(value, -1)
+
+
+_SENSITIVE_TOKEN = "敏感"
+_SENSITIVE_RISKS = frozenset({RiskLevel.HIGH.value, RiskLevel.MEDIUM.value})
+
+
+def normalize_label_cn(risk: str, label_cn: Optional[str]) -> str:
+    """收敛 label_cn: 高/中风险档剥离"敏感"两个字, 避免合成词.
+
+    Examples:
+        "涉政敏感" + 高风险  -> "涉政"
+        "敏感个人信息" + 敏感 -> "敏感个人信息"   (保留)
+        "涉政言论" + 高风险   -> "涉政言论"        (无敏感字, 不动)
+        "" + 任意             -> ""
+    """
+    text = (label_cn or "").strip()
+    if not text:
+        return text
+    if risk in _SENSITIVE_RISKS and _SENSITIVE_TOKEN in text:
+        return text.replace(_SENSITIVE_TOKEN, "").strip()
+    return text
+
+
+def coerce_sensitive_grade_for_hit(hit: Mapping[str, Any]) -> None:
+    """强制非"敏感"档的 hit 上 sensitive_grade / sensitive_level = S0.
+
+    容忍模式:
+    - 当 hit 上没有 risk / risk_level 字段 (即本次聚合尚未写出 per-hit 风险
+      档位) 时, 不做任何写回, 保留既有的 max 汇总路径.
+    - 当 risk / risk_level 显式落在非"敏感"档时, 把 sensitive_grade
+      与 sensitive_level 强制回写为 S0, 并标记 sensitive_was_coerced=True
+      便于审计/测试追溯.
+
+    接受 Mapping 与 dict; 但 Mapping 没有就地写回能力时, 静默跳过.
+    """
+    risk = hit.get("risk_level")
+    if risk is None:
+        risk = hit.get("risk")
+    if risk is None:
+        return
+    if risk == RiskLevel.SENSITIVE.value:
+        return
+    if not hasattr(hit, "__setitem__"):
+        return
+    if hit.get("sensitive_grade") == "S0" and hit.get("sensitive_level", "S0") == "S0":
+        return
+    hit["sensitive_grade"] = "S0"
+    hit["sensitive_level"] = "S0"
+    hit["sensitive_was_coerced"] = True

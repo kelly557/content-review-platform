@@ -90,6 +90,11 @@ class ReviewTask(Base):
     machine_status: Mapped[Optional[MachineStatus]] = mapped_column(
         Enum(MachineStatus), nullable=True, index=True
     )
+    strategy_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("strategies.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     machine_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     machine_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     machine_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

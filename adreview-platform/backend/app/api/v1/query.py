@@ -23,6 +23,7 @@ from app.models.review import (
     ReviewTask,
     ReviewType,
 )
+from app.models.strategy import Strategy
 from app.models.user import User
 from app.schemas.query import (
     AdvancedCondition,
@@ -56,9 +57,10 @@ def _to_record(
     submitter: Optional[User],
     assignee: Optional[User],
     tag_snapshots: List[Dict[str, Any]],
+    strategy_orm: Optional[Strategy] = None,
 ) -> MachineReviewRecordOut:
     mr: Dict[str, Any] = dict(task.machine_result or {})
-    strategy = mr.get("strategy") or {}
+    strategy_snapshot = mr.get("strategy") or {}
     risk_level = mr.get("risk_level")
     if isinstance(risk_level, str):
         machine_decision = RISK_TO_DECISION.get(risk_level)
@@ -76,10 +78,24 @@ def _to_record(
             except Exception:
                 continue
 
-    strategy_code = strategy.get("code") if isinstance(strategy, dict) else None
-    strategy_name = strategy.get("name") if isinstance(strategy, dict) else None
-    if not strategy_code:
-        strategy_code = task.stage_key or None
+    # 优先级：FK 真名 > machine_result.strategy JSONB 快照 > stage_key
+    # production 写路径不再写 JSONB 快照，FK 是唯一权威来源。
+    if strategy_orm is not None:
+        strategy_code = strategy_orm.code
+        strategy_name = strategy_orm.name
+    else:
+        strategy_code = (
+            strategy_snapshot.get("code")
+            if isinstance(strategy_snapshot, dict)
+            else None
+        )
+        strategy_name = (
+            strategy_snapshot.get("name")
+            if isinstance(strategy_snapshot, dict)
+            else None
+        )
+        if not strategy_code:
+            strategy_code = task.stage_key or None
 
     bailian = mr.get("trace_id") or mr.get("bailian_request_id")
 
@@ -174,7 +190,14 @@ def _apply_filters(
     if feedback is not None:
         stmt = stmt.where(ReviewTask.final_decision == feedback)
     if strategy_code:
-        stmt = stmt.where(ReviewTask.machine_result["strategy"]["code"].astext == strategy_code)
+        stmt = stmt.where(
+            or_(
+                ReviewTask.machine_result["strategy"]["code"].astext == strategy_code,
+                ReviewTask.strategy_id.in_(
+                    select(Strategy.id).where(Strategy.code == strategy_code)
+                ),
+            )
+        )
     if machine_decision:
         target_risks = [r for r, d in RISK_TO_DECISION.items() if d == machine_decision]
         if target_risks:
@@ -222,7 +245,7 @@ async def _run_query(
     Assignee = aliased(User, name="assignee")
 
     stmt = (
-        select(ReviewTask, Material, Submitter, Assignee)
+        select(ReviewTask, Material, Submitter, Assignee, Strategy)
         .join(Material, Material.id == ReviewTask.material_id)
         .outerjoin(Submitter, Submitter.id == Material.submitter_id)
         .outerjoin(
@@ -233,6 +256,7 @@ async def _run_query(
             ),
         )
         .outerjoin(Assignee, Assignee.id == ReviewAssignment.assignee_id)
+        .outerjoin(Strategy, Strategy.id == ReviewTask.strategy_id)
     )
     stmt = _apply_filters(
         stmt,
@@ -254,7 +278,7 @@ async def _run_query(
     if not rows:
         return []
 
-    task_ids_out = [t.id for t, _, _, _ in rows]
+    task_ids_out = [t.id for t, _, _, _, _ in rows]
     tag_stmt = (
         select(ReviewAssignmentTag.tag_id, ReviewAssignmentTag.tag_snapshot, ReviewAssignment.task_id)
         .join(ReviewAssignment, ReviewAssignment.id == ReviewAssignmentTag.assignment_id)
@@ -266,8 +290,17 @@ async def _run_query(
         tags_by_task.setdefault(task_id, []).append({"id": tag_id, "snapshot": snap})
 
     out: List[MachineReviewRecordOut] = []
-    for task, material, submitter, assignee in rows:
-        out.append(_to_record(task, material, submitter, assignee, tags_by_task.get(task.id, [])))
+    for task, material, submitter, assignee, strategy_orm in rows:
+        out.append(
+            _to_record(
+                task,
+                material,
+                submitter,
+                assignee,
+                tags_by_task.get(task.id, []),
+                strategy_orm=strategy_orm,
+            )
+        )
     return out
 
 

@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.deps import get_current_user
 from app.db.session import get_db
 from app.models.audit_item import AuditItem
@@ -433,3 +435,81 @@ async def _run_machine_review_async(task_id: int, force_human_rules: list[str] |
 
     async with SessionLocal() as db:
         await run_machine_review(task_id, db)
+
+
+class AutoCreateTasksRequest(BaseModel):
+    material_ids: List[int] = Field(min_length=1, max_length=200)
+    strategy_id: Optional[int] = None
+    workflow_template_code: Optional[str] = None
+    dedupe_key: Optional[str] = Field(default=None, max_length=128)
+
+
+@router.post("/tasks/auto")
+async def auto_create_tasks(
+    body: AutoCreateTasksRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Create review tasks for the given material ids (B. API push source).
+
+    Validates material eligibility, resolves strategy + template, starts a
+    workflow instance per material. Per-material failures are isolated and
+    returned in ``errors``.
+    """
+    from app.services.material_ingest import ingest_batch
+
+    result = await ingest_batch(
+        db,
+        body.material_ids,
+        actor=user,
+        source="api_push",
+        strategy_id=body.strategy_id,
+        workflow_template_code=body.workflow_template_code,
+    )
+    await db.commit()
+    return result.to_dict()
+
+
+class IngestPublishRequest(BaseModel):
+    material_ids: List[int] = Field(min_length=1, max_length=500)
+    strategy_id: Optional[int] = None
+    workflow_template_code: Optional[str] = None
+
+
+@router.post("/ingest/publish")
+async def ingest_publish(
+    body: IngestPublishRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Publish material_ids to the Redis ingest stream (D. MQ source entrypoint).
+
+    The actual review tasks are created asynchronously by the worker running in
+    :mod:`app.services.mq_consumer`. Returns the stream entry id so the caller
+    can correlate downstream completion.
+
+    Raises 503 if the redis client is not installed or the worker is disabled.
+    """
+    if not settings.mq_consumer_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MQ consumer disabled (set MQ_CONSUMER_ENABLED=true)",
+        )
+    try:
+        from app.services.mq_consumer import publish as mq_publish
+        entry_id = await mq_publish(
+            body.material_ids,
+            actor_id=user.id,
+            strategy_id=body.strategy_id,
+            workflow_template_code=body.workflow_template_code,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+    return {
+        "entry_id": entry_id,
+        "stream": settings.mq_stream_key,
+        "material_ids": body.material_ids,
+    }

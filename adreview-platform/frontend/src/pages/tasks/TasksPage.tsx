@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { App, Button, Empty, Input, Space, Table, Tag, type TableColumnsType } from 'antd'
-import { PlusOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
+import { App, Button, Drawer, Empty, Input, Space, Table, Tag, Typography, type TableColumnsType } from 'antd'
+import { PlusOutlined, ReloadOutlined, RocketOutlined, StopOutlined } from '@ant-design/icons'
 import { reviewsApi } from '@/api/reviews'
+import { ingestApi } from '@/api/ingest'
 import { canCreateTask } from '@/lib/permissions'
 import { useAuthStore } from '@/store'
 import {
@@ -19,6 +20,12 @@ import TaskSearchBar from '@/components/task-list/TaskSearchBar'
 import TaskFilterPanel, { type TaskFilters } from '@/components/task-list/TaskFilterPanel'
 import TaskStatusTabs from '@/components/task-list/TaskStatusTabs'
 import TaskBulkActions from '@/components/task-list/TaskBulkActions'
+import SourcePicker, {
+  type SourcePickerValue,
+} from '@/components/task-list/SourcePicker'
+import MaterialPicker from '@/components/task-create/MaterialPicker'
+
+const { Text } = Typography
 
 export default function TasksPage() {
   const { message, modal } = App.useApp()
@@ -33,6 +40,12 @@ export default function TasksPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterVisible, setFilterVisible] = useState(false)
   const [filters, setFilters] = useState<TaskFilters>({})
+
+  // 批量自动起任务 Drawer
+  const [batchAutoOpen, setBatchAutoOpen] = useState(false)
+  const [batchAutoSource, setBatchAutoSource] = useState<SourcePickerValue>({ source: 'library', scope: 'full' })
+  const [batchAutoIds, setBatchAutoIds] = useState<number[]>([])
+  const [batchAutoSubmitting, setBatchAutoSubmitting] = useState(false)
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
   const [counts, setCounts] = useState({
@@ -260,6 +273,11 @@ export default function TasksPage() {
               创建任务
             </Button>
           )}
+          {canCreate && (
+            <Button icon={<RocketOutlined />} onClick={() => setBatchAutoOpen(true)}>
+              批量自动起任务
+            </Button>
+          )}
         </Space>
       </div>
 
@@ -298,6 +316,66 @@ export default function TasksPage() {
         pagination={{ pageSize: 20, total, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
         locale={{ emptyText: <Empty description="暂无任务" /> }}
       />
+
+      <Drawer
+        title="批量自动起任务"
+        width={520}
+        open={batchAutoOpen}
+        onClose={() => setBatchAutoOpen(false)}
+        destroyOnClose
+        extra={
+          <Button
+            type="primary"
+            loading={batchAutoSubmitting}
+            disabled={batchAutoIds.length === 0}
+            onClick={handleBatchAutoSubmit}
+          >
+            提交 {batchAutoIds.length} 个
+          </Button>
+        }
+      >
+        <SourcePicker value={batchAutoSource} onChange={setBatchAutoSource} />
+        <div style={{ marginTop: 12 }}>
+          <Text strong>选择素材</Text>
+          <div style={{ marginTop: 8 }}>
+            <MaterialPicker
+              type="text"
+              selectedIds={batchAutoIds}
+              onChange={setBatchAutoIds}
+            />
+          </div>
+        </div>
+      </Drawer>
     </div>
   )
+
+  async function handleBatchAutoSubmit() {
+    if (batchAutoIds.length === 0) {
+      message.warning('请先选择至少 1 个素材')
+      return
+    }
+    setBatchAutoSubmitting(true)
+    try {
+      if (batchAutoSource.source === 'api_push') {
+        const r = await reviewsApi.autoCreateTasks({ material_ids: batchAutoIds })
+        message.success(`已创建 ${r.created} / ${r.requested}（失败 ${r.errors.length}）`)
+      } else if (batchAutoSource.source === 'mq') {
+        const r = await ingestApi.publish({ material_ids: batchAutoIds })
+        message.success(`已投递到 MQ（${r.stream}，entry=${r.entry_id}）`)
+      } else {
+        message.warning('素材库通道请使用「创建任务」入口走 trigger')
+        setBatchAutoSubmitting(false)
+        return
+      }
+      setBatchAutoOpen(false)
+      setBatchAutoIds([])
+      fetchTasks()
+      fetchCounts()
+    } catch (e) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      message.error(err.response?.data?.detail || err.message || '提交失败')
+    } finally {
+      setBatchAutoSubmitting(false)
+    }
+  }
 }

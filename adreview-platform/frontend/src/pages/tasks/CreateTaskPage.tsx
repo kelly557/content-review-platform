@@ -33,7 +33,6 @@ import type { MaterialType, StrategyHumanReview } from '@/types/domain'
 import { strategiesApi } from '@/api/strategies'
 import { colors } from '@/styles/theme'
 import { generateTaskName } from '@/lib/taskName'
-
 const { Text } = Typography
 
 type TabKind = MaterialType | 'audio'

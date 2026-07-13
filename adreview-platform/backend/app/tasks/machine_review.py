@@ -14,6 +14,11 @@ v8 (2026-07-16): delete the mock implementation entirely. The MaaS LLM is the
 sole moderation path; missing API key raises ``ModerationAPIError`` at the
 trigger boundary so the operator sees an explicit failure instead of
 silently getting a placeholder.
+
+v9 (字段收敛):
+- "敏感" 档只承载 PII 语义. 涉政/暴恐/医疗等不再以 "敏感" 修饰 label_cn.
+- aggregate_sensitive_level 在 max 汇总前, 对每条 hit 跑
+  coerce_sensitive_grade_for_hit, 强制非"敏感"档 hit 的 sensitive_grade=S0.
 """
 from __future__ import annotations
 
@@ -35,6 +40,7 @@ from app.models.sensitive_level import (
     sensitive_level_rank,
 )
 from app.models.workflow import WorkflowInstance, WorkflowTemplate
+from app.services.risk_taxonomy import coerce_sensitive_grade_for_hit
 
 log = get_logger(__name__)
 
@@ -346,7 +352,15 @@ def aggregate_risk_level(hits: List[Dict[str, Any]]) -> str:
 
 
 def aggregate_sensitive_level(hits: List[Dict[str, Any]]) -> str:
-    """Aggregate material-level SensitiveLevel from hit-level sensitive_grade."""
+    """Aggregate material-level SensitiveLevel from hit-level sensitive_grade.
+
+    收敛规则 (v3):
+    - 仅当某条 hit 的风险档位 == "敏感" 时, 其 sensitive_grade 才参与 max 汇总.
+    - 非"敏感"档位的 hit.sensitive_grade 强制回写 S0 (由 coerce_sensitive_grade_for_hit 完成).
+    """
+    for hit in hits:
+        if isinstance(hit, dict):
+            coerce_sensitive_grade_for_hit(hit)
     best_rank = 0
     best_level = SensitiveLevel.S0.value
     for hit in hits:

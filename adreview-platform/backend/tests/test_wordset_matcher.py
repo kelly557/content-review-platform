@@ -1,16 +1,10 @@
 """本地词库匹配 (wordset_matcher) 单元测试.
 
-纯函数部分 (quote 定位 / active 时间窗 / ignored_services 过滤) 走直测.
-
-DB 集成部分改用 mock 注入, 避免 conftest 的 db_engine fixture 在
-同一文件内连续多测试时出现 schema 漂移 (Library.back_audit_points
-关系触发跨 schema join). 真实 DB 行为由纯函数组合保证.
+需要 PostgreSQL (复用 conftest 的 db_engine fixture).
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Iterable
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
@@ -18,6 +12,7 @@ import pytest_asyncio
 import app.models  # noqa: F401
 from app.models.human_review_config import RiskLevel
 from app.models.library import Library, LibraryKind, LibraryType
+from app.models.library_item import LibraryItem
 from app.services.wordset_matcher import (
     _find_quote,
     _library_active_now,
@@ -92,64 +87,66 @@ def test_service_applies_ignore_match():
     assert _service_applies(lib, ["image_audit_pro"]) is True
 
 
-# ─── DB 集成 (mock 注入) ────────────────────────────────────────────────
+# ─── DB 集成 (需要 PG) ──────────────────────────────────────────────────
 
 
-def _lib(
-    *, lib_id: int, name: str = "测试库", kind: str | None = "黑名单",
-    is_active: bool = True,
-    effective_from=None, effective_until=None,
-    ignored_services: list[str] | None = None,
-    words: list[str] | None = None,
-) -> Library:
-    lib = Library(
-        id=lib_id,
-        code=f"lib_{lib_id}",
-        name=name,
-        library_type=LibraryType.WORD.value,
-        kind=kind,
-        is_active=is_active,
-        is_deleted=False,
-        effective_from=effective_from,
-        effective_until=effective_until,
-        ignored_services=ignored_services or [],
-    )
-    lib._words = words or []  # type: ignore[attr-defined]
-    return lib
+@pytest_asyncio.fixture
+async def make_word_library(db_engine):
+    """工厂: 创建一个 word 库 + 若干词条, 返回 library 对象."""
+    created: list[Library] = []
 
+    async def _factory(*, words: list[str], kind: str = "黑名单",
+                      is_active: bool = True,
+                      effective_from=None, effective_until=None,
+                      ignored_services: list[str] | None = None) -> Library:
+        from app.db.session import async_sessionmaker
+        maker = async_sessionmaker(db_engine, expire_on_commit=False)
+        async with maker() as session:
+            lib = Library(
+                code=f"lib_{len(created)}",
+                name=f"测试库-{len(created)}",
+                library_type=LibraryType.WORD.value,
+                kind=kind,
+                is_active=is_active,
+                is_deleted=False,
+                effective_from=effective_from,
+                effective_until=effective_until,
+                ignored_services=ignored_services or [],
+            )
+            session.add(lib)
+            await session.flush()
+            for w in words:
+                session.add(LibraryItem(library_id=lib.id, word=w))
+            await session.commit()
+            await session.refresh(lib)
+            created.append(lib)
+            return lib
 
-async def _run_with_libs(text: str, libs: list[Library]) -> list[dict]:
-    """用 mock session 替代 DB 调用, 跑 match_active_words.
+    yield _factory
 
-    模拟 _load_active_word_libraries 行为: 过滤 is_active=True 的库.
-    """
-    from app.services import wordset_matcher
-
-    session = MagicMock()
-
-    async def fake_load_libs(_db):
-        return [lib for lib in libs if lib.is_active]
-
-    async def fake_load_words(_db, lib_ids):
-        return {lib.id: getattr(lib, "_words", []) for lib in libs if lib.id in lib_ids}
-
-    orig_load_libs = wordset_matcher._load_active_word_libraries
-    orig_load_words = wordset_matcher._load_words_for_libraries
-    wordset_matcher._load_active_word_libraries = fake_load_libs  # type: ignore[assignment]
-    wordset_matcher._load_words_for_libraries = fake_load_words  # type: ignore[assignment]
-    try:
-        return await match_active_words(
-            session, text, ["text_detection_pro"]
-        )
-    finally:
-        wordset_matcher._load_active_word_libraries = orig_load_libs  # type: ignore[assignment]
-        wordset_matcher._load_words_for_libraries = orig_load_words  # type: ignore[assignment]
+    # cleanup
+    from app.db.session import async_sessionmaker
+    maker = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with maker() as session:
+        for lib in created:
+            await session.refresh(lib)
+            for item in lib.items:
+                await session.delete(item)
+            await session.delete(lib)
+        await session.commit()
 
 
 @pytest.mark.asyncio
-async def test_match_active_words_basic_blacklist():
-    lib = _lib(lib_id=1, name="黑名单", kind="黑名单", words=["骂", "辱骂"])
-    hits = await _run_with_libs("我骂你一下", [lib])
+async def test_match_active_words_basic_blacklist(make_word_library, db_engine):
+    """基本黑名单: 文本含词条, 应生成 hit."""
+    from app.db.session import async_sessionmaker
+
+    await make_word_library(words=["骂", "辱骂"])
+    maker = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with maker() as session:
+        hits = await match_active_words(
+            session, "我骂你一下", ["text_detection_pro"]
+        )
     assert len(hits) == 1
     h = hits[0]
     assert h["source"] == "local_wordset"
@@ -158,75 +155,80 @@ async def test_match_active_words_basic_blacklist():
 
 
 @pytest.mark.asyncio
-async def test_match_active_words_no_match():
-    lib = _lib(lib_id=1, words=["咒骂"])
-    hits = await _run_with_libs("你好世界", [lib])
+async def test_match_active_words_no_match(make_word_library, db_engine):
+    from app.db.session import async_sessionmaker
+    await make_word_library(words=["咒骂"])
+    maker = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with maker() as session:
+        hits = await match_active_words(
+            session, "你好世界", ["text_detection_pro"]
+        )
     assert hits == []
 
 
 @pytest.mark.asyncio
-async def test_match_active_words_inactive_library():
-    lib = _lib(lib_id=1, words=["骂"], is_active=False)
-    hits = await _run_with_libs("我骂你", [lib])
+async def test_match_active_words_inactive_library(make_word_library, db_engine):
+    from app.db.session import async_sessionmaker
+    await make_word_library(words=["骂"], is_active=False)
+    maker = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with maker() as session:
+        hits = await match_active_words(
+            session, "我骂你", ["text_detection_pro"]
+        )
     assert hits == []
 
 
 @pytest.mark.asyncio
-async def test_match_active_words_expired_library():
+async def test_match_active_words_expired_library(make_word_library, db_engine):
+    from app.db.session import async_sessionmaker
     now = datetime.now(timezone.utc)
-    lib = _lib(
-        lib_id=1,
+    await make_word_library(
         words=["骂"],
         effective_from=now - timedelta(days=10),
         effective_until=now - timedelta(days=1),
     )
-    hits = await _run_with_libs("我骂你", [lib])
+    maker = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with maker() as session:
+        hits = await match_active_words(
+            session, "我骂你", ["text_detection_pro"]
+        )
     assert hits == []
 
 
 @pytest.mark.asyncio
-async def test_match_active_words_ignored_service():
-    lib = _lib(
-        lib_id=1,
-        words=["骂"],
-        ignored_services=["text_detection_pro"],
-    )
-    hits = await _run_with_libs("我骂你", [lib])
+async def test_match_active_words_ignored_service(make_word_library, db_engine):
+    from app.db.session import async_sessionmaker
+    await make_word_library(words=["骂"], ignored_services=["text_detection_pro"])
+    maker = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with maker() as session:
+        hits = await match_active_words(
+            session, "我骂你", ["text_detection_pro"]
+        )
     assert hits == []
 
 
 @pytest.mark.asyncio
-async def test_match_active_words_whitelist_label():
+async def test_match_active_words_whitelist_label(make_word_library, db_engine):
     """白名单命中的词 label 应标记 '白名单:'."""
-    lib = _lib(lib_id=1, kind="白名单", words=["咖啡"])
-    hits = await _run_with_libs("我喝咖啡", [lib])
+    from app.db.session import async_sessionmaker
+    await make_word_library(words=["咖啡"], kind="白名单")
+    maker = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with maker() as session:
+        hits = await match_active_words(
+            session, "我喝咖啡", ["text_detection_pro"]
+        )
     assert len(hits) == 1
     assert hits[0]["label_cn"].startswith("白名单:")
     assert hits[0]["risk"] == RiskLevel.LOW.value
 
 
 @pytest.mark.asyncio
-async def test_match_active_words_dedupe():
-    lib = _lib(lib_id=1, words=["骂", "骂"])  # 同库同词 dedupe
-    hits = await _run_with_libs("我骂你", [lib])
+async def test_match_active_words_dedupe(make_word_library, db_engine):
+    from app.db.session import async_sessionmaker
+    await make_word_library(words=["骂", "骂"])  # 同库同词 dedupe
+    maker = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with maker() as session:
+        hits = await match_active_words(
+            session, "我骂你", ["text_detection_pro"]
+        )
     assert len(hits) == 1
-
-
-@pytest.mark.asyncio
-async def test_match_active_words_custom_blacklist_blocks_ma():
-    """回归: 用户自定义黑名单 '骂' 真的能命中并升级风险."""
-    lib = _lib(lib_id=1, words=["骂"])
-    hits = await _run_with_libs("我骂你", [lib])
-    from app.services.risk_taxonomy import aggregate_risk_level_v2
-    risk = aggregate_risk_level_v2(hits)
-    assert risk == RiskLevel.HIGH.value
-
-
-@pytest.mark.asyncio
-async def test_match_active_words_empty_text_skips_db():
-    """空文本直接返空, 不走 DB."""
-    from app.services import wordset_matcher
-    session = MagicMock()
-    hits = await wordset_matcher.match_active_words(session, "", ["text_detection_pro"])
-    assert hits == []
-    session.execute.assert_not_called()

@@ -1,19 +1,21 @@
-"""敏感等级 (SensitiveLevel) — 机审 hit 上的 PII 严重度.
+"""敏感等级 (SensitiveLevel) — "敏感"档内 hit 的 PII 严重度.
 
 四档（S0/S1/S2/S3），数字越大敏感程度越高：
 
 - S0: 未检出敏感内容
-- S1: 轻度敏感（行业内的常规 PII，如手机号、地址）
-- S2: 中度敏感（接近违规线的表述）
-- S3: 重度敏感（明显违规：涉政、暴恐、明确违规医疗/金融话术）
+- S1: 轻度敏感（行业内的常规 PII：手机号、地址）
+- S2: 中度敏感（接近违规线的 PII 组合：身份证 + 姓名）
+- S3: 重度敏感（多维 PII 共现：身份证 + 银行卡 + 手机号）
 
-注意：SensitiveLevel 与 RiskLevel 是**正交**的两条线：
-
-- RiskLevel（高/中/低/敏感/无）→ 决定**素材的整体动作**
-- SensitiveLevel（S0~S3）→ 决定**敏感内容本身的细粒度严重度**
-
-仅当 risk_level == "敏感" 时，hit 才会携带 sensitive_grade 字段。
-其他 risk_level 档位下默认为 S0，不参与决策。
+口径收紧 (2026-07-13):
+- "敏感" 档位 **只承载 PII**；涉政、暴恐、医疗违规等不再以 S3 表达.
+- 涉政/暴恐等语义走 RiskLevel.HIGH, 不会落入 "敏感" 档.
+- SensitiveLevel 与 RiskLevel **正交但有约束**:
+    * RiskLevel（高/中/低/敏感/无）→ 决定**素材的整体动作**
+    * SensitiveLevel（S0~S3）        → 决定**"敏感"档内** PII 严重度
+- 仅当 risk_level == "敏感" 时, hit 才会携带 non-zero sensitive_grade.
+  其他 risk_level 档位下默认 S0, 并由 risk_taxonomy.coerce_sensitive_grade_for_hit
+  强制回写 (避免演示数据跨档挂高 S 等级).
 """
 from __future__ import annotations
 

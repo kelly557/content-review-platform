@@ -85,6 +85,17 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
 
+    # MQ ingest (D. 消息队列来源) — Redis Streams
+    # Disabled by default; set MQ_CONSUMER_ENABLED=true to start the worker.
+    mq_consumer_enabled: bool = False
+    mq_redis_url: str = "redis://localhost:6379/0"
+    mq_consumer_group: str = "adreview-ingest"
+    mq_consumer_name: str = "consumer-1"
+    mq_stream_key: str = "adreview:task:requested"
+    mq_block_ms: int = 5000
+    mq_batch_count: int = 10
+    mq_max_deliveries: int = 5
+
     def ensure_storage_dirs(self) -> None:
         for sub in ("uploads", "thumbnails", "exports"):
             (self.storage_root / sub).mkdir(parents=True, exist_ok=True)

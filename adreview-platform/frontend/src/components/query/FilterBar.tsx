@@ -141,13 +141,13 @@ export default function FilterBar({ value, onChange, labelOptions }: FilterBarPr
       </div>
 
       <div style={{ flex: '1 1 240px', minWidth: 220 }}>
-        <div style={{ marginBottom: 4, fontSize: 12, color: '#64748B' }}>标签</div>
+        <div style={{ marginBottom: 4, fontSize: 12, color: '#64748B' }}>审核点</div>
         <Select<string[]>
           mode="multiple"
           value={value.labels ?? []}
           onChange={(v) => onChange({ ...value, labels: v.length ? v : undefined })}
           options={labelOptions.map((l) => ({ value: l, label: l }))}
-          placeholder="请选择标签"
+          placeholder="请选择审核点"
           allowClear
           maxTagCount="responsive"
           style={{ width: '100%' }}

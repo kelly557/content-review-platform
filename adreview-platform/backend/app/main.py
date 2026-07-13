@@ -75,6 +75,14 @@ async def lifespan(app: FastAPI):
     trigger_stop = asyncio.Event()
     trigger_task = asyncio.create_task(trigger_run_loop(trigger_stop), name="trigger_cron")
 
+    # MQ ingest consumer (D. 消息队列来源) — disabled unless MQ_CONSUMER_ENABLED=true.
+    mq_stop = asyncio.Event()
+    mq_task: asyncio.Task | None = None
+    if getattr(settings, "mq_consumer_enabled", False):
+        from app.services.mq_consumer import run_loop as mq_run_loop
+
+        mq_task = asyncio.create_task(mq_run_loop(mq_stop), name="mq_ingest")
+
     try:
         yield
     finally:
@@ -91,6 +99,13 @@ async def lifespan(app: FastAPI):
             await trigger_task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
+        if mq_task is not None:
+            mq_stop.set()
+            mq_task.cancel()
+            try:
+                await mq_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
         await shutdown_tasks()
 
 
