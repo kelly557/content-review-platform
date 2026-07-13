@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, Empty, Input, Modal, Space, Spin, Typography } from 'antd'
+import { Button, Collapse, Empty, Input, Modal, Space, Spin, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import type { Annotation } from '@/types/domain'
 import { colors } from '@/styles/theme'
@@ -22,7 +22,7 @@ export default function TextPreview({ versionId, textBody, readOnly, onChanged }
   const [annotations, setAnnotations] = useState<Annotation[]>([])
   const [loading, setLoading] = useState(false)
   const [pending, setPending] = useState<PendingSelection | null>(null)
-  const [comment, setComment] = useState('')
+  const [draftBody, setDraftBody] = useState('')
   const [saving, setSaving] = useState(false)
 
   const load = async () => {
@@ -30,7 +30,6 @@ export default function TextPreview({ versionId, textBody, readOnly, onChanged }
     try {
       const { annotationsApi } = await import('@/api/reviews')
       const res = await annotationsApi.list(versionId, 1, 100)
-      // 仅保留 quote/无坐标的批注（文本批注没有 bbox）
       setAnnotations(res.items.filter((a) => !!a.quote || (!a.x && !a.y && !a.w && !a.h)))
     } finally {
       setLoading(false)
@@ -51,21 +50,21 @@ export default function TextPreview({ versionId, textBody, readOnly, onChanged }
     const node = sel.anchorNode
     if (!node || !containerRef.current.contains(node)) return
     setPending({ quote: text })
-    setComment('')
+    setDraftBody('')
   }
 
   const onConfirm = async () => {
-    if (!pending || !comment.trim()) return
+    if (!pending || !draftBody.trim()) return
     setSaving(true)
     try {
       const { annotationsApi } = await import('@/api/reviews')
       await annotationsApi.create({
         version_id: versionId,
-        body: comment.trim(),
+        body: draftBody.trim(),
         quote: pending.quote,
       })
       setPending(null)
-      setComment('')
+      setDraftBody('')
       window.getSelection()?.removeAllRanges()
       await load()
       onChanged?.()
@@ -87,8 +86,8 @@ export default function TextPreview({ versionId, textBody, readOnly, onChanged }
               Modal.info({ title: '请先在下方文本中选中要批注的片段', icon: null })
               return
             }
-            setPending({ quote: text })
-            setComment('')
+              setPending({ quote: text })
+              setDraftBody('')
           }}
           disabled={readOnly}
         >
@@ -121,38 +120,57 @@ export default function TextPreview({ versionId, textBody, readOnly, onChanged }
       </Spin>
 
       {annotations.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <Text strong>已添加的文字批注</Text>
-          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {annotations.map((a) => (
+        <Collapse
+          size="small"
+          style={{ marginTop: 16 }}
+          defaultActiveKey={[]}
+          items={[
+            {
+              key: 'inline',
+              label: (
+                <Space>
+                  <Text strong>本页文字批注</Text>
+                  <span style={{ color: colors.muted, fontSize: 12 }}>
+                    {annotations.length} 条
+                  </span>
+                </Space>
+              ),
+              children: (
                 <div
-                  key={a.id}
-                  style={{
-                    border: `1px solid ${colors.border}`,
-                    borderRadius: 6,
-                    padding: 12,
-                    background: colors.surface2,
-                  }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
                 >
-                  <Paragraph
-                    type="secondary"
-                    style={{
-                      margin: 0,
-                      marginBottom: 4,
-                      fontSize: 12,
-                      borderLeft: `3px solid ${colors.accent}`,
-                      paddingLeft: 8,
-                      background: colors.accentSoft,
-                      padding: '4px 8px',
-                    }}
-                  >
-                  “{a.quote}”
-                </Paragraph>
-                <div>{a.body}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+                  {annotations.map((a) => (
+                    <div
+                      key={a.id}
+                      style={{
+                        border: `1px solid ${colors.border}`,
+                        borderRadius: 6,
+                        padding: 12,
+                        background: colors.surface2,
+                      }}
+                    >
+                      <Paragraph
+                        type="secondary"
+                        style={{
+                          margin: 0,
+                          marginBottom: 4,
+                          fontSize: 12,
+                          borderLeft: `3px solid ${colors.accent}`,
+                          paddingLeft: 8,
+                          background: colors.accentSoft,
+                          padding: '4px 8px',
+                        }}
+                      >
+                        “{a.quote}”
+                      </Paragraph>
+                      <div>{a.body}</div>
+                    </div>
+                  ))}
+                </div>
+              ),
+            },
+          ]}
+        />
       )}
 
       <Modal
@@ -160,7 +178,7 @@ export default function TextPreview({ versionId, textBody, readOnly, onChanged }
         open={!!pending}
         onCancel={() => setPending(null)}
         onOk={onConfirm}
-        okButtonProps={{ disabled: !comment.trim(), loading: saving }}
+        okButtonProps={{ disabled: !draftBody.trim(), loading: saving }}
         confirmLoading={saving}
       >
         <Space direction="vertical" style={{ width: '100%' }}>
@@ -179,8 +197,8 @@ export default function TextPreview({ versionId, textBody, readOnly, onChanged }
             </Paragraph>
           )}
           <Input.TextArea
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
+            value={draftBody}
+            onChange={(e) => setDraftBody(e.target.value)}
             rows={3}
             placeholder="对所选片段的反馈..."
             autoFocus

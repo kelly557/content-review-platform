@@ -49,8 +49,8 @@ class AnnotationOut(ORMBase):
 class ReviewDecisionRequest(BaseModel):
     decision: ReviewDecision
     note: Optional[str] = None
-    comment_body: Optional[str] = None  # optional stage-level comment
     tag_ids: List[str] = Field(default_factory=list, max_length=20)
+    audit_item_ids: List[int] = Field(default_factory=list, max_length=20)
 
 
 class ReviewAssignmentTagOut(ORMBase):
@@ -60,11 +60,10 @@ class ReviewAssignmentTagOut(ORMBase):
     created_at: datetime
 
 
-class ReviewCommentOut(ORMBase):
+class ReviewAssignmentAuditItemOut(ORMBase):
     id: int
-    task_id: int
-    author_id: int
-    body: str
+    audit_item_id: int
+    item_snapshot: Dict[str, Any]
     created_at: datetime
 
 
@@ -76,6 +75,7 @@ class ReviewAssignmentOut(ORMBase):
     note: Optional[str]
     decided_at: Optional[datetime]
     tags: List[ReviewAssignmentTagOut] = Field(default_factory=list)
+    audit_items: List[ReviewAssignmentAuditItemOut] = Field(default_factory=list)
 
 
 class AgentHit(BaseModel):
@@ -129,7 +129,6 @@ class ReviewTaskOut(ORMBase):
     created_at: datetime
     completed_at: Optional[datetime]
     assignments: List[ReviewAssignmentOut] = Field(default_factory=list)
-    comments: List[ReviewCommentOut] = Field(default_factory=list)
     material_type: Optional[MaterialType] = None
     material_status: Optional[MaterialStatus] = None
 
@@ -219,20 +218,6 @@ class WorkflowTemplateUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=2000)
     is_active: Optional[bool] = None
     stages: Optional[List[WorkflowStagePayload]] = Field(default=None, min_length=1)
-
-
-class TransferRequest(BaseModel):
-    """Forward a stage to another user (e.g. 加签/转交)."""
-
-    to_user_id: int
-    note: Optional[str] = None
-
-
-class AddReviewerRequest(BaseModel):
-    """Add an additional signer (会签/加签)."""
-
-    user_id: int
-    note: Optional[str] = None
 
 
 class ReviewCancelRequest(BaseModel):

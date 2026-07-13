@@ -24,9 +24,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { packagesApi } from '@/api/materialPackages'
 import { reviewsApi } from '@/api/reviews'
 import { materialsApi } from '@/api/materials'
-import { usersApi } from '@/api/admin'
 import { useAuthStore } from '@/store'
-import { canHandleTask } from '@/lib/permissions'
 import {
   DECISION_LABELS,
   TYPE_LABELS,
@@ -35,9 +33,7 @@ import {
   type MaterialVersion,
   type MaterialPackage,
   type MaterialPackageItem,
-  type ReviewDecision,
   type ReviewTask,
-  type User,
   type MaterialType,
 } from '@/types/domain'
 import PreviewEditor from '@/components/task-detail/PreviewEditor'
@@ -54,12 +50,16 @@ export default function PackageDetailPage() {
   const { user } = useAuthStore()
 
   const [pkg, setPkg] = useState<MaterialPackage | null>(null)
+  // 2026-07-16 cleanup: Transfer/AddReviewer UI removed, no longer need
+  // a user list for the recipient pickers. Re-introduce when those return.
   const [taskMap, setTaskMap] = useState<Record<number, ReviewTask>>({})
   const [materialMap, setMaterialMap] = useState<Record<number, Material>>({})
   const [versionMap, setVersionMap] = useState<Record<number, MaterialVersion>>({})
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
-  const [users, setUsers] = useState<User[]>([])
+  // (users list was previously fetched for Transfer/AddReviewer pickers;
+  // those actions were removed in the 2026-07-16 cleanup.)
   const [isDirty, setIsDirty] = useState(false)
+  const [pkgAuditItemIds, setPkgAuditItemIds] = useState<number[]>([])
 
   const packageId = routeId ? Number(routeId) : undefined
 
@@ -107,9 +107,8 @@ export default function PackageDetailPage() {
     fetchPackage(packageId).catch(() => {
       message.error('加载素材包失败')
     })
-    if (canHandleTask(user)) {
-      usersApi.list().then(setUsers).catch(() => {})
-    }
+    // 2026-07-16 cleanup: Transfer/AddReviewer UI removed, so the user list
+    // is no longer needed for this page. Revisit if those actions return.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [packageId])
 
@@ -137,36 +136,26 @@ export default function PackageDetailPage() {
     doSwitch()
   }
 
-  const onDecide = async (
-    decision: ReviewDecision,
-    _tagIds: string[],
-    note?: string,
-    commentBody?: string,
-  ) => {
-    if (!currentTask) return
-    if (!currentTask.assignments.find((a) => a.assignee_id === user?.id && a.decision === 'pending')) {
-      message.warning('当前阶段没有您的待办')
-      return
-    }
-    await reviewsApi.decide(currentTask.id, decision, note, commentBody)
-    message.success('已提交决定')
-    setIsDirty(false)
-    if (packageId) fetchPackage(packageId)
-  }
-
-  const onTransfer = async (toUserId: number) => {
-    if (!currentTask) return
-    await reviewsApi.transfer(currentTask.id, toUserId)
-    message.success('已转交')
-    if (packageId) fetchPackage(packageId)
-  }
-
-  const onAddReviewer = async (toUserId: number) => {
-    if (!currentTask) return
-    await reviewsApi.addReviewer(currentTask.id, toUserId)
-    message.success('已加签')
-    if (packageId) fetchPackage(packageId)
-  }
+  // 2026-07-16 cleanup: package-level decide was removed from the page UI;
+  // per-item decisions go through /tasks/:id. Keep this commented until
+  // a dedicated StickyDecisionBar lands here too.
+  // const onDecide = async (
+  //   decision: ReviewDecision,
+  //   options: { auditItemIds: number[]; note?: string },
+  // ) => {
+  //   if (!currentTask) return
+  //   if (!currentTask.assignments.find((a) => a.assignee_id === user?.id && a.decision === 'pending')) {
+  //     message.warning('当前阶段没有您的待办')
+  //     return
+  //   }
+  //   await reviewsApi.decide(currentTask.id, decision, {
+  //     note: options.note,
+  //     auditItemIds: options.auditItemIds,
+  //   })
+  //   message.success('已提交决定')
+  //   setIsDirty(false)
+  //   if (packageId) fetchPackage(packageId)
+  // }
 
   const downloadUrl = useMemo(() => {
     if (!currentTask || !currentVersion) return null
@@ -196,6 +185,14 @@ export default function PackageDetailPage() {
   const canDecide = currentTask
     ? !!currentTask.assignments.find((a) => a.assignee_id === user?.id && a.decision === 'pending')
     : false
+
+  const existingAuditItemIds = useMemo(() => {
+    if (!currentTask || !user) return []
+    const decided = currentTask.assignments.find(
+      (a) => a.assignee_id === user.id && a.decision !== 'pending',
+    )
+    return decided?.audit_items?.map((x) => x.audit_item_id) ?? []
+  }, [currentTask, user?.id])
 
   const getItemStatus = (item: MaterialPackageItem) => {
     const task = taskMap[item.id]
@@ -378,7 +375,6 @@ export default function PackageDetailPage() {
                         <PreviewEditor
                           task={currentTask}
                           materialType={currentMaterial.material_type}
-                          materialTitle={currentMaterial.title}
                           downloadUrl={downloadUrl}
                           textBody={currentVersion.text_body ?? null}
                           readOnly={!canDecide}
@@ -437,11 +433,14 @@ export default function PackageDetailPage() {
                   >
                     <HumanActionPanel
                       canDecide={canDecide}
-                      users={users}
-                      currentUserId={user?.id}
-                      onTransfer={onTransfer}
-                      onAddReviewer={onAddReviewer}
-                      onDecide={onDecide}
+                      hits={currentTask.agent_review?.hits ?? []}
+                      existingAuditItemIds={existingAuditItemIds}
+                      materialType={currentMaterial.material_type}
+                      auditItemIds={pkgAuditItemIds}
+                      onAuditItemsChange={setPkgAuditItemIds}
+                      onNoteChange={() => {
+                        /* no submit handler on this page yet */
+                      }}
                       onDirtyChange={setIsDirty}
                     />
                   </div>

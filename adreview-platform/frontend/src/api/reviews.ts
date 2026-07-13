@@ -25,16 +25,14 @@ export const reviewsApi = {
   decide(
     taskId: number,
     decision: ReviewDecision,
-    note?: string,
-    commentBody?: string,
-    tagIds: string[] = [],
+    options: { note?: string; tagIds?: string[]; auditItemIds?: number[] } = {},
   ) {
     return api
       .post<ReviewTask>(`/reviews/tasks/${taskId}/decide`, {
         decision,
-        note,
-        comment_body: commentBody,
-        tag_ids: tagIds,
+        note: options.note,
+        tag_ids: options.tagIds ?? [],
+        audit_item_ids: options.auditItemIds ?? [],
       })
       .then((r) => r.data)
   },
@@ -45,16 +43,6 @@ export const reviewsApi = {
         decision,
         note,
       })
-      .then((r) => r.data)
-  },
-  transfer(taskId: number, toUserId: number, note?: string) {
-    return api
-      .post(`/reviews/tasks/${taskId}/transfer`, { to_user_id: toUserId, note })
-      .then((r) => r.data)
-  },
-  addReviewer(taskId: number, userId: number, note?: string) {
-    return api
-      .post(`/reviews/tasks/${taskId}/add-reviewer`, { user_id: userId, note })
       .then((r) => r.data)
   },
   triggerMachineReview(taskId: number) {

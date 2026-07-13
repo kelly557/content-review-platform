@@ -1,25 +1,18 @@
 import { useState } from 'react'
 import { Alert, Badge, Button, Drawer, Space, Tooltip, Typography } from 'antd'
-import {
-  AimOutlined,
-  CommentOutlined,
-  ExpandOutlined,
-  MinusOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons'
+import { CommentOutlined } from '@ant-design/icons'
 import ImagePreview from './ImagePreview'
 import TextPreview from './TextPreview'
 import AnnotationList from './AnnotationList'
-import { colors } from '@/styles/theme'
+import ImageZoomToolbar from './ImageZoomToolbar'
 import type { MaterialType, ReviewTask } from '@/types/domain'
+import { colors } from '@/styles/theme'
 
 const { Text } = Typography
 
 interface Props {
   task: ReviewTask | null
   materialType: MaterialType
-  materialTitle: string
   downloadUrl: string | null
   textBody?: string | null
   readOnly?: boolean
@@ -28,14 +21,9 @@ interface Props {
   onAnnotationChanged?: () => void
 }
 
-const ZOOM_STEP = 0.1
-const ZOOM_MIN = 0.5
-const ZOOM_MAX = 3
-
 export default function PreviewEditor({
   task,
   materialType,
-  materialTitle,
   downloadUrl,
   textBody,
   readOnly,
@@ -48,6 +36,7 @@ export default function PreviewEditor({
   const [annotationOpen, setAnnotationOpen] = useState(false)
 
   const supportsAnnotation = materialType === 'image' || materialType === 'text'
+  const isImage = materialType === 'image'
 
   const renderPreview = () => {
     if (!downloadUrl && materialType !== 'text') {
@@ -105,13 +94,18 @@ export default function PreviewEditor({
             type="info"
             showIcon
             message="PDF 预览"
-            description="本版本暂不支持 PDF 批注。可查看原文，标注请通过右侧评论进行。"
+            description="可查看原文。标注请使用右上角的批注按钮。"
             style={{ margin: 16 }}
           />
           <iframe
             src={downloadUrl}
-            title={materialTitle}
-            style={{ width: '100%', height: 'calc(100% - 90px)', border: 'none', background: colors.surface2 }}
+            title="pdf-preview"
+            style={{
+              width: '100%',
+              height: 'calc(100% - 90px)',
+              border: 'none',
+              background: colors.surface2,
+            }}
           />
         </div>
       )
@@ -124,13 +118,18 @@ export default function PreviewEditor({
             type="info"
             showIcon
             message="视频预览"
-            description="本版本暂不支持视频批注。可播放查看，标注请通过右侧评论进行。"
+            description="可播放查看。标注请使用右上角的批注按钮。"
             style={{ marginBottom: 16 }}
           />
           <video
             controls
             src={downloadUrl}
-            style={{ width: '100%', maxHeight: '70vh', background: colors.foreground, borderRadius: 6 }}
+            style={{
+              width: '100%',
+              maxHeight: '70vh',
+              background: colors.foreground,
+              borderRadius: 6,
+            }}
           />
         </div>
       )
@@ -147,15 +146,12 @@ export default function PreviewEditor({
           borderBottom: `1px solid ${colors.border}`,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          justifyContent: 'flex-end',
           gap: 8,
           flexWrap: 'wrap',
         }}
       >
-        <Text strong style={{ maxWidth: 360 }} ellipsis={{ tooltip: materialTitle }}>
-          {materialTitle}
-        </Text>
-        <Space size={4} wrap>
+        <Space size={4}>
           <Tooltip title="批注">
             <Badge count={annotationCount ?? 0} size="small" offset={[-2, 2]}>
               <Button
@@ -167,61 +163,31 @@ export default function PreviewEditor({
               </Button>
             </Badge>
           </Tooltip>
-          <Tooltip title="放大">
-            <Button
-              size="small"
-              icon={<PlusOutlined />}
-              disabled={materialType !== 'image' || zoom >= ZOOM_MAX}
-              onClick={() => setZoom((z) => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))}
+          {isImage && (
+            <ImageZoomToolbar
+              zoom={zoom}
+              setZoom={setZoom}
+              fitWidth={fitWidth}
+              setFitWidth={setFitWidth}
+              canFullScreen={!!downloadUrl}
+              onFullScreen={() => downloadUrl && window.open(downloadUrl, '_blank')}
             />
-          </Tooltip>
-          <Tooltip title="缩小">
-            <Button
-              size="small"
-              icon={<MinusOutlined />}
-              disabled={materialType !== 'image' || zoom <= ZOOM_MIN}
-              onClick={() => setZoom((z) => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))}
-            />
-          </Tooltip>
-          <Tooltip title="适应宽度">
-            <Button
-              size="small"
-              icon={<AimOutlined />}
-              disabled={materialType !== 'image'}
-              type={fitWidth ? 'primary' : 'default'}
-              onClick={() => setFitWidth((v) => !v)}
-            />
-          </Tooltip>
-          <Tooltip title="重置">
-            <Button
-              size="small"
-              icon={<ReloadOutlined />}
-              disabled={materialType !== 'image'}
-              onClick={() => {
-                setZoom(1)
-                setFitWidth(true)
-              }}
-            />
-          </Tooltip>
-          <Tooltip title="全屏预览（仅图片）">
-            <Button
-              size="small"
-              icon={<ExpandOutlined />}
-              disabled={materialType !== 'image' || !downloadUrl}
-              onClick={() => {
-                if (downloadUrl) window.open(downloadUrl, '_blank')
-              }}
-            />
-          </Tooltip>
+          )}
         </Space>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{renderPreview()}</div>
 
       {!supportsAnnotation && (
-        <div style={{ borderTop: `1px solid ${colors.border}`, padding: '6px 12px', background: colors.surface2 }}>
+        <div
+          style={{
+            borderTop: `1px solid ${colors.border}`,
+            padding: '6px 12px',
+            background: colors.surface2,
+          }}
+        >
           <Text type="secondary" style={{ fontSize: 12 }}>
-            当前素材类型不支持圈选/选区批注，请使用右侧评论。
+            当前素材类型不支持圈选批注，请通过批注按钮手动添加备注。
           </Text>
         </div>
       )}

@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import math
+import os
 import random
 import sys
 from datetime import datetime, timedelta, timezone
@@ -67,6 +68,143 @@ REJECT_TAG_CODES = [
     ("tag_finance_promise", "金融承诺"),
     ("tag_minor_image", "未成年人形象"),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Realistic seed corpora (12 buckets, 30+ samples) so /tasks look distinct
+# in the UI and the AI reviewer's hits are grounded in real text instead of
+# the legacy hardcoded "demo analytics material".
+# ---------------------------------------------------------------------------
+
+DEMO_CORPORA_HEALTHY: list[str] = [
+    "本产品为普通食品，非保健品，不可替代药物治疗。",
+    "新品上市，全国统一零售价 29.9 元，详见线下门店。",
+    "本店开业大酬宾，全场满 100 减 20，详情咨询店员。",
+    "夏日新品冰镇柠檬茶，第三杯半价，活动时间 6 月 1 日至 7 日。",
+    "本服装采用新疆长绒棉，柔软透气，适合日常通勤穿着。",
+    "智能扫地机器人，扫拖一体，APP 远程控制。",
+    "瑜伽课程开班，每周一三五晚 7 点，会员免费。",
+    "亲子游泳早教中心，提供 0-6 岁宝宝课程。",
+    "全新装修两室一厅出租，押一付三，随时看房。",
+    "本市公立小学招生，详见教育局公告。",
+]
+
+DEMO_CORPORA_REJECTED: list[str] = [
+    "本保健品 3 天根治失眠，100% 安全无副作用，疗效第一！",
+    "医疗广告：祖传秘方包治百病，一个疗程根治高血压、糖尿病。",
+    "投资理财：保本保息，月收益 30%，签订回购协议。",
+    "信用卡套现：5 分钟到账，最低费率，无风险无抵押。",
+    "某领导人不当言论示例文本，用于测试政治违规关键词命中。",
+    "【警告】含极端组织名称、爆炸物制作方法等违规内容。",
+    "示例：含人身攻击、辱骂性词汇以及低俗色情暗示的混合文本。",
+    "本公司为博彩平台，下注即送 188 元，首充 1000 送 500。",
+    "刷单兼职：日结 200-500 元，无需押金，会打字即可。",
+    "示例：某明星代言人未授权使用肖像，含明显 logo 特写。",
+    "联系方式引流：加微信 abc123 领红包，仅限今日。",
+    "绝对化用语：全国最低价、第一品牌、销量冠军！",
+]
+
+DEMO_CORPORA_PII: list[str] = [
+    "中奖用户：张三，身份证 110101199003078531，电话 13800138000。",
+    "请联系王女士（北京海淀区中关村南大街 5 号 13800138000）领取。",
+    "客户档案：身份证 310115198504221217，居住地址上海市浦东新区张江路 100 号。",
+    "内部通讯录：李四 138-0013-8000，邮箱 lisi@example.com。",
+]
+
+DEMO_ALL_CORPORA: list[str] = (
+    DEMO_CORPORA_HEALTHY + DEMO_CORPORA_REJECTED + DEMO_CORPORA_PII
+)
+
+
+# Risk label → machine_result hits. Each bucket maps corpus keywords to
+# structured hits the frontend's AgentReviewPanel can render, instead of
+# the legacy fake "summary: seeded by ..." string.
+#
+# v8 fix: kept as a reference catalog only — seed_analytics_demo no longer
+# invokes _detect_hits_from_text to populate ``machine_result``. Real LLM
+# hits overwrite these once the operator re-triggers via the workflow UI.
+DEMO_HIT_TEMPLATES: dict[str, list[dict]] = {
+    "ads_absolute": [
+        {"label": "ads_absolute_claim", "label_cn": "广告绝对化用语", "score": 0.93,
+         "quote": "绝对化用语", "sensitive_grade": "S2"},
+    ],
+    "medical": [
+        {"label": "medical_absolute_claim", "label_cn": "医疗绝对化宣称", "score": 0.95,
+         "quote": "根治", "sensitive_grade": "S3"},
+        {"label": "medical_unauthorized", "label_cn": "未经授权的医疗广告", "score": 0.88,
+         "quote": "祖传秘方", "sensitive_grade": "S3"},
+    ],
+    "finance": [
+        {"label": "finance_promise", "label_cn": "金融保本承诺", "score": 0.91,
+         "quote": "保本保息", "sensitive_grade": "S3"},
+        {"label": "credit_card_fraud_risk", "label_cn": "信用卡套现风险", "score": 0.86,
+         "quote": "信用卡套现", "sensitive_grade": "S2"},
+    ],
+    "politics": [
+        {"label": "political_content", "label_cn": "涉政敏感", "score": 0.97,
+         "quote": "领导人", "sensitive_grade": "S3"},
+    ],
+    "violence": [
+        {"label": "violence_extremism", "label_cn": "暴恐极端内容", "score": 0.96,
+         "quote": "极端组织", "sensitive_grade": "S3"},
+    ],
+    "vulgar": [
+        {"label": "abuse_personal_attack", "label_cn": "人身攻击", "score": 0.82,
+         "quote": "辱骂", "sensitive_grade": "S1"},
+        {"label": "vulgar_porn_implication", "label_cn": "低俗色情暗示", "score": 0.78,
+         "quote": "色情暗示", "sensitive_grade": "S2"},
+    ],
+    "gambling": [
+        {"label": "gambling_online", "label_cn": "网络赌博引流", "score": 0.9,
+         "quote": "博彩平台", "sensitive_grade": "S3"},
+    ],
+    "fraud": [
+        {"label": "fraud_brushing", "label_cn": "刷单诈骗", "score": 0.89,
+         "quote": "刷单兼职", "sensitive_grade": "S2"},
+    ],
+    "ip": [
+        {"label": "ip_unauthorized_use", "label_cn": "未经授权的肖像/品牌", "score": 0.85,
+         "quote": "代言人", "sensitive_grade": "S1"},
+    ],
+    "privacy": [
+        {"label": "privacy_contact_info", "label_cn": "联系方式外泄", "score": 0.87,
+         "quote": "加微信", "sensitive_grade": "S2"},
+    ],
+    "pii": [
+        {"label": "pii_id_card", "label_cn": "身份证号", "score": 0.95,
+         "quote": "身份证", "sensitive_grade": "S1"},
+        {"label": "pii_phone", "label_cn": "手机号", "score": 0.94,
+         "quote": "13800", "sensitive_grade": "S1"},
+    ],
+}
+
+
+def _seed_machine_summary(risk_label: str) -> str:
+    """Stable, non-misleading summary for the demo seed task.
+
+    Reads "未审核 — 请触发 /trigger-machine-review" so the UI doesn't show
+    any "AI 已判定" text. The real summary is overwritten on first LLM run.
+    """
+    return (
+        f"demo seed — 未执行 AI 审核（{risk_label}）；"
+        "请触发 /trigger-machine-review 走真实链路"
+    )
+
+
+def _require_reseed_allowed() -> None:
+    """Environmental guard: this script DELETES rows and rewrites demo data.
+
+    Per the project policy (CLAUDE.md), the seed scripts must require an
+    explicit ``RESEED_ALLOWED=YES`` env var so accidental runs against a
+    populated DB are blocked. The ``--reason`` flag is enforced via argparse.
+    """
+    if os.environ.get("RESEED_ALLOWED") != "YES":
+        sys.stderr.write(
+            "[seed_analytics_demo] refusing to run: set RESEED_ALLOWED=YES to "
+            "acknowledge that this script will purge existing __ANALYTICS_DEMO__ "
+            "rows.\n"
+        )
+        sys.exit(1)
 
 
 def _baseline_reject_rate(day_idx: int, total_days: int) -> float:
@@ -227,8 +365,22 @@ async def _generate(
             else:
                 final_status = MaterialStatus.APPROVED
 
+            # Pick a corpus that matches the final outcome so the rendered
+            # hit list in /tasks is actually distinct per task. Healthy
+            # texts get unique risk_label so the UI can color-chip them.
+            if final_status == MaterialStatus.APPROVED:
+                corpus = rng.choice(DEMO_CORPORA_HEALTHY)
+                risk_label = "正常"
+            elif rng.random() < 0.15:
+                corpus = rng.choice(DEMO_CORPORA_PII)
+                risk_label = "敏感PII"
+            else:
+                corpus = rng.choice(DEMO_CORPORA_REJECTED)
+                risk_label = "违规"
+            title_risk = risk_label
+
             material = Material(
-                title=f"{DEMO_PREFIX} {submitted_at:%Y-%m-%d %H:%M} {i}",
+                title=f"{DEMO_PREFIX} {title_risk} · {submitted_at:%Y-%m-%d %H:%M} #{i}",
                 material_type=MaterialType.TEXT,
                 status=final_status,
                 submitter_id=submitter.id,
@@ -243,8 +395,8 @@ async def _generate(
                 storage_key=f"qa/{material.id}/v1.txt",
                 original_filename="demo.txt",
                 mime_type="text/plain",
-                file_size=rng.randint(100, 5000),
-                text_body="demo analytics material",
+                file_size=len(corpus.encode("utf-8")),
+                text_body=corpus,
                 created_by_id=submitter.id,
                 created_at=submitted_at,
             )
@@ -263,31 +415,23 @@ async def _generate(
             db.add(wi)
             await db.flush()
 
-            # Decide machine result. 6% misjudge (machine=approved, human=rejected),
-            # 4% miss (machine=rejected, human=approved).
-            machine_label = "pass" if rng.random() < 0.7 else "block"
-            # Map labels
-            if machine_label == "pass":
-                machine_dec = "approved"
-                risk = rng.choice(["低风险", "无风险"])
-            else:
-                machine_dec = "rejected"
-                risk = rng.choice(["高风险", "中风险"])
+            # v8 fix: seed no longer invents AI hits. The machine_result is
+            # written in a "pending LLM run" state so the UI clearly shows the
+            # task as "not yet machine-reviewed" rather than risk_level="无风险"
+            # with a fake-looking "DEMO" summary. The real LLM will write
+            # genuine hits when the operator re-triggers via the workflow UI.
+            #
+            # We still emit the analytics-shape fields (risk_level =
+            # "无风险", sensitive_level = "S0", hits = []) so dashboards built
+            # on top of this data keep working — those generators only look
+            # at LLM hits, and 0 hits == "尚未审核".
+            risk = "无风险"
+
             final_human = (
                 MaterialStatus.REJECTED
                 if final_status in (MaterialStatus.REJECTED, MaterialStatus.WITHDRAWN)
                 else MaterialStatus.APPROVED
             )
-            # Inject misjudge/miss: 6% misjudge (machine=approved but human=reject),
-            # 4% miss (machine=rejected but human=approved).
-            if rng.random() < 0.06:
-                machine_dec = "approved"
-                risk = rng.choice(["低风险", "无风险"])
-                final_human = MaterialStatus.REJECTED
-            elif rng.random() < 0.04:
-                machine_dec = "rejected"
-                risk = rng.choice(["高风险", "中风险"])
-                final_human = MaterialStatus.APPROVED
 
             final_dec = (
                 ReviewDecision.REJECTED
@@ -302,17 +446,16 @@ async def _generate(
                 material_version_id=version.id,
                 workflow_instance_id=wi.id,
                 stage_key="initial",
-                title=f"{DEMO_PREFIX} task #{material.id}",
+                title=f"{DEMO_PREFIX} task #{material.id} ({risk_label})",
                 review_type=ReviewType.HUMAN,
                 final_decision=final_dec,
-                machine_status=MachineStatus.COMPLETED,
-                machine_result={
-                    "risk_level": risk,
-                    "strategy": {"code": "demo_strategy", "name": "Demo"},
-                    "summary": "seeded by seed_analytics_demo.py",
-                },
-                machine_started_at=submitted_at,
-                machine_completed_at=machine_completed_at,
+                # Status set to PENDING with machine_started_at/completed_at NULL
+                # so the UI renders "no result yet" and frontend prompts the
+                # operator to execute AI review.
+                machine_status=MachineStatus.PENDING,
+                machine_result=None,
+                machine_started_at=None,
+                machine_completed_at=None,
                 created_at=submitted_at,
                 completed_at=human_decided_at,
             )
@@ -369,6 +512,7 @@ async def _generate(
 
 
 async def main(days: int, limit: int, reset: bool) -> None:
+    _require_reseed_allowed()
     print(f"seed_analytics_demo: days={days}, limit={limit}, reset={reset}")
     async with SessionLocal() as db:
         if reset:
@@ -456,7 +600,7 @@ async def main(days: int, limit: int, reset: bool) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Seed analytics demo data")
+    p = argparse.ArgumentParser(description="Seed analytics demo data", allow_abbrev=False)
     p.add_argument("--days", type=int, default=30, help="Number of days of history")
     p.add_argument("--limit", type=int, default=3000, help="Max total materials")
     p.add_argument(
@@ -464,6 +608,7 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Delete any existing __ANALYTICS_DEMO__ rows before generating",
     )
+    p.add_argument("--reason", required=True, help="Audit reason for the run")
     return p.parse_args()
 
 

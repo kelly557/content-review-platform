@@ -7,10 +7,18 @@ v6 refactor:
 - aggregate_sensitive_level 按 max 汇总素材级 S 等级
 - _suggest_action_for 决策矩阵 5×4×2×2 = 80 组合
 - run_machine_review 末尾把 suggested_action + desensitize_plan 写入 machine_result
+
+v7 (2026-07-16): swap call_mock_detection → call_llm_detection.
+
+v8 (2026-07-16): delete the mock implementation entirely. The MaaS LLM is the
+sole moderation path; missing API key raises ``ModerationAPIError`` at the
+trigger boundary so the operator sees an explicit failure instead of
+silently getting a placeholder.
 """
 from __future__ import annotations
 
 import random
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -18,15 +26,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.human_review_config import HumanReviewConfig, RiskLevel
 from app.models.review import MachineStatus, ReviewTask, ReviewType
 from app.models.sensitive_level import (
-    SENSITIVE_LEVEL_RANK,
     SensitiveLevel,
     sensitive_level_rank,
 )
-from app.models.workflow import WorkflowInstance, WorkflowNode, WorkflowTemplate
+from app.models.workflow import WorkflowInstance, WorkflowTemplate
 
 log = get_logger(__name__)
 
@@ -41,6 +49,8 @@ SUGGESTED_ACTION_APPROVED = "approved"
 SUGGESTED_ACTION_REJECTED = "rejected"
 SUGGESTED_ACTION_DESENSITIZE = "desensitize"
 SUGGESTED_ACTION_REVIEW = "review"
+
+PROVENANCE_LLM = "openai"
 
 
 async def run_machine_review(task_id: int, db: AsyncSession) -> None:
@@ -84,10 +94,17 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
         stage_config = _get_stage_config(instance, task.stage_key)
         services = stage_config.get("services", ["text_detection_pro"])
 
-        hits = []
-        for svc_code in services:
-            svc_hits = await call_mock_detection(svc_code, task.material_version_id)
-            hits.extend(svc_hits)
+        # Load the text once so the LLM call doesn't open a second session
+        # that races with this one.
+        text_body = await _load_version_text(task.material_version_id)
+
+        hits, llm_meta = await call_llm_detection(
+            db,
+            task_id=task_id,
+            version_id=task.material_version_id,
+            enabled_services=services,
+            text_body=text_body,
+        )
 
         # 1. 素材级 risk_level（5 档：高/中/低/敏感/无）
         risk_level = aggregate_risk_level(hits)
@@ -96,7 +113,7 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
         sensitive_level = aggregate_sensitive_level(hits)
 
         # 3. 规则命中（含每个 hit 的 sensitive_grade）
-        rule_hits = _generate_mock_rule_hits(hits)
+        rule_hits = _build_rule_hits(hits)
 
         # 4. 决策矩阵：4 个上下文变量 + 用户自定义覆盖 → suggested_action
         hr_cfg = getattr(instance, "strategy_human_review", None) or {}
@@ -127,9 +144,11 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
             "rule_hits": rule_hits,
             "suggested_action": suggested_action,
             "summary": (
-                f"检测到 {len(hits)} 条命中，"
+                llm_meta.get("summary")
+                or f"检测到 {len(hits)} 条命中，"
                 f"风险等级：{risk_level}，敏感等级：{sensitive_level}"
             ),
+            "provenance": PROVENANCE_LLM,
         }
 
         # 6. 敏感档（risk=敏感 且 sensitive ≥ S1）→ 生成 desensitize_plan
@@ -170,7 +189,10 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
     except Exception as e:
         log.error(f"Machine review failed for task {task_id}: {e}")
         task.machine_status = MachineStatus.FAILED
-        task.machine_result = {"error": str(e)}
+        task.machine_result = {
+            "error": str(e),
+            "provenance": PROVENANCE_LLM,
+        }
         await db.commit()
         raise
 
@@ -188,95 +210,107 @@ def _get_stage_config(instance: WorkflowInstance, stage_key: str) -> Dict[str, A
     return {}
 
 
-async def call_mock_detection(service_code: str, version_id: int) -> List[Dict[str, Any]]:
-    """Mock detection service that returns random hits.
-
-    每个 hit 携带 sensitive_grade（S0~S3），mock 规则：
-      - 医疗/政治 → S3
-      - 金融 → S2
-      - 敏感内容 → S1
-      - 其他 → S0
-    """
-    await _simulate_network_delay()
-
-    mock_labels = [
-        {"label": "medical_ad_violation", "label_cn": "医疗广告违规", "risk": "高风险"},
-        {"label": "financial_risk_warning", "label_cn": "金融风险提示", "risk": "中风险"},
-        {"label": "sensitive_content", "label_cn": "敏感内容", "risk": "敏感"},
-        {"label": "political_content", "label_cn": "政治敏感", "risk": "高风险"},
-    ]
-
-    num_hits = random.choice([1, 2, 3])
-    hits = []
-    for _ in range(num_hits):
-        chosen = random.choice(mock_labels)
-        hits.append({
-            "service_code": service_code,
-            "service_name": f"Mock 检测服务 ({service_code})",
-            "label": chosen["label"],
-            "label_cn": chosen["label_cn"],
-            "score": round(random.uniform(0.6, 0.99), 2),
-            "quote": _pick_quote_for_version(version_id),
-            "bbox": None,
-            "page": None,
-            "timestamp_ms": None,
-        })
-
-    # 给每个 hit 打 sensitive_grade（mock 规则）
-    for h in hits:
-        h["sensitive_grade"] = _mock_sensitive_grade_for(h)
-
-    return hits
-
-
-def _mock_sensitive_grade_for(hit: Dict[str, Any]) -> str:
-    """Mock：基于 label_cn 推断 hit 的 sensitive_grade。
-
-    真实机审服务会直接返回 sensitive_grade；mock 用关键词兜底。
-    """
-    lc = hit.get("label_cn", "")
-    if "医疗" in lc or "政治" in lc:
-        return SensitiveLevel.S3.value
-    if "金融" in lc:
-        return SensitiveLevel.S2.value
-    if "敏感" in lc:
-        return SensitiveLevel.S1.value
-    return SensitiveLevel.S0.value
-
-
-def _pick_quote_for_version(version_id: int) -> str:
-    """Best-effort: fetch the material version's text_body and slice a window.
-
-    Falls back to a deterministic-looking fake quote when the version is missing
-    or has no text body (e.g. video / image materials).
-    """
-    import asyncio
-
-    async def _inner() -> str:
+async def _load_version_text(version_id: int) -> str:
+    """Best-effort load of a version's text_body (None for media without text)."""
+    try:
         from app.db.session import SessionLocal
         from app.models.material import MaterialVersion
 
-        try:
-            async with SessionLocal() as db:
-                v = await db.get(MaterialVersion, version_id)
-                body = getattr(v, "text_body", None) if v else None
-                if body and len(body) >= 10:
-                    snippet = body.strip().replace("\n", " ")
-                    if len(snippet) <= 30:
-                        return f"“{snippet}”"
-                    start = random.randint(0, max(0, len(snippet) - 30))
-                    return f"“{snippet[start:start + random.randint(10, 30)]}…”"
-        except Exception:
-            pass
-        return f"“模拟命中片段 #{version_id}-{random.randint(1, 99)}”"
-
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            return f"“模拟命中片段 #{version_id}-{random.randint(1, 99)}”"
-        return loop.run_until_complete(_inner())
+        async with SessionLocal() as db:
+            v = await db.get(MaterialVersion, version_id)
+            return (v.text_body or "") if v else ""
     except Exception:
-        return f"“模拟命中片段 #{version_id}-{random.randint(1, 99)}”"
+        return ""
+
+
+async def call_llm_detection(
+    db: AsyncSession,
+    *,
+    task_id: int,
+    version_id: int,
+    enabled_services: List[str],
+    text_body: str,
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Single source of truth for moderation: call MaaS, no fallback.
+
+    Returns
+    -------
+    (hits, meta)
+        - ``hits`` is a list of dicts shaped like the legacy mock output so
+          the downstream ``aggregate_*`` + rule_hits code keeps working.
+        - ``meta`` carries summary text + token counts.
+
+    Raises ``ModerationAPIError`` (from ``app.services.llm.client``) when
+    the API key is missing or the call fails. The catch-all in
+    ``run_machine_review`` records the failure into ``machine_result``.
+    """
+    if not settings.maas_api_key:
+        # Hard fail — missing key must NOT silently produce fake results.
+        raise RuntimeError(
+            "MAAS_API_KEY is not configured. Set it in the backend .env "
+            "before triggering machine review."
+        )
+
+    correlation_id = uuid.uuid4().hex
+    meta: Dict[str, Any] = {"summary": None, "token_in": 0, "token_out": 0}
+
+    from app.services.llm import MaaSClient
+
+    model = settings.maas_model
+    client = MaaSClient(model=model)
+    result, audit_meta = await client.moderate(
+        db=db,
+        version_id=version_id,
+        task_id=task_id,
+        text_body=text_body,
+        enabled_services=enabled_services,
+        correlation_id=correlation_id,
+    )
+    hits = _result_to_hits(result, enabled_services)
+    meta.update(
+        {
+            "summary": result.summary,
+            "token_in": audit_meta.get("token_in", 0),
+            "token_out": audit_meta.get("token_out", 0),
+            "schema_valid": audit_meta.get("schema_valid", False),
+        }
+    )
+    log.info(
+        f"MaaS moderation ok task={task_id} version={version_id} "
+        f"hits={len(hits)} corr={correlation_id}"
+    )
+    return hits, meta
+
+
+def _result_to_hits(
+    result: Any, enabled_services: List[str]
+) -> List[Dict[str, Any]]:
+    """Coerce the LLM result into the hit-dict shape downstream expects."""
+    hits: List[Dict[str, Any]] = []
+    for hit in result.hits:
+        hits.append(
+            {
+                "service_code": hit.service_code or (
+                    enabled_services[0] if enabled_services else "text_detection_pro"
+                ),
+                "service_name": hit.service_name or "MaaS Moderation",
+                "label": hit.label,
+                "label_cn": hit.label_cn,
+                "score": max(0.0, min(1.0, float(hit.score))),
+                "quote": hit.quote,
+                "bbox": None,
+                "page": None,
+                "timestamp_ms": None,
+                "sensitive_grade": _normalize_grade(hit.sensitive_grade),
+            }
+        )
+    return hits
+
+
+def _normalize_grade(grade: str | None) -> str:
+    if grade in {"S0", "S1", "S2", "S3"}:
+        return grade
+    return SensitiveLevel.S0.value
 
 
 def aggregate_risk_level(hits: List[Dict[str, Any]]) -> str:
@@ -292,7 +326,6 @@ def aggregate_risk_level(hits: List[Dict[str, Any]]) -> str:
     if not hits:
         return RiskLevel.NONE.value
 
-    # 兼容旧风险字段（hit["risk"]）和关键词兜底
     explicit_priority = {
         RiskLevel.HIGH.value: 4,
         RiskLevel.MEDIUM.value: 3,
@@ -302,12 +335,10 @@ def aggregate_risk_level(hits: List[Dict[str, Any]]) -> str:
     }
     max_score = 0
     for hit in hits:
-        # 优先用显式 risk 字段
         risk_raw = (hit.get("risk") or "").strip()
         if risk_raw in explicit_priority:
             max_score = max(max_score, explicit_priority[risk_raw])
             continue
-        # 否则按 label_cn 兜底
         label_cn = hit.get("label_cn", "")
         if "医疗" in label_cn or "政治" in label_cn:
             max_score = max(max_score, 4)
@@ -330,10 +361,7 @@ def aggregate_risk_level(hits: List[Dict[str, Any]]) -> str:
 
 
 def aggregate_sensitive_level(hits: List[Dict[str, Any]]) -> str:
-    """Aggregate material-level SensitiveLevel from hit-level sensitive_grade.
-
-    取 max（"严重度最高原则"）；全无 S 字段 → S0。
-    """
+    """Aggregate material-level SensitiveLevel from hit-level sensitive_grade."""
     best_rank = 0
     best_level = SensitiveLevel.S0.value
     for hit in hits:
@@ -347,13 +375,16 @@ def aggregate_sensitive_level(hits: List[Dict[str, Any]]) -> str:
     return best_level
 
 
-def _generate_mock_rule_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Generate mock rule hits based on detection hits.
+def _build_rule_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Map detection hits → rule hits (1:1 by label).
 
-    每个 rule_hit 透传对应 hit 的 sensitive_grade。
+    Collapses duplicates by ``hit.label`` and assigns a synthetic rule id
+    for each unique label. The schema persists this list verbatim into
+    ``machine_result.rule_hits``; the LLM-driven production version of
+    this function will later emit real rule ids from the strategy store.
     """
     rule_hits = []
-    seen_labels = set()
+    seen_labels: set[str] = set()
     for hit in hits:
         label = hit.get("label")
         if label and label not in seen_labels:
@@ -367,6 +398,10 @@ def _generate_mock_rule_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]
                 "sensitive_grade": hit.get("sensitive_grade", SensitiveLevel.S0.value),
             })
     return rule_hits
+
+
+# Backwards compatibility alias: external tests / scripts still import this.
+_generate_mock_rule_hits = _build_rule_hits
 
 
 def _build_desensitize_plan(hits: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -526,12 +561,6 @@ def _suggest_action_for(
             return SUGGESTED_ACTION_APPROVED
 
     return base_action
-
-
-async def _simulate_network_delay() -> None:
-    """Simulate short network delay for the mock service."""
-    import asyncio
-    await asyncio.sleep(random.uniform(0.1, 0.4))
 
 
 async def should_escalate_to_human(

@@ -5,7 +5,6 @@ import {
   Col,
   Drawer,
   Empty,
-  Input,
   Row,
   Space,
   Tag,
@@ -14,15 +13,11 @@ import {
 import {
   ArrowLeftOutlined,
   RobotOutlined,
-  StopOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
-import { reviewsApi, annotationsApi } from '@/api/reviews'
+import { annotationsApi, reviewsApi } from '@/api/reviews'
 import { materialsApi } from '@/api/materials'
-import { usersApi } from '@/api/admin'
-import { tagsApi } from '@/api/tags'
 import { useAuthStore } from '@/store'
-import { canHandleTask } from '@/lib/permissions'
 import {
   DECISION_LABELS,
   TYPE_LABELS,
@@ -31,16 +26,15 @@ import {
   type MaterialVersion,
   type ReviewDecision,
   type ReviewTask,
-  type TagSummary,
-  type User,
 } from '@/types/domain'
 import TaskListPanel from '@/components/task-detail/TaskListPanel'
 import PreviewEditor from '@/components/task-detail/PreviewEditor'
 import AgentReviewPanel from '@/components/task-detail/AgentReviewPanel'
 import HumanActionPanel from '@/components/task-detail/HumanActionPanel'
+import StickyDecisionBar from '@/components/task-detail/StickyDecisionBar'
 import { colors } from '@/styles/theme'
 
-const { Title, Text } = Typography
+const { Title } = Typography
 
 type LayoutMode = 'triple' | 'double' | 'drawer'
 
@@ -64,6 +58,22 @@ function detect(): LayoutMode {
   return 'drawer'
 }
 
+const RISK_COLOR_HEX: Record<string, string> = {
+  高风险: colors.destructive,
+  中风险: colors.warning,
+  低风险: colors.success,
+  敏感: colors.accent,
+  无风险: colors.muted,
+}
+
+const RISK_SOFT: Record<string, string> = {
+  高风险: colors.dangerSoft,
+  中风险: colors.warningSoft,
+  低风险: colors.successSoft,
+  敏感: colors.accentSoft,
+  无风险: colors.surface2,
+}
+
 export default function TaskDetailPage() {
   const { message, modal } = App.useApp()
   const { id: routeId } = useParams<{ id: string }>()
@@ -74,13 +84,13 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState<ReviewTask | null>(null)
   const [material, setMaterial] = useState<Material | null>(null)
   const [version, setVersion] = useState<MaterialVersion | null>(null)
-  const [users, setUsers] = useState<User[]>([])
-  const [availableTags, setAvailableTags] = useState<TagSummary[]>([])
   const [annotationRefreshKey, setAnnotationRefreshKey] = useState(0)
   const [annotationCount, setAnnotationCount] = useState(0)
   const [isDirty, setIsDirty] = useState(false)
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false)
   const [triggeringMachineReview, setTriggeringMachineReview] = useState(false)
+  const [auditItemIds, setAuditItemIds] = useState<number[]>([])
+  const [note, setNote] = useState('')
   const rightPanelRef = useRef<HTMLDivElement>(null)
 
   const taskId = routeId ? Number(routeId) : undefined
@@ -91,7 +101,10 @@ export default function TaskDetailPage() {
     setIsDirty(false)
     const m = await materialsApi.get(t.material_id)
     setMaterial(m)
-    const v = m.versions.find((x) => x.id === t.material_version_id) ?? m.versions[m.versions.length - 1] ?? null
+    const v =
+      m.versions.find((x) => x.id === t.material_version_id) ??
+      m.versions[m.versions.length - 1] ??
+      null
     setVersion(v ?? null)
     if (v) {
       try {
@@ -113,13 +126,6 @@ export default function TaskDetailPage() {
     fetchTask(taskId).catch(() => {
       message.error('加载任务失败')
     })
-    if (canHandleTask(user)) {
-      usersApi.list().then(setUsers).catch(() => {})
-    }
-    tagsApi
-      .list({ page: 1, size: 200, status: 'active' })
-      .then((res) => setAvailableTags(res.items))
-      .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId])
 
@@ -158,7 +164,7 @@ export default function TaskDetailPage() {
     const doSwitch = () => navigate(`/tasks/${nextId}`)
     if (isDirty) {
       modal.confirm({
-        title: '切换任务将丢弃未提交的备注/评论',
+        title: '切换任务将丢弃未提交的审核意见',
         content: '当前任务有未保存的内容，是否继续？',
         okText: '丢弃并切换',
         cancelText: '留在当前任务',
@@ -171,32 +177,23 @@ export default function TaskDetailPage() {
 
   const onDecide = async (
     decision: ReviewDecision,
-    tagIds: string[],
-    note?: string,
-    commentBody?: string,
+    options: { auditItemIds?: number[]; note?: string },
   ) => {
     if (!task) return
-    if (!task.assignments.find((a) => a.assignee_id === user?.id && a.decision === 'pending')) {
+    if (
+      !task.assignments.find(
+        (a) => a.assignee_id === user?.id && a.decision === 'pending',
+      )
+    ) {
       message.warning('当前阶段没有您的待办')
       return
     }
-    await reviewsApi.decide(task.id, decision, note, commentBody, tagIds)
+    await reviewsApi.decide(task.id, decision, {
+      note: options.note,
+      auditItemIds: options.auditItemIds ?? [],
+    })
     message.success('已提交决定')
     setIsDirty(false)
-    fetchTask(task.id)
-  }
-
-  const onTransfer = async (toUserId: number) => {
-    if (!task) return
-    await reviewsApi.transfer(task.id, toUserId)
-    message.success('已转交')
-    fetchTask(task.id)
-  }
-
-  const onAddReviewer = async (toUserId: number) => {
-    if (!task) return
-    await reviewsApi.addReviewer(task.id, toUserId)
-    message.success('已加签')
     fetchTask(task.id)
   }
 
@@ -220,52 +217,17 @@ export default function TaskDetailPage() {
     }
   }
 
-  const onCancelTask = () => {
-    if (!task) return
-    let reason = ''
-    modal.confirm({
-      title: '取消任务',
-      content: (
-        <div>
-          <p style={{ marginBottom: 8 }}>确认取消任务「{task.title}」？该操作不可撤销。</p>
-          <Input.TextArea
-            rows={3}
-            maxLength={500}
-            showCount
-            placeholder="请输入取消原因（可选）"
-            onChange={(e) => {
-              reason = e.target.value
-            }}
-          />
-        </div>
-      ),
-      okText: '确认取消',
-      okButtonProps: { danger: true },
-      cancelText: '不取消',
-      onOk: async () => {
-        try {
-          await reviewsApi.cancelTask(task.id, reason || undefined)
-          message.success('任务已取消')
-          await fetchTask(task.id)
-        } catch (e) {
-          const err = e as { response?: { data?: { detail?: string } }; message?: string }
-          message.error(err.response?.data?.detail || err.message || '取消失败')
-        }
-      },
-    })
-  }
-
   const downloadUrl = useMemo(() => {
     if (!task || !version) return null
     return materialsApi.downloadUrl(task.material_id, version.id)
   }, [task, version])
 
-  const existingTagIds = useMemo(() => {
-    if (!task) return []
+  const existingAuditItemIds = useMemo(() => {
+    if (!task || !user) return []
     const decided = task.assignments.find(
-      (a) => a.assignee_id === user?.id && a.decision !== 'pending',
+      (a) => a.assignee_id === user.id && a.decision !== 'pending',
     )
-    return decided?.tags?.map((t) => t.tag_id) ?? []
+    return decided?.audit_items?.map((x) => x.audit_item_id) ?? []
   }, [task, user?.id])
 
   if (!task || !material) {
@@ -278,23 +240,10 @@ export default function TaskDetailPage() {
   const isMachineWithResult =
     task.review_type === 'machine' &&
     (task.machine_status === 'completed' || task.machine_status === 'failed')
-  const reviewerRoles = ['admin', 'reviewer', 'mlr']
+
   const canDecide =
     hasPendingAssignment ||
-    (isMachineWithResult && !!user && reviewerRoles.includes(user.role))
-
-  // v10: header visibility for the cancel button. The same predicate as
-  // the list page so behavior stays consistent.
-  const canCancel =
-    task.final_decision === 'pending' &&
-    task.canceled_at == null &&
-    (task.machine_status === 'pending' ||
-      task.machine_status === 'running' ||
-      task.machine_status == null) &&
-    (user?.role === 'admin' ||
-      user?.role === 'superadmin' ||
-      (user?.role === 'submitter' && material.submitter_id === user.id) ||
-      hasPendingAssignment)
+    (isMachineWithResult && !!user && ['admin', 'reviewer', 'mlr'].includes(user.role))
 
   const decisionTagColor =
     task.final_decision === 'approved'
@@ -309,11 +258,11 @@ export default function TaskDetailPage() {
 
   const workflowMode = task.workflow_mode ?? 'machine_only'
   const isHybrid = workflowMode === 'machine_then_human'
-  const isCanceled = task.final_decision === 'canceled'
+
+  const riskLevel = task.agent_review?.risk_level
 
   const renderRightPanel = () => {
     const isMachineReview = task.review_type === 'machine'
-
     return (
       <div
         ref={rightPanelRef}
@@ -326,7 +275,16 @@ export default function TaskDetailPage() {
           borderLeft: `1px solid ${colors.border}`,
         }}
       >
-        <div style={{ flex: isMachineReview ? '1 1 100%' : '0 0 60%', minHeight: 0, borderBottom: isMachineReview ? 'none' : `1px solid ${colors.border}`, overflow: 'auto' }}>
+        <div
+          style={{
+            flex: isMachineReview ? '1 1 100%' : '0 0 55%',
+            minHeight: 0,
+            borderBottom: isMachineReview
+              ? 'none'
+              : `1px solid ${colors.border}`,
+            overflow: 'auto',
+          }}
+        >
           <AgentReviewPanel
             result={task.agent_review}
             task={task}
@@ -334,38 +292,53 @@ export default function TaskDetailPage() {
             triggering={triggeringMachineReview}
           />
         </div>
-        {(!isMachineReview || task.machine_status === 'completed' || task.machine_status === 'failed') ? (
-          <div style={{ flex: '0 0 40%', minHeight: 0, overflow: 'auto', background: colors.surface2 }}>
+        {(!isMachineReview ||
+          task.machine_status === 'completed' ||
+          task.machine_status === 'failed') && (
+          <div
+            style={{
+              flex: '0 0 45%',
+              minHeight: 0,
+              overflow: 'auto',
+              background: colors.surface2,
+            }}
+          >
             <HumanActionPanel
               canDecide={canDecide}
-              users={users}
-              currentUserId={user?.id}
-              availableTags={availableTags}
-              existingTagIds={existingTagIds}
-              onTransfer={onTransfer}
-              onAddReviewer={onAddReviewer}
-              onDecide={onDecide}
+              hits={task.agent_review?.hits ?? []}
+              existingAuditItemIds={existingAuditItemIds}
+              materialType={material.material_type}
+              auditItemIds={auditItemIds}
+              onAuditItemsChange={setAuditItemIds}
+              onNoteChange={setNote}
               onDirtyChange={setIsDirty}
             />
           </div>
-        ) : null}
+        )}
       </div>
     )
   }
 
   return (
-    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* v10 PageHeader: task meta + workflow_mode + status + cancel button */}
+    <div
+      style={{
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
+      {/* Compact header: title + risk chip + tags + danger action */}
       <div
         style={{
           width: '100%',
-          padding: '12px 16px',
+          padding: '10px 14px',
           background: '#fff',
           border: `1px solid ${colors.border}`,
           borderRadius: 8,
           display: 'flex',
           flexDirection: 'column',
-          gap: 8,
+          gap: 6,
         }}
       >
         <div
@@ -374,7 +347,7 @@ export default function TaskDetailPage() {
             alignItems: 'center',
             justifyContent: 'space-between',
             flexWrap: 'wrap',
-            rowGap: 8,
+            rowGap: 6,
             columnGap: 12,
           }}
         >
@@ -386,9 +359,22 @@ export default function TaskDetailPage() {
             >
               返回任务列表
             </Button>
-            <Title level={5} style={{ margin: 0 }}>
+            <Title level={5} style={{ margin: 0 }} ellipsis={{ tooltip: task.title }}>
               {task.title}
             </Title>
+            {riskLevel && (
+              <Tag
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  background: RISK_SOFT[riskLevel] ?? colors.surface2,
+                  color: RISK_COLOR_HEX[riskLevel] ?? colors.muted,
+                  borderColor: RISK_COLOR_HEX[riskLevel] ?? colors.border,
+                }}
+              >
+                {riskLevel}
+              </Tag>
+            )}
             <Tag color={isHybrid ? 'purple' : 'blue'} style={{ margin: 0 }}>
               {WORKFLOW_MODE_LABELS[workflowMode]}
             </Tag>
@@ -396,20 +382,9 @@ export default function TaskDetailPage() {
               {DECISION_LABELS[task.final_decision]}
             </Tag>
             <Tag style={{ margin: 0 }}>{TYPE_LABELS[material.material_type]}</Tag>
-            <Tag color="default" style={{ margin: 0 }}>{task.stage_key}</Tag>
           </Space>
 
           <Space size={8} wrap>
-            {!isCanceled && canCancel && (
-              <Button
-                danger
-                size="small"
-                icon={<StopOutlined />}
-                onClick={onCancelTask}
-              >
-                取消任务
-              </Button>
-            )}
             <Button
               size="small"
               icon={<RobotOutlined />}
@@ -425,17 +400,9 @@ export default function TaskDetailPage() {
             </Button>
           </Space>
         </div>
-        {isCanceled && task.cancel_reason && (
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            取消原因：{task.cancel_reason}
-            {task.canceled_at && (
-              <> · 取消于 {new Date(task.canceled_at).toLocaleString('zh-CN')}</>
-            )}
-          </Text>
-        )}
       </div>
 
-      <div style={{ height: 'calc(100vh - 200px)', minHeight: 520 }}>
+      <div style={{ height: 'calc(100vh - 220px)', minHeight: 520 }}>
         {layoutMode === 'triple' ? (
           <Row gutter={12} style={{ height: '100%' }}>
             <Col span={6} style={{ height: '100%' }}>
@@ -470,7 +437,6 @@ export default function TaskDetailPage() {
                 <PreviewEditor
                   task={task}
                   materialType={material.material_type}
-                  materialTitle={material.title}
                   downloadUrl={downloadUrl}
                   textBody={version?.text_body ?? null}
                   readOnly={!canDecide}
@@ -518,7 +484,6 @@ export default function TaskDetailPage() {
                 <PreviewEditor
                   task={task}
                   materialType={material.material_type}
-                  materialTitle={material.title}
                   downloadUrl={downloadUrl}
                   textBody={version?.text_body ?? null}
                   readOnly={!canDecide}
@@ -545,7 +510,6 @@ export default function TaskDetailPage() {
             <PreviewEditor
               task={task}
               materialType={material.material_type}
-              materialTitle={material.title}
               downloadUrl={downloadUrl}
               textBody={version?.text_body ?? null}
               readOnly={!canDecide}
@@ -574,6 +538,22 @@ export default function TaskDetailPage() {
           {renderRightPanel()}
         </Drawer>
       )}
+
+      <StickyDecisionBar
+        taskId={task.id}
+        taskTitle={task.title}
+        isDirty={isDirty}
+        canDecide={canDecide}
+        onApprove={() => onDecide('approved', { auditItemIds, note })}
+        onReject={() => onDecide('rejected', { auditItemIds, note })}
+        badge={
+          !canDecide
+            ? '无可决策的待办'
+            : hasPendingAssignment
+              ? '当前阶段待办'
+              : undefined
+        }
+      />
     </div>
   )
 }

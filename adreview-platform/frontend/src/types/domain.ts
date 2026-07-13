@@ -90,14 +90,22 @@ export interface ReviewAssignment {
   note?: string | null
   decided_at?: string | null
   tags?: ReviewAssignmentTag[]
+  audit_items?: ReviewAssignmentAuditItem[]
 }
 
-export interface ReviewComment {
+export interface ReviewAssignmentAuditItem {
   id: number
   public_id?: string
-  task_id: number
-  author_id: number
-  body: string
+  audit_item_id: number
+  item_snapshot: {
+    id: number
+    package_code: string
+    code: string
+    name_cn: string
+    aliases?: string[]
+    is_enabled: boolean
+    is_builtin: boolean
+  }
   created_at: string
 }
 
@@ -118,7 +126,6 @@ export interface ReviewTask {
   created_at: string
   completed_at?: string | null
   assignments: ReviewAssignment[]
-  comments: ReviewComment[]
   agent_review?: AgentReviewResult | null
   material_type?: MaterialType | null
   material_status?: MaterialStatus | null

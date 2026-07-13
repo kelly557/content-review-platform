@@ -1,5 +1,10 @@
-import { Alert, Button, Empty, Space, Statistic, Tabs, Tag, Typography } from 'antd'
-import { AlertOutlined, FileSearchOutlined, PlayCircleOutlined, TagOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Alert, Badge, Button, Empty, Space, Statistic, Tabs, Tag, Tooltip, Typography } from 'antd'
+import {
+  AlertOutlined,
+  PlayCircleOutlined,
+  TagOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons'
 import type { AgentReviewResult, ReviewTask } from '@/types/domain'
 import { RISK_COLOR, suggestAction } from '@/lib/risk'
 import { colors } from '@/styles/theme'
@@ -13,18 +18,29 @@ interface Props {
   triggering?: boolean
 }
 
-export default function AgentReviewPanel({ result, task, onTriggerMachineReview, triggering }: Props) {
-  const canTrigger = task && task.review_type === 'machine' && task.machine_status === 'pending'
+const CHIP_BG: Record<string, string> = {
+  高风险: colors.dangerSoft,
+  中风险: colors.warningSoft,
+  低风险: colors.successSoft,
+  敏感: colors.accentSoft,
+  无风险: colors.surface2,
+}
+
+export default function AgentReviewPanel({
+  result,
+  task,
+  onTriggerMachineReview,
+  triggering,
+}: Props) {
+  const canTrigger =
+    task && task.review_type === 'machine' && task.machine_status === 'pending'
 
   if (!result) {
     return (
       <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
         {canTrigger ? (
           <div style={{ textAlign: 'center', padding: '40px 16px' }}>
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="AI 审核尚未执行"
-            />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="AI 审核尚未执行" />
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}
@@ -36,16 +52,13 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
             </Button>
           </div>
         ) : (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="后端尚未提供 Agent 审核结果"
-          />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="后端尚未提供 Agent 审核结果" />
         )}
       </div>
     )
   }
 
-  const { risk_level, hits, rule_hits, strategy, summary, finished_at } = result
+  const { risk_level, hits, rule_hits, summary, finished_at } = result
   const suggestion = suggestAction(risk_level)
   const uniqueServiceNames = Array.from(
     new Set(hits.map((h) => h.service_name || h.service_code).filter(Boolean) as string[]),
@@ -54,21 +67,42 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
   return (
     <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Space align="center" size={12} style={{ width: '100%', justifyContent: 'space-between' }}>
-          <div>
-            <Text type="secondary" style={{ fontSize: 12 }}>AI 审核结论</Text>
-            <div style={{ marginTop: 4 }}>
-              <Tag color={RISK_COLOR[risk_level]} style={{ fontSize: 14, padding: '2px 10px' }}>
-                {risk_level}
-              </Tag>
-            </div>
-          </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}
+        >
+          <Space size={10} align="center">
+            <Tag
+              color={RISK_COLOR[risk_level]}
+              style={{
+                fontSize: 13,
+                padding: '2px 10px',
+                background: CHIP_BG[risk_level] ?? colors.dangerSoft,
+                borderColor: RISK_COLOR[risk_level],
+              }}
+            >
+              AI 结论 · {risk_level}
+            </Tag>
+            <Badge count={hits.length} showZero color={hits.length > 0 ? colors.destructive : colors.mutedSoft}>
+              <Text type="secondary" style={{ fontSize: 12 }}>命中</Text>
+            </Badge>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              完成于 {new Date(finished_at).toLocaleString('zh-CN')}
+            </Text>
+          </Space>
           <Statistic
             title="命中条数"
             value={hits.length}
-            valueStyle={{ fontSize: 22, color: hits.length > 0 ? colors.destructive : colors.primary }}
+            valueStyle={{
+              fontSize: 22,
+              color: hits.length > 0 ? colors.destructive : colors.primary,
+            }}
           />
-        </Space>
+        </div>
 
         <Alert
           type={suggestion.tone}
@@ -81,9 +115,7 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
                 <Space size={4} wrap>
                   <Text type="secondary" style={{ fontSize: 12 }}>命中服务：</Text>
                   {uniqueServiceNames.slice(0, 4).map((s) => (
-                    <Tag key={s} style={{ margin: 0 }}>
-                      {s}
-                    </Tag>
+                    <Tag key={s} style={{ margin: 0 }}>{s}</Tag>
                   ))}
                   {uniqueServiceNames.length > 4 && (
                     <Tag style={{ margin: 0 }}>+{uniqueServiceNames.length - 4}</Tag>
@@ -109,16 +141,8 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
           </div>
         )}
 
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          审核时间：{new Date(finished_at).toLocaleString('zh-CN')}
-          {strategy && (
-            <>
-              {' · '}
-              <Tag color="blue" style={{ marginLeft: 4 }}>{strategy.name}</Tag>
-            </>
-          )}
-        </Text>
-
+        {/* Consolidated tabs: hits (default) + rules + a single 详情 tab for the
+            remaining info previously split across 4 tabs. */}
         <Tabs
           size="small"
           items={[
@@ -204,7 +228,12 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
                             阈值 {r.threshold}
                           </Text>
                         </Space>
-                        <Text style={{ fontSize: 12, color: r.matched ? colors.destructive : colors.mutedSoft }}>
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            color: r.matched ? colors.destructive : colors.mutedSoft,
+                          }}
+                        >
                           {r.matched ? '已触发' : '未触发'}
                         </Text>
                       </div>
@@ -212,34 +241,27 @@ export default function AgentReviewPanel({ result, task, onTriggerMachineReview,
                   </div>
                 ),
             },
-            {
-              key: 'wordlist',
-              label: (
-                <span>
-                  <FileSearchOutlined /> 命中词
-                </span>
-              ),
-              children: (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂未对接词库明细" />
-              ),
-            },
-            {
-              key: 'strategy',
-              label: (
-                <span>
-                  <TagOutlined /> 策略依据
-                </span>
-              ),
-              children: strategy ? (
-                <div>
-                  <Text>本任务依据策略 </Text>
-                  <Text strong>{strategy.name}</Text>
-                  <Text>（{strategy.code}）</Text>
-                </div>
-              ) : (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无策略信息" />
-              ),
-            },
+            ...(result.strategy
+              ? [
+                  {
+                    key: 'detail',
+                    label: (
+                      <span>
+                        <TagOutlined /> 详情
+                      </span>
+                    ),
+                    children: (
+                      <div style={{ padding: '8px 4px' }}>
+                        <Tooltip title="策略名称即 score 计算的元规则集">
+                          <Text>本任务依据策略 </Text>
+                          <Text strong>{result.strategy.name}</Text>
+                          <Text>（{result.strategy.code}）</Text>
+                        </Tooltip>
+                      </div>
+                    ),
+                  },
+                ]
+              : []),
           ]}
         />
       </Space>

@@ -44,12 +44,11 @@ class Settings(BaseSettings):
 
     maas_base_url: str = "https://maas.marketingforce.com"
     maas_api_key: str = ""
-    maas_model: str = "gpt-4o"
+    maas_model: str = "claude-opus-4-7"
     maas_timeout: int = 60
     maas_max_tokens: int = 4096
     maas_temperature: float = 0.1
     maas_response_mode: str = "json_schema"
-    maas_enabled: bool = True
     maas_max_text_chars: int = 12000
 
     @field_validator("cors_origins", "storage_allowed_mime", mode="before")

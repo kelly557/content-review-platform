@@ -8,6 +8,7 @@ import app.models.review  # noqa: F401
 import app.models.annotation  # noqa: F401
 import app.models.workflow  # noqa: F401
 import app.models.audit  # noqa: F401
+import app.models.llm_call  # noqa: F401
 import app.models.strategy  # noqa: F401
 import app.models.service_category  # noqa: F401
 import app.models.service  # noqa: F401

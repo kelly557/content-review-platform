@@ -1,4 +1,10 @@
-"""Annotation models: comments + canvas-shape highlights bound to a material version."""
+"""Annotation models: canvas-shape highlights + comments bound to a material version.
+
+Note (2026-07-16): the older ``ReviewComment`` model that stored stage-level
+comments on a review task was removed — that surface is replaced by the
+reviewer's decide note (``ReviewAssignment.note``) and the ``Annotation``
+free-form body. See alembic ``20260716_review_detail_cleanup``.
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -49,23 +55,3 @@ class Annotation(Base):
     )
 
     replies: Mapped[list["Annotation"]] = relationship("Annotation")
-
-
-class ReviewComment(Base):
-    """Stage-level comment (decision explanation, free-form remark)."""
-
-    __tablename__ = "review_comments"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    public_id: Mapped[str] = mapped_column(
-        String(36), unique=True, index=True, nullable=False, default=new_public_id
-    )
-    task_id: Mapped[int] = mapped_column(
-        ForeignKey("review_tasks.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    body: Mapped[str] = mapped_column(Text, nullable=False)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    task = relationship("ReviewTask", back_populates="comments")

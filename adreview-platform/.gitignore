@@ -42,6 +42,12 @@ storage/exports/*
 !storage/thumbnails/.gitkeep
 !storage/exports/.gitkeep
 
+# PG dumps produced by start_backend_safe.sh (rotate ADREVIEW_BACKUP_KEEP)
+storage/backups/
+
+# Alembic artifacts that should not survive cross-checking
+*.bak
+
 # OpenAPI / Swagger dev snapshots (regenerated from /docs)
 docs/moderation-openapi*.json
 docs/moderation-openapi*.yaml

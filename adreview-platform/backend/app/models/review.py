@@ -109,9 +109,6 @@ class ReviewTask(Base):
     assignments: Mapped[List["ReviewAssignment"]] = relationship(
         back_populates="task", cascade="all, delete-orphan"
     )
-    comments: Mapped[List["ReviewComment"]] = relationship(  # type: ignore[name-defined]
-        back_populates="task", cascade="all, delete-orphan"
-    )
 
     __table_args__ = (Index("ix_review_task_stage", "workflow_instance_id", "stage_key"),)
 
@@ -140,10 +137,17 @@ class ReviewAssignment(Base):
     tag_links: Mapped[List["ReviewAssignmentTag"]] = relationship(
         back_populates="assignment", cascade="all, delete-orphan"
     )
+    audit_item_links: Mapped[List["ReviewAssignmentAuditItem"]] = relationship(
+        back_populates="assignment", cascade="all, delete-orphan"
+    )
 
     @property
     def tags(self) -> List["ReviewAssignmentTag"]:
         return list(self.tag_links or [])
+
+    @property
+    def audit_items(self) -> List["ReviewAssignmentAuditItem"]:
+        return list(self.audit_item_links or [])
 
 
 class ReviewAssignmentTag(Base):
@@ -176,4 +180,45 @@ class ReviewAssignmentTag(Base):
 
     __table_args__ = (
         Index("ix_rat_assignment_tag", "assignment_id", "tag_id", unique=True),
+    )
+
+
+class ReviewAssignmentAuditItem(Base):
+    """审核项勾选：reviewer 在 decide 时勾选了哪些 AuditItem。
+
+    ``item_snapshot`` 是 AuditItem 在决策时刻的快照
+    （``{id, package_code, code, name_cn, aliases, is_enabled}``），
+    这样即使 AuditItem 后来被禁用 / 软删，历史勾选仍然可读。
+    """
+
+    __tablename__ = "review_assignment_audit_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
+    assignment_id: Mapped[int] = mapped_column(
+        ForeignKey("review_assignments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    audit_item_id: Mapped[int] = mapped_column(
+        ForeignKey("audit_items.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    item_snapshot: Mapped[dict] = mapped_column(_JSONType, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), server_default=func.now(), nullable=False
+    )
+
+    assignment = relationship("ReviewAssignment", back_populates="audit_item_links")
+
+    __table_args__ = (
+        Index(
+            "ix_raai_assignment_item",
+            "assignment_id",
+            "audit_item_id",
+            unique=True,
+        ),
     )

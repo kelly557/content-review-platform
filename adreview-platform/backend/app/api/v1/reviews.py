@@ -1,4 +1,4 @@
-"""Review router: list tasks, decide, transfer, comment."""
+"""Review router: list tasks, decide, transfer, cancel."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -11,24 +11,29 @@ from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_current_user
 from app.db.session import get_db
+from app.models.audit_item import AuditItem
 from app.models.material import Material, MaterialStatus, MaterialType
-from app.models.review import ReviewAssignment, ReviewAssignmentTag, ReviewDecision, ReviewTask, ReviewType, MachineStatus
+from app.models.review import (
+    ReviewAssignment,
+    ReviewAssignmentAuditItem,
+    ReviewAssignmentTag,
+    ReviewDecision,
+    ReviewTask,
+    ReviewType,
+    MachineStatus,
+)
 from app.models.tag import Tag
 from app.models.user import User
-from app.models.workflow import WorkflowInstance, WorkflowNode
+from app.models.workflow import WorkflowInstance
 from app.schemas.common import Page
 from app.schemas.review import (
-    AddReviewerRequest,
     BulkDecideRequest,
     ReviewCancelRequest,
-    ReviewCommentOut,
     ReviewDecisionRequest,
     ReviewTaskOut,
-    TransferRequest,
 )
 from app.services import audit
 from app.services.workflow_engine import (
-    assign_reviewer,
     evaluate_stage_completion,
     get_workflow_mode,
 )
@@ -119,7 +124,7 @@ async def list_my_tasks(
     result = await db.execute(
         base.options(
             selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.tag_links),
-            selectinload(ReviewTask.comments),
+            selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.audit_item_links),
         )
         .offset((page - 1) * size)
         .limit(size)
@@ -149,7 +154,7 @@ async def get_task(
         .where(ReviewTask.id == task_id)
         .options(
             selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.tag_links),
-            selectinload(ReviewTask.comments),
+            selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.audit_item_links),
         )
     )
     task = result.scalar_one_or_none()
@@ -172,7 +177,7 @@ async def decide(
         .where(ReviewTask.id == task_id)
         .options(
             selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.tag_links),
-            selectinload(ReviewTask.comments),
+            selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.audit_item_links),
         )
     )
     task = result.scalar_one_or_none()
@@ -223,12 +228,39 @@ async def decide(
                 ReviewAssignmentTag(tag_id=tag.id, tag_snapshot=snapshot)
             )
 
-    if body.comment_body:
-        task.comments.append(
-            __import__("app.models.annotation", fromlist=["ReviewComment"]).ReviewComment(
-                author_id=user.id, body=body.comment_body
+    if body.audit_item_ids:
+        unique_ai_ids = list(dict.fromkeys(body.audit_item_ids))
+        if len(unique_ai_ids) > 20:
+            raise HTTPException(status_code=400, detail="单次最多勾选 20 个审核项")
+        ai_rows = (
+            await db.execute(
+                select(AuditItem).where(
+                    AuditItem.id.in_(unique_ai_ids), AuditItem.is_enabled.is_(True)
+                )
             )
-        )
+        ).scalars().all()
+        found_ids = {a.id for a in ai_rows}
+        missing = [aid for aid in unique_ai_ids if aid not in found_ids]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"以下审核项不存在或已禁用: {', '.join(str(m) for m in missing)}",
+            )
+        for ai in ai_rows:
+            snapshot = {
+                "id": ai.id,
+                "package_code": ai.package_code,
+                "code": ai.code,
+                "name_cn": ai.name_cn,
+                "aliases": list(ai.aliases or []),
+                "is_enabled": ai.is_enabled,
+                "is_builtin": ai.is_builtin,
+            }
+            assignment.audit_item_links.append(
+                ReviewAssignmentAuditItem(
+                    audit_item_id=ai.id, item_snapshot=snapshot
+                )
+            )
 
     instance = await db.get(WorkflowInstance, task.workflow_instance_id)
     if instance is not None:
@@ -240,82 +272,6 @@ async def decide(
     )
     await db.commit()
     return await get_task(task_id, db, user)
-
-
-@router.post("/tasks/{task_id}/transfer", response_model=ReviewCommentOut)
-async def transfer(
-    task_id: int,
-    body: TransferRequest,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> ReviewCommentOut:
-    result = await db.execute(
-        select(ReviewTask)
-        .where(ReviewTask.id == task_id)
-        .options(selectinload(ReviewTask.assignments))
-    )
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
-    if not any(a.assignee_id == user.id and a.decision == ReviewDecision.PENDING for a in task.assignments):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not your task")
-
-    target = await db.get(User, body.to_user_id)
-    if not target:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="target user not found")
-
-    instance = await db.get(
-        WorkflowInstance, task.workflow_instance_id, options=[selectinload(WorkflowInstance.nodes)]
-    )
-    if instance is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="workflow not found")
-    node = next((n for n in instance.nodes if n.stage_key == task.stage_key and n.status == "active"), None)
-    if node is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="stage not active")
-    await assign_reviewer(db, instance, node, target)
-
-    from app.models.annotation import ReviewComment
-
-    comment = ReviewComment(author_id=user.id, task_id=task.id, body=f"转交给 {target.full_name}: {body.note or ''}")
-    db.add(comment)
-    await db.flush()
-    await db.commit()
-    return ReviewCommentOut.model_validate(comment)
-
-
-@router.post("/tasks/{task_id}/add-reviewer", response_model=ReviewCommentOut)
-async def add_reviewer(
-    task_id: int,
-    body: AddReviewerRequest,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> ReviewCommentOut:
-    result = await db.execute(
-        select(ReviewTask).where(ReviewTask.id == task_id)
-    )
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
-
-    target = await db.get(User, body.user_id)
-    if not target:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
-
-    instance = await db.get(
-        WorkflowInstance, task.workflow_instance_id, options=[selectinload(WorkflowInstance.nodes)]
-    )
-    node = next((n for n in instance.nodes if n.stage_key == task.stage_key and n.status == "active"), None)
-    if node is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="stage not active")
-    await assign_reviewer(db, instance, node, target)
-
-    from app.models.annotation import ReviewComment
-
-    comment = ReviewComment(author_id=user.id, task_id=task.id, body=f"加签 {target.full_name}: {body.note or ''}")
-    db.add(comment)
-    await db.flush()
-    await db.commit()
-    return ReviewCommentOut.model_validate(comment)
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=ReviewTaskOut)
@@ -339,7 +295,7 @@ async def cancel_task(
         .where(ReviewTask.id == task_id)
         .options(
             selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.tag_links),
-            selectinload(ReviewTask.comments),
+            selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.audit_item_links),
         )
     )
     task = result.scalar_one_or_none()
@@ -375,7 +331,7 @@ async def cancel_task(
         .where(ReviewTask.id == task_id)
         .options(
             selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.tag_links),
-            selectinload(ReviewTask.comments),
+            selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.audit_item_links),
         )
     )
     task = refreshed.scalar_one()
@@ -400,7 +356,10 @@ async def bulk_decide(
         result = await db.execute(
             select(ReviewTask)
             .where(ReviewTask.id == task_id)
-            .options(selectinload(ReviewTask.assignments), selectinload(ReviewTask.comments))
+            .options(
+            selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.tag_links),
+            selectinload(ReviewTask.assignments).selectinload(ReviewAssignment.audit_item_links),
+        )
         )
         task = result.scalar_one_or_none()
         if not task:

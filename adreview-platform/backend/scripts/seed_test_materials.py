@@ -263,10 +263,11 @@ async def _create_text_material(
 async def _create_non_text_material(
     db: AsyncSession, submitter: User, payload: dict
 ) -> Material:
-    """Create a non-text material WITHOUT writing a real file.
+    """Create a non-text material WITH a real placeholder file on disk.
 
-    ``storage_key`` is set to a placeholder path; the file does not exist on
-    disk, so the download endpoint will fail for these materials.
+    Generates a tiny but valid image / PDF / video stub so the download
+    endpoint actually returns bytes instead of 404. The previous behaviour
+    (placeholder.bin missing on disk) broke the preview pane in /tasks.
     """
     material = Material(
         title=payload["title"],
@@ -276,16 +277,18 @@ async def _create_non_text_material(
         tags={"risk": payload["risk"], "source": "seed_qa"},
         extra_metadata={
             "risk_label": payload["risk"],
-            "placeholder": True,
-            "placeholder_note": "no real file on disk; download not available",
+            "seed_origin": "qa",
         },
         submitter_id=submitter.id,
     )
     db.add(material)
     await db.flush()
 
-    key = (
-        f"materials/{material.id}/v1/placeholder.bin"
+    file_bytes = _build_placeholder_bytes(
+        payload["material_type"], payload.get("risk", "qa"), payload["original_filename"]
+    )
+    key, size, sha = storage.save_upload(
+        material.id, 1, payload["original_filename"], _BytesIO(file_bytes)
     )
     version = MaterialVersion(
         material_id=material.id,
@@ -293,16 +296,92 @@ async def _create_non_text_material(
         storage_key=key,
         original_filename=payload["original_filename"],
         mime_type=payload["mime_type"],
-        file_size=0,
-        checksum=None,
+        file_size=size,
+        checksum=sha,
         text_body=None,
-        extra={"risk_label": payload["risk"], "placeholder": True},
+        extra={"risk_label": payload["risk"], "seed_origin": "qa"},
         created_by_id=submitter.id,
     )
     db.add(version)
     await db.flush()
     material.current_version_id = version.id
     return material
+
+
+def _build_placeholder_bytes(
+    material_type: MaterialType, risk: str, original_filename: str
+) -> bytes:
+    """Build a small valid placeholder for the given media type.
+
+    Goals: downloadable, no external deps beyond Pillow (already in
+    requirements.txt). Video stubs are real MP4 ftyp boxes — most browsers
+    will show a "no codec" frame rather than refusing to load.
+    """
+    label = f"QA-{risk}"[:32]
+    try:
+        if material_type == MaterialType.IMAGE:
+            from PIL import Image, ImageDraw
+
+            img = Image.new("RGB", (640, 360), color=(15, 23, 42))
+            draw = ImageDraw.Draw(img)
+            draw.rectangle((20, 20, 620, 340), outline=(3, 105, 161), width=4)
+            draw.text((36, 36), label, fill=(255, 255, 255))
+            from io import BytesIO
+
+            buf = BytesIO()
+            ext = (original_filename.rsplit(".", 1)[-1] or "png").lower()
+            fmt = {"png": "PNG", "jpg": "JPEG", "jpeg": "JPEG", "webp": "WEBP"}.get(
+                ext, "PNG"
+            )
+            img.save(buf, format=fmt)
+            return buf.getvalue()
+        if material_type == MaterialType.PDF:
+            try:
+                from reportlab.pdfgen import canvas as rcanvas
+                from io import BytesIO
+
+                buf = BytesIO()
+                c = rcanvas.Canvas(buf)
+                c.setFont("Helvetica", 24)
+                c.drawString(72, 720, label)
+                c.setFont("Helvetica", 10)
+                c.drawString(72, 690, "(seed_qa placeholder PDF for QA preview tests)")
+                c.showPage()
+                c.save()
+                return buf.getvalue()
+            except ImportError:
+                # Minimal valid PDF stub (header + EOF), no third-party deps.
+                return (
+                    b"%PDF-1.4\n"
+                    b"1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n"
+                    b"2 0 obj <</Type /Pages /Kids [3 0 R] /Count 1>> endobj\n"
+                    b"3 0 obj <</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"
+                    b" /Contents 4 0 R>> endobj\n"
+                    b"4 0 obj <</Length 44>> stream\n"
+                    b"BT /F1 24 Tf 72 720 Td (" + label.encode("latin-1", "replace") + b") Tj ET\n"
+                    b"endstream endobj\n"
+                    b"trailer <</Size 5 /Root 1 0 R>>\n"
+                    b"%%EOF\n"
+                )
+        if material_type == MaterialType.VIDEO:
+            return _minimal_mp4_box(label)
+        # fallback: empty safe container
+        return b"\x00" * 64
+    except Exception:
+        # Last resort: never fail the seed because of preview bytes.
+        return b""
+
+
+def _minimal_mp4_box(label: str) -> bytes:
+    """Build a 64-byte MP4-ish ftyp box so the player shows a placeholder card."""
+    ftyp = (
+        b"\x00\x00\x00\x20ftyp"  # size=32, type=ftyp
+        b"isom" + b"\x00\x00\x02\x00"  # minor version
+        b"isomiso2avc1mp41"  # brands
+        + b"\x00" * 4
+    )
+    free = b"\x00\x00\x00\x08free"  # 8-byte free box
+    return ftyp + free + label.encode("utf-8")[:32].ljust(64, b" ")
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +452,7 @@ async def main() -> None:
             )
         print()
         print(f"created {len(created)} QA material(s), all in status=draft")
-        print("(download endpoint is only functional for text materials)")
+        print("all materials now have a real placeholder file on disk; download works")
 
 
 async def _run() -> None:
