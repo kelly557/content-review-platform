@@ -93,7 +93,7 @@ export default function TaskFilterPanel({ filters, onChange, visible }: TaskFilt
             style={{ width: '100%' }}
           />
         </Col>
-        <Col span={6}>
+        <Col span={6} style={{ display: 'none' }}>
           <div style={{ marginBottom: 8, fontSize: 12, color: '#666' }}>流程</div>
           <Select
             value={filters.workflow_mode || ''}

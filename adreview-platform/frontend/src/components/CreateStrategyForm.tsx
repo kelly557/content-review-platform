@@ -19,22 +19,18 @@ import {
   type CategoryKey,
 } from './strategy/constants'
 import StrategyTypeTabs from './strategy/StrategyTypeTabs'
-import { HumanReviewSettings } from './strategy/HumanReviewSettings'
 import {
   DEFAULT_AUDIO_FEATURES,
   DEFAULT_DOC_COMPOSE_MODES,
   DEFAULT_VIDEO_COMPOSE_MODES,
   DEFAULT_VIDEO_FRAME_INTERVAL_SEC,
-  EMPTY_HUMAN_REVIEW,
   extractAudioFeatures,
   extractDocComposeModes,
-  extractHumanReview,
   extractVideoComposeModes,
   extractVideoFrameInterval,
   extractVoiceRuleMode,
   type AudioFeatures,
   type DocComposeModes,
-  type StrategyHumanReview,
   type StrategyPointRef,
   type VideoComposeModes,
   type VoiceRuleMode,
@@ -66,7 +62,7 @@ interface Props {
   mode?: 'create' | 'edit'
   strategyId?: number
   initial?: Strategy
-  initialStep?: 0 | 1 | 2
+  initialStep?: 0 | 1
   onCancel?: () => void
 }
 
@@ -122,7 +118,7 @@ export default function CreateStrategyForm({
   const navigate = useNavigate()
   const [form] = Form.useForm<BasicFormValues>()
   const [durationMode, setDurationMode] = useState<DurationMode>('always')
-  const [step, setStep] = useState<0 | 1 | 2>(
+  const [step, setStep] = useState<0 | 1>(
     initialStep ?? (mode === 'edit' ? 1 : 0),
   )
   const [submitting, setSubmitting] = useState(false)
@@ -133,7 +129,6 @@ export default function CreateStrategyForm({
   const [pointOverrides, setPointOverrides] = useState<MediaPointOverrideMap>(
     EMPTY_MEDIA_OVERRIDES,
   )
-  const [humanReview, setHumanReview] = useState<StrategyHumanReview>(EMPTY_HUMAN_REVIEW)
   const [voiceRuleMode, setVoiceRuleMode] = useState<VoiceRuleMode>('reuse_text')
   const [audioFeatures, setAudioFeatures] = useState<AudioFeatures>(DEFAULT_AUDIO_FEATURES)
   const [docComposeModes, setDocComposeModes] = useState<DocComposeModes>(DEFAULT_DOC_COMPOSE_MODES)
@@ -192,7 +187,6 @@ export default function CreateStrategyForm({
       }
     }
     setPointOverrides(overridesFromBackend)
-    setHumanReview(extractHumanReview(initial.definition))
     setVoiceRuleMode(extractVoiceRuleMode(initial.definition))
     setAudioFeatures(extractAudioFeatures(initial.definition))
     setDocComposeModes(extractDocComposeModes(initial.definition))
@@ -216,36 +210,7 @@ export default function CreateStrategyForm({
     setStep(1)
   }
 
-  const goToStep2 = () => {
-    if (mode === 'create' && countEnabledPoints(pointMap) === 0) {
-      message.warning('请在第二步选择至少一个审核点')
-      return
-    }
-    setStep(2)
-  }
-
-  const goBackOne = () => setStep((s) => Math.max(0, s - 1) as 0 | 1 | 2)
-
-  const validateHumanReview = (): string | null => {
-    if (!humanReview.is_enabled) return null
-    if (humanReview.risk_levels.length === 0) {
-      return '启用人审复审后，请至少选择一个升级触发的风险等级'
-    }
-    if (humanReview.review_rule_id === null) {
-      return '启用人审复审后，请选择人工复审流程模板'
-    }
-    if (
-      humanReview.risk_levels.includes('敏感') &&
-      humanReview.sensitive_levels.length === 0
-    ) {
-      return '已选「敏感」风险等级，请至少选择一个敏感等级，否则「敏感」档位不会触发升级'
-    }
-    const ratio = humanReview.sample_ratio ?? 100
-    if (ratio < 0 || ratio > 100) {
-      return '抽审比例必须在 0~100 之间'
-    }
-    return null
-  }
+  const goBackOne = () => setStep((s) => Math.max(0, s - 1) as 0 | 1)
 
   const buildDefinitionPayload = (): Record<string, unknown> | undefined => {
     const out: Record<string, unknown> = {}
@@ -258,22 +223,6 @@ export default function CreateStrategyForm({
     out.video_audio_mode = videoComposeModes.audio_mode
     out.video_frame_interval_sec = videoFrameInterval
 
-    if (humanReview.is_enabled) {
-      out.human_review = {
-        is_enabled: true,
-        risk_levels: humanReview.risk_levels,
-        sensitive_levels: humanReview.sensitive_levels,
-        review_rule_id: humanReview.review_rule_id,
-        sample_ratio: humanReview.sample_ratio ?? 100,
-        auto_action_overrides: humanReview.auto_action_overrides ?? {},
-      }
-    } else {
-      const hasAny = humanReview.risk_levels.length > 0
-        || humanReview.sensitive_levels.length > 0
-        || humanReview.review_rule_id !== null
-        || humanReview.sample_ratio !== undefined
-      if (hasAny) out.human_review = EMPTY_HUMAN_REVIEW
-    }
     return Object.keys(out).length > 0 ? out : undefined
   }
 
@@ -292,12 +241,6 @@ export default function CreateStrategyForm({
     if (mode === 'create' && countEnabledPoints(pointMap) === 0) {
       message.warning('请在第二步选择至少一个审核点')
       setStep(1)
-      return
-    }
-    const hrError = validateHumanReview()
-    if (hrError) {
-      message.warning(hrError)
-      setStep(2)
       return
     }
     const definition = buildDefinitionPayload()
@@ -425,7 +368,6 @@ export default function CreateStrategyForm({
           items={[
             { title: '基本信息' },
             { title: '策略审核规则' },
-            { title: '人审规则' },
           ]}
         />
 
@@ -605,31 +547,6 @@ export default function CreateStrategyForm({
             </div>
           </div>
         )}
-
-        {step === 2 && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 16,
-            width: '100%',
-          }}
-        >
-          <div
-            style={{
-              padding: '12px 16px',
-              background: '#F0F9FF',
-              border: '1px solid #BAE6FD',
-              borderRadius: 6,
-            }}
-          >
-            <Text>
-              配置本策略下提交审核的素材触发人工复审的规则。关闭时，机审按默认高/中风险升级；开启后，严格按此处配置升级。
-            </Text>
-          </div>
-          <HumanReviewSettings value={humanReview} onChange={setHumanReview} />
-        </div>
-      )}
     </Form>
 
     <div
@@ -660,11 +577,6 @@ export default function CreateStrategyForm({
             </Button>
           )}
           {step === 1 && (
-            <Button type="primary" onClick={goToStep2}>
-              下一步
-            </Button>
-          )}
-          {step === 2 && (
             <Button type="primary" loading={submitting} onClick={onSubmit}>
               保存策略
             </Button>

@@ -55,17 +55,6 @@ export function TaskDispositionOverridePanel({
     return `策略默认：${parsed.risk_levels.join('、') || '无'}，抽审 ${parsed.sample_ratio ?? 100}%`
   }, [strategyDefaultHumanReview])
 
-  if (!strategyDefaultHumanReview) {
-    return (
-      <Alert
-        type="info"
-        showIcon
-        message="未选择策略时无法覆盖本任务处置"
-        description="请先在上方「策略」中选择一个审核策略，然后展开本面板。"
-      />
-    )
-  }
-
   return (
     <Collapse
       ghost
@@ -74,7 +63,7 @@ export function TaskDispositionOverridePanel({
           key: 'override',
           label: (
             <Space size={6} align="center">
-              <Text strong>高级：本任务处置覆盖</Text>
+              <Text strong>人审设置</Text>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {hasOverride ? '已自定义' : '默认走策略值'}
               </Text>

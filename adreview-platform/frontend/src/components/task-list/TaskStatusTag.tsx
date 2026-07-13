@@ -32,7 +32,7 @@ export default function TaskStatusTag({ task }: TaskStatusTagProps) {
 
   return (
     <Tag color={config.color} icon={ICON_MAP[config.icon]}>
-      {config.label}
+      {null}
     </Tag>
   )
 }

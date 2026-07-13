@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Empty, Space, Statistic, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Badge, Button, Empty, Space, Statistic, Tabs, Tag, Tooltip, Typography } from 'antd'
 import {
   AlertOutlined,
   PlayCircleOutlined,
@@ -6,7 +6,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import type { AgentReviewResult, ReviewTask } from '@/types/domain'
-import { RISK_COLOR, suggestAction } from '@/lib/risk'
+import { RISK_COLOR } from '@/lib/risk'
 import { colors } from '@/styles/theme'
 
 const { Text } = Typography
@@ -59,10 +59,6 @@ export default function AgentReviewPanel({
   }
 
   const { risk_level, hits, rule_hits, summary, finished_at } = result
-  const suggestion = suggestAction(risk_level)
-  const uniqueServiceNames = Array.from(
-    new Set(hits.map((h) => h.service_name || h.service_code).filter(Boolean) as string[]),
-  )
 
   return (
     <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
@@ -103,28 +99,6 @@ export default function AgentReviewPanel({
             }}
           />
         </div>
-
-        <Alert
-          type={suggestion.tone}
-          showIcon
-          message={suggestion.label}
-          description={
-            <Space direction="vertical" size={4} style={{ width: '100%' }}>
-              <span>{suggestion.reason}</span>
-              {uniqueServiceNames.length > 0 && (
-                <Space size={4} wrap>
-                  <Text type="secondary" style={{ fontSize: 12 }}>命中服务：</Text>
-                  {uniqueServiceNames.slice(0, 4).map((s) => (
-                    <Tag key={s} style={{ margin: 0 }}>{s}</Tag>
-                  ))}
-                  {uniqueServiceNames.length > 4 && (
-                    <Tag style={{ margin: 0 }}>+{uniqueServiceNames.length - 4}</Tag>
-                  )}
-                </Space>
-              )}
-            </Space>
-          }
-        />
 
         {summary && (
           <div

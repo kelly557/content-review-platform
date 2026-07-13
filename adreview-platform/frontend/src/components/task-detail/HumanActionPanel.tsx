@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Form, Input, Space, Typography } from 'antd'
+import { Form, Input, Space, Typography } from 'antd'
 import { ThunderboltOutlined } from '@ant-design/icons'
 import type { AgentHit, AuditItem, MaterialType } from '@/types/domain'
 import { auditItemsApi } from '@/api/auditItems'
-import { colors } from '@/styles/theme'
 import AuditItemChecklist from './AuditItemChecklist'
 
 const { Text } = Typography
@@ -94,16 +93,6 @@ export default function HumanActionPanel({
         <Text strong>
           <ThunderboltOutlined /> 人工处理动作
         </Text>
-
-        {!canDecide && (
-          <Alert
-            type="info"
-            showIcon
-            message="当前阶段没有您的待办"
-            description="下方按钮已禁用。可继续查看内容并添加批注。"
-            style={{ background: colors.surface2 }}
-          />
-        )}
 
         <Form
           form={decisionForm}

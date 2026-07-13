@@ -190,6 +190,7 @@ export default function TasksPage() {
       title: '流程',
       key: 'workflow_mode',
       width: 110,
+      hidden: true,
       render: (_, record) => renderWorkflowMode(record.workflow_mode),
     },
     {
