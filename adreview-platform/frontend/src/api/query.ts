@@ -18,6 +18,7 @@ function buildParams(filters: QueryFilters) {
   if (filters.start) params.start = filters.start
   if (filters.end) params.end = filters.end
   if (filters.material_types?.length) params.material_types = filters.material_types as string[]
+  if (filters.content_medias?.length) params.content_medias = filters.content_medias as string[]
   if (filters.strategy_code) params.strategy_code = filters.strategy_code
   if (filters.machine_decision) params.machine_decision = filters.machine_decision
   if (filters.request_ids?.length) params.request_ids = filters.request_ids.join(',')
@@ -43,6 +44,9 @@ export const queryApi = {
     if (filters.end) qs.set('end', filters.end)
     if (filters.material_types?.length) {
       filters.material_types.forEach((v) => qs.append('material_types', v))
+    }
+    if (filters.content_medias?.length) {
+      filters.content_medias.forEach((v) => qs.append('content_medias', v))
     }
     if (filters.strategy_code) qs.set('strategy_code', filters.strategy_code)
     if (filters.machine_decision) qs.set('machine_decision', filters.machine_decision)

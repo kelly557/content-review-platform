@@ -511,7 +511,7 @@ export const TYPE_LABELS: Record<MaterialType, string> = {
   image: '图片',
   video: '视频',
   pdf: 'PDF',
-  text: '文案',
+  text: '文本',
 }
 
 export const DECISION_LABELS: Record<ReviewDecision, string> = {
@@ -1773,6 +1773,18 @@ export const DETECTION_MODALITIES: { value: DetectionModality; label: string }[]
   { value: 'pdf', label: '文件' },
 ]
 
+// 呈现内容(text/image/audio/video) — 与 DetectionModality 的差异:
+// pdf 在呈现内容维度折叠到 text；audio 不在 DetectionModality 内，
+// 由 material_versions.mime_type 派生。
+export type ContentMedia = 'text' | 'image' | 'audio' | 'video'
+
+export const CONTENT_MEDIA_OPTIONS: { value: ContentMedia; label: string }[] = [
+  { value: 'text', label: '文本' },
+  { value: 'image', label: '图片' },
+  { value: 'audio', label: '音频' },
+  { value: 'video', label: '视频' },
+]
+
 export type MachineDecision = 'block' | 'review' | 'pass'
 
 export const MACHINE_DECISION_OPTIONS: { value: MachineDecision; label: string; color: string }[] = [
@@ -1806,6 +1818,10 @@ export interface MachineReviewRecord {
   material_id?: number | null
   material_version_id?: number | null
   material_type?: DetectionModality | string | null
+  content_media?: ContentMedia | null
+  preview_url?: string | null
+  mime_type?: string | null
+  text_body?: string | null
   strategy_code?: string | null
   strategy_name?: string | null
   risk_level?: string | null
@@ -1833,6 +1849,7 @@ export interface QueryFilters {
   start?: string
   end?: string
   material_types?: DetectionModality[]
+  content_medias?: ContentMedia[]
   strategy_code?: string
   machine_decision?: MachineDecision
   request_ids?: number[]
@@ -1857,6 +1874,7 @@ export type QueryColumnKey =
   | 'requested_at'
   | 'ip'
   | 'account_id'
+  | 'content_preview'
 
 export interface QueryColumnDef {
   key: QueryColumnKey
@@ -1869,6 +1887,7 @@ export const QUERY_COLUMNS: QueryColumnDef[] = [
   { key: 'strategy_name', title: '策略名称', defaultVisible: true },
   { key: 'machine_decision', title: '检测结果', defaultVisible: true },
   { key: 'feedback', title: '反馈结果', defaultVisible: true },
+  { key: 'content_preview', title: '呈现内容', defaultVisible: false },
   { key: 'request_id', title: 'Request ID', defaultVisible: false },
   { key: 'task_id', title: 'Task ID', defaultVisible: false },
   { key: 'labels', title: '命中审核点及置信度', defaultVisible: false },

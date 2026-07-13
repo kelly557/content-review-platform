@@ -22,6 +22,7 @@ import FilterBar from '@/components/query/FilterBar'
 import AdvancedFilters from '@/components/query/AdvancedFilters'
 import ColumnSettingsMenu from '@/components/query/ColumnSettingsMenu'
 import RecordDetailDrawer from '@/components/query/RecordDetailDrawer'
+import ContentPreviewCell from '@/components/query/ContentPreviewCell'
 
 const decisionMeta = (v?: string | null) => MACHINE_DECISION_OPTIONS.find((m) => m.value === v)
 const feedbackMeta = (v?: string | null) =>
@@ -123,6 +124,12 @@ export default function QueryPage() {
       key: 'feedback',
       width: 110,
       render: (_, r) => feedbackMeta(r.final_decision) || r.final_decision || '-',
+    },
+    {
+      title: '呈现内容',
+      key: 'content_preview',
+      width: 280,
+      render: (_, r) => <ContentPreviewCell record={r} />,
     },
     {
       title: 'Request ID',
