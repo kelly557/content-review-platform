@@ -243,7 +243,7 @@ export default function TaskDetailPage() {
 
   const canDecide =
     hasPendingAssignment ||
-    (isMachineWithResult && !!user && ['admin', 'reviewer', 'mlr'].includes(user.role))
+    (isMachineWithResult && !!user && ['admin', 'superadmin', 'reviewer', 'mlr'].includes(user.role))
 
   const decisionTagColor =
     task.final_decision === 'approved'
