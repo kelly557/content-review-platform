@@ -144,6 +144,9 @@ export default function AgentReviewPanel({
                       >
                         <Space size={6} wrap>
                           <Tag color="red">{h.label_cn}</Tag>
+                          {h.source === 'local_wordset' && (
+                            <Tag color="volcano">本地词库</Tag>
+                          )}
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {h.service_name || h.service_code}
                           </Text>
@@ -198,6 +201,11 @@ export default function AgentReviewPanel({
                           <Tag color={r.matched ? 'red' : 'default'} style={{ margin: 0 }}>
                             {r.label_cn}
                           </Tag>
+                          {r.source === 'local_wordset' && (
+                            <Tag color="volcano" style={{ margin: 0 }}>
+                              本地词库
+                            </Tag>
+                          )}
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             阈值 {r.threshold}
                           </Text>

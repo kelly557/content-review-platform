@@ -148,6 +148,10 @@ export interface AgentHit {
   bbox?: { x: number; y: number; w: number; h: number } | null
   page?: number | null
   timestamp_ms?: number | null
+  /** LLM 自评或本地词库标注的风险等级 */
+  risk?: string | null
+  /** "llm" or "local_wordset" */
+  source?: 'llm' | 'local_wordset' | string
 }
 
 export interface AgentStrategyRef {
@@ -163,6 +167,8 @@ export interface AgentRuleHit {
   label_cn: string
   threshold: number
   matched: boolean
+  /** "llm" (default) or "local_wordset" — 本地词库命中时为后者 */
+  source?: 'llm' | 'local_wordset' | string
 }
 
 export interface AgentReviewResult {

@@ -106,6 +106,15 @@ async def run_machine_review(task_id: int, db: AsyncSession) -> None:
             text_body=text_body,
         )
 
+        # 0. 本地词库匹配: 用户在「库管理」配的黑/白名单先跑一遍, 命中
+        #    即生成 hit, 与 LLM hits 合并后再走聚合/决策. 这样自定义
+        #    词库**真的**会拦截, 不再完全依赖 LLM 是否识别.
+        from app.services.wordset_matcher import match_active_words
+
+        local_hits = await match_active_words(db, text_body, services)
+        if local_hits:
+            hits = local_hits + hits
+
         # 1. 素材级 risk_level（5 档：高/中/低/敏感/无）
         risk_level = aggregate_risk_level(hits)
 
@@ -302,6 +311,10 @@ def _result_to_hits(
                 "page": None,
                 "timestamp_ms": None,
                 "sensitive_grade": _normalize_grade(hit.sensitive_grade),
+                # 透传 LLM 自评 hit-level risk; aggregate_risk_level_v2 会优先采用.
+                # 本地词库匹配产生的 hit 不带此字段, 由 v2 走查表/关键字路径.
+                "risk": (hit.risk or "").strip() or None,
+                "source": "llm",
             }
         )
     return hits
@@ -316,48 +329,20 @@ def _normalize_grade(grade: str | None) -> str:
 def aggregate_risk_level(hits: List[Dict[str, Any]]) -> str:
     """Aggregate material-level risk_level from hits.
 
-    5 档桶（v6）：
-      - 医疗/政治 → 高风险
-      - 金融 → 中风险
-      - 敏感内容 → 敏感（新增）
-      - 其他命中 → 低风险
-      - 无命中 → 无风险
+    v2 实现委托给 risk_taxonomy.aggregate_risk_level_v2, 解决旧版
+    `label_cn` substring 匹配的脆弱性 (例如 LLM 写 "涉政敏感" 但
+    旧版期待 "政治" 关键字, 落入"其他命中"分支被判为低风险).
+
+    判定顺序 (per-hit):
+      1) hit.risk 字段 (在合法 5 档内)  -> 直接采用
+      2) (service_code, label_prefix) 查 LABEL_RISK_MAP
+      3) label_cn 关键字兜底 (扩展版: 政治/医疗/暴力/色情/未成年 ...)
+      4) 默认 "低风险"
+
+    整体聚合取 max.
     """
-    if not hits:
-        return RiskLevel.NONE.value
-
-    explicit_priority = {
-        RiskLevel.HIGH.value: 4,
-        RiskLevel.MEDIUM.value: 3,
-        RiskLevel.SENSITIVE.value: 2,
-        RiskLevel.LOW.value: 1,
-        RiskLevel.NONE.value: 0,
-    }
-    max_score = 0
-    for hit in hits:
-        risk_raw = (hit.get("risk") or "").strip()
-        if risk_raw in explicit_priority:
-            max_score = max(max_score, explicit_priority[risk_raw])
-            continue
-        label_cn = hit.get("label_cn", "")
-        if "医疗" in label_cn or "政治" in label_cn:
-            max_score = max(max_score, 4)
-        elif "金融" in label_cn:
-            max_score = max(max_score, 3)
-        elif "敏感" in label_cn:
-            max_score = max(max_score, 2)
-        else:
-            max_score = max(max_score, 1)
-
-    if max_score >= 4:
-        return RiskLevel.HIGH.value
-    if max_score >= 3:
-        return RiskLevel.MEDIUM.value
-    if max_score >= 2:
-        return RiskLevel.SENSITIVE.value
-    if max_score >= 1:
-        return RiskLevel.LOW.value
-    return RiskLevel.NONE.value
+    from app.services.risk_taxonomy import aggregate_risk_level_v2
+    return aggregate_risk_level_v2(hits)
 
 
 def aggregate_sensitive_level(hits: List[Dict[str, Any]]) -> str:
@@ -382,6 +367,8 @@ def _build_rule_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for each unique label. The schema persists this list verbatim into
     ``machine_result.rule_hits``; the LLM-driven production version of
     this function will later emit real rule ids from the strategy store.
+
+    携带 ``source`` 字段 ("llm" / "local_wordset") 供前端 Tab 区分展示.
     """
     rule_hits = []
     seen_labels: set[str] = set()
@@ -396,6 +383,7 @@ def _build_rule_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "threshold": 0.5,
                 "matched": True,
                 "sensitive_grade": hit.get("sensitive_grade", SensitiveLevel.S0.value),
+                "source": hit.get("source") or "llm",
             })
     return rule_hits
 
