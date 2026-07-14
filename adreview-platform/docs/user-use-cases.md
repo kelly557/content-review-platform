@@ -203,7 +203,7 @@ allow = (user.role in route.allowed_roles)
 
 | 字段 | 内容 |
 |---|---|
-| 入口 | `/strategy/word-libraries`（`pages/strategy/WordLibraryListPage.tsx`）<br>详情：`/strategy/word-libraries/:id`（`WordLibraryDetailPage.tsx`） |
+| 入口 | `/resources/words`（`pages/strategy/WordLibraryListPage.tsx`）<br>详情：`/resources/words/:id`（`WordLibraryDetailPage.tsx`） |
 | API | `GET/POST/PUT/DELETE /api/v1/libraries?type=word`<br>`GET/POST/PUT/DELETE /api/v1/libraries/{id}/items` |
 | 步骤 | 1. 创建词库 `{name, sensitivity_level, scope: global\|application}`<br>2. 导入词条（CSV/JSON）→ 批量 `POST .../items`<br>3. 编辑权重、级别、启用状态 |
 | 命中公式 | 见 §10-C |
@@ -212,7 +212,7 @@ allow = (user.role in route.allowed_roles)
 
 | 字段 | 内容 |
 |---|---|
-| 入口 | `/strategy/image-libraries`、`/strategy/reply-libraries` |
+| 入口 | `/resources/images`、`/resources/replies` |
 | 步骤 | 1. 上传参考图 → 计算 pHash（perceptual hash）<br>2. 相似度检索：汉明距离 ≤ 8 视为同图（默认阈值，可在词库配置）<br>3. 回复库维护"标准答复"模板，命中规则后由审核员一键采用 |
 | API | `/api/v1/libraries?type=image\|reply` |
 
