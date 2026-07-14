@@ -177,12 +177,6 @@ interface LargeFormProps {
 function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) {
   return (
     <>
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 16 }}
-        message="一个厂商级接入配置 = 一个 Provider（凭证 + Base URL）+ 一组 Model。同厂商多模型可在下方「模型列表」一次性建好。"
-      />
       <Form<CreateFormValues>
         form={form}
         layout="vertical"
@@ -349,16 +343,6 @@ function SmallForm({ form, uploading, setUploading }: SmallFormProps) {
           uploading={uploading}
           setUploading={setUploading}
         />
-        <Form.Item
-          label="模型名称"
-          name="name"
-          tooltip="留空则使用业务标识作为展示名"
-        >
-          <Input placeholder="如：涉政分类 v1" />
-        </Form.Item>
-        <Form.Item label="描述" name="description">
-          <Input.TextArea rows={2} placeholder="该小模型的用途 / 注意事项" />
-        </Form.Item>
       </Form>
     </>
   )
