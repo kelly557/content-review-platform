@@ -1,37 +1,156 @@
 # 模型库（Resources · Models）
 
-> 资源库下「模型库」领域。模型接入遵循「Provider + Model ID」结构；模型分为大模型 / 小模型；小模型有固定分类（9 类）。所有模型都支持版本管理。
+> 资源库下「模型库」领域。架构采用「Provider 二级实体 + Model」分层：一个 Provider
+> 承载接入地址、API Key 与一组共享凭证的 model；model 自身只保留业务标识与
+> 分类。模型分为大模型 / 小模型；大模型有固定三分类（文本 / 多模态 / 其他），
+> 小模型有 9 分类（涉政 / 涉恐 / ...）。所有模型都支持版本管理。
 
 ---
 
 ## 1. 交互文案
 
-- 顶部按钮：「**添加模型**」。
-- 抽屉标题：`添加模型`。
-- 保存成功提示：`模型添加成功`。
-- 详情页按钮：校验连通性 / 停用 / 归档 / 删除。
-- 详情页版本 Tab：`+ 发布新版本` / 列表中点 `切换到此版本` 把 current_version 指向该版本。
-
-入口路径：
-- 列表 `/resources/models`
-- 详情 `/resources/models/:id`
+- 资源库下模型列表页顶部按钮：「**添加 Provider**」「**添加模型**」
+- 抽屉标题：`添加 Provider` / `添加模型`。
+- 「添加 Provider」表单：与参考截图一致 — display_name / Provider 类型 / Base URL /
+  API key（编辑框）+ Models（Form.List 动态行：model_id + display name + 大模型分类）。
+- 「添加模型」表单：从已有 Provider 选 + 填 model_id + 大模型分类。
 
 ---
 
-## 2. 模型分类
+## 2. 概念模型
 
-### 2.1 大模型 / 小模型（kind）
+```
+Provider (1) ──── (n) Model
+   │                  │
+   │ display_name     ├─ name  (业务展示名)
+   │ provider_preset  ├─ model_name (厂商 model_id)
+   │ endpoint_url     ├─ large_category (text/multimodal/other) — kind=large 时必填
+   │ credential ─┐    ├─ small_category (9 类) — kind=small 时必填
+   │ (FK)        │    ├─ version / description / config
+   │ api_key ────┘    ├─ kind (large/small)
+   │ (raw, 自动加密)  ├─ status (draft/active/...)
+   │ status          └─ versions[] (RegisteredModelVersion[])
+   └─ models[]
+       (config.protocol / timeout 继承自 Provider)
+```
 
-`kind` 字段在添加时**必选**：
+实际数据库：
 
-| 值 | 标签 | 适用 |
+```
+resource_credentials (加密存储 credential)
+        ▲
+        │ credential_id (FK)
+        │
+registered_providers        registered_provider_options (active only)
+        ▲
+        │ provider_id (FK)
+        │
+registered_models            registered_models.options (active only)
+        ▲
+        │ model_id
+        │
+registered_model_versions
+```
+
+---
+
+## 3. Provider 实体（`registered_providers`）
+
+### 3.1 字段表
+
+| 字段 | 类型 | 必填 | 备注 |
+|---|---|---|---|
+| `id` | bigint | ✓ | PK |
+| `public_id` | uuid | ✓ | 对外路由 |
+| `code` | string(64) | ✓ | **后端自动生成** `prv_<preset>_<rand6>`，前端不展示 |
+| `display_name` | string(128) | ✓ | 用户可见 |
+| `description` | text | × | 描述 |
+| `provider_preset` | string(64) | × | openai / anthropic / bailian / deepseek / self-hosted / custom |
+| `endpoint_url` | text | ✓ | Base URL；preset 提供默认值时自动预填 |
+| `config` | jsonb | ✓ | `{protocol, timeout, ...}`，按 preset 推断 |
+| `credential_id` | FK resource_credentials.id | × | 创建时传 raw api_key 自动建并绑定 |
+| `status` | string(16) | ✓ | `active`（默认）/ `archived` |
+| `owner_id` / `created_by_id` / `updated_by_id` | FK users.id | × | 审计字段 |
+| `created_at` / `updated_at` | timestamptz | ✓ | |
+
+### 3.2 endpoint 与脚本
+
+| Method | Path | Body | 行为 |
+|---|---|---|---|
+| GET    | `/api/v1/providers` | – | list providers（含 model_count + masked_token） |
+| GET    | `/api/v1/providers/options` | – | 轻量下拉（active only），给 Model 创建 modal |
+| GET    | `/api/v1/providers/{id}` | – | 详情 + 关联 models 列表 |
+| POST   | `/api/v1/providers` | ProviderCreate（含 api_key + initial_models[]） | 创建；一次性建 initial_models |
+| PATCH  | `/api/v1/providers/{id}` | ProviderUpdate（metadata） | 仅元数据；api_key 用单独 rotate |
+| POST   | `/api/v1/providers/{id}/api-key` | `{api_key}` | 替换凭证并切换 provider.credential_id |
+| POST   | `/api/v1/providers/{id}/validate` | – | 调 `GET {endpoint_url}` 测连通性 |
+| POST   | `/api/v1/providers/{id}/archive` | – | 软归档（status='archived'） |
+| DELETE | `/api/v1/providers/{id}` | – | 模型非空 → 409；为空 → 真删 |
+
+### 3.3 自动建凭证
+
+`POST /providers` 接收 raw `api_key`：服务端 `_find_or_create_credential` 按
+`(provider_preset + masked_token)` 复用已有 resource_credential，命中返回；未命中新建。
+这样多个 provider 用同一 token 共享一份凭证，替换时通过 `/api-key` 切换。
+
+### 3.4 删除约束
+
+`DELETE /providers/{id}` 若 `model_count > 0` 返回 409，前端引导用户迁移或归档。
+归档是软操作（`status='archived'`），从 `/options` 列表消失但数据保留。
+
+---
+
+## 4. Model 实体（`registered_models`）
+
+### 4.1 字段表
+
+| 字段 | 类型 | 必填 | 备注 |
+|---|---|---|---|
+| `id` / `code` / `public_id` | – | ✓ | PK + 业务编号 |
+| `name` | string(128) | ✓ | 业务展示名 |
+| `description` | text | × | 用途说明 |
+| `kind` | string(8) | ✓ | `large` / `small` |
+| `small_category` | string(32) | × | 9 类（kind=small 时必填） |
+| `large_category` | string(16) | × | 3 类（kind=large 时必填） |
+| `provider_id` | FK registered_providers.id | ✓ | 模型归属的 Provider |
+| `model_name` | string(128) | × | 厂商 model_id（gpt-4o-mini 等） |
+| `max_output_tokens` | int | × | 小模型专用 |
+| `registration_method` | string(16) | ✓ | `remote_api` (默认) / `uploaded_file` (小模型) |
+| `status` | string(16) | ✓ | draft/validating/active/inactive/failed/archived |
+| `version` | string(64) | × | 当前版本号 |
+| `config` | jsonb | ✓ | 协议 / 超时等 |
+
+> 旧字段 `endpoint_url` / `credential_id` 已不再可读写；保留在 DB column 以
+> 兼容现有数据，**应用层完全忽略**。
+
+### 4.2 endpoint 与脚本
+
+| Method | Path | 行为 |
 |---|---|---|
-| `large` | 大模型 | 通用对话、分类、生成（GPT-4o / Claude / DeepSeek / Qwen 等） |
-| `small` | 小模型 | 单一分类器（如"涉政分类器"），绑定一个固定分类 |
+| GET    | `/api/v1/models` | list (filter: `kind` / `small_category` / `large_category` / `provider_id` / `status` / `q`) |
+| GET    | `/api/v1/models/options` | 轻量下拉 active models |
+| GET    | `/api/v1/models/{id}` | 详情 |
+| POST   | `/api/v1/models` | 注册模型（必填 `provider_id` + 按 kind 校验分类） |
+| PATCH  | `/api/v1/models/{id}` | 修改 |
+| DELETE | `/api/v1/models/{id}` | 软删除 |
+| POST   | `/api/v1/models/{id}/archive` / `/deactivate` | 状态切换 |
+| POST   | `/api/v1/models/{id}/validate` | 连通性校验 |
+| GET    | `/api/v1/models/{id}/versions` | list versions |
+| POST   | `/api/v1/models/{id}/versions` | 创建新版本（credential/endpoint 继承自 Provider） |
+| POST   | `/api/v1/models/{id}/versions/{vid}/activate` | 切换到该版本 |
+| POST   | `/api/v1/models/upload-artifact` | 上传小模型权重 |
 
-### 2.2 小模型分类（small_category）
+### 4.3 大模型三分类（必填）
 
-`small_category` 在 `kind=small` 时**必选**。固定枚举，不允许运营自定义（与 LLM 风格的多分类分类器不同——小模型本身就是单一目标域）。
+| 值 | 标签 | 用途 |
+|---|---|---|
+| `text` | 文本模型 | 文本输入输出 |
+| `multimodal` | 多模态模型 | 含图像 / 视频 / 音频输入 |
+| `other` | 其他模型 | 兜底 |
+
+校验：`kind='large'` 时 `large_category NOT NULL`；`kind='small'` 时强制置空。
+
+### 4.4 小模型 9 分类（kind=small 必填）
 
 | 值 | 标签 |
 |---|---|
@@ -45,168 +164,68 @@
 | `abuse` | 辱骂 |
 | `unhealthy` | 不良 |
 
-> 大模型（`kind=large`）的 `small_category` 始终为 null，添加时即使填写也会被自动置空。
-
----
-
-## 3. 字段语义（精简版）
-
-| 字段 | 必填 | 类型 | 含义 | 备注 |
-|---|---|---|---|---|
-| `name` | ✅ | string(128) | 模型展示名（中文友好） | `GPT-4o 文本审核` / `涉政分类小模型` |
-| `description` | — | text | 模型说明 | 用途场景 / 注意事项 |
-| `kind` | ✅ | enum | 大 / 小模型 | `large` / `small` |
-| `small_category` | small 时必填 | enum | 9 类固定分类 | `politics` / `terrorism` / ... |
-| `provider` | ✅ | enum+custom | 提供方键 | `openai` / `anthropic` / `bailian` / `deepseek` / `self-hosted` / `custom` |
-| `model_name` | ✅ | string(128) | Model ID | 厂商返回的模型标识（`gpt-4o-mini`） |
-| `endpoint_url` | ✅ | URL | Base URL | provider 预设可改 |
-| `credential_id` | ✅ | FK | 凭证 ID | 必填，上线后无凭证直接 401 |
-| `version` | — | string(64) | 语义版本号 | `1.0.0`（同时也是首版本 version_label） |
-| `status` | — | enum | 状态 | draft / active / archived |
-
-> `registration_method` 字段当前一期固定 `remote_api`，后端不暴露。
-> 旧字段 `scale_class` / `framework` / `license` / `capabilities` 已 DROP。
-
----
-
-## 4. Provider 字典
-
-| provider 键 | 展示名 | 默认 `endpoint_url` | 默认 `protocol` |
-|---|---|---|---|
-| `openai` | OpenAI | `https://api.openai.com/v1` | `openai-compatible` |
-| `anthropic` | Anthropic | `https://api.anthropic.com/v1` | `anthropic-messages` |
-| `bailian` | 阿里百炼 (DashScope) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `openai-compatible` |
-| `deepseek` | DeepSeek | `https://api.deepseek.com/v1` | `openai-compatible` |
-| `self-hosted` | 自建 / 私有部署 | `null`（需手填） | `openai-compatible` |
-| `custom` | 自定义 | `null`（需手填） | `custom` |
-
 ---
 
 ## 5. 版本管理
 
-### 5.1 存储
+每个 model 有 `RegisteredModelVersion[]`，版本号自增。
 
-`registered_model_versions` 表记录每次接入配置变更；`registered_models.current_version_id` 指向当前生效版本。
+- `large_category`：大模型版本可覆盖（不传则继承 model 当前值）
+- `endpoint_url` / `credential`：默认继承 Provider；**版本层不直接读写**
+- 状态机：`draft → validated → active ↔ inactive → archived`；`failed` 表示校验异常
+- 切换：`POST /models/{id}/versions/{vid}/activate` 把 `current_version_id` 指向该版本
 
-每条版本字段：
-- `version_no`（自增：v1, v2, v3...）
-- `version_label`（可选，如 "1.1.0" / "2025-Q1"）
-- `notes`（变更说明，可展开行查看）
-- `provider` / `model_name` / `endpoint_url` / `config` / `credential_id`（版本快照）
-- `status`（draft / validated / active / inactive / failed / archived）
-- `validation_log`（最近 20 次探活结果）
+### 5.1 注册 Provider 时一次性携带 model
 
-### 5.2 操作
+`POST /providers` body 内 `initial_models[]`，每个模型一行：
 
-| 操作 | 端点 | 效果 |
-|---|---|---|
-| 添加模型 | `POST /api/v1/registered-models` | 自动创建 v1 |
-| 发布新版本 | `POST /api/v1/registered-models/:id/versions` | 递增 version_no；新版本为 draft |
-| 切换版本 | `POST /api/v1/registered-models/:id/versions/:ver/activate` | 把 `current_version_id` 指向该版本；模型 status → active |
-| 校验连通性 | `POST /api/v1/registered-models/:id/validate` | 探活当前版本 endpoint；记录 validation_log |
-| 归档 | `POST /api/v1/registered-models/:id/archive` | 模型 status → archived |
-
-> 一份模型可保留多个版本（如 v1 生产 / v2 测试），调用方始终走 `current_version` 指向的版本；切版本不影响调用方（除非显式监听 current_version 变化）。
-
----
-
-## 6. 凭证（resource_credentials）
-
-- 凭证以 `Fernet`（AES-128 CBC + HMAC-SHA256）加密写入 `ciphertext`。
-- 列表/详情只返回 `masked_token`，明文不出现在 API 响应或 `audit_events` payload。
-- 添加模型时**必须**选择凭证；上线后未配置凭证将直接返回 401。
-- 校验/连接时由服务端在内存中解密 → 发起请求 → 不落库。
-
----
-
-## 7. 状态机
-
-### 模型主表
-
-```
-       [add]
-         │
-         ▼
-   ┌─────────────┐
-   │   draft     │ ← 默认
-   └─────────────┘
-      │     ▲
-[active]    │ [archive 恢复]
-      │     │
-      ▼     │
-   ┌─────────────┐         ┌─────────────┐
-   │   active    │ ──────→ │  archived   │
-   └─────────────┘         └─────────────┘
-      │
-[inactive]
-      │
-      ▼
-   ┌─────────────┐
-   │  inactive   │
-   └─────────────┘
+```json
+{
+  "display_name": "OpenAI 生产",
+  "provider_preset": "openai",
+  "endpoint_url": "https://api.openai.com/v1",
+  "api_key": "sk-...",
+  "initial_models": [
+    {"model_name": "gpt-4o-mini", "name": "文本审核 GPT-4o-mini",
+     "large_category": "text", "version": "1.0.0"},
+    {"model_name": "gpt-4o-vision", "large_category": "multimodal"}
+  ]
+}
 ```
 
-### 版本
-
-- 新版本默认 `draft`。
-- 校验通过 → `validated`。
-- 切到当前版本（`activate_version`）→ `active`。
-- 校验失败 → `failed`。
+效果：原子化创建 1 个 Provider + N 个 model + 1 个 version（v1）+ 自动建凭证。
 
 ---
 
-## 8. 权限矩阵
+## 6. 凭证策略
 
-| 操作 | submitter | reviewer | mlr | admin | superadmin |
-|---|---:|---:|---:|---:|---:|
-| 查看列表/详情 | ❌ | ❌ | ✅ | ✅ | ✅ |
-| 添加模型 | ❌ | ❌ | ❌ | ✅ | ✅ |
-| 编辑模型 | ❌ | ❌ | ❌ | ✅ | ✅ |
-| 删除（软删） | ❌ | ❌ | ❌ | ✅ | ✅ |
-| 校验连通性 | ❌ | ❌ | ❌ | ✅ | ✅ |
-| 停用/归档 | ❌ | ❌ | ❌ | ✅ | ✅ |
-| 发布新版本 | ❌ | ❌ | ❌ | ✅ | ✅ |
-| 切换版本 | ❌ | ❌ | ❌ | ✅ | ✅ |
-
-后端权限检查位于 `app/services/resource_auth.py:require_reader / require_writer`。
+- `resource_credentials.ciphertext`：Fernet + HKDF 加密（见 `services/credential_cipher.py`）
+- 列表只返 `masked_token`；audit 不写 raw api_key
+- 命中 `(provider_preset + masked_token)` 的 raw token 自动复用同凭证
+- 替换：用 `/api-key` 显式切换 provider.credential_id；旧凭证自然失效
 
 ---
 
-## 9. 已落地文件清单
+## 7. 历史数据迁移
 
-后端
-- `app/models/registered_model.py`
-  - 新增 `RegisteredModelKind`（large/small）与 `SmallModelCategory`（9 类）enum
-  - 新增 `RegisteredModelVersionStatus` enum
-  - `registered_models` 加列：kind / small_category
-  - `registered_model_versions` 加列：version_label / notes / credential_id
-- `app/schemas/registered_model.py`
-  - `RegisteredModelCreate` / `Update` / `Out` / `ListItem` 同步；`RegisteredModelVersionCreate` schema
-- `app/api/v1/registered_models.py`
-  - `_validate_kind` / `_validate_small_category` / `_validate_version_status`
-  - 大模型忽略 small_category；小模型必须带 small_category
-  - 新增 `POST /:id/versions` 与 `POST /:id/versions/:ver/activate`
-  - `archive` 端点（POST 替换 activate→已用 status 控制）
-  - 列表移除 `selectinload(current_version)`，避免懒加载 IO
-- `app/services/credential_cipher.py`（Fernet + HKDF）
-- `alembic/versions/20260722_model_kind_and_categories.py`（kind / small_category / version_label / notes / version credential_id）
-- `tests/test_registered_models.py`（10 个用例：CRUD / kind 必填 / small_category 强校验 / provider 预设 / version 创建+activate / 凭证必填 / MLR 拒绝）
+Alembic `20260723_provider_split_and_large_category.py` 在 upgrade 中：
 
-前端
-- `src/types/domain.ts`
-  - 新增 `RegisteredModelKind` / `SmallModelCategory` 类型与 options
-  - 字段集更新（kind / small_category / version_label / notes）
-- `src/api/registered-models.ts`
-  - 新增 `createVersion` / `activateVersion` / `archive` / `listActiveModels`
-  - `ActiveModelOption` 类型导出
-- `src/pages/models/ModelListPage.tsx`
-  - 列：类型 / 分类 / Provider / Model ID / 状态 / 更新时间
-  - 筛选：类型 / 分类 / Provider / 状态
-  - 表单：kind（Radio）+ 条件渲染 small_category（仅 small 显示）
-- `src/pages/models/ModelDetailPage.tsx`
-  - 概览：类型 / 分类 / Provider / Model ID / Version / 凭证 / Base URL / 说明
-  - 版本 Tab：列表 + 「发布新版本」/「切换到此版本」/ 当前版本 Tag
-  - Modal：发布新版本（version_label / notes / provider / model_name / endpoint_url）
-  - 顶部按钮：校验 / 停用 / 归档 / 删除
-- `src/components/strategy/LlmReviewCard.tsx`
-  - 改为使用 `listActiveModels({ kind: 'large' })` 拉取大模型选项
+1. 新表 `registered_providers`
+2. 给 `registered_models` 加列 `provider_id` / `large_category`
+3. 按 `(provider_preset, endpoint_url, credential_id)` 三元组**唯一性**创建 Provider 行
+4. 回填每个 model 的 `provider_id`
+5. 大模型自动置 `large_category='other'`
+6. `registered_model_versions` 同步加 `large_category`
+
+升级期间旧 `endpoint_url` / `credential_id` 列保留（nullable=True），应用层
+不再读写。
+
+---
+
+## 8. UI 路径
+
+| URL | 页面 |
+|---|---|
+| `/resources/models` | 模型库列表（顶部「添加 Provider」「添加模型」） |
+| `/resources/models/:id` | 模型详情（发布新版本 / 校验 / 删除） |
+| `/resources/providers/:id` | Provider 详情（编辑元数据 / 替换 API Key / 归档 / 删除） |
