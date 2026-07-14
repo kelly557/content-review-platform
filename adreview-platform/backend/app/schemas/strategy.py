@@ -182,10 +182,43 @@ class StrategyPointRef(BaseModel):
     item_id: int
     point_id: int
     is_enabled: bool = True
-    # 策略级 override；提交时透传到 strategies.definition.enabled_points，不写 audit_point
+    # 策略级 override；提交时透传到 strategies.definition.enabled_point_overrides，不写 audit_point
     medium_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
     high_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    linked_library_ids: Optional[List[int]] = None
+
+
+class LlmReviewConfig(BaseModel):
+    """策略级「大模型审核能力」总开关 + 选定的已激活大模型。
+
+    单一开关（不按媒体类型拆分），单选资源库已加入的大模型。
+    存入 ``strategy.definition.llm_review``；开启后所有纳入此策略的
+    审核项均会调用该模型补充机审结果。
+
+    注意：当策略所配置的规则覆盖了图片 / 音频 / 视频 / 文档等非文本媒体类型时，
+    UI 会提示用户选择具备相应模态能力的「多模态」大模型，避免出现
+    「文本模型被叫去做图片机审」的不匹配。
+    """
+
+    is_enabled: bool = False
+    # 资源库中已激活 (`status=active`) 的大模型 ID。单选；None 表示启用但尚未选定。
+    model_id: Optional[int] = None
+    # 模型能力多模态提示（由后端校验后填回，告知前端是否需要更换为多模态模型）。
+    # 字段仅输出，不接收；前端读这个判断是否展示"请选择多模态大模型"提示。
+    needs_multimodal_hint: bool = False
+
+    def normalized(self) -> "LlmReviewConfig":
+        """清理后返回：未启用时 model_id 重置为 None。"""
+        if not self.is_enabled:
+            return LlmReviewConfig(
+                is_enabled=False,
+                model_id=None,
+                needs_multimodal_hint=False,
+            )
+        return LlmReviewConfig(
+            is_enabled=True,
+            model_id=self.model_id,
+            needs_multimodal_hint=False,
+        )
 
 
 class StrategyOut(ORMBase):
@@ -203,6 +236,9 @@ class StrategyOut(ORMBase):
     enabled_points: List[StrategyPointRef] = Field(default_factory=list)
     rule_set_id: Optional[int] = None
     disposition_rule_id: Optional[int] = None
+    # 「大模型审核能力」总开关 + 选定的模型 ID（不按媒体类型拆分）。
+    # 真相源仍是 strategies.definition.llm_review；这里上提到顶层以便前端读取。
+    llm_review: LlmReviewConfig = Field(default_factory=lambda: LlmReviewConfig())
     created_at: datetime
     updated_at: Optional[datetime]   
 
@@ -223,6 +259,8 @@ class StrategyCreate(BaseModel):
     # Phase B: 审批规则集 + 处置规则；新建策略必填（编辑接受 Optional）
     rule_set_id: Optional[int] = None
     disposition_rule_id: Optional[int] = None
+    # 「大模型审核能力」总开关 + 选定的已激活大模型 ID（单一开关）。
+    llm_review: LlmReviewConfig = Field(default_factory=lambda: LlmReviewConfig())
 
 
 class StrategyUpdate(BaseModel):
@@ -239,6 +277,8 @@ class StrategyUpdate(BaseModel):
     # Phase B：编辑可改 rule_set / disposition 绑定
     rule_set_id: Optional[int] = None
     disposition_rule_id: Optional[int] = None
+    # 「大模型审核能力」总开关 + 选定的已激活大模型 ID（单一开关）。
+    llm_review: Optional[LlmReviewConfig] = None
 
 
 class StrategyDuplicateRequest(BaseModel):

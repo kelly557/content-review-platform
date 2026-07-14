@@ -336,10 +336,16 @@ async def _upsert_item(
     """
     item = (
         await db.execute(
-            select(AuditItem).where(
+            select(AuditItem)
+            .where(
                 AuditItem.package_code == package_code,
                 AuditItem.code == code,
             )
+            .options(
+                noload(AuditItem.linked_libraries),
+                noload(AuditItem.linked_library_links),
+            )
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
 

@@ -10,6 +10,7 @@ import os
 import pytest_asyncio
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 # Default to the local dev DB; override via env if needed.
 DEFAULT_DSN = "postgresql+asyncpg://adreview:adreview@localhost:5432/adreview"
@@ -27,6 +28,15 @@ def _make_test_schema_name() -> str:
     return f"test_{uuid.uuid4().hex[:12]}"
 
 
+def _apply_schema(schema: str | None) -> None:
+    """Stamp the schema on every table and column. When None, reset to default."""
+    for table in Base.metadata.tables.values():
+        table.schema = schema
+        for column in table.columns:
+            # 重新绑定 column -> table，让 SQLAlchemy 在 compile 时拿到最新 schema。
+            column.table = table
+
+
 @pytest_asyncio.fixture
 async def db_engine():
     dsn = os.environ.get("DATABASE_URL", DEFAULT_DSN)
@@ -37,10 +47,14 @@ async def db_engine():
         conn.execute(text(f'CREATE SCHEMA "{schema}"'))
     sync_engine.dispose()
 
-    engine = create_async_engine(dsn, connect_args={"server_settings": {"search_path": schema}})
-    # Force all models to use this schema.
-    for table in Base.metadata.tables.values():
-        table.schema = schema
+    # 关键：每次测试都新建一个 NullPool 的 engine，避免连接池复用导致 cached statement 残留
+    # 上一个测试的 search_path。
+    engine = create_async_engine(
+        dsn,
+        connect_args={"server_settings": {"search_path": schema}},
+        poolclass=NullPool,
+    )
+    _apply_schema(schema)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -54,8 +68,7 @@ async def db_engine():
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         sync_engine.dispose()
         # Reset schema assignment so other tests don't leak it.
-        for table in Base.metadata.tables.values():
-            table.schema = None
+        _apply_schema(None)
 
 
 @pytest_asyncio.fixture
