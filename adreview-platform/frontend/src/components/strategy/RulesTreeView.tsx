@@ -3,7 +3,6 @@ import {
   Empty,
   Grid,
   InputNumber,
-  Select,
   Space,
   Table,
   Tag,
@@ -12,19 +11,16 @@ import {
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import {
+  AppstoreAddOutlined,
   CheckOutlined,
-  DeleteOutlined,
   LockOutlined,
   UnlockOutlined,
 } from '@ant-design/icons'
 import { auditItemsApi } from '@/api/auditItems'
 import { auditPointsApi } from '@/api/auditPoints'
-import { librariesApi } from '@/api/libraries'
 import type {
   AuditItem,
   AuditPoint,
-  LibraryListItem,
-  LibraryType,
 } from '@/types/domain'
 import { type CategoryKey } from './constants'
 import {
@@ -34,24 +30,37 @@ import {
 
 const { Text } = Typography
 
-const TYPE_LABEL: Record<LibraryType, string> = {
+const TYPE_LABEL_BY_LIB: Record<string, string> = {
   image: '图',
   word: '词',
-  reply: '代答',
+  reply: '代',
 }
-const TYPE_COLOR: Record<LibraryType, string> = {
+const TYPE_COLOR_BY_LIB: Record<string, string> = {
   image: 'blue',
   word: 'green',
   reply: 'purple',
 }
 
-/** 媒体类型允许关联的库类型（文本审核只允许词库/代答库） */
-const ALLOWED_LIB_TYPES: Record<CategoryKey, LibraryType[]> = {
-  image: ['image', 'word', 'reply'],
-  text: ['word', 'reply'],
-  audio: ['word', 'reply'],
-  doc: ['image', 'word', 'reply'],
-  video: ['image', 'word', 'reply'],
+function libsBadge(item: AuditItem): React.ReactNode {
+  const list = item.linked_libraries ?? []
+  if (list.length === 0) {
+    return null
+  }
+  const type = list[0]?.library_type
+  const label = TYPE_LABEL_BY_LIB[type] ?? '?'
+  const color = TYPE_COLOR_BY_LIB[type] ?? 'default'
+  const names = list.map((l) => l.name).join('、')
+  return (
+    <Tooltip title={names}>
+      <Tag
+        color={color}
+        bordered={false}
+        style={{ margin: 0, fontSize: 11, padding: '0 6px' }}
+      >
+        {label}×{list.length}
+      </Tag>
+    </Tooltip>
+  )
 }
 
 interface Props {
@@ -66,11 +75,17 @@ interface Props {
     override: {
       medium_threshold?: number
       high_threshold?: number
-      linked_library_ids?: number[]
     },
   ) => void
   /** point 勾选时通知父级，便于父级维护 enabledItemIds 集合 */
   onPointToggle: (itemId: number, pointId: number, checked: boolean) => void
+  /** 点击 item 行「关联库」入口触发；父级弹出 ItemLibrariesEditor 并立即 PATCH */
+  onItemLibraryLink?: (item: AuditItem) => void
+  /**
+   * 父级在库关联保存后 +1, RulesTreeView 用它做 remount key,
+   * 重新拉 items 让左栏 badge 同步刷新。
+   */
+  refreshKey?: number
 }
 
 const PACKAGE_TO_MEDIA: Record<string, CategoryKey> = {
@@ -89,42 +104,29 @@ export default function RulesTreeView({
   pointOverrides,
   onPointOverrideChange,
   onPointToggle: _onPointToggle,
+  onItemLibraryLink,
+  refreshKey,
 }: Props) {
   const [items, setItems] = useState<AuditItem[]>([])
   const [pointsByItem, setPointsByItem] = useState<Record<number, AuditPoint[]>>(
     {},
   )
   const [loading, setLoading] = useState(false)
-  const [libraryOptions, setLibraryOptions] = useState<LibraryListItem[]>([])
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
 
   const mediaKey: CategoryKey =
     (packageCode ? PACKAGE_TO_MEDIA[packageCode] : null) ?? 'image'
 
-  // 拉数据：items + 3 种库
+  // 拉数据：仅 items。关联自定义库已上移至审核项，不再在审核点表格展示。
   useEffect(() => {
     if (!packageCode) return
     let cancel = false
     setLoading(true)
-    Promise.all([
-      auditItemsApi.list(packageCode),
-      librariesApi
-        .list({ type: 'image', size: 200 })
-        .then((p) => p.items)
-        .catch(() => [] as LibraryListItem[]),
-      librariesApi
-        .list({ type: 'word', size: 200 })
-        .then((p) => p.items)
-        .catch(() => [] as LibraryListItem[]),
-      librariesApi
-        .list({ type: 'reply', size: 200 })
-        .then((p) => p.items)
-        .catch(() => [] as LibraryListItem[]),
-    ])
-      .then(async ([itemsRes, img, word, reply]) => {
+    auditItemsApi
+      .list(packageCode)
+      .then(async (itemsRes) => {
         if (cancel) return
         setItems(itemsRes)
-        setLibraryOptions([...img, ...word, ...reply])
         const map: Record<number, AuditPoint[]> = {}
         await Promise.all(
           itemsRes.map((it) =>
@@ -152,7 +154,7 @@ export default function RulesTreeView({
     return () => {
       cancel = true
     }
-  }, [packageCode])
+  }, [packageCode, refreshKey])
 
   const { builtinItems, customItems } = useMemo(() => {
     const b: AuditItem[] = []
@@ -228,6 +230,7 @@ export default function RulesTreeView({
             onPick={(id) => setSelectedItemId(id)}
             loading={loading}
             emptyText="暂无通用规则"
+            onItemLibraryLink={onItemLibraryLink}
           />
           <ItemGroup
             title="自定义"
@@ -239,6 +242,7 @@ export default function RulesTreeView({
             onPick={(id) => setSelectedItemId(id)}
             loading={loading}
             emptyText="暂无自定义规则"
+            onItemLibraryLink={onItemLibraryLink}
           />
         </div>
 
@@ -259,7 +263,6 @@ export default function RulesTreeView({
               pointOverrides={pointOverrides}
               onPointMapChange={onPointMapChange}
               onPointOverrideChange={onPointOverrideChange}
-              libraryOptions={libraryOptions}
               mediaKey={mediaKey}
             />
           ) : (
@@ -289,6 +292,7 @@ function ItemGroup({
   onPick,
   loading,
   emptyText,
+  onItemLibraryLink,
 }: {
   title: string
   icon: React.ReactNode
@@ -299,6 +303,7 @@ function ItemGroup({
   onPick: (id: number) => void
   loading: boolean
   emptyText: string
+  onItemLibraryLink?: (item: AuditItem) => void
 }) {
   return (
     <div style={{ marginBottom: 8 }}>
@@ -378,6 +383,37 @@ function ItemGroup({
                   启用
                 </Tag>
               )}
+              {libsBadge(it)}
+              {onItemLibraryLink && (
+                <Tooltip
+                  title={
+                    (it.linked_libraries ?? []).length > 0
+                      ? `已关联 ${(it.linked_libraries ?? []).length} 个自定义库，点击管理`
+                      : '为该审核项关联自定义库'
+                  }
+                >
+                  <span
+                    role="button"
+                    aria-label={`关联库 ${it.name_cn}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onItemLibraryLink(it)
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 22,
+                      height: 22,
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      color: '#0EA5E9',
+                    }}
+                  >
+                    <AppstoreAddOutlined style={{ fontSize: 14 }} />
+                  </span>
+                </Tooltip>
+              )}
             </div>
           )
         })
@@ -393,7 +429,6 @@ type PointRowRecord = {
   override: {
     medium_threshold?: number
     high_threshold?: number
-    linked_library_ids?: number[]
   }
   isCustom: boolean
   editDisabled: boolean
@@ -406,7 +441,6 @@ function PointsColumn({
   pointOverrides,
   onPointMapChange,
   onPointOverrideChange,
-  libraryOptions,
   mediaKey,
 }: {
   item: AuditItem
@@ -420,10 +454,8 @@ function PointsColumn({
     override: {
       medium_threshold?: number
       high_threshold?: number
-      linked_library_ids?: number[]
     },
   ) => void
-  libraryOptions: LibraryListItem[]
   mediaKey: CategoryKey
 }) {
   const dataSource: PointRowRecord[] = points.map((p) => ({
@@ -536,24 +568,6 @@ function PointsColumn({
         />
       ),
     },
-    {
-      title: '关联库',
-      dataIndex: 'libraries',
-      width: 240,
-      render: (_, record) => (
-        <LibrarySelectInline
-          disabled={record.editDisabled}
-          mediaKey={mediaKey}
-          overrideIds={record.override.linked_library_ids}
-          libraryOptions={libraryOptions}
-          onChange={(ids) =>
-            onPointOverrideChange(item.id, record.point.id, {
-              linked_library_ids: ids,
-            })
-          }
-        />
-      ),
-    },
   ]
 
   return (
@@ -606,108 +620,3 @@ function ThresholdInput({
     </Tooltip>
   )
 }
-
-function LibrarySelectInline({
-  disabled,
-  mediaKey,
-  overrideIds,
-  libraryOptions,
-  onChange,
-}: {
-  disabled: boolean
-  mediaKey: CategoryKey
-  overrideIds: number[] | undefined
-  libraryOptions: LibraryListItem[]
-  onChange: (ids: number[]) => void
-}) {
-  const currentIds = overrideIds ?? []
-  const libraryById = useMemo(() => {
-    const m = new Map<number, LibraryListItem>()
-    for (const l of libraryOptions) m.set(l.id, l)
-    return m
-  }, [libraryOptions])
-
-  const allowedTypes = ALLOWED_LIB_TYPES[mediaKey] ?? []
-  const allowedLibs = useMemo(
-    () =>
-      libraryOptions.filter((l) =>
-        allowedTypes.includes(l.library_type as LibraryType),
-      ),
-    [libraryOptions, allowedTypes],
-  )
-
-  const lockedType: LibraryType | undefined = currentIds.length
-    ? (libraryById.get(currentIds[0])?.library_type as LibraryType | undefined)
-    : undefined
-
-  const options = useMemo(() => {
-    return allowedLibs
-      .filter(
-        (l) =>
-          !lockedType || (l.library_type as LibraryType) === lockedType,
-      )
-      .map((l) => {
-        const t = l.library_type as LibraryType
-        return {
-          value: l.id,
-          label: (
-            <Space size={4} align="center">
-              <Tag color={TYPE_COLOR[t]} style={{ margin: 0 }}>
-                {TYPE_LABEL[t]}
-              </Tag>
-              {l.kind && (
-                <Tag
-                  color={l.kind === '黑名单' ? 'red' : 'green'}
-                  style={{ margin: 0 }}
-                >
-                  {l.kind}
-                </Tag>
-              )}
-              <span>{l.name}</span>
-            </Space>
-          ),
-        }
-      })
-  }, [allowedLibs, lockedType])
-
-  const handleChange = (ids: number[]) => {
-    if (lockedType) {
-      const filtered = ids.filter((id) => {
-        const lib = libraryById.get(id)
-        return lib ? (lib.library_type as LibraryType) === lockedType : false
-      })
-      onChange(filtered)
-    } else {
-      onChange(ids)
-    }
-  }
-
-  if (allowedLibs.length === 0) {
-    return (
-      <Text type="secondary" style={{ fontSize: 12 }}>
-        当前媒体类型无可用关联库
-      </Text>
-    )
-  }
-
-  return (
-    <Select
-      mode="multiple"
-      size="small"
-      placeholder={lockedType ? `选择自定义${TYPE_LABEL[lockedType]}库` : '选择自定义库'}
-      value={currentIds}
-      onChange={handleChange}
-      allowClear
-      style={{ minWidth: 180, maxWidth: 280 }}
-      disabled={disabled || options.length === 0}
-      options={options}
-      maxTagCount="responsive"
-      notFoundContent={
-        lockedType ? `已锁定为${TYPE_LABEL[lockedType]}库` : '暂无可用'
-      }
-    />
-  )
-}
-
-// 保留 DeleteOutlined 供将来"自定义审核点管理"页使用
-void DeleteOutlined
