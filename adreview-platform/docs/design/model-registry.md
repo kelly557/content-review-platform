@@ -228,28 +228,96 @@ Alembic `20260723_provider_split_and_large_category.py` 在 upgrade 中：
 |---|---|
 | `/resources/models` | 模型库列表（顶部 Tabs：大模型 / 小模型） |
 | `/resources/models/:id` | 模型详情（发布新版本 / 校验 / 删除） |
-| `/resources/providers/:id` | Provider 详情（编辑元数据 / 替换 API Key / 归档 / 删除） |
+| `/resources/providers/:id` | Provider 详情（编辑元数据 / 替换 API Key / 归档 / 删除 / 添加模型） |
 
-### 8.1 列表 Tab 化
+### 8.1 统一「添加模型」入口 + Tab 化
 
-列表页用 `Tabs` 把两种 model 分为两套属性集（不再用单个 Table 凑列表）：
+「添加模型」是所有 model 创建的统一入口。无论是大模型还是小模型，UI 上
+只看到一个主按钮。背后根据 activeTab 切换 modal 内部内容：
 
 ```
 /resources/models
 ├── Tabs: 大模型(n) | 小模型(n)
-├── 共享筛选：搜索 / Provider / 状态
-├── Tab 独享筛选：大模型分类（large 时）/ 小模型分类（small 时）
-├── 添加 Provider（始终可用）
-└── 添加模型（按当前 tab 自动选 large / small）
+├── 共享筛选：搜索 / 状态
+├── Tab 独享筛选：大模型分类（large 时）/ 小模型分类 + Provider（large 时）
+└── [+ 添加模型]（按当前 tab 切换 modal 内容）
 ```
 
-### 8.2 list 接口扩展
+### 8.2 「添加模型」modal 两种模式
 
-`GET /api/v1/models` 在 ListItem 增加三个字段（仅 kind=small 有值）：
+`CreateModelModal` 接受 `mode: 'large' | 'small'`，由 ModelListPage 按 activeTab 传入：
+
+**大模型 mode（建 Provider + 一组 model）**：
+
+```
+Modal title: 添加模型
+┌──────────────────────────────────────────────────┐
+│ ⚠ 一个厂商级接入配置 = Provider + 一组 Model       │
+│                                                  │
+│ 显示名称 (display_name)        [必填]            │
+│ Provider 类型 (preset)          [Select]           │
+│ Base URL                       [必填, url]        │
+│ API Key                        [必填, password]   │
+│ 描述 (可选)                                       │
+│ ── 模型列表 ──                                    │
+│ ┌─ row 1 ──────────────────────────────────┐     │
+│ │ model_id [必填] │ 显示名 [可选] │ [删除]  │     │
+│ │ 大模型分类 [Select 必填]                   │     │
+│ │ Version [可选]                             │     │
+│ └──────────────────────────────────────────┘     │
+│ [+ 添加模型]                                       │
+└──────────────────────────────────────────────────┘
+```
+
+提交：POST /api/v1/providers（带 initial_models[]）一次性原子创建。
+
+**小模型 mode（仅建 model，不挂 Provider）**：
+
+```
+Modal title: 添加小模型
+┌──────────────────────────────────────────────────┐
+│ ⚠ 小模型不绑定任何 Provider                  │
+│                                                  │
+│ 业务标识 (model_name)           [必填]            │
+│ 起始版本号 (version)             [可选]            │
+│ max_output_tokens                [必填, 1-32768]   │
+│ 上传权重文件 (.onnx/.pt/.zip…)   [Dragger, 必填]  │
+│ 小模型分类                       [Select 必填]     │
+│ 模型名称 (name)                  [可选]            │
+│ 描述 (可选)                                       │
+└──────────────────────────────────────────────────┘
+```
+
+提交：POST /api/v1/registered-models（provider_id=null）。
+
+### 8.3 Provider 详情页「追加 model」副入口
+
+主入口走 ModelListPage「添加模型」（一次建 Provider + models）；
+副入口走 Provider 详情页 header 的 [+ 添加模型]，向已有 Provider
+**追加单条 model**：
+
+```
+[+ 添加模型] [校验连通性] [编辑] [替换 API Key] [归档] [删除]
+
+Modal title: 添加模型到「<display_name>」
+┌──────────────────────────────────────────────────┐
+│ Model ID                       [必填]             │
+│ 模型名称                       [可选]             │
+│ 大模型分类                     [Select 必填]      │
+│ Version                        [可选]             │
+│ 描述 (可选)                                       │
+└──────────────────────────────────────────────────┘
+```
+
+凭证与 Base URL 自动继承自 Provider；提交走
+`POST /api/v1/registered-models` 并把 `provider_id` 写死为当前 Provider。
+
+### 8.4 list 接口扩展（小模型 artifact 摘要）
+
+`GET /api/v1/models` 在 ListItem 增加 2 个字段（仅 kind=small 有值）：
 
 - `artifact_filename`：当前版本文件名（如 `politics-cls.onnx`）
 - `artifact_size`：字节数（用于显示 MB）
-- `artifact_sha256`：完整 SHA-256 摘要（小模型前端表格截前 12 字符）
 
-实现上 list endpoint 显式 SELECT `registered_model_versions` 的这三列，按
+实现上 list endpoint 显式 SELECT `registered_model_versions` 的这两列，按
 `current_version_id` 索引返回；不走 selectinload 以避开跨测试 schema 缓存。
