@@ -2150,6 +2150,26 @@ export const SMALL_MODEL_CATEGORY_LABEL: Record<SmallModelCategory, string> = SM
   {} as Record<SmallModelCategory, string>,
 )
 
+export type LargeModelCategory = 'text' | 'multimodal' | 'other'
+
+export const LARGE_MODEL_CATEGORY_OPTIONS: {
+  value: LargeModelCategory
+  label: string
+  color: string
+}[] = [
+  { value: 'text', label: '文本模型', color: 'blue' },
+  { value: 'multimodal', label: '多模态模型', color: 'purple' },
+  { value: 'other', label: '其他模型', color: 'default' },
+]
+
+export const LARGE_MODEL_CATEGORY_LABEL: Record<LargeModelCategory, string> = LARGE_MODEL_CATEGORY_OPTIONS.reduce(
+  (acc, o) => {
+    acc[o.value] = o.label
+    return acc
+  },
+  {} as Record<LargeModelCategory, string>,
+)
+
 export type RegisteredModelRegistrationMethod = 'remote_api' | 'uploaded_file'
 
 export type RegisteredModelStatus =
@@ -2196,6 +2216,7 @@ export interface RegisteredModelVersion {
   version_no: number
   version_label: string | null
   notes: string | null
+  large_category: LargeModelCategory | null
   registration_method: RegisteredModelRegistrationMethod
   provider: string | null
   model_name: string | null
@@ -2214,6 +2235,16 @@ export interface RegisteredModelVersion {
   created_at: string
 }
 
+export interface RegisteredProviderSummary {
+  id: number
+  public_id?: string
+  display_name: string
+  provider_preset: RegisteredModelProvider | null
+  endpoint_url: string | null
+  masked_token: string | null
+  status: string
+}
+
 export interface RegisteredModel {
   id: number
   public_id?: string
@@ -2222,16 +2253,17 @@ export interface RegisteredModel {
   description: string | null
   kind: RegisteredModelKind
   small_category: SmallModelCategory | null
-  provider: string | null
+  large_category: LargeModelCategory | null
+  provider_id: number | null
+  provider: RegisteredProviderSummary | null
+  provider_preset: RegisteredModelProvider | null
   model_name: string | null
   max_output_tokens: number | null
   registration_method: RegisteredModelRegistrationMethod
   status: RegisteredModelStatus
   version: string | null
-  endpoint_url: string | null
   config: Record<string, unknown>
-  credential_id: number | null
-  credential_label: string | null
+  credential_label?: string | null
   is_deleted: boolean
   deleted_at: string | null
   owner_id: number | null
@@ -2254,7 +2286,10 @@ export interface RegisteredModelListItem {
   name: string
   kind: RegisteredModelKind
   small_category: SmallModelCategory | null
-  provider: string | null
+  large_category: LargeModelCategory | null
+  provider_id: number | null
+  provider_preset: RegisteredModelProvider | null
+  provider_label: string | null
   model_name: string | null
   max_output_tokens: number | null
   registration_method: RegisteredModelRegistrationMethod
@@ -2274,13 +2309,12 @@ export interface RegisteredModelCreate {
   description?: string | null
   kind?: RegisteredModelKind
   small_category?: SmallModelCategory | null
-  provider?: RegisteredModelProvider | string | null
+  large_category?: LargeModelCategory | null
+  provider_id: number
   model_name?: string | null
   status?: RegisteredModelStatus
   version?: string | null
-  endpoint_url?: string | null
   config?: Record<string, unknown>
-  credential_id?: number | null
   // —— 小模型专用 ——
   registration_method?: RegisteredModelRegistrationMethod
   max_output_tokens?: number | null
@@ -2291,26 +2325,85 @@ export interface RegisteredModelUpdate {
   name?: string
   description?: string | null
   small_category?: SmallModelCategory | null
-  provider?: RegisteredModelProvider | string | null
+  large_category?: LargeModelCategory | null
   model_name?: string | null
   max_output_tokens?: number | null
   status?: RegisteredModelStatus
   version?: string | null
-  endpoint_url?: string | null
   config?: Record<string, unknown>
-  credential_id?: number
 }
 
 export interface RegisteredModelVersionCreate {
   version_label?: string | null
   notes?: string | null
-  provider?: RegisteredModelProvider | string | null
+  large_category?: LargeModelCategory | null
   model_name?: string | null
-  endpoint_url?: string | null
   config?: Record<string, unknown>
-  credential_id?: number | null
   // —— 小模型上传新版本时携带 ——
   artifact?: ArtifactUploadResponse | null
+}
+
+// ─── Provider（4 级实体） ───
+
+export interface ProviderInitialModel {
+  model_name: string
+  name?: string
+  large_category: LargeModelCategory
+  description?: string
+  version?: string
+}
+
+export interface RegisteredProvider {
+  id: number
+  public_id?: string
+  display_name: string
+  description: string | null
+  provider_preset: RegisteredModelProvider | null
+  endpoint_url: string
+  config: Record<string, unknown>
+  credential_id: number | null
+  masked_token: string | null
+  credential_label: string | null
+  status: 'active' | 'archived'
+  model_count: number
+  owner_id: number | null
+  created_by_id: number | null
+  updated_by_id: number | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface RegisteredProviderDetail extends RegisteredProvider {
+  models: RegisteredModelListItem[]
+}
+
+export interface RegisteredProviderOption {
+  id: number
+  display_name: string
+  provider_preset: RegisteredModelProvider | null
+  endpoint_url: string | null
+  masked_token: string | null
+  status: 'active' | 'archived'
+}
+
+export interface RegisteredProviderCreate {
+  display_name: string
+  description?: string
+  provider_preset?: RegisteredModelProvider | null
+  endpoint_url: string
+  api_key: string
+  initial_models: ProviderInitialModel[]
+}
+
+export interface RegisteredProviderUpdate {
+  display_name?: string
+  description?: string
+  provider_preset?: RegisteredModelProvider | null
+  endpoint_url?: string
+}
+
+export interface RegisteredProviderRotateApiKey {
+  api_key: string
 }
 
 // ─── 凭证 ───
