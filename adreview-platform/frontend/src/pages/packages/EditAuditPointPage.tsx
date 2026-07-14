@@ -38,7 +38,6 @@ const BUILTIN_POINT_WRITABLE_FIELDS = new Set([
   'is_enabled',
   'medium_threshold',
   'high_threshold',
-  'linked_library_ids',
 ])
 
 export default function EditAuditPointPage() {
@@ -158,7 +157,7 @@ export default function EditAuditPointPage() {
             title={
               isSuperadmin
                 ? '通用审核点:超级管理员可编辑全部字段'
-                : '通用审核点:仅允许修改启用 / 中/高风险分 / 关联自定义库'
+                : '通用审核点:仅允许修改启用 / 中/高风险分（关联自定义图库词库已上移至审核项）'
             }
           >
             <Tag color="gold" icon={<LockOutlined />} style={{ margin: 0 }}>
@@ -177,7 +176,7 @@ export default function EditAuditPointPage() {
             </Tag>
           ) : (
             <Tag style={{ margin: 0, color: '#64748B' }}>
-              仅可启用 / 中/高风险分 / 关联库
+              仅可启用 / 中/高风险分
             </Tag>
           ))}
         <Text type="secondary">code: {point.code}</Text>
