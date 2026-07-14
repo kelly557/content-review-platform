@@ -107,7 +107,7 @@ async def test_small_model_with_category_ok(client):
         json={
             "name": "广告法小模型",
             "kind": "small",
-            "small_category": "ad_law",
+            "small_category": "ad_law", "modality": "text",
             "provider_id": pid,
             "model_name": "adlaw-v1",
             "max_output_tokens": 512,
@@ -134,7 +134,7 @@ async def test_small_model_invalid_category(client):
         json={
             "name": "bad cat",
             "kind": "small",
-            "small_category": "unknown_category",
+            "small_category": "unknown_category", "modality": "text",
             "provider_id": pid,
             "model_name": "x",
         },
@@ -152,6 +152,7 @@ async def test_large_model_ignores_small_category(client):
             "name": "大模型",
             "kind": "large",
             "small_category": "ad_law",
+            "modality": "text",
             "large_category": "text",
             "provider_id": pid,
             "model_name": "gpt-4o",
@@ -159,7 +160,49 @@ async def test_large_model_ignores_small_category(client):
     )
     assert r.status_code == 201
     assert r.json()["small_category"] is None
+    assert r.json()["modality"] is None
     assert r.json()["large_category"] == "text"
+
+
+@pytest.mark.asyncio
+async def test_small_model_requires_modality(client):
+    await _login(client)
+    art = await _upload_small_model_file(client, b"no-modality")
+    r = await client.post(
+        "/api/v1/registered-models",
+        json={
+            "name": "缺模态",
+            "kind": "small",
+            "small_category": "politics",
+            "model_name": "politics-no-modality",
+            "max_output_tokens": 256,
+            "registration_method": "uploaded_file",
+            "artifact": art,
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "modality" in r.text
+
+
+@pytest.mark.asyncio
+async def test_small_model_invalid_modality(client):
+    await _login(client)
+    art = await _upload_small_model_file(client, b"bad-modality")
+    r = await client.post(
+        "/api/v1/registered-models",
+        json={
+            "name": "非法模态",
+            "kind": "small",
+            "small_category": "politics",
+            "modality": "audio",
+            "model_name": "politics-bad-modality",
+            "max_output_tokens": 256,
+            "registration_method": "uploaded_file",
+            "artifact": art,
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "modality" in r.text
 
 
 @pytest.mark.asyncio
@@ -291,7 +334,7 @@ async def test_small_model_provider_optional(client):
         json={
             "name": "orphan-small",
             "kind": "small",
-            "small_category": "politics",
+            "small_category": "politics", "modality": "text",
             "model_name": "politics-orphan",
             "max_output_tokens": 256,
             "registration_method": "uploaded_file",
@@ -354,7 +397,7 @@ async def test_create_small_model_with_upload(client):
         json={
             "name": "涉政小模型 v1",
             "kind": "small",
-            "small_category": "politics",
+            "small_category": "politics", "modality": "text",
             "provider_id": pid,
             "model_name": "politics-cls-v1",
             "max_output_tokens": 1024,
@@ -391,7 +434,7 @@ async def test_list_models_carries_small_model_artifact_summary(client):
         json={
             "name": "summary-model",
             "kind": "small",
-            "small_category": "politics",
+            "small_category": "politics", "modality": "text",
             "provider_id": pid,
             "model_name": "politics-summary",
             "max_output_tokens": 256,
@@ -421,7 +464,7 @@ async def test_create_small_model_missing_artifact_rejected(client):
         json={
             "name": "no-file",
             "kind": "small",
-            "small_category": "politics",
+            "small_category": "politics", "modality": "text",
             "provider_id": pid,
             "model_name": "x",
             "max_output_tokens": 512,
@@ -441,7 +484,7 @@ async def test_create_small_model_missing_max_tokens_rejected(client):
         json={
             "name": "no-tokens",
             "kind": "small",
-            "small_category": "politics",
+            "small_category": "politics", "modality": "text",
             "provider_id": pid,
             "model_name": "x",
             "artifact": art,
@@ -461,7 +504,7 @@ async def test_create_small_model_max_tokens_out_of_range(client):
         json={
             "name": "bad-tokens",
             "kind": "small",
-            "small_category": "politics",
+            "small_category": "politics", "modality": "text",
             "provider_id": pid,
             "model_name": "x",
             "max_output_tokens": 99999,
@@ -486,7 +529,7 @@ async def test_create_small_model_no_credential_required(client):
         json={
             "name": "no-cred",
             "kind": "small",
-            "small_category": "ad",
+            "small_category": "ad", "modality": "text",
             "provider_id": pid,
             "model_name": "ad-cls-v1",
             "max_output_tokens": 256,
@@ -511,7 +554,7 @@ async def test_small_model_validate_rejected(client):
         json={
             "name": "small",
             "kind": "small",
-            "small_category": "porn",
+            "small_category": "porn", "modality": "text",
             "provider_id": pid,
             "model_name": "porn-cls",
             "max_output_tokens": 256,
@@ -534,7 +577,7 @@ async def test_small_model_new_version_with_new_artifact(client):
         json={
             "name": "versioned small",
             "kind": "small",
-            "small_category": "abuse",
+            "small_category": "abuse", "modality": "text",
             "provider_id": pid,
             "model_name": "abuse-cls",
             "max_output_tokens": 512,
@@ -577,7 +620,7 @@ async def test_small_model_artifact_download(client):
         json={
             "name": "downloadable",
             "kind": "small",
-            "small_category": "illicit",
+            "small_category": "illicit", "modality": "text",
             "provider_id": pid,
             "model_name": "illicit-cls",
             "max_output_tokens": 256,
