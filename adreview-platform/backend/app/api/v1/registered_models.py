@@ -275,7 +275,6 @@ def _to_list_item(
     if artifact:
         payload["artifact_filename"] = artifact.get("artifact_filename")
         payload["artifact_size"] = artifact.get("artifact_size")
-        payload["artifact_sha256"] = artifact.get("artifact_sha256")
     return RegisteredModelListItem.model_validate(payload)
 
 
@@ -398,7 +397,7 @@ async def list_models(
         ).scalars().all()
         providers = {p.id: p for p in provs}
 
-    # 显式取 current_version artifact 摘要（小模型列表展示文件名 / 大小 / SHA-256）
+    # 显式取 current_version artifact 摘要（小模型列表展示文件名 + 大小）
     cv_ids = [r.current_version_id for r in rows if r.current_version_id]
     version_artifact: dict[int, dict] = {}
     if cv_ids:
@@ -408,15 +407,13 @@ async def list_models(
                     RegisteredModelVersion.id,
                     RegisteredModelVersion.artifact_filename,
                     RegisteredModelVersion.artifact_size,
-                    RegisteredModelVersion.artifact_sha256,
                 ).where(RegisteredModelVersion.id.in_(cv_ids))
             )
         ).all()
-        for vid, fn, sz, sha in ver_rows:
+        for vid, fn, sz in ver_rows:
             version_artifact[vid] = {
                 "artifact_filename": fn,
                 "artifact_size": sz,
-                "artifact_sha256": sha,
             }
 
     items = [

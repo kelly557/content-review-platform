@@ -2300,7 +2300,6 @@ export interface RegisteredModelListItem {
   // 小模型专属：当前版本 artifact 摘要（来自 list 接口）
   artifact_filename: string | null
   artifact_size: number | null
-  artifact_sha256: string | null
   owner_id: number | null
   owner_name?: string | null
   updated_at: string | null

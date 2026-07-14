@@ -383,8 +383,8 @@ async def test_list_models_carries_small_model_artifact_summary(client):
     assert items, "列表中未找到刚创建的小模型"
     item = items[0]
     assert item["artifact_filename"] == "politics.onnx"
-    assert item["artifact_sha256"] == art["sha256"]
     assert item["artifact_size"] == len(b"weights-list-summary")
+    assert "artifact_sha256" not in item
 
 
 @pytest.mark.asyncio

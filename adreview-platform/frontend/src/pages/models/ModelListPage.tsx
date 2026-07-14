@@ -342,7 +342,7 @@ export default function ModelListPage() {
       {
         title: '当前版本文件',
         dataIndex: 'artifact_filename',
-        width: '14%',
+        width: '20%',
         render: (v: string | null) =>
           v ? <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</span> : '-',
       },
@@ -352,18 +352,6 @@ export default function ModelListPage() {
         width: '8%',
         render: (v: number | null) =>
           v ? `${(v / 1024 / 1024).toFixed(2)} MB` : '-',
-      },
-      {
-        title: 'SHA-256',
-        width: '14%',
-        render: (_v: unknown, row: RegisteredModelListItem) =>
-          row.artifact_sha256 ? (
-            <Text code style={{ fontSize: 12 }}>
-              {row.artifact_sha256.slice(0, 12)}…
-            </Text>
-          ) : (
-            '-'
-          ),
       },
       {
         title: '状态',
