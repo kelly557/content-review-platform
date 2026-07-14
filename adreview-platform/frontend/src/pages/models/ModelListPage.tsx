@@ -10,6 +10,7 @@ import {
   Select,
   Space,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -34,7 +35,6 @@ import type {
 } from '@/types/domain'
 import {
   LARGE_MODEL_CATEGORY_OPTIONS,
-  REGISTERED_MODEL_KIND_OPTIONS,
   REGISTERED_MODEL_STATUS_OPTIONS,
   SMALL_MODEL_CATEGORY_OPTIONS,
 } from '@/types/domain'
@@ -57,13 +57,15 @@ interface CreateFormValues extends SmallModelFormValues, LargeModelFormValues {
   kind: RegisteredModelKind
 }
 
+type ModelTab = 'large' | 'small'
+
 export default function ModelListPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
   const canWrite = user?.role === 'admin' || user?.role === 'superadmin'
 
+  const [activeTab, setActiveTab] = useState<ModelTab>('large')
   const [q, setQ] = useState('')
-  const [kind, setKind] = useState<RegisteredModelKind | null>(null)
   const [smallCategory, setSmallCategory] = useState<SmallModelCategory | null>(null)
   const [largeCategory, setLargeCategory] = useState<LargeModelCategory | null>(null)
   const [status, setStatus] = useState<RegisteredModelStatus | null>(null)
@@ -85,7 +87,7 @@ export default function ModelListPage() {
     try {
       const data = await registeredModelsApi.list({
         q: q || undefined,
-        kind: kind ?? undefined,
+        kind: activeTab,
         small_category: smallCategory ?? undefined,
         large_category: largeCategory ?? undefined,
         provider_id: providerFilter ? Number(providerFilter) : undefined,
@@ -116,6 +118,11 @@ export default function ModelListPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    void fetchList()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
+
   const openCreate = () => {
     if (!canWrite) {
       message.warning('仅管理员可添加模型')
@@ -128,8 +135,8 @@ export default function ModelListPage() {
     }
     createForm.resetFields()
     createForm.setFieldsValue({
-      kind: 'large',
-      large_category: 'text',
+      kind: activeTab,
+      large_category: activeTab === 'large' ? 'text' : undefined,
       provider_id: providerOptions[0]?.id,
     })
     setCreateOpen(true)
@@ -232,39 +239,35 @@ export default function ModelListPage() {
     }
   }
 
-  const columns = useMemo(
+  const onTabChange = (next: string) => {
+    const tab = next as ModelTab
+    setActiveTab(tab)
+    // 切换 Tab：重置只属于前一种类型的分类筛选
+    if (tab === 'large') {
+      setSmallCategory(null)
+    } else {
+      setLargeCategory(null)
+    }
+  }
+
+  // 大模型列
+  const largeColumns = useMemo(
     () => [
-      { title: '名称', dataIndex: 'name', width: '18%' },
+      { title: '名称', dataIndex: 'name', width: '20%' },
       {
-        title: '类型',
-        dataIndex: 'kind',
-        width: '7%',
-        render: (v: RegisteredModelKind) => {
-          const opt = REGISTERED_MODEL_KIND_OPTIONS.find((o) => o.value === v)
-          return <Tag color={opt?.color}>{opt?.label ?? v}</Tag>
-        },
-      },
-      {
-        title: '分类',
+        title: '大模型分类',
         dataIndex: 'large_category',
-        width: '8%',
-        render: (v: LargeModelCategory | null, row: RegisteredModelListItem) => {
-          if (row.kind === 'large') {
-            if (!v) return '-'
-            const opt = LARGE_MODEL_CATEGORY_OPTIONS.find((o) => o.value === v)
-            return opt ? <Tag color={opt.color}>{opt.label}</Tag> : v
-          }
-          if (!row.small_category) return '-'
-          const opt = SMALL_MODEL_CATEGORY_OPTIONS.find(
-            (o) => o.value === row.small_category,
-          )
-          return opt ? <Tag color={opt.color}>{opt.label}</Tag> : row.small_category
+        width: '10%',
+        render: (v: LargeModelCategory | null) => {
+          if (!v) return '-'
+          const opt = LARGE_MODEL_CATEGORY_OPTIONS.find((o) => o.value === v)
+          return opt ? <Tag color={opt.color}>{opt.label}</Tag> : v
         },
       },
       {
         title: 'Provider',
         dataIndex: 'provider_label',
-        width: '12%',
+        width: '16%',
         render: (v: string | null, row: RegisteredModelListItem) =>
           row.provider_id ? (
             <Link to={`/resources/providers/${row.provider_id}`}>
@@ -274,7 +277,7 @@ export default function ModelListPage() {
             <Text type="secondary">未挂载</Text>
           ),
       },
-      { title: 'Model ID', dataIndex: 'model_name', width: '14%' },
+      { title: 'Model ID', dataIndex: 'model_name', width: '18%' },
       {
         title: '状态',
         dataIndex: 'status',
@@ -309,12 +312,7 @@ export default function ModelListPage() {
               onConfirm={() => handleDelete(row)}
             >
               <Tooltip title={canWrite ? '' : '仅管理员可删除'}>
-                <Button
-                  type="link"
-                  size="small"
-                  danger
-                  disabled={!canWrite}
-                >
+                <Button type="link" size="small" danger disabled={!canWrite}>
                   删除
                 </Button>
               </Tooltip>
@@ -323,7 +321,99 @@ export default function ModelListPage() {
         ),
       },
     ],
-    [canWrite],
+    [canWrite, handleDelete],
+  )
+
+  // 小模型列（无 Provider 概念：业务上选择框隐藏）
+  const smallColumns = useMemo(
+    () => [
+      { title: '名称', dataIndex: 'name', width: '18%' },
+      {
+        title: '小模型分类',
+        dataIndex: 'small_category',
+        width: '10%',
+        render: (v: SmallModelCategory | null) => {
+          if (!v) return '-'
+          const opt = SMALL_MODEL_CATEGORY_OPTIONS.find((o) => o.value === v)
+          return opt ? <Tag color={opt.color}>{opt.label}</Tag> : v
+        },
+      },
+      { title: '业务标识', dataIndex: 'model_name', width: '14%' },
+      {
+        title: '当前版本文件',
+        dataIndex: 'artifact_filename',
+        width: '14%',
+        render: (v: string | null) =>
+          v ? <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</span> : '-',
+      },
+      {
+        title: '大小',
+        dataIndex: 'artifact_size',
+        width: '8%',
+        render: (v: number | null) =>
+          v ? `${(v / 1024 / 1024).toFixed(2)} MB` : '-',
+      },
+      {
+        title: 'SHA-256',
+        width: '14%',
+        render: (_v: unknown, row: RegisteredModelListItem) =>
+          row.artifact_sha256 ? (
+            <Text code style={{ fontSize: 12 }}>
+              {row.artifact_sha256.slice(0, 12)}…
+            </Text>
+          ) : (
+            '-'
+          ),
+      },
+      {
+        title: '状态',
+        dataIndex: 'status',
+        width: '7%',
+        render: (v: RegisteredModelStatus) => {
+          const opt = REGISTERED_MODEL_STATUS_OPTIONS.find((o) => o.value === v)
+          return <Tag color={opt?.color}>{opt?.label ?? v}</Tag>
+        },
+      },
+      {
+        title: '操作',
+        width: '14%',
+        render: (_v: unknown, row: RegisteredModelListItem) => (
+          <Space size={4}>
+            <Link to={`/resources/models/${row.id}`}>
+              <Button type="link" size="small" icon={<CloudDownloadOutlined />}>
+                详情
+              </Button>
+            </Link>
+            {row.current_version_id && (
+              <Button
+                type="link"
+                size="small"
+                onClick={() => {
+                  const url = registeredModelsApi.artifactDownloadUrl(row.id, row.current_version_id!)
+                  window.open(url, '_blank')
+                }}
+              >
+                下载
+              </Button>
+            )}
+            <Popconfirm
+              title="删除该模型？"
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => handleDelete(row)}
+            >
+              <Tooltip title={canWrite ? '' : '仅管理员可删除'}>
+                <Button type="link" size="small" danger disabled={!canWrite}>
+                  删除
+                </Button>
+              </Tooltip>
+            </Popconfirm>
+          </Space>
+        ),
+      },
+    ],
+    [canWrite, handleDelete],
   )
 
   return (
@@ -339,40 +429,36 @@ export default function ModelListPage() {
       <Space style={{ marginBottom: 12 }} wrap>
         <Input.Search
           allowClear
-          placeholder="搜索名称 / Model ID"
+          placeholder={activeTab === 'large' ? '搜索大模型名称 / Model ID' : '搜索小模型名称 / 业务标识'}
           onSearch={(val) => {
             setQ(val)
             void fetchList()
           }}
-          style={{ width: 220 }}
+          style={{ width: 240 }}
         />
-        <Select
-          allowClear
-          placeholder="类型"
-          style={{ width: 110 }}
-          value={kind ?? undefined}
-          onChange={(v) => setKind(v ?? null)}
-          options={REGISTERED_MODEL_KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-        />
-        <Select
-          allowClear
-          placeholder="大模型分类"
-          style={{ width: 130 }}
-          value={largeCategory ?? undefined}
-          onChange={(v) => setLargeCategory((v as LargeModelCategory) ?? null)}
-          options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
-            value: o.value,
-            label: o.label,
-          }))}
-        />
-        <Select
-          allowClear
-          placeholder="小模型分类"
-          style={{ width: 130 }}
-          value={smallCategory ?? undefined}
-          onChange={(v) => setSmallCategory(v ?? null)}
-          options={SMALL_MODEL_CATEGORY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-        />
+        {activeTab === 'large' && (
+          <Select
+            allowClear
+            placeholder="大模型分类"
+            style={{ width: 140 }}
+            value={largeCategory ?? undefined}
+            onChange={(v) => setLargeCategory((v as LargeModelCategory) ?? null)}
+            options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
+              value: o.value,
+              label: o.label,
+            }))}
+          />
+        )}
+        {activeTab === 'small' && (
+          <Select
+            allowClear
+            placeholder="小模型分类"
+            style={{ width: 140 }}
+            value={smallCategory ?? undefined}
+            onChange={(v) => setSmallCategory(v ?? null)}
+            options={SMALL_MODEL_CATEGORY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+          />
+        )}
         <Select
           allowClear
           placeholder="Provider"
@@ -411,26 +497,69 @@ export default function ModelListPage() {
           添加模型
         </Button>
       </Space>
-      <Table<RegisteredModelListItem>
-        rowKey="id"
-        size="middle"
-        loading={loading}
-        columns={columns}
-        dataSource={items}
-        pagination={{
-          total,
-          pageSize: 50,
-          showSizeChanger: false,
-          onChange: () => {
-            /* server paging later */
+      <Tabs
+        activeKey={activeTab}
+        onChange={onTabChange}
+        items={[
+          {
+            key: 'large',
+            label: `大模型 (${activeTab === 'large' ? total : '...'})`,
+            children: (
+              <Table<RegisteredModelListItem>
+                rowKey="id"
+                size="middle"
+                loading={loading}
+                columns={largeColumns}
+                dataSource={items}
+                pagination={{
+                  total,
+                  pageSize: 50,
+                  showSizeChanger: false,
+                  onChange: () => {},
+                }}
+                scroll={{ x: 'max-content' }}
+                footer={() => <Text type="secondary">共 {total} 条</Text>}
+                locale={{
+                  emptyText:
+                    providerOptions.length === 0
+                      ? '请先添加 Provider'
+                      : '暂无大模型',
+                }}
+              />
+            ),
           },
-        }}
-        scroll={{ x: 'max-content' }}
-        footer={() => <Text type="secondary">共 {total} 条</Text>}
+          {
+            key: 'small',
+            label: `小模型 (${activeTab === 'small' ? total : '...'})`,
+            children: (
+              <Table<RegisteredModelListItem>
+                rowKey="id"
+                size="middle"
+                loading={loading}
+                columns={smallColumns}
+                dataSource={items}
+                pagination={{
+                  total,
+                  pageSize: 50,
+                  showSizeChanger: false,
+                  onChange: () => {},
+                }}
+                scroll={{ x: 'max-content' }}
+                footer={() => <Text type="secondary">共 {total} 条</Text>}
+                locale={{
+                  emptyText:
+                    providerOptions.length === 0
+                      ? '请先添加 Provider'
+                      : '暂无小模型',
+                }}
+              />
+            ),
+          },
+        ]}
       />
 
       <Drawer
-        title="添加模型"
+        title={activeTab === 'large' ? '添加大模型' : '添加小模型'}
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         width={600}
@@ -462,11 +591,27 @@ export default function ModelListPage() {
           >
             {({ getFieldValue }) =>
               getFieldValue('kind') === 'small' ? (
-                <SmallModelFormFields
-                  form={createForm as never}
-                  uploading={uploading}
-                  setUploading={setUploading}
-                />
+                <>
+                  <SmallModelFormFields
+                    form={createForm as never}
+                    uploading={uploading}
+                    setUploading={setUploading}
+                  />
+                  <Form.Item
+                    label="Provider"
+                    name="provider_id"
+                    rules={[{ required: true, message: '请选择 Provider' }]}
+                    tooltip="凭证与端点统一继承自 Provider（小模型通常选 self-hosted）"
+                  >
+                    <Select
+                      options={providerOptions.map((p) => ({
+                        value: p.id,
+                        label: `${p.display_name}${p.provider_preset ? ` (${p.provider_preset})` : ''}`,
+                      }))}
+                      placeholder="选择 Provider"
+                    />
+                  </Form.Item>
+                </>
               ) : (
                 <>
                   <Form.Item
@@ -518,10 +663,7 @@ export default function ModelListPage() {
                   >
                     <Input placeholder="1.0.0" />
                   </Form.Item>
-                  <Form.Item
-                    label="模型说明（Description）"
-                    name="description"
-                  >
+                  <Form.Item label="模型说明（Description）" name="description">
                     <Input.TextArea
                       rows={3}
                       placeholder="如：用于广宣品文本审核"
@@ -531,24 +673,6 @@ export default function ModelListPage() {
               )
             }
           </Form.Item>
-
-          {/* 小模型也需要选择 Provider，移到 Form.List 之外仍可显示 */}
-          {createForm.getFieldValue('kind') === 'small' && (
-            <Form.Item
-              label="Provider"
-              name="provider_id"
-              rules={[{ required: true, message: '请选择 Provider' }]}
-              tooltip="凭证与端点统一继承自 Provider（小模型通常选 self-hosted）"
-            >
-              <Select
-                options={providerOptions.map((p) => ({
-                  value: p.id,
-                  label: `${p.display_name}${p.provider_preset ? ` (${p.provider_preset})` : ''}`,
-                }))}
-                placeholder="选择 Provider"
-              />
-            </Form.Item>
-          )}
         </Form>
       </Drawer>
 
