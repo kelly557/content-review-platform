@@ -9,6 +9,7 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Select,
   Space,
   Spin,
   Table,
@@ -22,15 +23,18 @@ import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
   KeyOutlined,
+  PlusOutlined,
   StopOutlined,
 } from '@ant-design/icons'
 import { Link, useParams } from 'react-router-dom'
 import dayjs from 'dayjs'
-import { providersApi } from '@/api/registered-models'
+import { providersApi, registeredModelsApi } from '@/api/registered-models'
 import { useAuthStore } from '@/store'
 import {
   LARGE_MODEL_CATEGORY_OPTIONS,
   REGISTERED_MODEL_PROVIDER_PRESETS,
+  type LargeModelCategory,
+  type RegisteredModelCreate,
   type RegisteredProviderDetail,
   type RegisteredProviderUpdate,
 } from '@/types/domain'
@@ -56,6 +60,15 @@ export default function ProviderDetailPage() {
   const [editForm] = Form.useForm<RegisteredProviderUpdate>()
   const [rotateOpen, setRotateOpen] = useState(false)
   const [rotateForm] = Form.useForm<{ api_key: string }>()
+  const [appendOpen, setAppendOpen] = useState(false)
+  const [appending, setAppending] = useState(false)
+  const [appendForm] = Form.useForm<{
+    name?: string
+    model_name: string
+    large_category: LargeModelCategory
+    version?: string
+    description?: string
+  }>()
 
   const fetchAll = async () => {
     setLoading(true)
@@ -143,6 +156,43 @@ export default function ProviderDetailPage() {
     }
   }
 
+  const handleAppendModel = async () => {
+    const v = await appendForm.validateFields().catch(() => null)
+    if (!v) return
+    if (!v.model_name || !v.model_name.trim()) {
+      message.error('请填写 model_id')
+      return
+    }
+    if (!v.large_category) {
+      message.error('请选择大模型分类')
+      return
+    }
+    setAppending(true)
+    try {
+      const payload: RegisteredModelCreate = {
+        name: (v.name ?? v.model_name).trim(),
+        description: v.description,
+        kind: 'large',
+        small_category: null,
+        large_category: v.large_category,
+        provider_id: providerId,
+        model_name: v.model_name.trim(),
+        version: v.version,
+      }
+      await registeredModelsApi.create(payload)
+      message.success('模型已追加到该 Provider')
+      appendForm.resetFields()
+      setAppendOpen(false)
+      await fetchAll()
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const text = typeof detail === 'string' ? detail : '追加失败'
+      message.error(text)
+    } finally {
+      setAppending(false)
+    }
+  }
+
   if (loading && !data) {
     return <Spin style={{ display: 'block', margin: '20vh auto' }} />
   }
@@ -187,6 +237,14 @@ export default function ProviderDetailPage() {
         }
         extra={
           <Space>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setAppendOpen(true)}
+              disabled={!canWrite || data.status === 'archived'}
+            >
+              添加模型
+            </Button>
             <Tooltip title={data.status === 'archived' ? '归档态不可校验' : ''}>
               <Button
                 icon={<CheckCircleOutlined />}
@@ -400,6 +458,59 @@ export default function ProviderDetailPage() {
             rules={[{ required: true, message: '请填写新的 API key' }]}
           >
             <Input.Password visibilityToggle placeholder="sk-..." />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`添加模型到「${data.display_name}」`}
+        open={appendOpen}
+        onCancel={() => setAppendOpen(false)}
+        onOk={handleAppendModel}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={appending}
+        destroyOnClose
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="该模型将立即挂载到当前 Provider，凭证与 Base URL 继承自 Provider。"
+        />
+        <Form
+          form={appendForm}
+          layout="vertical"
+          initialValues={{ large_category: 'text' as LargeModelCategory }}
+        >
+          <Form.Item
+            label="Model ID"
+            name="model_name"
+            rules={[{ required: true, message: '请填写 Model ID' }]}
+            tooltip="厂商返回的模型标识，如 gpt-4o-mini / claude-3-5-sonnet-latest"
+          >
+            <Input placeholder="gpt-4o-mini / claude-3-5-sonnet-latest" />
+          </Form.Item>
+          <Form.Item label="模型名称" name="name">
+            <Input placeholder="留空则使用 Model ID 作为展示名" />
+          </Form.Item>
+          <Form.Item
+            label="大模型分类"
+            name="large_category"
+            rules={[{ required: true, message: '请选择大模型分类' }]}
+          >
+            <Select
+              options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
+                value: o.value,
+                label: o.label,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item label="Version" name="version" tooltip="语义版本号，如 1.0.0（可选）">
+            <Input placeholder="1.0.0" />
+          </Form.Item>
+          <Form.Item label="描述" name="description">
+            <Input.TextArea rows={2} placeholder="该模型的用途 / 注意事项" />
           </Form.Item>
         </Form>
       </Modal>
