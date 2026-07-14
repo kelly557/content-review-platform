@@ -352,6 +352,42 @@ async def test_create_small_model_with_upload(client):
 
 
 @pytest.mark.asyncio
+async def test_list_models_carries_small_model_artifact_summary(client):
+    """list 接口应在 list item 携带 current_version 的 artifact 摘要。
+
+    业务价值：小模型列表页直接展示文件 + 大小 + SHA-256 前缀，
+    不用每次点进详情才看到。
+    """
+    await _login(client)
+    art = await _upload_small_model_file(client, b"weights-list-summary")
+    pid = await _create_provider(client, display_name="selfhost-summary", preset="self-hosted")
+    r = await client.post(
+        "/api/v1/registered-models",
+        json={
+            "name": "summary-model",
+            "kind": "small",
+            "small_category": "politics",
+            "provider_id": pid,
+            "model_name": "politics-summary",
+            "max_output_tokens": 256,
+            "registration_method": "uploaded_file",
+            "artifact": art,
+        },
+    )
+    assert r.status_code == 201, r.text
+    mid = r.json()["id"]
+
+    r1 = await client.get("/api/v1/registered-models", params={"kind": "small"})
+    assert r1.status_code == 200
+    items = [m for m in r1.json()["items"] if m["id"] == mid]
+    assert items, "列表中未找到刚创建的小模型"
+    item = items[0]
+    assert item["artifact_filename"] == "politics.onnx"
+    assert item["artifact_sha256"] == art["sha256"]
+    assert item["artifact_size"] == len(b"weights-list-summary")
+
+
+@pytest.mark.asyncio
 async def test_create_small_model_missing_artifact_rejected(client):
     await _login(client)
     pid = await _create_provider(client, display_name="selfhost-bad", preset="self-hosted")

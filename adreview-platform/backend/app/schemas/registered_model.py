@@ -110,6 +110,10 @@ class RegisteredModelListItem(BaseModel):
     version: Optional[str] = None
     current_version_id: Optional[int] = None
     current_version_no: Optional[int] = None
+    # 小模型专属：当前版本的 artifact 摘要，用于列表直接展示文件
+    artifact_filename: Optional[str] = None
+    artifact_size: Optional[int] = None
+    artifact_sha256: Optional[str] = None
     owner_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None

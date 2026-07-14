@@ -243,7 +243,11 @@ def _to_out(model: RegisteredModel) -> RegisteredModelOut:
     return RegisteredModelOut.model_validate(payload)
 
 
-def _to_list_item(model: RegisteredModel, provider: Optional[RegisteredProvider] = None) -> RegisteredModelListItem:
+def _to_list_item(
+    model: RegisteredModel,
+    provider: Optional[RegisteredProvider] = None,
+    artifact: Optional[dict] = None,
+) -> RegisteredModelListItem:
     current_no = None
     p = provider if provider is not None else getattr(model, "provider", None)
     payload = {
@@ -268,6 +272,10 @@ def _to_list_item(model: RegisteredModel, provider: Optional[RegisteredProvider]
         "created_at": model.created_at,
         "updated_at": model.updated_at,
     }
+    if artifact:
+        payload["artifact_filename"] = artifact.get("artifact_filename")
+        payload["artifact_size"] = artifact.get("artifact_size")
+        payload["artifact_sha256"] = artifact.get("artifact_sha256")
     return RegisteredModelListItem.model_validate(payload)
 
 
@@ -378,20 +386,43 @@ async def list_models(
         )
     ).scalars().all()
 
-    # 避免 selectinload 触发跨测试 schema 缓存：用显式 query 取 provider
+    # 显式取 provider（避开 selectinload 跨测试 schema 缓存）
     provider_ids = {r.provider_id for r in rows if r.provider_id}
     providers: dict[int, RegisteredProvider] = {}
     if provider_ids:
         provs = (
             await db.execute(
                 select(RegisteredProvider)
-                
                 .where(RegisteredProvider.id.in_(provider_ids))
             )
         ).scalars().all()
         providers = {p.id: p for p in provs}
 
-    items = [_to_list_item(r, providers.get(r.provider_id)) for r in rows]
+    # 显式取 current_version artifact 摘要（小模型列表展示文件名 / 大小 / SHA-256）
+    cv_ids = [r.current_version_id for r in rows if r.current_version_id]
+    version_artifact: dict[int, dict] = {}
+    if cv_ids:
+        ver_rows = (
+            await db.execute(
+                select(
+                    RegisteredModelVersion.id,
+                    RegisteredModelVersion.artifact_filename,
+                    RegisteredModelVersion.artifact_size,
+                    RegisteredModelVersion.artifact_sha256,
+                ).where(RegisteredModelVersion.id.in_(cv_ids))
+            )
+        ).all()
+        for vid, fn, sz, sha in ver_rows:
+            version_artifact[vid] = {
+                "artifact_filename": fn,
+                "artifact_size": sz,
+                "artifact_sha256": sha,
+            }
+
+    items = [
+        _to_list_item(r, providers.get(r.provider_id), version_artifact.get(r.current_version_id or -1))
+        for r in rows
+    ]
     return Page(items=items, total=total, page=page, size=size)
 
 
