@@ -2,11 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
-  Drawer,
-  Form,
   Input,
   Popconfirm,
-  Radio,
   Select,
   Space,
   Table,
@@ -26,8 +23,6 @@ import dayjs from 'dayjs'
 import { registeredModelsApi, providersApi } from '@/api/registered-models'
 import type {
   LargeModelCategory,
-  RegisteredModelCreate,
-  RegisteredModelKind,
   RegisteredModelListItem,
   RegisteredModelStatus,
   RegisteredProviderOption,
@@ -39,23 +34,9 @@ import {
   SMALL_MODEL_CATEGORY_OPTIONS,
 } from '@/types/domain'
 import { useAuthStore } from '@/store'
-import SmallModelFormFields, {
-  type SmallModelFormValues,
-} from './SmallModelFormFields'
-import CreateProviderModal from './CreateModelModal'
+import CreateModelModal from './CreateModelModal'
 
 const { Text } = Typography
-
-interface LargeModelFormValues {
-  provider_id?: number
-  model_name: string
-  large_category?: LargeModelCategory
-  version?: string
-}
-
-interface CreateFormValues extends SmallModelFormValues, LargeModelFormValues {
-  kind: RegisteredModelKind
-}
 
 type ModelTab = 'large' | 'small'
 
@@ -76,11 +57,7 @@ export default function ModelListPage() {
   const [loading, setLoading] = useState(false)
 
   const [createOpen, setCreateOpen] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [createForm] = Form.useForm<CreateFormValues>()
   const [providerOptions, setProviderOptions] = useState<RegisteredProviderOption[]>([])
-  const [providerOpen, setProviderOpen] = useState(false)
 
   const fetchList = async () => {
     setLoading(true)
@@ -128,101 +105,7 @@ export default function ModelListPage() {
       message.warning('仅管理员可添加模型')
       return
     }
-    if (activeTab === 'large' && providerOptions.length === 0) {
-      message.warning('请先创建一个 Provider，再添加大模型')
-      setProviderOpen(true)
-      return
-    }
-    createForm.resetFields()
-    createForm.setFieldsValue({
-      kind: activeTab,
-      large_category: activeTab === 'large' ? 'text' : undefined,
-      provider_id: activeTab === 'large' ? providerOptions[0]?.id : undefined,
-    })
     setCreateOpen(true)
-  }
-
-  const onKindChange = (next?: RegisteredModelKind) => {
-    if (next === 'large') {
-      createForm.setFieldValue('small_category', undefined)
-    } else if (next === 'small') {
-      createForm.setFieldValue('large_category', undefined)
-      createForm.setFieldValue('provider_id', undefined)
-    }
-  }
-
-  const submitCreate = async () => {
-    const v = await createForm.validateFields().catch(() => null)
-    if (!v) return
-    if (!v.model_name || !v.model_name.trim()) {
-      message.error('请填写模型标识')
-      return
-    }
-    if (v.kind === 'large') {
-      if (!v.provider_id) {
-        message.error('请选择 Provider')
-        return
-      }
-      if (!v.large_category) {
-        message.error('大模型必须选择分类')
-        return
-      }
-    } else {
-      if (!v.small_category) {
-        message.error('小模型必须选择分类')
-        return
-      }
-      const artifact = (v as CreateFormValues & { __artifact?: unknown }).__artifact as
-        | import('@/types/domain').ArtifactUploadResponse
-        | undefined
-      if (!artifact) {
-        message.error('请上传小模型文件')
-        return
-      }
-    }
-    setCreating(true)
-    try {
-      if (v.kind === 'small') {
-        const artifact = (v as CreateFormValues & { __artifact?: unknown }).__artifact as
-          | import('@/types/domain').ArtifactUploadResponse
-          | undefined
-        const payload: RegisteredModelCreate = {
-          name: v.name,
-          description: v.description,
-          kind: 'small',
-          small_category: v.small_category,
-          large_category: null,
-          provider_id: undefined,
-          model_name: v.model_name.trim(),
-          version: v.version,
-          max_output_tokens: v.max_output_tokens,
-          registration_method: 'uploaded_file',
-          artifact: artifact ?? null,
-        }
-        await registeredModelsApi.create(payload)
-      } else {
-        const payload: RegisteredModelCreate = {
-          name: v.name,
-          description: v.description,
-          kind: 'large',
-          small_category: null,
-          large_category: v.large_category!,
-          provider_id: v.provider_id!,
-          model_name: v.model_name.trim(),
-          version: v.version,
-        }
-        await registeredModelsApi.create(payload)
-      }
-      message.success('模型添加成功')
-      setCreateOpen(false)
-      await fetchList()
-    } catch (e: unknown) {
-      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-      const text = typeof detail === 'string' ? detail : '添加失败'
-      message.error(text)
-    } finally {
-      setCreating(false)
-    }
   }
 
   const handleDelete = async (row: RegisteredModelListItem) => {
@@ -238,7 +121,6 @@ export default function ModelListPage() {
   const onTabChange = (next: string) => {
     const tab = next as ModelTab
     setActiveTab(tab)
-    // 切换 Tab：重置只属于前一种类型的分类筛选；并清空跨 tab 无意义的条件
     if (tab === 'large') {
       setSmallCategory(null)
     } else {
@@ -289,7 +171,11 @@ export default function ModelListPage() {
         dataIndex: 'updated_at',
         width: '12%',
         render: (v: string | null) =>
-          v ? <span style={{ color: '#64748B', fontSize: 12 }}>{dayjs(v).format('YYYY-MM-DD HH:mm')}</span> : '-',
+          v ? (
+            <span style={{ color: '#64748B', fontSize: 12 }}>{dayjs(v).format('YYYY-MM-DD HH:mm')}</span>
+          ) : (
+            '-'
+          ),
       },
       {
         title: '操作',
@@ -321,7 +207,7 @@ export default function ModelListPage() {
     [canWrite, handleDelete],
   )
 
-  // 小模型列（无 Provider 概念：业务上选择框隐藏）
+  // 小模型列（无 Provider 概念）
   const smallColumns = useMemo(
     () => [
       { title: '名称', dataIndex: 'name', width: '18%' },
@@ -374,7 +260,10 @@ export default function ModelListPage() {
                 type="link"
                 size="small"
                 onClick={() => {
-                  const url = registeredModelsApi.artifactDownloadUrl(row.id, row.current_version_id!)
+                  const url = registeredModelsApi.artifactDownloadUrl(
+                    row.id,
+                    row.current_version_id!,
+                  )
                   window.open(url, '_blank')
                 }}
               >
@@ -469,13 +358,6 @@ export default function ModelListPage() {
           刷新
         </Button>
         <Button
-          icon={<CloudDownloadOutlined />}
-          onClick={() => setProviderOpen(true)}
-          disabled={!canWrite}
-        >
-          添加 Provider
-        </Button>
-        <Button
           type="primary"
           icon={<PlusOutlined />}
           onClick={openCreate}
@@ -506,12 +388,7 @@ export default function ModelListPage() {
                 }}
                 scroll={{ x: 'max-content' }}
                 footer={() => <Text type="secondary">共 {total} 条</Text>}
-                locale={{
-                  emptyText:
-                    providerOptions.length === 0
-                      ? '请先添加 Provider'
-                      : '暂无大模型',
-                }}
+                locale={{ emptyText: '暂无大模型，请先添加模型' }}
               />
             ),
           },
@@ -533,124 +410,17 @@ export default function ModelListPage() {
                 }}
                 scroll={{ x: 'max-content' }}
                 footer={() => <Text type="secondary">共 {total} 条</Text>}
-                locale={{
-                  emptyText:
-                    providerOptions.length === 0
-                      ? '请先添加 Provider'
-                      : '暂无小模型',
-                }}
+                locale={{ emptyText: '暂无小模型，请先添加模型' }}
               />
             ),
           },
         ]}
       />
 
-      <Drawer
-        title={activeTab === 'large' ? '添加大模型' : '添加小模型'}
+      <CreateModelModal
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        width={600}
-        destroyOnClose
-        extra={
-          <Space>
-            <Button onClick={() => setCreateOpen(false)}>取消</Button>
-            <Button
-              type="primary"
-              loading={creating || uploading}
-              onClick={submitCreate}
-            >
-              保存
-            </Button>
-          </Space>
-        }
-      >
-        <Form<CreateFormValues> form={createForm} layout="vertical">
-          <Form.Item label="类型" name="kind" rules={[{ required: true }]}>
-            <Radio.Group onChange={(e) => onKindChange(e.target.value)}>
-              <Radio.Button value="large">大模型</Radio.Button>
-              <Radio.Button value="small">小模型</Radio.Button>
-            </Radio.Group>
-          </Form.Item>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(prev, curr) => prev.kind !== curr.kind}
-          >
-            {({ getFieldValue }) =>
-              getFieldValue('kind') === 'small' ? (
-                <SmallModelFormFields
-                  form={createForm as never}
-                  uploading={uploading}
-                  setUploading={setUploading}
-                />
-              ) : (
-                <>
-                  <Form.Item
-                    label="模型名称"
-                    name="name"
-                    rules={[{ required: true, message: '请填写模型名称' }]}
-                  >
-                    <Input placeholder="如：GPT-4o 文本审核" />
-                  </Form.Item>
-                  <Form.Item
-                    label="Provider"
-                    name="provider_id"
-                    rules={[{ required: true, message: '请选择 Provider' }]}
-                    tooltip="凭证与端点统一继承自 Provider"
-                  >
-                    <Select
-                      options={providerOptions.map((p) => ({
-                        value: p.id,
-                        label: `${p.display_name}${p.provider_preset ? ` (${p.provider_preset})` : ''}`,
-                      }))}
-                      placeholder="选择厂商级 Provider"
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    label="大模型分类"
-                    name="large_category"
-                    rules={[{ required: true, message: '请选择大模型分类' }]}
-                  >
-                    <Select
-                      options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
-                        value: o.value,
-                        label: o.label,
-                      }))}
-                      placeholder="文本 / 多模态 / 其他"
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    label="Model ID"
-                    name="model_name"
-                    rules={[{ required: true, message: '请填写 Model ID' }]}
-                    tooltip="厂商返回的模型标识，如 gpt-4o-mini / claude-3-5-sonnet-latest"
-                  >
-                    <Input placeholder="gpt-4o-mini / claude-3-5-sonnet-latest" />
-                  </Form.Item>
-                  <Form.Item
-                    label="Version"
-                    name="version"
-                    tooltip="语义版本号，如 1.0.0（可选）"
-                  >
-                    <Input placeholder="1.0.0" />
-                  </Form.Item>
-                  <Form.Item label="模型说明（Description）" name="description">
-                    <Input.TextArea
-                      rows={3}
-                      placeholder="如：用于广宣品文本审核"
-                    />
-                  </Form.Item>
-                </>
-              )
-            }
-          </Form.Item>
-        </Form>
-      </Drawer>
-
-      <CreateProviderModal
-        open={providerOpen}
         mode={activeTab === 'large' ? 'large' : 'small'}
-        onClose={() => setProviderOpen(false)}
+        onClose={() => setCreateOpen(false)}
         onCreated={() => {
           void fetchProviders()
           void fetchList()
