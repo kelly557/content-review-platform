@@ -149,6 +149,20 @@ def _validate_small_category(s: str | None) -> str | None:
     return s
 
 
+ALLOWED_MODALITY = {"text", "image"}
+
+
+def _validate_modality(s: str | None) -> str | None:
+    if s is None:
+        return None
+    if s not in ALLOWED_MODALITY:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"非法 modality: {s}（期望 text / image）",
+        )
+    return s
+
+
 def _validate_provider(p: str | None) -> Optional[str]:
     if p is None:
         return None
@@ -210,6 +224,7 @@ def _to_out(model: RegisteredModel) -> RegisteredModelOut:
         except Exception:
             current = None
     current_no = current.version_no if current else None
+    current_label = current.version_label if current else None
     p = getattr(model, "provider", None)
     payload = {
         "id": model.id,
@@ -219,6 +234,7 @@ def _to_out(model: RegisteredModel) -> RegisteredModelOut:
         "description": model.description,
         "kind": model.kind,
         "small_category": model.small_category,
+        "modality": model.modality,
         "large_category": model.large_category,
         "provider_id": model.provider_id,
         "provider": _provider_summary(p) if p else None,
@@ -236,6 +252,7 @@ def _to_out(model: RegisteredModel) -> RegisteredModelOut:
         "updated_by_id": model.updated_by_id,
         "current_version_id": model.current_version_id,
         "current_version_no": current_no,
+        "current_version_label": current_label,
         "current_version": current,
         "created_at": model.created_at,
         "updated_at": model.updated_at,
@@ -248,7 +265,6 @@ def _to_list_item(
     provider: Optional[RegisteredProvider] = None,
     artifact: Optional[dict] = None,
 ) -> RegisteredModelListItem:
-    current_no = None
     p = provider if provider is not None else getattr(model, "provider", None)
     payload = {
         "id": model.id,
@@ -257,6 +273,7 @@ def _to_list_item(
         "name": model.name,
         "kind": model.kind,
         "small_category": model.small_category,
+        "modality": model.modality,
         "large_category": model.large_category,
         "provider_id": model.provider_id,
         "provider_preset": p.provider_preset if p else None,
@@ -267,7 +284,8 @@ def _to_list_item(
         "status": model.status,
         "version": model.version,
         "current_version_id": model.current_version_id,
-        "current_version_no": current_no,
+        "current_version_no": artifact.get("version_no") if artifact else None,
+        "current_version_label": artifact.get("version_label") if artifact else None,
         "owner_id": model.owner_id,
         "created_at": model.created_at,
         "updated_at": model.updated_at,
@@ -398,6 +416,7 @@ async def list_models(
         providers = {p.id: p for p in provs}
 
     # 显式取 current_version artifact 摘要（小模型列表展示文件名 + 大小）
+    # + version_no / version_label（用于列表展示「当前模型版本」）
     cv_ids = [r.current_version_id for r in rows if r.current_version_id]
     version_artifact: dict[int, dict] = {}
     if cv_ids:
@@ -407,13 +426,17 @@ async def list_models(
                     RegisteredModelVersion.id,
                     RegisteredModelVersion.artifact_filename,
                     RegisteredModelVersion.artifact_size,
+                    RegisteredModelVersion.version_no,
+                    RegisteredModelVersion.version_label,
                 ).where(RegisteredModelVersion.id.in_(cv_ids))
             )
         ).all()
-        for vid, fn, sz in ver_rows:
+        for vid, fn, sz, vno, vlbl in ver_rows:
             version_artifact[vid] = {
                 "artifact_filename": fn,
                 "artifact_size": sz,
+                "version_no": vno,
+                "version_label": vlbl,
             }
 
     items = [
@@ -474,15 +497,23 @@ async def create_model(
 ) -> RegisteredModelOut:
     kind = _validate_kind(body.kind or RegisteredModelKind.LARGE.value)
     small_category = _validate_small_category(body.small_category)
+    modality = _validate_modality(body.modality)
     large_category = _validate_large_category(body.large_category)
     if kind == RegisteredModelKind.SMALL.value and not small_category:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "小模型（kind=small）必须选择分类（small_category）",
         )
+    if kind == RegisteredModelKind.SMALL.value and not modality:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "小模型（kind=small）必须选择模态（modality）：text / image",
+        )
     if kind == RegisteredModelKind.LARGE.value:
         if small_category:
             small_category = None
+        if modality:
+            modality = None
         if not large_category:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -557,6 +588,7 @@ async def create_model(
             description=body.description,
             kind=kind,
             small_category=small_category,
+            modality=modality,
             large_category=None,
             provider_id=provider.id if provider else None,
             model_name=model_id_str,
@@ -635,6 +667,7 @@ async def create_model(
         description=body.description,
         kind=kind,
         small_category=None,
+        modality=None,
         large_category=large_category,
         provider_id=provider.id,
         model_name=model_id_str,
@@ -818,6 +851,10 @@ async def update_model(
         data["small_category"] = _validate_small_category(data["small_category"])
     if model.kind == RegisteredModelKind.LARGE.value and "small_category" in data:
         data["small_category"] = None
+    if "modality" in data and data["modality"] is not None:
+        data["modality"] = _validate_modality(data["modality"])
+    if model.kind == RegisteredModelKind.LARGE.value and "modality" in data:
+        data["modality"] = None
     if "large_category" in data and data["large_category"] is not None:
         data["large_category"] = _validate_large_category(data["large_category"])
     if model.kind == RegisteredModelKind.SMALL.value and "large_category" in data:
@@ -932,6 +969,9 @@ async def create_version(
 
     if method == RegisteredModelRegistrationMethod.UPLOADED_FILE.value:
         # 小模型分支
+        if body.modality is not None:
+            new_modality = _validate_modality(body.modality)
+            model.modality = new_modality
         prev = None
         if model.current_version_id:
             prev = await db.scalar(

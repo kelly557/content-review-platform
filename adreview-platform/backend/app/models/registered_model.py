@@ -115,6 +115,10 @@ class RegisteredModel(Base):
     small_category: Mapped[Optional[str]] = mapped_column(
         String(32), nullable=True, index=True
     )
+    # 小模型模态（kind=small 时必填 text|image；kind=large 时为 null）
+    modality: Mapped[Optional[str]] = mapped_column(
+        String(8), nullable=True, index=True
+    )
     # 大模型分类（kind=large 时必填；kind=small 时为 null）
     large_category: Mapped[Optional[str]] = mapped_column(
         String(16), nullable=True, index=True

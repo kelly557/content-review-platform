@@ -68,6 +68,7 @@ class RegisteredModelOut(BaseModel):
     description: Optional[str] = None
     kind: str
     small_category: Optional[str] = None
+    modality: Optional[str] = None
     large_category: Optional[str] = None
     provider_id: Optional[int] = None
     provider: Optional["RegisteredProviderSummaryOut"] = None
@@ -85,6 +86,7 @@ class RegisteredModelOut(BaseModel):
     updated_by_id: Optional[int] = None
     current_version_id: Optional[int] = None
     current_version_no: Optional[int] = None
+    current_version_label: Optional[str] = None
     current_version: Optional[RegisteredModelVersionOut] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -99,6 +101,7 @@ class RegisteredModelListItem(BaseModel):
     name: str
     kind: str
     small_category: Optional[str] = None
+    modality: Optional[str] = None
     large_category: Optional[str] = None
     provider_id: Optional[int] = None
     provider_preset: Optional[str] = None
@@ -110,6 +113,7 @@ class RegisteredModelListItem(BaseModel):
     version: Optional[str] = None
     current_version_id: Optional[int] = None
     current_version_no: Optional[int] = None
+    current_version_label: Optional[str] = None
     # 小模型专属：当前版本的 artifact 摘要，用于列表直接展示文件
     artifact_filename: Optional[str] = None
     artifact_size: Optional[int] = None
@@ -133,6 +137,11 @@ class RegisteredModelCreate(BaseModel):
             "小模型分类（kind=small 时必填）：politics / terrorism / porn / illicit / "
             "ad / religion / ad_law / abuse / unhealthy"
         ),
+    )
+    modality: Optional[str] = Field(
+        default=None,
+        max_length=8,
+        description="小模型模态（kind=small 时必填）：text / image",
     )
     large_category: Optional[str] = Field(
         default=None,
@@ -182,6 +191,7 @@ class RegisteredModelUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     small_category: Optional[str] = None
+    modality: Optional[str] = None
     large_category: Optional[str] = None
     model_name: Optional[str] = None
     max_output_tokens: Optional[int] = Field(default=None, ge=1, le=32768)
@@ -199,6 +209,11 @@ class RegisteredModelVersionCreate(BaseModel):
         default=None,
         max_length=16,
         description="大模型分类（覆盖 Provider 默认值，可选）",
+    )
+    modality: Optional[str] = Field(
+        default=None,
+        max_length=8,
+        description="小模型模态（覆盖 model 默认值，可选）",
     )
     model_name: Optional[str] = Field(default=None, max_length=128)
     config: dict[str, Any] = Field(default_factory=dict)
