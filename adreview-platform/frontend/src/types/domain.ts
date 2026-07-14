@@ -2150,6 +2150,18 @@ export const SMALL_MODEL_CATEGORY_LABEL: Record<SmallModelCategory, string> = SM
   {} as Record<SmallModelCategory, string>,
 )
 
+export type SmallModelModality = 'text' | 'image'
+
+export const SMALL_MODEL_MODALITY_OPTIONS: { value: SmallModelModality; label: string; color: string }[] = [
+  { value: 'text', label: '文本', color: 'blue' },
+  { value: 'image', label: '图片', color: 'geekblue' },
+]
+
+export const SMALL_MODEL_MODALITY_LABEL: Record<SmallModelModality, string> = SMALL_MODEL_MODALITY_OPTIONS.reduce(
+  (acc, opt) => ({ ...acc, [opt.value]: opt.label }),
+  {} as Record<SmallModelModality, string>,
+)
+
 export type LargeModelCategory = 'text' | 'multimodal' | 'other'
 
 export const LARGE_MODEL_CATEGORY_OPTIONS: {
@@ -2253,6 +2265,7 @@ export interface RegisteredModel {
   description: string | null
   kind: RegisteredModelKind
   small_category: SmallModelCategory | null
+  modality: SmallModelModality | null
   large_category: LargeModelCategory | null
   provider_id: number | null
   provider: RegisteredProviderSummary | null
@@ -2274,6 +2287,7 @@ export interface RegisteredModel {
   updated_by_name?: string | null
   current_version_id: number | null
   current_version_no: number | null
+  current_version_label: string | null
   current_version?: RegisteredModelVersion | null
   created_at: string
   updated_at: string | null
@@ -2286,6 +2300,7 @@ export interface RegisteredModelListItem {
   name: string
   kind: RegisteredModelKind
   small_category: SmallModelCategory | null
+  modality: SmallModelModality | null
   large_category: LargeModelCategory | null
   provider_id: number | null
   provider_preset: RegisteredModelProvider | null
@@ -2297,6 +2312,7 @@ export interface RegisteredModelListItem {
   version: string | null
   current_version_id: number | null
   current_version_no: number | null
+  current_version_label: string | null
   // 小模型专属：当前版本 artifact 摘要（来自 list 接口）
   artifact_filename: string | null
   artifact_size: number | null
@@ -2312,6 +2328,7 @@ export interface RegisteredModelCreate {
   description?: string | null
   kind?: RegisteredModelKind
   small_category?: SmallModelCategory | null
+  modality?: SmallModelModality | null
   large_category?: LargeModelCategory | null
   // 大模型必填；小模型可空（不绑定任何 Provider）
   provider_id?: number | null
@@ -2329,6 +2346,7 @@ export interface RegisteredModelUpdate {
   name?: string
   description?: string | null
   small_category?: SmallModelCategory | null
+  modality?: SmallModelModality | null
   large_category?: LargeModelCategory | null
   model_name?: string | null
   max_output_tokens?: number | null
@@ -2341,6 +2359,7 @@ export interface RegisteredModelVersionCreate {
   version_label?: string | null
   notes?: string | null
   large_category?: LargeModelCategory | null
+  modality?: SmallModelModality | null
   model_name?: string | null
   config?: Record<string, unknown>
   // —— 小模型上传新版本时携带 ——
