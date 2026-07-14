@@ -2,17 +2,18 @@
 
 Phase 4：把 endpoint_url / api_key 从「每 model 重复」上移到 Provider。
 一个 Provider 容纳多个 model，凭证共享。
+
+注意：本文件不通过 ORM relationship (`provider.credential`) 访问凭证，
+而是用显式 SELECT 方式，避免测试 schema 缓存导致的跨测试脏数据。
 """
 from __future__ import annotations
 
-import re
 import time
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
 from app.models.registered_model import (
@@ -20,6 +21,8 @@ from app.models.registered_model import (
     RegisteredModel,
     RegisteredModelKind,
     RegisteredModelStatus,
+    RegisteredModelVersion,
+    RegisteredModelVersionStatus,
     RegisteredProvider,
     RegisteredProviderStatus,
     ResourceCredential,
@@ -81,10 +84,7 @@ async def _find_or_create_credential(
     provider_preset: Optional[str],
     user_id: Optional[int],
 ) -> ResourceCredential:
-    """按 (provider_preset + masked_token) 复用已存在的凭证，否则新建。
-
-    命中已存在但被另一 provider 占用：仍新建一份（保留多 provider 同 token 的可能）。
-    """
+    """按 (provider_preset + masked_token) 复用已存在的凭证，否则新建。"""
     masked = mask_token(api_key)
     preset = (provider_preset or "").strip()
     existing = await db.scalar(
@@ -112,30 +112,21 @@ async def _find_or_create_credential(
     return cred
 
 
-def _provider_to_out(
-    p: RegisteredProvider, model_count: int, masked_token: Optional[str]
-) -> RegisteredProviderOut:
-    return RegisteredProviderOut.model_validate(
-        {
-            "id": p.id,
-            "public_id": p.public_id,
-            "display_name": p.display_name,
-            "description": p.description,
-            "provider_preset": p.provider_preset,
-            "endpoint_url": p.endpoint_url,
-            "config": p.config or {},
-            "credential_id": p.credential_id,
-            "masked_token": masked_token,
-            "credential_label": p.credential.name if p.credential_id and p.credential else None,
-            "status": p.status,
-            "model_count": model_count,
-            "owner_id": p.owner_id,
-            "created_by_id": p.created_by_id,
-            "updated_by_id": p.updated_by_id,
-            "created_at": p.created_at,
-            "updated_at": p.updated_at,
-        }
+async def _credential_meta(
+    db: AsyncSession, credential_id: Optional[int]
+) -> tuple[Optional[str], Optional[str]]:
+    """显式 SELECT：返回 (masked_token, name)。"""
+    if credential_id is None:
+        return None, None
+    row = await db.execute(
+        select(ResourceCredential.masked_token, ResourceCredential.name).where(
+            ResourceCredential.id == credential_id
+        )
     )
+    r = row.first()
+    if r is None:
+        return None, None
+    return r[0], r[1]  # type: ignore[return-value]
 
 
 async def _load_model_count(db: AsyncSession, provider_id: int) -> int:
@@ -154,6 +145,41 @@ async def _load_model_count(db: AsyncSession, provider_id: int) -> int:
     )
 
 
+def _provider_out_payload(
+    p: RegisteredProvider,
+    *,
+    model_count: int,
+    masked_token: Optional[str],
+    credential_label: Optional[str],
+) -> dict:
+    return {
+        "id": p.id,
+        "public_id": p.public_id,
+        "display_name": p.display_name,
+        "description": p.description,
+        "provider_preset": p.provider_preset,
+        "endpoint_url": p.endpoint_url,
+        "config": p.config or {},
+        "credential_id": p.credential_id,
+        "masked_token": masked_token,
+        "credential_label": credential_label,
+        "status": p.status,
+        "model_count": model_count,
+        "owner_id": p.owner_id,
+        "created_by_id": p.created_by_id,
+        "updated_by_id": p.updated_by_id,
+        "created_at": p.created_at,
+        "updated_at": p.updated_at,
+    }
+
+
+async def _provider_to_out(db: AsyncSession, p: RegisteredProvider, model_count: int) -> RegisteredProviderOut:
+    masked, label = await _credential_meta(db, p.credential_id)
+    return RegisteredProviderOut.model_validate(
+        _provider_out_payload(p, model_count=model_count, masked_token=masked, credential_label=label)
+    )
+
+
 @router.get("", response_model=List[RegisteredProviderOut])
 async def list_providers(
     status_filter: Optional[str] = Query(None, alias="status", description="active / archived"),
@@ -161,11 +187,7 @@ async def list_providers(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_reader),
 ) -> List[RegisteredProviderOut]:
-    stmt = (
-        select(RegisteredProvider)
-        .options(selectinload(RegisteredProvider.credential))
-        .order_by(RegisteredProvider.created_at.desc())
-    )
+    stmt = select(RegisteredProvider).order_by(RegisteredProvider.created_at.desc())
     if status_filter:
         if status_filter not in {s.value for s in RegisteredProviderStatus}:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"非法 status: {status_filter}")
@@ -175,34 +197,44 @@ async def list_providers(
         stmt = stmt.where(RegisteredProvider.display_name.ilike(like))
     rows = (await db.execute(stmt)).scalars().all()
 
-    # 批量取 model_count
     provider_ids = [p.id for p in rows]
+    counts: dict[int, int] = {}
+    cred_ids = sorted({p.credential_id for p in rows if p.credential_id})
     if provider_ids:
-        counts = dict(
-            (
-                await db.execute(
-                    select(RegisteredModel.provider_id, func.count())
-                    .where(
-                        and_(
-                            RegisteredModel.provider_id.in_(provider_ids),
-                            RegisteredModel.is_deleted.is_(False),
+        counts.update(
+            dict(
+                (
+                    await db.execute(
+                        select(RegisteredModel.provider_id, func.count())
+                        .where(
+                            and_(
+                                RegisteredModel.provider_id.in_(provider_ids),
+                                RegisteredModel.is_deleted.is_(False),
+                            )
                         )
+                        .group_by(RegisteredModel.provider_id)
                     )
-                    .group_by(RegisteredModel.provider_id)
-                )
-            ).all()
+                ).all()
+            )
         )
-    else:
-        counts = {}
+    cred_meta: dict[int, tuple[str, str]] = {}
+    if cred_ids:
+        meta_rows = await db.execute(
+            select(ResourceCredential.id, ResourceCredential.masked_token, ResourceCredential.name).where(
+                ResourceCredential.id.in_(cred_ids)
+            )
+        )
+        cred_meta = {r[0]: (r[1], r[2]) for r in meta_rows.all()}
 
-    return [
-        _provider_to_out(
-            p,
-            counts.get(p.id, 0),
-            p.credential.masked_token if p.credential_id and p.credential else None,
+    out: list[RegisteredProviderOut] = []
+    for p in rows:
+        masked, label = cred_meta.get(p.credential_id, (None, None)) if p.credential_id else (None, None)
+        out.append(
+            RegisteredProviderOut.model_validate(
+                _provider_out_payload(p, model_count=counts.get(p.id, 0), masked_token=masked, credential_label=label)
+            )
         )
-        for p in rows
-    ]
+    return out
 
 
 @router.get("/options", operation_id="providers_options")
@@ -210,22 +242,30 @@ async def list_provider_options(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_reader),
 ) -> list[dict]:
-    """轻量下拉：所有 active Provider（不含 model_count 关联）。"""
+    """轻量下拉：所有 active Provider。"""
     rows = (
         await db.execute(
             select(RegisteredProvider)
-            .options(selectinload(RegisteredProvider.credential))
             .where(RegisteredProvider.status == RegisteredProviderStatus.ACTIVE.value)
             .order_by(RegisteredProvider.display_name.asc())
         )
     ).scalars().all()
+    cred_ids = sorted({p.credential_id for p in rows if p.credential_id})
+    cred_meta: dict[int, str] = {}
+    if cred_ids:
+        rs = await db.execute(
+            select(ResourceCredential.id, ResourceCredential.masked_token).where(
+                ResourceCredential.id.in_(cred_ids)
+            )
+        )
+        cred_meta = {r[0]: r[1] for r in rs.all()}
     return [
         {
             "id": p.id,
             "display_name": p.display_name,
             "provider_preset": p.provider_preset,
             "endpoint_url": p.endpoint_url,
-            "masked_token": p.credential.masked_token if p.credential_id and p.credential else None,
+            "masked_token": cred_meta.get(p.credential_id),
             "status": p.status,
         }
         for p in rows
@@ -239,14 +279,11 @@ async def get_provider(
     user=Depends(require_reader),
 ) -> RegisteredProviderDetailOut:
     p = await db.scalar(
-        select(RegisteredProvider)
-        .options(selectinload(RegisteredProvider.credential))
-        .where(RegisteredProvider.id == provider_id)
+        select(RegisteredProvider).where(RegisteredProvider.id == provider_id)
     )
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Provider 不存在")
 
-    # 关联 models
     rows = (
         await db.execute(
             select(RegisteredModel)
@@ -259,6 +296,7 @@ async def get_provider(
             .order_by(RegisteredModel.created_at.desc())
         )
     ).scalars().all()
+
     from app.schemas.registered_model import RegisteredModelListItem
 
     items: list[dict] = []
@@ -290,87 +328,12 @@ async def get_provider(
             ).model_dump()
         )
 
-    out = _provider_to_out(
-        p,
-        len(items),
-        p.credential.masked_token if p.credential_id and p.credential else None,
+    masked, label = await _credential_meta(db, p.credential_id)
+    out = RegisteredProviderOut.model_validate(
+        _provider_out_payload(p, model_count=len(items), masked_token=masked, credential_label=label)
     ).model_dump()
     out["models"] = items
     return RegisteredProviderDetailOut.model_validate(out)
-
-
-@router.post("", response_model=RegisteredProviderDetailOut, status_code=status.HTTP_201_CREATED)
-async def create_provider(
-    body: RegisteredProviderCreate,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(require_writer),
-) -> RegisteredProviderDetailOut:
-    preset = _validate_preset(body.provider_preset)
-    if not body.endpoint_url or not body.endpoint_url.strip():
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "endpoint_url 必填")
-
-    # 1) 凭证：raw token 入库（仅当 present）
-    cred = await _find_or_create_credential(
-        db, api_key=body.api_key, provider_preset=preset, user_id=user.id
-    )
-
-    # 2) Provider 行
-    config = {}
-    proto = _infer_proto(preset)
-    config["protocol"] = proto
-    config["timeout"] = 30
-
-    code = make_provider_code(preset)
-    # 应对极端碰撞：再生成一次
-    while await db.scalar(select(RegisteredProvider).where(RegisteredProvider.code == code)) is not None:
-        code = make_provider_code(preset)
-
-    provider = RegisteredProvider(
-        code=code,
-        display_name=body.display_name.strip(),
-        description=body.description,
-        provider_preset=preset,
-        endpoint_url=body.endpoint_url.strip(),
-        config=config,
-        credential_id=cred.id,
-        status=RegisteredProviderStatus.ACTIVE.value,
-        owner_id=user.id,
-        created_by_id=user.id,
-        updated_by_id=user.id,
-    )
-    db.add(provider)
-    await db.flush()
-
-    # 3) 一次性创建 initial_models
-    initial_summary = []
-    for init in body.initial_models:
-        await _create_provider_model(
-            db,
-            provider=provider,
-            init=init,
-            user=user,
-        )
-        initial_summary.append(init.model_name)
-
-    await write_audit(
-        db,
-        actor=user,
-        action="registered_provider.create",
-        entity_type="registered_provider",
-        entity_id=provider.id,
-        payload={
-            "display_name": provider.display_name,
-            "provider_preset": provider.provider_preset,
-            "endpoint_url": provider.endpoint_url,
-            "credential_id": provider.credential_id,
-            "masked_token": cred.masked_token,
-            "initial_models": initial_summary,
-        },
-    )
-    await db.commit()
-    # 重新取一次（确保 status 字段是枚举）
-    await db.refresh(provider, ["credential"])
-    return await get_provider(provider.id, db=db, user=user)
 
 
 async def _create_provider_model(
@@ -380,7 +343,7 @@ async def _create_provider_model(
     init: ProviderInitialModel,
     user,
 ) -> RegisteredModel:
-    """在 Provider 下创建一个大模型；端点 / 凭证 继承自 Provider。"""
+    """在 Provider 下创建一个大模型；端点 / 凭证 / config 继承自 Provider。"""
     _validate_large_category(init.large_category)
     if not init.large_category:
         raise HTTPException(
@@ -410,12 +373,10 @@ async def _create_provider_model(
     db.add(model)
     await db.flush()
 
-    from app.models.registered_model import RegisteredModelVersion, RegisteredModelVersionStatus
-    next_no = 1
     ver = RegisteredModelVersion(
         model_id=model.id,
-        version_no=next_no,
-        version_label=init.version or f"v{next_no}",
+        version_no=1,
+        version_label=init.version or "v1",
         notes=None,
         large_category=init.large_category,
         registration_method="remote_api",
@@ -434,6 +395,68 @@ async def _create_provider_model(
     return model
 
 
+@router.post("", response_model=RegisteredProviderDetailOut, status_code=status.HTTP_201_CREATED)
+async def create_provider(
+    body: RegisteredProviderCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_writer),
+) -> RegisteredProviderDetailOut:
+    preset = _validate_preset(body.provider_preset)
+    if not body.endpoint_url or not body.endpoint_url.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "endpoint_url 必填")
+
+    cred = await _find_or_create_credential(
+        db, api_key=body.api_key, provider_preset=preset, user_id=user.id
+    )
+
+    config: dict[str, Any] = {}
+    config["protocol"] = _infer_proto(preset)
+    config["timeout"] = 30
+
+    code = make_provider_code(preset)
+    while await db.scalar(select(RegisteredProvider).where(RegisteredProvider.code == code)) is not None:
+        code = make_provider_code(preset)
+
+    provider = RegisteredProvider(
+        code=code,
+        display_name=body.display_name.strip(),
+        description=body.description,
+        provider_preset=preset,
+        endpoint_url=body.endpoint_url.strip(),
+        config=config,
+        credential_id=cred.id,
+        status=RegisteredProviderStatus.ACTIVE.value,
+        owner_id=user.id,
+        created_by_id=user.id,
+        updated_by_id=user.id,
+    )
+    db.add(provider)
+    await db.flush()
+
+    initial_summary = []
+    for init in body.initial_models:
+        await _create_provider_model(db, provider=provider, init=init, user=user)
+        initial_summary.append(init.model_name)
+
+    await write_audit(
+        db,
+        actor=user,
+        action="registered_provider.create",
+        entity_type="registered_provider",
+        entity_id=provider.id,
+        payload={
+            "display_name": provider.display_name,
+            "provider_preset": provider.provider_preset,
+            "endpoint_url": provider.endpoint_url,
+            "credential_id": provider.credential_id,
+            "masked_token": cred.masked_token,
+            "initial_models": initial_summary,
+        },
+    )
+    await db.commit()
+    return await get_provider(provider.id, db=db, user=user)
+
+
 @router.patch("/{provider_id}", response_model=RegisteredProviderOut)
 async def update_provider(
     provider_id: int,
@@ -442,9 +465,7 @@ async def update_provider(
     user=Depends(require_writer),
 ) -> RegisteredProviderOut:
     p = await db.scalar(
-        select(RegisteredProvider)
-        .options(selectinload(RegisteredProvider.credential))
-        .where(RegisteredProvider.id == provider_id)
+        select(RegisteredProvider).where(RegisteredProvider.id == provider_id)
     )
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Provider 不存在")
@@ -452,7 +473,6 @@ async def update_provider(
     data = body.model_dump(exclude_unset=True)
     if "provider_preset" in data and data["provider_preset"]:
         data["provider_preset"] = _validate_preset(data["provider_preset"])
-        # 改 preset 同步影响 config.protocol
         p.config = dict(p.config or {})
         p.config["protocol"] = _infer_proto(data["provider_preset"])
     if "endpoint_url" in data and data["endpoint_url"] is not None:
@@ -467,11 +487,10 @@ async def update_provider(
         action="registered_provider.update",
         entity_type="registered_provider",
         entity_id=p.id,
-        payload={"changes": {k: (data[k] if k in data else None) for k in data}},
+        payload={"changes": {k: data[k] for k in data}},
     )
     await db.commit()
-    await db.refresh(p, ["credential"])
-    return _provider_to_out(p, await _load_model_count(db, p.id), p.credential.masked_token if p.credential_id and p.credential else None)
+    return await _provider_to_out(db, p, await _load_model_count(db, p.id))
 
 
 @router.post("/{provider_id}/api-key", response_model=RegisteredProviderOut)
@@ -481,11 +500,8 @@ async def rotate_api_key(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_writer),
 ) -> RegisteredProviderOut:
-    """替换 Provider 的 API key：新 token 自动建凭证并切换。旧凭证随业务自然漂移。"""
     p = await db.scalar(
-        select(RegisteredProvider)
-        .options(selectinload(RegisteredProvider.credential))
-        .where(RegisteredProvider.id == provider_id)
+        select(RegisteredProvider).where(RegisteredProvider.id == provider_id)
     )
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Provider 不存在")
@@ -503,11 +519,14 @@ async def rotate_api_key(
         action="registered_provider.api_key.rotate",
         entity_type="registered_provider",
         entity_id=p.id,
-        payload={"from_credential_id": old_credential_id, "to_credential_id": new_cred.id, "masked_token": new_cred.masked_token},
+        payload={
+            "from_credential_id": old_credential_id,
+            "to_credential_id": new_cred.id,
+            "masked_token": new_cred.masked_token,
+        },
     )
     await db.commit()
-    await db.refresh(p, ["credential"])
-    return _provider_to_out(p, await _load_model_count(db, p.id), new_cred.masked_token)
+    return await _provider_to_out(db, p, await _load_model_count(db, p.id))
 
 
 @router.post("/{provider_id}/validate", response_model=dict)
@@ -517,18 +536,23 @@ async def validate_provider(
     user=Depends(require_writer),
 ) -> dict:
     p = await db.scalar(
-        select(RegisteredProvider)
-        .options(selectinload(RegisteredProvider.credential))
-        .where(RegisteredProvider.id == provider_id)
+        select(RegisteredProvider).where(RegisteredProvider.id == provider_id)
     )
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Provider 不存在")
-    if p.credential is None:
+    if p.credential_id is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Provider 未绑定凭证")
+
+    ciphertext_row = await db.execute(
+        select(ResourceCredential.ciphertext).where(ResourceCredential.id == p.credential_id)
+    )
+    ciphertext = ciphertext_row.scalar()
+    if not ciphertext:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Provider 未绑定凭证")
 
     from app.services.credential_cipher import decrypt_token
     try:
-        token = decrypt_token(p.credential.ciphertext)
+        token = decrypt_token(ciphertext)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"凭证无法解密：{exc}") from exc
 
@@ -560,11 +584,8 @@ async def archive_provider(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_writer),
 ) -> RegisteredProviderOut:
-    """软归档 Provider（status=archived）。前端列表不再展示，但数据保留。"""
     p = await db.scalar(
-        select(RegisteredProvider)
-        .options(selectinload(RegisteredProvider.credential))
-        .where(RegisteredProvider.id == provider_id)
+        select(RegisteredProvider).where(RegisteredProvider.id == provider_id)
     )
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Provider 不存在")
@@ -579,8 +600,7 @@ async def archive_provider(
         payload={"status": p.status},
     )
     await db.commit()
-    await db.refresh(p, ["credential"])
-    return _provider_to_out(p, await _load_model_count(db, p.id), p.credential.masked_token if p.credential_id and p.credential else None)
+    return await _provider_to_out(db, p, await _load_model_count(db, p.id))
 
 
 @router.delete("/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -589,11 +609,8 @@ async def delete_provider(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_writer),
 ) -> None:
-    """删除 Provider。若仍有模型挂载，返回 409，由前端引导用户先迁移模型或归档。"""
     p = await db.scalar(
-        select(RegisteredProvider)
-        .options(selectinload(RegisteredProvider.credential))
-        .where(RegisteredProvider.id == provider_id)
+        select(RegisteredProvider).where(RegisteredProvider.id == provider_id)
     )
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Provider 不存在")
@@ -605,7 +622,7 @@ async def delete_provider(
             f"该 Provider 下存在 {mc} 个模型，无法删除。请先把模型迁至其他 Provider 或选择「归档」。",
         )
 
-    masked = p.credential.masked_token if p.credential_id and p.credential else None
+    masked, _ = await _credential_meta(db, p.credential_id)
     await write_audit(
         db,
         actor=user,

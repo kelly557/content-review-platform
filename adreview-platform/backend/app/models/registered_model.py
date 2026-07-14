@@ -132,7 +132,8 @@ class RegisteredModel(Base):
         back_populates="models",
         foreign_keys=[provider_id],
     )
-    provider: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # 旧 column `provider` (vendor preset 字符串) 已废弃，由 provider_preset (RegisteredProvider.provider_preset) 取代
+    # 历史数据列保留在 DB 内但不再映射，应用也不再写入。
     model_name: Mapped[Optional[str]] = mapped_column(
         "model", String(128), nullable=True, index=True
     )

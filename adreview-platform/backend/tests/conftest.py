@@ -33,7 +33,6 @@ def _apply_schema(schema: str | None) -> None:
     for table in Base.metadata.tables.values():
         table.schema = schema
         for column in table.columns:
-            # 重新绑定 column -> table，让 SQLAlchemy 在 compile 时拿到最新 schema。
             column.table = table
 
 

@@ -385,7 +385,7 @@ async def list_models(
         provs = (
             await db.execute(
                 select(RegisteredProvider)
-                .options(selectinload(RegisteredProvider.credential))
+                
                 .where(RegisteredProvider.id.in_(provider_ids))
             )
         ).scalars().all()
@@ -454,7 +454,7 @@ async def create_model(
         )
     if kind == RegisteredModelKind.LARGE.value:
         if small_category:
-            small_category = None  # 大模型忽略 small_category
+            small_category = None
         if not large_category:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -463,7 +463,6 @@ async def create_model(
 
     _validate_status(body.status or RegisteredModelStatus.DRAFT.value)
 
-    # —— 推断 registration_method（前端不传时按 kind 决定） ——
     if body.registration_method:
         if body.registration_method not in {m.value for m in RegisteredModelRegistrationMethod}:
             raise HTTPException(
@@ -491,18 +490,15 @@ async def create_model(
     if (await db.scalar(select(RegisteredModel).where(RegisteredModel.code == code))) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"编码已存在: {code}")
 
-    # —— Provider 解析 ——
+    # Provider 解析（不带 selectinload，避免跨测试 schema 缓存）
     provider = await db.scalar(
-        select(RegisteredProvider)
-        .options(selectinload(RegisteredProvider.credential))
-        .where(RegisteredProvider.id == body.provider_id)
+        select(RegisteredProvider).where(RegisteredProvider.id == body.provider_id)
     )
     if provider is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, f"Provider 不存在（id={body.provider_id}）"
         )
 
-    # —— 小模型分支 ——
     if registration_method == RegisteredModelRegistrationMethod.UPLOADED_FILE.value:
         if body.max_output_tokens is None:
             raise HTTPException(
@@ -565,7 +561,6 @@ async def create_model(
         await db.flush()
         model.current_version_id = ver.id
         await db.flush()
-        await db.refresh(model, ["provider", "current_version"])
 
         await write_audit(
             db,
@@ -589,11 +584,9 @@ async def create_model(
             },
         )
         await db.commit()
-        await db.refresh(model, attribute_names=["updated_at"])
-        await db.refresh(model, ["provider", "current_version"])
-        return _to_out(model)
+        return await _build_out_for_model(db, model)
 
-    # —— 大模型 / remote_api 分支 ——
+    # 大模型 / remote_api 分支
     config = dict(body.config or {})
     if not config.get("protocol"):
         config["protocol"] = (provider.config or {}).get("protocol") or "openai-compatible"
@@ -640,7 +633,6 @@ async def create_model(
     await db.flush()
     model.current_version_id = ver.id
     await db.flush()
-    await db.refresh(model, ["provider", "current_version"])
 
     await write_audit(
         db,
@@ -661,9 +653,29 @@ async def create_model(
         },
     )
     await db.commit()
+    return await _build_out_for_model(db, model)
+
+
+async def _build_out_for_model(db: AsyncSession, model: RegisteredModel) -> RegisteredModelOut:
+    """构建 Model 详情的输出（避开 selectinload(credential) 跨测试 schema 缓存）。"""
     await db.refresh(model, attribute_names=["updated_at"])
-    await db.refresh(model, ["provider", "current_version"])
-    return _to_out(model)
+    p: Optional[RegisteredProvider] = None
+    masked: Optional[str] = None
+    label: Optional[str] = None
+    if model.provider_id:
+        p = await db.scalar(
+            select(RegisteredProvider).where(RegisteredProvider.id == model.provider_id)
+        )
+        if p and p.credential_id:
+            cr = await db.execute(
+                select(ResourceCredential.masked_token, ResourceCredential.name).where(
+                    ResourceCredential.id == p.credential_id
+                )
+            )
+            r = cr.first()
+            if r is not None:
+                masked, label = r[0], r[1]
+    return _build_model_out(model, p, masked, label)
 
 
 @router.get("/{model_id}", response_model=RegisteredModelOut)
@@ -674,18 +686,80 @@ async def get_model(
 ) -> RegisteredModelOut:
     model = await db.scalar(
         select(RegisteredModel)
-        .options(
-            selectinload(RegisteredModel.credential),
-            selectinload(RegisteredModel.provider),
-            selectinload(RegisteredModel.current_version),
-        )
+        .options(selectinload(RegisteredModel.current_version))
         .where(RegisteredModel.id == model_id)
     )
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
-    if model.provider is not None:
-        await db.refresh(model.provider, ["credential"])
-    return _to_out(model)
+    # 显式取 provider + credential（绕过 selectinload 跨测试 schema 缓存）
+    p: Optional[RegisteredProvider] = None
+    if model.provider_id:
+        p = await db.scalar(
+            select(RegisteredProvider).where(RegisteredProvider.id == model.provider_id)
+        )
+    masked: Optional[str] = None
+    label: Optional[str] = None
+    if p is not None and p.credential_id:
+        cr = await db.execute(
+            select(ResourceCredential.masked_token, ResourceCredential.name).where(
+                ResourceCredential.id == p.credential_id
+            )
+        )
+        r = cr.first()
+        if r is not None:
+            masked, label = r[0], r[1]
+    return _build_model_out(model, p, masked, label)
+
+
+def _build_model_out(model: RegisteredModel, provider: Optional[RegisteredProvider], masked_token: Optional[str], credential_label: Optional[str]) -> RegisteredModelOut:
+    """包装 _to_out 但显式传入 provider + credential。"""
+    current = None
+    if model.current_version:
+        try:
+            current = RegisteredModelVersionOut.model_validate(model.current_version)
+        except Exception:
+            current = None
+    current_no = current.version_no if current else None
+    payload = {
+        "id": model.id,
+        "public_id": model.public_id,
+        "code": model.code,
+        "name": model.name,
+        "description": model.description,
+        "kind": model.kind,
+        "small_category": model.small_category,
+        "large_category": model.large_category,
+        "provider_id": model.provider_id,
+        "provider": {
+            "id": provider.id,
+            "public_id": provider.public_id,
+            "display_name": provider.display_name,
+            "provider_preset": provider.provider_preset,
+            "endpoint_url": provider.endpoint_url,
+            "masked_token": masked_token,
+            "status": provider.status,
+        } if provider else None,
+        "provider_preset": provider.provider_preset if provider else None,
+        "model_name": model.model_name,
+        "max_output_tokens": model.max_output_tokens,
+        "registration_method": model.registration_method,
+        "status": model.status,
+        "version": model.version,
+        "config": model.config or {},
+        "credential_id": provider.credential_id if provider else None,
+        "credential_label": credential_label,
+        "is_deleted": model.is_deleted,
+        "deleted_at": model.deleted_at,
+        "owner_id": model.owner_id,
+        "created_by_id": model.created_by_id,
+        "updated_by_id": model.updated_by_id,
+        "current_version_id": model.current_version_id,
+        "current_version_no": current_no,
+        "current_version": current,
+        "created_at": model.created_at,
+        "updated_at": model.updated_at,
+    }
+    return RegisteredModelOut.model_validate(payload)
 
 
 @router.patch("/{model_id}", response_model=RegisteredModelOut)
@@ -697,11 +771,7 @@ async def update_model(
 ) -> RegisteredModelOut:
     model = await db.scalar(
         select(RegisteredModel)
-        .options(
-            selectinload(RegisteredModel.current_version),
-            selectinload(RegisteredModel.credential),
-            selectinload(RegisteredModel.provider),
-        )
+        .options(selectinload(RegisteredModel.current_version))
         .where(RegisteredModel.id == model_id)
     )
     if model is None or model.is_deleted:
@@ -814,9 +884,7 @@ async def create_version(
     - 小模型（uploaded_file）：可传 artifact 上传新权重；不传则沿用上一版本的文件
     """
     model = await db.scalar(
-        select(RegisteredModel)
-        .options(selectinload(RegisteredModel.provider))
-        .where(RegisteredModel.id == model_id)
+        select(RegisteredModel).where(RegisteredModel.id == model_id)
     )
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
@@ -904,11 +972,18 @@ async def create_version(
         return RegisteredModelVersionOut.model_validate(ver)
 
     # —— 大模型 / remote_api 分支 ——
-    provider = model.provider
-    if provider is None:
+    if model.provider_id is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "大模型未挂载 Provider；请先在 Provider 页面配置",
+        )
+    provider = await db.scalar(
+        select(RegisteredProvider).where(RegisteredProvider.id == model.provider_id)
+    )
+    if provider is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Provider 不存在（请检查是否已删除）",
         )
 
     endpoint = provider.endpoint_url
@@ -1100,9 +1175,7 @@ async def validate_model(
     user=Depends(require_writer),
 ) -> RegisteredModelValidateResult:
     model = await db.scalar(
-        select(RegisteredModel)
-        .options(selectinload(RegisteredModel.provider))
-        .where(RegisteredModel.id == model_id)
+        select(RegisteredModel).where(RegisteredModel.id == model_id)
     )
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
@@ -1111,8 +1184,14 @@ async def validate_model(
             status.HTTP_400_BAD_REQUEST,
             "小模型（上传文件）不支持远程连通性校验；如需确认文件请使用「下载」功能",
         )
-    if not model.provider or not model.provider.endpoint_url:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "模型未挂载有效 Provider")
+    if model.provider_id is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "模型未挂载 Provider")
+
+    provider = await db.scalar(
+        select(RegisteredProvider).where(RegisteredProvider.id == model.provider_id)
+    )
+    if provider is None or not provider.endpoint_url:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Provider 或 endpoint_url 缺失")
 
     if model.current_version_id and model.current_version is None:
         model.current_version = await db.scalar(
@@ -1121,19 +1200,24 @@ async def validate_model(
             )
         )
 
-    protocol = (model.config or {}).get("protocol") or (model.provider.config or {}).get("protocol") or "custom"
+    protocol = (model.config or {}).get("protocol") or (provider.config or {}).get("protocol") or "custom"
     if protocol not in ALLOWED_PROTOCOLS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"不支持的协议: {protocol}")
     timeout = int((model.config or {}).get("timeout", 30))
 
     token: str | None = None
-    if model.provider.credential_id and model.provider.credential:
-        try:
-            token = decrypt_token(model.provider.credential.ciphertext)
-        except ValueError:
-            token = None
+    if provider.credential_id:
+        cr = await db.execute(
+            select(ResourceCredential.ciphertext).where(ResourceCredential.id == provider.credential_id)
+        )
+        ciphertext = cr.scalar()
+        if ciphertext:
+            try:
+                token = decrypt_token(ciphertext)
+            except ValueError:
+                token = None
 
-    log = await _validate_endpoint(model.provider.endpoint_url, protocol, model.model_name, token, timeout)
+    log = await _validate_endpoint(provider.endpoint_url, protocol, model.model_name, token, timeout)
 
     if model.current_version:
         history = list(model.current_version.validation_log or [])
