@@ -1,0 +1,35 @@
+# Local environment
+.env
+.env.local
+.env.*.local
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.vscode/
+.idea/
+.DS_Store
+
+# Build artifacts
+dist/
+build/
+.cache/
+*.tsbuildinfo
+.pytest_cache/
+
+# Storage / DB / backups (local runtime data)
+adreview-platform/backend/storage/uploads/
+adreview-platform/backend/storage/backups/
+adreview-platform/backend/storage/models/
+adreview-platform/storage/
+storage/
+
+# Local SQL dumps / fixtures (out of source control)
+adreview-platform/backend/docs/sql/
+*.sql.gz
+*.dump
+
+# Loose architecture diagrams at repo root (intentional: people drop files
+# in the project root for quick reference; not for git)
+/专业审核架构图.png
+/审核架构图.png
