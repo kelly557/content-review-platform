@@ -2,6 +2,7 @@
 
 Phase 1: outbound HTTP only; admin/superadmin write, mlr read.
 Phase 2: small models (传统 ML/深度学习) registered by file upload.
+Phase 4: Provider 二级化 + 大模型三分类
 """
 from __future__ import annotations
 
@@ -27,12 +28,14 @@ from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
 from app.models.registered_model import (
+    LargeModelCategory,
     RegisteredModel,
     RegisteredModelKind,
     RegisteredModelRegistrationMethod,
     RegisteredModelStatus,
     RegisteredModelVersion,
     RegisteredModelVersionStatus,
+    RegisteredProvider,
     ResourceCredential,
     SmallModelCategory,
 )
@@ -184,6 +187,21 @@ async def _resolve_credential(
     )
 
 
+def _provider_summary(p: Optional[RegisteredProvider]) -> Optional[dict]:
+    if p is None:
+        return None
+    masked = p.credential.masked_token if p.credential_id and p.credential else None
+    return {
+        "id": p.id,
+        "public_id": p.public_id,
+        "display_name": p.display_name,
+        "provider_preset": p.provider_preset,
+        "endpoint_url": p.endpoint_url,
+        "masked_token": masked,
+        "status": p.status,
+    }
+
+
 def _to_out(model: RegisteredModel) -> RegisteredModelOut:
     current = None
     if model.current_version:
@@ -192,6 +210,7 @@ def _to_out(model: RegisteredModel) -> RegisteredModelOut:
         except Exception:
             current = None
     current_no = current.version_no if current else None
+    p = getattr(model, "provider", None)
     payload = {
         "id": model.id,
         "public_id": model.public_id,
@@ -200,16 +219,16 @@ def _to_out(model: RegisteredModel) -> RegisteredModelOut:
         "description": model.description,
         "kind": model.kind,
         "small_category": model.small_category,
-        "provider": model.provider,
+        "large_category": model.large_category,
+        "provider_id": model.provider_id,
+        "provider": _provider_summary(p) if p else None,
+        "provider_preset": p.provider_preset if p else None,
         "model_name": model.model_name,
         "max_output_tokens": model.max_output_tokens,
         "registration_method": model.registration_method,
         "status": model.status,
         "version": model.version,
-        "endpoint_url": model.endpoint_url,
         "config": model.config or {},
-        "credential_id": model.credential_id,
-        "credential_label": model.credential.name if model.credential_id and model.credential else None,
         "is_deleted": model.is_deleted,
         "deleted_at": model.deleted_at,
         "owner_id": model.owner_id,
@@ -224,10 +243,9 @@ def _to_out(model: RegisteredModel) -> RegisteredModelOut:
     return RegisteredModelOut.model_validate(payload)
 
 
-def _to_list_item(model: RegisteredModel) -> RegisteredModelListItem:
-    # 不在列表里触发 current_version 懒加载（测试时序交叉的 schema 缓存问题）。
-    # 若需要，调用方在 select 后用 await db.refresh(..., ['current_version']) 显式加载。
+def _to_list_item(model: RegisteredModel, provider: Optional[RegisteredProvider] = None) -> RegisteredModelListItem:
     current_no = None
+    p = provider if provider is not None else getattr(model, "provider", None)
     payload = {
         "id": model.id,
         "public_id": model.public_id,
@@ -235,7 +253,10 @@ def _to_list_item(model: RegisteredModel) -> RegisteredModelListItem:
         "name": model.name,
         "kind": model.kind,
         "small_category": model.small_category,
-        "provider": model.provider,
+        "large_category": model.large_category,
+        "provider_id": model.provider_id,
+        "provider_preset": p.provider_preset if p else None,
+        "provider_label": p.display_name if p else None,
         "model_name": model.model_name,
         "max_output_tokens": model.max_output_tokens,
         "registration_method": model.registration_method,
@@ -296,6 +317,17 @@ async def _validate_endpoint(
         )
 
 
+ALLOWED_LARGE_CATEGORY = {c.value for c in LargeModelCategory}
+
+
+def _validate_large_category(s: Optional[str]) -> Optional[str]:
+    if s is None:
+        return None
+    if s not in ALLOWED_LARGE_CATEGORY:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"非法 large_category: {s}")
+    return s
+
+
 @router.get("", response_model=Page[RegisteredModelListItem])
 async def list_models(
     page: int = Query(1, ge=1),
@@ -303,7 +335,8 @@ async def list_models(
     q: str | None = None,
     kind: str | None = None,
     small_category: str | None = None,
-    provider: str | None = None,
+    large_category: str | None = None,
+    provider_id: int | None = Query(None, description="按 Provider 过滤"),
     status_filter: str | None = Query(None, alias="status"),
     include_deleted: bool = False,
     db: AsyncSession = Depends(get_db),
@@ -318,8 +351,11 @@ async def list_models(
     if small_category:
         _validate_small_category(small_category)
         base = base.where(RegisteredModel.small_category == small_category)
-    if provider:
-        base = base.where(RegisteredModel.provider == provider)
+    if large_category:
+        _validate_large_category(large_category)
+        base = base.where(RegisteredModel.large_category == large_category)
+    if provider_id is not None:
+        base = base.where(RegisteredModel.provider_id == provider_id)
     if status_filter:
         _validate_status(status_filter)
         base = base.where(RegisteredModel.status == status_filter)
@@ -341,7 +377,21 @@ async def list_models(
             .limit(size)
         )
     ).scalars().all()
-    items = [_to_list_item(r) for r in rows]
+
+    # 避免 selectinload 触发跨测试 schema 缓存：用显式 query 取 provider
+    provider_ids = {r.provider_id for r in rows if r.provider_id}
+    providers: dict[int, RegisteredProvider] = {}
+    if provider_ids:
+        provs = (
+            await db.execute(
+                select(RegisteredProvider)
+                .options(selectinload(RegisteredProvider.credential))
+                .where(RegisteredProvider.id.in_(provider_ids))
+            )
+        ).scalars().all()
+        providers = {p.id: p for p in provs}
+
+    items = [_to_list_item(r, providers.get(r.provider_id)) for r in rows]
     return Page(items=items, total=total, page=page, size=size)
 
 
@@ -352,6 +402,7 @@ async def list_active_models(
         description="按 kind 过滤（large / small）",
     ),
     small_category: str | None = Query(None),
+    large_category: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_reader),
 ) -> list[dict]:
@@ -366,6 +417,9 @@ async def list_active_models(
     if small_category:
         _validate_small_category(small_category)
         stmt = stmt.where(RegisteredModel.small_category == small_category)
+    if large_category:
+        _validate_large_category(large_category)
+        stmt = stmt.where(RegisteredModel.large_category == large_category)
     stmt = stmt.order_by(RegisteredModel.name.asc())
     rows = (await db.execute(stmt)).scalars().all()
     return [
@@ -375,7 +429,8 @@ async def list_active_models(
             "name": m.name,
             "kind": m.kind,
             "small_category": m.small_category,
-            "provider": m.provider,
+            "large_category": m.large_category,
+            "provider_id": m.provider_id,
             "model_name": m.model_name,
             "status": m.status,
         }
@@ -391,14 +446,20 @@ async def create_model(
 ) -> RegisteredModelOut:
     kind = _validate_kind(body.kind or RegisteredModelKind.LARGE.value)
     small_category = _validate_small_category(body.small_category)
+    large_category = _validate_large_category(body.large_category)
     if kind == RegisteredModelKind.SMALL.value and not small_category:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "小模型（kind=small）必须选择分类（small_category）",
         )
-    if kind == RegisteredModelKind.LARGE.value and small_category:
-        # 大模型忽略分类，自动置空
-        small_category = None
+    if kind == RegisteredModelKind.LARGE.value:
+        if small_category:
+            small_category = None  # 大模型忽略 small_category
+        if not large_category:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "大模型（kind=large）必须选择分类（large_category）：text / multimodal / other",
+            )
 
     _validate_status(body.status or RegisteredModelStatus.DRAFT.value)
 
@@ -430,6 +491,17 @@ async def create_model(
     if (await db.scalar(select(RegisteredModel).where(RegisteredModel.code == code))) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"编码已存在: {code}")
 
+    # —— Provider 解析 ——
+    provider = await db.scalar(
+        select(RegisteredProvider)
+        .options(selectinload(RegisteredProvider.credential))
+        .where(RegisteredProvider.id == body.provider_id)
+    )
+    if provider is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, f"Provider 不存在（id={body.provider_id}）"
+        )
+
     # —— 小模型分支 ——
     if registration_method == RegisteredModelRegistrationMethod.UPLOADED_FILE.value:
         if body.max_output_tokens is None:
@@ -447,22 +519,20 @@ async def create_model(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "小模型必须先上传文件（artifact.storage_key 必填）",
             )
-        # provider / endpoint_url / credential_id 在小模型分支全部忽略
         model = RegisteredModel(
             code=code,
             name=body.name,
             description=body.description,
             kind=kind,
             small_category=small_category,
-            provider=None,
+            large_category=None,
+            provider_id=provider.id,
             model_name=model_id_str,
             max_output_tokens=body.max_output_tokens,
             registration_method=registration_method,
-            status=body.status or RegisteredModelStatus.ACTIVE.value,  # 小模型无远程校验，默认 active
+            status=body.status or RegisteredModelStatus.ACTIVE.value,
             version=body.version,
-            endpoint_url=None,
             config={},
-            credential_id=None,
             owner_id=user.id,
             created_by_id=user.id,
             updated_by_id=user.id,
@@ -477,7 +547,8 @@ async def create_model(
             version_no=version_no,
             version_label=body.version or f"v{version_no}",
             registration_method=registration_method,
-            provider=None,
+            large_category=None,
+            provider=provider.provider_preset,
             model_name=model_id_str,
             endpoint_url=None,
             config={},
@@ -494,7 +565,7 @@ async def create_model(
         await db.flush()
         model.current_version_id = ver.id
         await db.flush()
-        await db.refresh(model, ["current_version"])
+        await db.refresh(model, ["provider", "current_version"])
 
         await write_audit(
             db,
@@ -510,6 +581,7 @@ async def create_model(
                 "model_name": model.model_name,
                 "max_output_tokens": model.max_output_tokens,
                 "registration_method": registration_method,
+                "provider_id": provider.id,
                 "artifact_filename": art.filename,
                 "artifact_size": art.size,
                 "artifact_sha256": art.sha256,
@@ -518,47 +590,30 @@ async def create_model(
         )
         await db.commit()
         await db.refresh(model, attribute_names=["updated_at"])
-        await db.refresh(model, ["current_version"])
+        await db.refresh(model, ["provider", "current_version"])
         return _to_out(model)
 
     # —— 大模型 / remote_api 分支 ——
-    provider = _validate_provider(body.provider)
-    provider, endpoint, proto_hint = _coerce_provider_endpoint(provider, body.endpoint_url)
-    if not endpoint:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "endpoint_url 必填（self-hosted / custom 需手动填写）",
-        )
-
     config = dict(body.config or {})
-    if proto_hint and "protocol" not in config:
-        config["protocol"] = proto_hint
     if not config.get("protocol"):
-        config["protocol"] = "openai-compatible"
+        config["protocol"] = (provider.config or {}).get("protocol") or "openai-compatible"
     if "timeout" not in config:
-        config["timeout"] = 30
-
-    if not body.credential_id:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "大模型必须提供 credential_id")
-    cred = await _resolve_credential(db, body.credential_id)
-    if cred is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "凭证不存在或已删除")
+        config["timeout"] = (provider.config or {}).get("timeout", 30)
 
     model = RegisteredModel(
         code=code,
         name=body.name,
         description=body.description,
         kind=kind,
-        small_category=small_category,
-        provider=provider,
+        small_category=None,
+        large_category=large_category,
+        provider_id=provider.id,
         model_name=model_id_str,
         max_output_tokens=None,
         registration_method=registration_method,
         status=body.status or RegisteredModelStatus.DRAFT.value,
         version=body.version,
-        endpoint_url=endpoint,
         config=config,
-        credential_id=body.credential_id,
         owner_id=user.id,
         created_by_id=user.id,
         updated_by_id=user.id,
@@ -572,11 +627,12 @@ async def create_model(
         version_no=version_no,
         version_label=body.version or f"v{version_no}",
         registration_method=registration_method,
-        provider=provider,
+        large_category=large_category,
+        provider=provider.provider_preset,
         model_name=model_id_str,
-        endpoint_url=endpoint,
+        endpoint_url=provider.endpoint_url,
         config=config,
-        credential_id=body.credential_id,
+        credential_id=provider.credential_id,
         status=RegisteredModelVersionStatus.DRAFT.value,
         created_by_id=user.id,
     )
@@ -584,7 +640,7 @@ async def create_model(
     await db.flush()
     model.current_version_id = ver.id
     await db.flush()
-    await db.refresh(model, ["current_version"])
+    await db.refresh(model, ["provider", "current_version"])
 
     await write_audit(
         db,
@@ -597,16 +653,16 @@ async def create_model(
             "name": model.name,
             "kind": model.kind,
             "small_category": model.small_category,
-            "provider": model.provider,
+            "large_category": large_category,
+            "provider_id": provider.id,
             "model_name": model.model_name,
-            "credential_id": model.credential_id,
             "registration_method": registration_method,
             "version_no": ver.version_no,
         },
     )
     await db.commit()
     await db.refresh(model, attribute_names=["updated_at"])
-    await db.refresh(model, ["current_version"])
+    await db.refresh(model, ["provider", "current_version"])
     return _to_out(model)
 
 
@@ -620,12 +676,15 @@ async def get_model(
         select(RegisteredModel)
         .options(
             selectinload(RegisteredModel.credential),
+            selectinload(RegisteredModel.provider),
             selectinload(RegisteredModel.current_version),
         )
         .where(RegisteredModel.id == model_id)
     )
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    if model.provider is not None:
+        await db.refresh(model.provider, ["credential"])
     return _to_out(model)
 
 
@@ -638,7 +697,11 @@ async def update_model(
 ) -> RegisteredModelOut:
     model = await db.scalar(
         select(RegisteredModel)
-        .options(selectinload(RegisteredModel.current_version), selectinload(RegisteredModel.credential))
+        .options(
+            selectinload(RegisteredModel.current_version),
+            selectinload(RegisteredModel.credential),
+            selectinload(RegisteredModel.provider),
+        )
         .where(RegisteredModel.id == model_id)
     )
     if model is None or model.is_deleted:
@@ -649,17 +712,18 @@ async def update_model(
         data["small_category"] = _validate_small_category(data["small_category"])
     if model.kind == RegisteredModelKind.LARGE.value and "small_category" in data:
         data["small_category"] = None
+    if "large_category" in data and data["large_category"] is not None:
+        data["large_category"] = _validate_large_category(data["large_category"])
+    if model.kind == RegisteredModelKind.SMALL.value and "large_category" in data:
+        data["large_category"] = None
+    if model.kind == RegisteredModelKind.LARGE.value and not model.large_category:
+        # 大模型新建时已校验；编辑时如有 large_category 入参必须非空
+        pass
     if "status" in data and data["status"]:
         _validate_status(data["status"])
-    if "provider" in data and data["provider"]:
-        data["provider"] = _validate_provider(data["provider"])
     if "model_name" in data and data["model_name"]:
         if len(data["model_name"]) > 128:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "model 过长 (≤128)")
-    if "credential_id" in data and data["credential_id"] is not None:
-        cred = await _resolve_credential(db, data["credential_id"])
-        if cred is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "凭证不存在或已删除")
     if "max_output_tokens" in data and data["max_output_tokens"] is not None:
         v = data["max_output_tokens"]
         if v < 1 or v > 32768:
@@ -746,11 +810,12 @@ async def create_version(
 ) -> RegisteredModelVersionOut:
     """发布新版本：版本号自增（v1, v2, ...）；如需切到新版本可再调 activate 接口。
 
-    - 大模型（remote_api）：需要 provider / endpoint_url / credential_id（继承自当前模型或重新提供）
+    - 大模型（remote_api）：endpoint_url / credential 继承自 Provider，可改 model_name / large_category
     - 小模型（uploaded_file）：可传 artifact 上传新权重；不传则沿用上一版本的文件
     """
     model = await db.scalar(
         select(RegisteredModel)
+        .options(selectinload(RegisteredModel.provider))
         .where(RegisteredModel.id == model_id)
     )
     if model is None or model.is_deleted:
@@ -762,8 +827,7 @@ async def create_version(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "model_name 必填")
 
     if method == RegisteredModelRegistrationMethod.UPLOADED_FILE.value:
-        # 小模型分支：artifact 可选，不传则沿用上一版本
-        # 显式加载 current_version 关系（不依赖 lazy load，避开 post_update 触发的 expire 问题）
+        # 小模型分支
         prev = None
         if model.current_version_id:
             prev = await db.scalar(
@@ -773,7 +837,6 @@ async def create_version(
             )
         art = body.artifact
         if art is None and prev is not None:
-            # 沿用旧 artifact
             art_dict = {
                 "storage_key": prev.artifact_storage_key,
                 "filename": prev.artifact_filename,
@@ -805,6 +868,7 @@ async def create_version(
             version_no=next_no,
             version_label=body.version_label or f"v{next_no}",
             notes=body.notes,
+            large_category=None,
             registration_method=method,
             provider=None,
             model_name=model_name,
@@ -836,49 +900,31 @@ async def create_version(
             },
         )
         await db.commit()
-        await db.refresh(
-            ver,
-            attribute_names=[
-                "id",
-                "public_id",
-                "model_id",
-                "version_no",
-                "version_label",
-                "notes",
-                "registration_method",
-                "provider",
-                "model_name",
-                "endpoint_url",
-                "config",
-                "credential_id",
-                "artifact_storage_key",
-                "artifact_filename",
-                "artifact_mime_type",
-                "artifact_size",
-                "artifact_sha256",
-                "status",
-                "validation_log",
-                "created_by_id",
-                "created_at",
-            ],
-        )
+        await db.refresh(ver)
         return RegisteredModelVersionOut.model_validate(ver)
 
     # —— 大模型 / remote_api 分支 ——
-    provider = _validate_provider(body.provider or model.provider)
-    endpoint = body.endpoint_url or model.endpoint_url
+    provider = model.provider
+    if provider is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "大模型未挂载 Provider；请先在 Provider 页面配置",
+        )
+
+    endpoint = provider.endpoint_url
     if not endpoint:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "endpoint_url 必填")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Provider endpoint_url 缺失")
 
     config = dict(body.config or {})
     if not config.get("protocol"):
-        config["protocol"] = "openai-compatible"
+        config["protocol"] = (provider.config or {}).get("protocol") or "openai-compatible"
 
-    credential_id = body.credential_id or model.credential_id
-    if credential_id is not None:
-        cred = await _resolve_credential(db, credential_id)
-        if cred is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "凭证不存在或已删除")
+    new_large_category = _validate_large_category(body.large_category) or model.large_category
+    if model.kind == RegisteredModelKind.LARGE.value and not new_large_category:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "大模型分类（large_category）必填：text / multimodal / other",
+        )
 
     next_no = await _next_version_no(db, model.id)
     ver = RegisteredModelVersion(
@@ -886,12 +932,13 @@ async def create_version(
         version_no=next_no,
         version_label=body.version_label or f"v{next_no}",
         notes=body.notes,
+        large_category=new_large_category,
         registration_method=RegisteredModelRegistrationMethod.REMOTE_API.value,
-        provider=provider,
+        provider=provider.provider_preset,
         model_name=model_name,
         endpoint_url=endpoint,
         config=config,
-        credential_id=credential_id,
+        credential_id=provider.credential_id,
         status=RegisteredModelVersionStatus.DRAFT.value,
         created_by_id=user.id,
     )
@@ -1054,6 +1101,7 @@ async def validate_model(
 ) -> RegisteredModelValidateResult:
     model = await db.scalar(
         select(RegisteredModel)
+        .options(selectinload(RegisteredModel.provider))
         .where(RegisteredModel.id == model_id)
     )
     if model is None or model.is_deleted:
@@ -1063,10 +1111,9 @@ async def validate_model(
             status.HTTP_400_BAD_REQUEST,
             "小模型（上传文件）不支持远程连通性校验；如需确认文件请使用「下载」功能",
         )
-    if not model.endpoint_url:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "缺少 endpoint_url")
+    if not model.provider or not model.provider.endpoint_url:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "模型未挂载有效 Provider")
 
-    # 显式加载 current_version（post_update=True 关系与 selectinload 兼容性差）
     if model.current_version_id and model.current_version is None:
         model.current_version = await db.scalar(
             select(RegisteredModelVersion).where(
@@ -1074,21 +1121,19 @@ async def validate_model(
             )
         )
 
-    protocol = (model.config or {}).get("protocol", "custom")
+    protocol = (model.config or {}).get("protocol") or (model.provider.config or {}).get("protocol") or "custom"
     if protocol not in ALLOWED_PROTOCOLS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"不支持的协议: {protocol}")
     timeout = int((model.config or {}).get("timeout", 30))
 
     token: str | None = None
-    if model.credential_id:
-        cred = await _resolve_credential(db, model.credential_id)
-        if cred is not None:
-            try:
-                token = decrypt_token(cred.ciphertext)
-            except ValueError:
-                token = None
+    if model.provider.credential_id and model.provider.credential:
+        try:
+            token = decrypt_token(model.provider.credential.ciphertext)
+        except ValueError:
+            token = None
 
-    log = await _validate_endpoint(model.endpoint_url, protocol, model.model_name, token, timeout)
+    log = await _validate_endpoint(model.provider.endpoint_url, protocol, model.model_name, token, timeout)
 
     if model.current_version:
         history = list(model.current_version.validation_log or [])
