@@ -221,9 +221,8 @@ export default function ModelListPage() {
           return opt ? <Tag color={opt.color}>{opt.label}</Tag> : v
         },
       },
-      { title: '业务标识', dataIndex: 'model_name', width: '14%' },
       {
-        title: '当前版本文件',
+        title: '当前模型版本',
         dataIndex: 'artifact_filename',
         width: '20%',
         render: (v: string | null) =>
@@ -303,7 +302,7 @@ export default function ModelListPage() {
       <Space style={{ marginBottom: 12 }} wrap>
         <Input.Search
           allowClear
-          placeholder={activeTab === 'large' ? '搜索大模型名称 / Model ID' : '搜索小模型名称 / 业务标识'}
+          placeholder={activeTab === 'large' ? '搜索大模型名称 / Model ID' : '搜索小模型名称'}
           onSearch={(val) => {
             setQ(val)
             void fetchList()
