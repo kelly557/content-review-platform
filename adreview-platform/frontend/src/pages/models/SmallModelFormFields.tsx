@@ -120,18 +120,6 @@ export default function SmallModelFormFields({
       </Form.Item>
 
       <Form.Item
-        label="模型标识"
-        name="model_name"
-        rules={[
-          { required: true, message: '请填写模型标识' },
-          { pattern: /^[a-zA-Z0-9_\-]+$/, message: '仅允许字母/数字/下划线/中划线' },
-        ]}
-        tooltip="模型业务标识，如 politics-cls-v3"
-      >
-        <Input placeholder="politics-cls-v3" />
-      </Form.Item>
-
-      <Form.Item
         label="模型文件"
         required
         tooltip="传统 ML/深度学习权重文件（.onnx / .pt / .pth / .bin / .zip / .tar.gz），单文件 ≤ 512MB"
