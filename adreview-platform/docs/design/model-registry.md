@@ -226,6 +226,30 @@ Alembic `20260723_provider_split_and_large_category.py` 在 upgrade 中：
 
 | URL | 页面 |
 |---|---|
-| `/resources/models` | 模型库列表（顶部「添加 Provider」「添加模型」） |
+| `/resources/models` | 模型库列表（顶部 Tabs：大模型 / 小模型） |
 | `/resources/models/:id` | 模型详情（发布新版本 / 校验 / 删除） |
 | `/resources/providers/:id` | Provider 详情（编辑元数据 / 替换 API Key / 归档 / 删除） |
+
+### 8.1 列表 Tab 化
+
+列表页用 `Tabs` 把两种 model 分为两套属性集（不再用单个 Table 凑列表）：
+
+```
+/resources/models
+├── Tabs: 大模型(n) | 小模型(n)
+├── 共享筛选：搜索 / Provider / 状态
+├── Tab 独享筛选：大模型分类（large 时）/ 小模型分类（small 时）
+├── 添加 Provider（始终可用）
+└── 添加模型（按当前 tab 自动选 large / small）
+```
+
+### 8.2 list 接口扩展
+
+`GET /api/v1/models` 在 ListItem 增加三个字段（仅 kind=small 有值）：
+
+- `artifact_filename`：当前版本文件名（如 `politics-cls.onnx`）
+- `artifact_size`：字节数（用于显示 MB）
+- `artifact_sha256`：完整 SHA-256 摘要（小模型前端表格截前 12 字符）
+
+实现上 list endpoint 显式 SELECT `registered_model_versions` 的这三列，按
+`current_version_id` 索引返回；不走 selectinload 以避开跨测试 schema 缓存。
