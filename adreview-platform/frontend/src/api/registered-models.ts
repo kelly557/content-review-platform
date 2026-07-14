@@ -1,6 +1,7 @@
 import { api } from './client'
 import type {
   ArtifactUploadResponse,
+  LargeModelCategory,
   Page,
   RegisteredModel,
   RegisteredModelCreate,
@@ -10,6 +11,12 @@ import type {
   RegisteredModelValidationLog,
   RegisteredModelVersion,
   RegisteredModelVersionCreate,
+  RegisteredProvider,
+  RegisteredProviderCreate,
+  RegisteredProviderDetail,
+  RegisteredProviderOption,
+  RegisteredProviderRotateApiKey,
+  RegisteredProviderUpdate,
   ResourceCredential,
 } from '@/types/domain'
 
@@ -20,7 +27,8 @@ export const registeredModelsApi = {
     q?: string
     kind?: 'large' | 'small'
     small_category?: string
-    provider?: string
+    large_category?: LargeModelCategory
+    provider_id?: number
     status?: string
     include_deleted?: boolean
   }) {
@@ -83,6 +91,7 @@ export const registeredModelsApi = {
   listActiveModels(params?: {
     kind?: 'large' | 'small'
     small_category?: string
+    large_category?: LargeModelCategory
   }): Promise<ActiveModelOption[]> {
     return api
       .get<ActiveModelOption[]>('/registered-models/options', { params })
@@ -98,7 +107,6 @@ export const registeredModelsApi = {
       .then((r) => r.data)
   },
   artifactDownloadUrl(modelId: number, versionId: number): string {
-    // 直接拼 baseURL 前缀；走 axios 实例的 baseURL 不可用于原生 <a> 下载
     const base = (api.defaults.baseURL ?? '/api/v1').replace(/\/$/, '')
     return `${base}/registered-models/${modelId}/versions/${versionId}/artifact`
   },
@@ -110,9 +118,45 @@ export interface ActiveModelOption {
   name: string
   kind: 'large' | 'small'
   small_category: string | null
-  provider: string | null
+  large_category: LargeModelCategory | null
+  provider_id: number | null
   model_name: string | null
   status: string
+}
+
+export const providersApi = {
+  list(params?: { status?: string; q?: string }): Promise<RegisteredProvider[]> {
+    return api.get<RegisteredProvider[]>('/providers', { params }).then((r) => r.data)
+  },
+  options(): Promise<RegisteredProviderOption[]> {
+    return api.get<RegisteredProviderOption[]>('/providers/options').then((r) => r.data)
+  },
+  get(id: number): Promise<RegisteredProviderDetail> {
+    return api.get<RegisteredProviderDetail>(`/providers/${id}`).then((r) => r.data)
+  },
+  create(body: RegisteredProviderCreate): Promise<RegisteredProviderDetail> {
+    return api.post<RegisteredProviderDetail>('/providers', body).then((r) => r.data)
+  },
+  update(id: number, body: RegisteredProviderUpdate): Promise<RegisteredProvider> {
+    return api.patch<RegisteredProvider>(`/providers/${id}`, body).then((r) => r.data)
+  },
+  rotateApiKey(id: number, body: RegisteredProviderRotateApiKey): Promise<RegisteredProvider> {
+    return api.post<RegisteredProvider>(`/providers/${id}/api-key`, body).then((r) => r.data)
+  },
+  validate(id: number): Promise<{
+    ok: boolean
+    http_status: number | null
+    latency_ms: number | null
+    message: string
+  }> {
+    return api.post(`/providers/${id}/validate`, {}).then((r) => r.data)
+  },
+  archive(id: number): Promise<RegisteredProvider> {
+    return api.post<RegisteredProvider>(`/providers/${id}/archive`, {}).then((r) => r.data)
+  },
+  delete(id: number): Promise<void> {
+    return api.delete(`/providers/${id}`).then(() => undefined)
+  },
 }
 
 export const credentialsApi = {
