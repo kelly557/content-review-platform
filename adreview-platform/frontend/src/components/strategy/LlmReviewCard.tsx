@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Alert, App, Empty, Select, Space, Spin, Switch, Tag, Typography } from 'antd'
 import { ExperimentOutlined, WarningOutlined } from '@ant-design/icons'
 import { registeredModelsApi, type ActiveModelOption } from '@/api/registered-models'
-import { type LlmReviewConfig } from '@/types/domain'
+import {
+  LARGE_MODEL_CATEGORY_LABEL,
+  LARGE_MODEL_CATEGORY_OPTIONS,
+  type LargeModelCategory,
+  type LlmReviewConfig,
+} from '@/types/domain'
 
 const { Text } = Typography
 
@@ -110,6 +115,18 @@ export function LlmReviewCard({ value, onChange }: Props) {
               {pickedModel.name}（{pickedModel.model_name ?? '-'}）
             </Tag>
           )}
+          {pickedModel?.large_category && (
+            <Tag
+              color={
+                LARGE_MODEL_CATEGORY_OPTIONS.find(
+                  (o) => o.value === pickedModel.large_category,
+                )?.color ?? 'default'
+              }
+              bordered={false}
+            >
+              {LARGE_MODEL_CATEGORY_LABEL[pickedModel.large_category as LargeModelCategory]}
+            </Tag>
+          )}
           <Switch checked={value.is_enabled} onChange={onToggle} />
         </Space>
         <Text type="secondary" style={{ fontSize: 12 }}>
@@ -159,20 +176,36 @@ export function LlmReviewCard({ value, onChange }: Props) {
                 optionFilterProp="label"
                 placeholder="选择资源库已激活的大模型"
                 style={{ width: '100%', maxWidth: 480 }}
-                options={options.map((m) => ({
-                  value: m.id,
-                  // 在 label 中标注模态能力，帮助用户在选单中识别多模态模型
-                  label: (
-                    <Space size={6} wrap>
-                      <span>{m.name}</span>
-                      {m.model_name && (
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          （{m.model_name}）
-                        </Text>
-                      )}
-                    </Space>
-                  ) as unknown as string,
-                }))}
+                options={options.map((m) => {
+                  const cat = m.large_category
+                  const catLabel = cat ? LARGE_MODEL_CATEGORY_LABEL[cat] : null
+                  const catColor = cat
+                    ? (LARGE_MODEL_CATEGORY_OPTIONS.find((o) => o.value === cat)?.color ?? 'default')
+                    : 'default'
+                  return {
+                    value: m.id,
+                    // label 同时展示：大模型名 + 模型分类 + 模型技术名
+                    label: (
+                      <Space size={6} wrap style={{ width: '100%' }}>
+                        <span style={{ color: '#0F172A' }}>{m.name}</span>
+                        {catLabel && (
+                          <Tag
+                            color={catColor}
+                            bordered={false}
+                            style={{ margin: 0, fontSize: 11, padding: '0 6px' }}
+                          >
+                            {catLabel}
+                          </Tag>
+                        )}
+                        {m.model_name && (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            （{m.model_name}）
+                          </Text>
+                        )}
+                      </Space>
+                    ) as unknown as string,
+                  }
+                })}
               />
             )}
           </Space>
