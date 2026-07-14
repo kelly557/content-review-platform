@@ -130,14 +130,16 @@ async def _credential_meta(
 
 
 async def _load_model_count(db: AsyncSession, provider_id: int) -> int:
+    # 直接用 Table.c 引用，避免 ORM ColumnProperty 跨测试 schema 缓存。
+    tbl = RegisteredModel.__table__
     return int(
         await db.scalar(
             select(func.count())
-            .select_from(RegisteredModel)
+            .select_from(tbl)
             .where(
                 and_(
-                    RegisteredModel.provider_id == provider_id,
-                    RegisteredModel.is_deleted.is_(False),
+                    tbl.c.provider_id == provider_id,
+                    tbl.c.is_deleted.is_(False),
                 )
             )
         )
@@ -200,19 +202,20 @@ async def list_providers(
     provider_ids = [p.id for p in rows]
     counts: dict[int, int] = {}
     cred_ids = sorted({p.credential_id for p in rows if p.credential_id})
+    rm_table = RegisteredModel.__table__
     if provider_ids:
         counts.update(
             dict(
                 (
                     await db.execute(
-                        select(RegisteredModel.provider_id, func.count())
+                        select(rm_table.c.provider_id, func.count())
                         .where(
                             and_(
-                                RegisteredModel.provider_id.in_(provider_ids),
-                                RegisteredModel.is_deleted.is_(False),
+                                rm_table.c.provider_id.in_(provider_ids),
+                                rm_table.c.is_deleted.is_(False),
                             )
                         )
-                        .group_by(RegisteredModel.provider_id)
+                        .group_by(rm_table.c.provider_id)
                     )
                 ).all()
             )
@@ -284,16 +287,17 @@ async def get_provider(
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Provider 不存在")
 
+    rm_table = RegisteredModel.__table__
     rows = (
         await db.execute(
             select(RegisteredModel)
             .where(
                 and_(
-                    RegisteredModel.provider_id == provider_id,
-                    RegisteredModel.is_deleted.is_(False),
+                    rm_table.c.provider_id == provider_id,
+                    rm_table.c.is_deleted.is_(False),
                 )
             )
-            .order_by(RegisteredModel.created_at.desc())
+            .order_by(rm_table.c.created_at.desc())
         )
     ).scalars().all()
 

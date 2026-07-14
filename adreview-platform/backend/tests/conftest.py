@@ -29,11 +29,44 @@ def _make_test_schema_name() -> str:
 
 
 def _apply_schema(schema: str | None) -> None:
-    """Stamp the schema on every table and column. When None, reset to default."""
+    """Stamp the schema on every table and column. When None, reset to default.
+
+    SQLAlchemy 2 的 ORM 层通过 cache_key 跟踪 schema。column.table 重新绑定
+    后需要重新设置 column._cache_key_traversal，否则会沿用上一个测试的
+    编译表达式（包含旧 schema 名）。
+    """
     for table in Base.metadata.tables.values():
         table.schema = schema
         for column in table.columns:
             column.table = table
+            # 清 column 自身的 annotations cache 和 compiler dispatch，
+            # 强制下次访问时重新生成绑定 schema 名的表达式
+            try:
+                for attr in ("__annotations_cache__", "_compile_w_cache"):
+                    if hasattr(column, attr):
+                        v = getattr(column, attr, None)
+                        if v and hasattr(v, "clear"):
+                            v.clear()
+                        elif isinstance(v, dict):
+                            v.clear()
+            except Exception:
+                pass
+    # 同时清掉 ORM mapper 的全局 compile cache
+    try:
+        from sqlalchemy.orm import mapper as _mapper_mod
+
+        for m in _mapper_mod.Mapper.registry.mappers:
+            cache = getattr(m, "_compiled_cache", None)
+            if cache is not None and hasattr(cache, "clear"):
+                cache.clear()
+            # mapper 上每个 ColumnProperty 也可能持有 cache
+            for prop in m.attrs.values():
+                for attr in ("_cache_key_traversal", "__annotations_cache__"):
+                    v = getattr(prop, attr, None)
+                    if isinstance(v, dict) and hasattr(v, "clear"):
+                        v.clear()
+    except Exception:
+        pass
 
 
 @pytest_asyncio.fixture
