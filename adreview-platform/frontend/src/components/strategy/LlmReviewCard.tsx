@@ -107,7 +107,7 @@ export function LlmReviewCard({ value, onChange }: Props) {
           </Tag>
           {pickedModel && (
             <Tag color="blue" bordered={false}>
-              {pickedModel.name}（{pickedModel.provider ?? '-'} / {pickedModel.model_name ?? '-'}）
+              {pickedModel.name}（{pickedModel.model_name ?? '-'}）
             </Tag>
           )}
           <Switch checked={value.is_enabled} onChange={onToggle} />

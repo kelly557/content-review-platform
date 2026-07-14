@@ -56,6 +56,7 @@ const ReplyLibraryListPage = lazy(() => import('@/pages/strategy/ReplyLibraryLis
 const ReplyLibraryDetailPage = lazy(() => import('@/pages/strategy/ReplyLibraryDetailPage'))
 const ModelListPage = lazy(() => import('@/pages/models/ModelListPage'))
 const ModelDetailPage = lazy(() => import('@/pages/models/ModelDetailPage'))
+const ProviderDetailPage = lazy(() => import('@/pages/models/ProviderDetailPage'))
 const KnowledgeDocumentListPage = lazy(
   () => import('@/pages/knowledge/KnowledgeDocumentListPage'),
 )
@@ -153,6 +154,7 @@ export default function AppRoutes() {
               <Route path="/resources/replies/:id" element={<ReplyLibraryDetailPage />} />
               <Route path="/resources/models" element={<ModelListPage />} />
               <Route path="/resources/models/:id" element={<ModelDetailPage />} />
+              <Route path="/resources/providers/:id" element={<ProviderDetailPage />} />
               <Route path="/resources/knowledge" element={<KnowledgeDocumentListPage />} />
               <Route path="/resources/knowledge/:id" element={<KnowledgeDocumentDetailPage />} />
 

@@ -35,7 +35,8 @@ interface ModelGroup {
   id: number
   code: string
   name: string
-  provider: string | null
+  provider_id: number | null
+  model_name: string | null
   versions: RegisteredModelVersion[]
   versionsLoading: boolean
 }
@@ -71,7 +72,8 @@ export default function ChooseModelVersionModal({
             id: r.id,
             code: r.code,
             name: r.name,
-            provider: r.provider ?? null,
+            provider_id: r.provider_id ?? null,
+            model_name: r.model_name ?? null,
             versions: [],
             versionsLoading: false,
           })),
@@ -170,7 +172,7 @@ export default function ChooseModelVersionModal({
                   <Text strong>{m.name}</Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {m.code}
-                    {m.provider ? ` · ${m.provider}` : ''}
+                    {m.model_name ? ` · ${m.model_name}` : ''}
                   </Text>
                 </Space>
               ),

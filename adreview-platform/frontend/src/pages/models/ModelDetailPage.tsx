@@ -32,6 +32,7 @@ import dayjs from 'dayjs'
 import { registeredModelsApi } from '@/api/registered-models'
 import type {
   ArtifactUploadResponse,
+  LargeModelCategory,
   RegisteredModel,
   RegisteredModelRegistrationMethod,
   RegisteredModelVersion,
@@ -39,6 +40,7 @@ import type {
   SmallModelCategory,
 } from '@/types/domain'
 import {
+  LARGE_MODEL_CATEGORY_LABEL,
   REGISTERED_MODEL_KIND_OPTIONS,
   REGISTERED_MODEL_PROVIDER_PRESETS,
   REGISTERED_MODEL_STATUS_OPTIONS,
@@ -67,12 +69,10 @@ interface NewVersionValues {
   version?: string
   max_output_tokens?: number
   __artifact?: ArtifactUploadResponse
-  // 大模型分支
+  // 大模型分支（endpoint / credential 继承 Provider；此处可调 model_name / 分类）
   version_label?: string
   notes?: string
-  provider?: string
-  endpoint_url?: string
-  credential_id?: number
+  large_category?: LargeModelCategory
 }
 
 export default function ModelDetailPage() {
@@ -178,9 +178,8 @@ export default function ModelDetailPage() {
       })
     } else {
       createForm.setFieldsValue({
-        provider: model.provider ?? undefined,
         model_name: model.model_name ?? undefined,
-        endpoint_url: model.endpoint_url ?? undefined,
+        large_category: (model.large_category as LargeModelCategory | undefined) ?? undefined,
       })
     }
     setCreateOpen(true)
@@ -208,9 +207,8 @@ export default function ModelDetailPage() {
         const body: RegisteredModelVersionCreate = {
           version_label: v.version_label ?? null,
           notes: v.notes ?? null,
-          provider: v.provider ?? null,
           model_name: v.model_name ?? null,
-          endpoint_url: v.endpoint_url ?? null,
+          large_category: v.large_category ?? null,
         }
         await registeredModelsApi.createVersion(modelId, body)
       }
@@ -383,16 +381,27 @@ export default function ModelDetailPage() {
                     </>
                   ) : (
                     <>
-                      <Descriptions.Item label="Provider">
-                        {model.provider
-                          ? REGISTERED_MODEL_PROVIDER_PRESETS.find((p) => p.value === model.provider)?.label ?? model.provider
-                          : '-'}
+                      <Descriptions.Item label="Provider" span={2}>
+                        {model.provider ? (
+                          <Link to={`/resources/providers/${model.provider.id}`}>
+                            <span style={{ color: '#0369A1' }}>
+                              {model.provider.display_name}
+                              {' · '}
+                              {REGISTERED_MODEL_PROVIDER_PRESETS.find(
+                                (p) => p.value === model.provider?.provider_preset,
+                              )?.label ?? model.provider.provider_preset}
+                            </span>
+                          </Link>
+                        ) : (
+                          <Text type="secondary">未挂载</Text>
+                        )}
                       </Descriptions.Item>
                       <Descriptions.Item label="Model ID">{model.model_name || '-'}</Descriptions.Item>
                       <Descriptions.Item label="Version">{model.version || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="API Key（凭证）">{model.credential_label || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="Base URL" span={2}>
-                        <code>{model.endpoint_url || '-'}</code>
+                      <Descriptions.Item label="大模型分类" span={2}>
+                        {model.large_category
+                          ? (LARGE_MODEL_CATEGORY_LABEL as Record<string, string>)[model.large_category] ?? model.large_category
+                          : '-'}
                       </Descriptions.Item>
                     </>
                   )}
@@ -654,24 +663,21 @@ export default function ModelDetailPage() {
               >
                 <Input.TextArea rows={3} placeholder="新增 prompt / 调整超时 / 切换到 gpt-4o ..." />
               </Form.Item>
-              <Form.Item label="Provider" name="provider">
+              <Form.Item
+                label="大模型分类"
+                name="large_category"
+                tooltip="不填则继承当前版本的分类"
+              >
                 <Select
                   allowClear
-                  options={REGISTERED_MODEL_PROVIDER_PRESETS.map((p) => ({
-                    value: p.value,
-                    label: p.label,
+                  options={Object.entries(LARGE_MODEL_CATEGORY_LABEL).map(([value, label]) => ({
+                    value,
+                    label,
                   }))}
                   placeholder="继承当前版本或重新选择"
                 />
               </Form.Item>
               <Form.Item label="Model ID" name="model_name">
-                <Input placeholder="继承当前版本或重新填写" />
-              </Form.Item>
-              <Form.Item
-                label="Base URL"
-                name="endpoint_url"
-                rules={[{ type: 'url', message: '请填写有效的 URL' }]}
-              >
                 <Input placeholder="继承当前版本或重新填写" />
               </Form.Item>
             </>
