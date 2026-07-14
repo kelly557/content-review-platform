@@ -174,6 +174,7 @@ export default function ProviderDetailPage() {
         description: v.description,
         kind: 'large',
         small_category: null,
+        modality: null,
         large_category: v.large_category,
         provider_id: providerId,
         model_name: v.model_name.trim(),

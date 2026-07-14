@@ -16,10 +16,12 @@ import { registeredModelsApi } from '@/api/registered-models'
 import type {
   ArtifactUploadResponse,
   SmallModelCategory,
+  SmallModelModality,
 } from '@/types/domain'
-import { SMALL_MODEL_CATEGORY_OPTIONS } from '@/types/domain'
+import { SMALL_MODEL_CATEGORY_OPTIONS, SMALL_MODEL_MODALITY_OPTIONS } from '@/types/domain'
 
 export interface SmallModelFormValues {
+  modality: SmallModelModality
   small_category: SmallModelCategory
   name: string
   model_name: string
@@ -42,7 +44,7 @@ interface Props {
 
 /**
  * 小模型添加表单字段（不包含 Name/Kind Radio — 由父组件渲染）。
- * - 必填：分类、模型名称、模型标识、文件、max_output_tokens
+ * - 必填：模态、分类、模型名称、文件、max_output_tokens
  * - 可选：版本号、说明
  * - artifact 上传结果通过 form.setFieldValue('__artifact', meta) 存到表单
  */
@@ -90,6 +92,26 @@ export default function SmallModelFormFields({
 
   return (
     <>
+      <Form.Item
+        label="模态"
+        name="modality"
+        rules={[{ required: true, message: '请选择模态' }]}
+      >
+        <Select
+          options={SMALL_MODEL_MODALITY_OPTIONS.map((o) => ({
+            value: o.value,
+            label: (
+              <span>
+                <Tag color={o.color} style={{ marginRight: 4 }}>
+                  {o.label}
+                </Tag>
+              </span>
+            ),
+          }))}
+          placeholder="选择模态（文本 / 图片）"
+        />
+      </Form.Item>
+
       <Form.Item
         label="分类"
         name="small_category"

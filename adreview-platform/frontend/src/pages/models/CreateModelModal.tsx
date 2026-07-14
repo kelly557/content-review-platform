@@ -98,6 +98,10 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
           message.error('请上传小模型文件')
           return
         }
+        if (!v.modality) {
+          message.error('请选择模态')
+          return
+        }
         if (!v.small_category) {
           message.error('请选择小模型分类')
           return
@@ -111,6 +115,7 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
           description: v.description,
           kind: 'small',
           small_category: v.small_category as SmallModelCategory,
+          modality: v.modality,
           large_category: null,
           provider_id: null,
           model_name: v.model_name.trim(),
@@ -324,27 +329,20 @@ interface SmallFormProps {
 
 function SmallForm({ form, uploading, setUploading }: SmallFormProps) {
   return (
-    <>
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 16 }}
-        message="小模型是自建的传统 ML / 深度学习权重文件（.onnx / .pt / .zip 等），不绑定任何 Provider。上传权重文件后填业务标识和分类即可。"
+    <Form<CreateFormValues>
+      form={form}
+      layout="vertical"
+      initialValues={{
+        modality: 'text',
+        small_category: 'politics' as SmallModelCategory,
+      }}
+    >
+      <SmallModelFormFields
+        form={form as never}
+        uploading={uploading}
+        setUploading={setUploading}
       />
-      <Form<CreateFormValues>
-        form={form}
-        layout="vertical"
-        initialValues={{
-          small_category: 'politics' as SmallModelCategory,
-        }}
-      >
-        <SmallModelFormFields
-          form={form as never}
-          uploading={uploading}
-          setUploading={setUploading}
-        />
-      </Form>
-    </>
+    </Form>
   )
 }
 
