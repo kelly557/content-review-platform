@@ -87,6 +87,7 @@ export default function ModelDetailPage() {
   const [loading, setLoading] = useState(false)
   const [validating, setValidating] = useState(false)
   const [toggling, setToggling] = useState(false)
+  const [activating, setActivating] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -232,6 +233,23 @@ export default function ModelDetailPage() {
     }
   }
 
+  const handleActivate = async () => {
+    if (!model || !model.current_version_id) {
+      message.warning('当前没有可激活的版本，请先发布新版本')
+      return
+    }
+    setActivating(true)
+    try {
+      await registeredModelsApi.activateVersion(modelId, model.current_version_id)
+      message.success('已激活当前版本')
+      await fetchAll()
+    } catch {
+      // handled
+    } finally {
+      setActivating(false)
+    }
+  }
+
   if (loading && !model) {
     return <Spin style={{ display: 'block', margin: '20vh auto' }} />
   }
@@ -288,6 +306,21 @@ export default function ModelDetailPage() {
         }
         extra={
           <Space>
+            <Button
+              type="primary"
+              icon={<RocketOutlined />}
+              loading={activating}
+              onClick={handleActivate}
+              disabled={
+                !canWrite ||
+                !model.current_version_id ||
+                model.status === 'archived' ||
+                model.status === 'active'
+              }
+              title={model.status === 'active' ? '当前已是激活态' : ''}
+            >
+              激活
+            </Button>
             <Tooltip title={isSmall ? '小模型不支持远程校验' : ''}>
               <Button
                 icon={<CheckCircleOutlined />}
