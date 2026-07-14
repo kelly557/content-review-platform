@@ -141,8 +141,11 @@ class RegisteredModelCreate(BaseModel):
             "大模型分类（kind=large 时必填）：text / multimodal / other"
         ),
     )
-    provider_id: int = Field(
-        description="归属 Provider（大模型 / 小模型均必填）；由 /providers 端点创建",
+    provider_id: Optional[int] = Field(
+        default=None,
+        description=(
+            "归属 Provider；大模型必填，小模型可空（不再绑定 Provider）。"
+        ),
     )
     model_name: Optional[str] = Field(
         default=None,

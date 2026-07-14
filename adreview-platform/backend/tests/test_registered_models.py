@@ -265,19 +265,44 @@ async def test_models_provider_default_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_models_require_provider(client):
+async def test_large_model_requires_provider(client):
+    """大模型（remote_api）必须挂载 Provider；不传 provider_id → 422。"""
     await _login(client)
     r = await client.post(
         "/api/v1/registered-models",
         json={
-            "name": "no-provider",
+            "name": "no-provider-large",
             "kind": "large",
             "large_category": "text",
             "model_name": "gpt-4o-mini",
         },
     )
     assert r.status_code == 422
-    assert "provider_id" in r.text
+    assert "Provider" in r.text or "provider_id" in r.text
+
+
+@pytest.mark.asyncio
+async def test_small_model_provider_optional(client):
+    """小模型可以无 Provider（业务语义：自建权重，不属于任何厂商级 Provider）。"""
+    await _login(client)
+    art = await _upload_small_model_file(client, b"no-provider-small")
+    r = await client.post(
+        "/api/v1/registered-models",
+        json={
+            "name": "orphan-small",
+            "kind": "small",
+            "small_category": "politics",
+            "model_name": "politics-orphan",
+            "max_output_tokens": 256,
+            "registration_method": "uploaded_file",
+            "artifact": art,
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["kind"] == "small"
+    assert body["provider_id"] is None
+    assert body["provider"] is None
 
 
 @pytest.mark.asyncio

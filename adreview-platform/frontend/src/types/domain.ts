@@ -2313,7 +2313,8 @@ export interface RegisteredModelCreate {
   kind?: RegisteredModelKind
   small_category?: SmallModelCategory | null
   large_category?: LargeModelCategory | null
-  provider_id: number
+  // 大模型必填；小模型可空（不绑定任何 Provider）
+  provider_id?: number | null
   model_name?: string | null
   status?: RegisteredModelStatus
   version?: string | null

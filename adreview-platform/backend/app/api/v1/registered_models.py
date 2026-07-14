@@ -518,13 +518,21 @@ async def create_model(
     if (await db.scalar(select(RegisteredModel).where(RegisteredModel.code == code))) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"编码已存在: {code}")
 
-    # Provider 解析（不带 selectinload，避免跨测试 schema 缓存）
-    provider = await db.scalar(
-        select(RegisteredProvider).where(RegisteredProvider.id == body.provider_id)
-    )
-    if provider is None:
+    # Provider 解析：大模型必填；小模型可空
+    provider: Optional[RegisteredProvider] = None
+    if body.provider_id is not None:
+        provider = await db.scalar(
+            select(RegisteredProvider).where(RegisteredProvider.id == body.provider_id)
+        )
+        if provider is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Provider 不存在（id={body.provider_id}）",
+            )
+    if kind == RegisteredModelKind.LARGE.value and provider is None:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, f"Provider 不存在（id={body.provider_id}）"
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "大模型（kind=large）必须挂载到 Provider（请先在「添加 Provider」创建）",
         )
 
     if registration_method == RegisteredModelRegistrationMethod.UPLOADED_FILE.value:
@@ -550,7 +558,7 @@ async def create_model(
             kind=kind,
             small_category=small_category,
             large_category=None,
-            provider_id=provider.id,
+            provider_id=provider.id if provider else None,
             model_name=model_id_str,
             max_output_tokens=body.max_output_tokens,
             registration_method=registration_method,
@@ -572,7 +580,7 @@ async def create_model(
             version_label=body.version or f"v{version_no}",
             registration_method=registration_method,
             large_category=None,
-            provider=provider.provider_preset,
+            provider=provider.provider_preset if provider else None,
             model_name=model_id_str,
             endpoint_url=None,
             config={},
@@ -604,7 +612,7 @@ async def create_model(
                 "model_name": model.model_name,
                 "max_output_tokens": model.max_output_tokens,
                 "registration_method": registration_method,
-                "provider_id": provider.id,
+                "provider_id": provider.id if provider else None,
                 "artifact_filename": art.filename,
                 "artifact_size": art.size,
                 "artifact_sha256": art.sha256,

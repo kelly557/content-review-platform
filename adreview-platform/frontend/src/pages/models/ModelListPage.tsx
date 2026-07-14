@@ -128,8 +128,8 @@ export default function ModelListPage() {
       message.warning('仅管理员可添加模型')
       return
     }
-    if (providerOptions.length === 0) {
-      message.warning('请先创建一个 Provider，再添加模型')
+    if (activeTab === 'large' && providerOptions.length === 0) {
+      message.warning('请先创建一个 Provider，再添加大模型')
       setProviderOpen(true)
       return
     }
@@ -137,7 +137,7 @@ export default function ModelListPage() {
     createForm.setFieldsValue({
       kind: activeTab,
       large_category: activeTab === 'large' ? 'text' : undefined,
-      provider_id: providerOptions[0]?.id,
+      provider_id: activeTab === 'large' ? providerOptions[0]?.id : undefined,
     })
     setCreateOpen(true)
   }
@@ -172,10 +172,6 @@ export default function ModelListPage() {
         message.error('小模型必须选择分类')
         return
       }
-      if (!v.provider_id) {
-        message.error('小模型也必须挂载到某个 Provider')
-        return
-      }
       const artifact = (v as CreateFormValues & { __artifact?: unknown }).__artifact as
         | import('@/types/domain').ArtifactUploadResponse
         | undefined
@@ -196,7 +192,7 @@ export default function ModelListPage() {
           kind: 'small',
           small_category: v.small_category,
           large_category: null,
-          provider_id: v.provider_id!,
+          provider_id: undefined,
           model_name: v.model_name.trim(),
           version: v.version,
           max_output_tokens: v.max_output_tokens,
@@ -242,11 +238,12 @@ export default function ModelListPage() {
   const onTabChange = (next: string) => {
     const tab = next as ModelTab
     setActiveTab(tab)
-    // 切换 Tab：重置只属于前一种类型的分类筛选
+    // 切换 Tab：重置只属于前一种类型的分类筛选；并清空跨 tab 无意义的条件
     if (tab === 'large') {
       setSmallCategory(null)
     } else {
       setLargeCategory(null)
+      setProviderFilter(null)
     }
   }
 
@@ -447,17 +444,19 @@ export default function ModelListPage() {
             options={SMALL_MODEL_CATEGORY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
           />
         )}
-        <Select
-          allowClear
-          placeholder="Provider"
-          style={{ width: 180 }}
-          value={providerFilter ?? undefined}
-          onChange={(v) => setProviderFilter(v ?? null)}
-          options={providerOptions.map((p) => ({
-            value: String(p.id),
-            label: p.display_name,
-          }))}
-        />
+        {activeTab === 'large' && (
+          <Select
+            allowClear
+            placeholder="Provider"
+            style={{ width: 180 }}
+            value={providerFilter ?? undefined}
+            onChange={(v) => setProviderFilter(v ?? null)}
+            options={providerOptions.map((p) => ({
+              value: String(p.id),
+              label: p.display_name,
+            }))}
+          />
+        )}
         <Select
           allowClear
           placeholder="状态"
@@ -579,27 +578,11 @@ export default function ModelListPage() {
           >
             {({ getFieldValue }) =>
               getFieldValue('kind') === 'small' ? (
-                <>
-                  <SmallModelFormFields
-                    form={createForm as never}
-                    uploading={uploading}
-                    setUploading={setUploading}
-                  />
-                  <Form.Item
-                    label="Provider"
-                    name="provider_id"
-                    rules={[{ required: true, message: '请选择 Provider' }]}
-                    tooltip="凭证与端点统一继承自 Provider（小模型通常选 self-hosted）"
-                  >
-                    <Select
-                      options={providerOptions.map((p) => ({
-                        value: p.id,
-                        label: `${p.display_name}${p.provider_preset ? ` (${p.provider_preset})` : ''}`,
-                      }))}
-                      placeholder="选择 Provider"
-                    />
-                  </Form.Item>
-                </>
+                <SmallModelFormFields
+                  form={createForm as never}
+                  uploading={uploading}
+                  setUploading={setUploading}
+                />
               ) : (
                 <>
                   <Form.Item
