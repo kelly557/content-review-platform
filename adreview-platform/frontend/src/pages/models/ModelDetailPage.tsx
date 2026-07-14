@@ -38,6 +38,7 @@ import type {
   RegisteredModelVersion,
   RegisteredModelVersionCreate,
   SmallModelCategory,
+  SmallModelModality,
 } from '@/types/domain'
 import {
   LARGE_MODEL_CATEGORY_LABEL,
@@ -45,6 +46,7 @@ import {
   REGISTERED_MODEL_PROVIDER_PRESETS,
   REGISTERED_MODEL_STATUS_OPTIONS,
   SMALL_MODEL_CATEGORY_LABEL,
+  SMALL_MODEL_MODALITY_LABEL,
 } from '@/types/domain'
 import { useAuthStore } from '@/store'
 import SmallModelFormFields from './SmallModelFormFields'
@@ -64,6 +66,7 @@ interface NewVersionValues {
   // 小模型分支（沿用 SmallModelFormValues 字段，全部可选 — 详情页「发布新版本」时复用）
   name?: string
   small_category?: SmallModelCategory
+  modality?: SmallModelModality
   model_name?: string
   description?: string
   version?: string
@@ -172,6 +175,7 @@ export default function ModelDetailPage() {
     createForm.resetFields()
     if (model.kind === 'small') {
       createForm.setFieldsValue({
+        modality: (model.modality as SmallModelModality | undefined) ?? 'text',
         name: model.name,
         small_category: model.small_category as never,
         model_name: model.model_name ?? undefined,
@@ -201,6 +205,7 @@ export default function ModelDetailPage() {
           version_label: v.version,
           notes: v.notes ?? null,
           model_name: v.model_name,
+          modality: (v as NewVersionValues & { modality?: SmallModelModality }).modality ?? null,
           artifact: artifact ?? null,
         }
         await registeredModelsApi.createVersion(modelId, body)
@@ -262,6 +267,9 @@ export default function ModelDetailPage() {
   const kindOption = REGISTERED_MODEL_KIND_OPTIONS.find((o) => o.value === model.kind)
   const categoryLabel = model.small_category
     ? SMALL_MODEL_CATEGORY_LABEL[model.small_category as keyof typeof SMALL_MODEL_CATEGORY_LABEL] ?? model.small_category
+    : null
+  const modalityLabel = model.modality
+    ? SMALL_MODEL_MODALITY_LABEL[model.modality as SmallModelModality] ?? model.modality
     : null
   const isSmall = model.kind === 'small'
   const initialArtifact: ArtifactUploadResponse | null =
@@ -383,28 +391,15 @@ export default function ModelDetailPage() {
                       <Descriptions.Item label="最大输出 tokens">
                         {model.max_output_tokens ?? '-'}
                       </Descriptions.Item>
-                      <Descriptions.Item label="当前版本文件">
-                        {initialArtifact ? (
-                          <Space>
-                            <span>{initialArtifact.filename}</span>
-                            <Button
-                              type="link"
-                              size="small"
-                              icon={<CloudDownloadOutlined />}
-                              onClick={() => {
-                                const url = registeredModelsApi.artifactDownloadUrl(
-                                  model.id,
-                                  model.current_version_id!,
-                                )
-                                window.open(url, '_blank')
-                              }}
-                            >
-                              下载
-                            </Button>
-                          </Space>
-                        ) : (
-                          '-'
-                        )}
+                      <Descriptions.Item label="模态">
+                        {modalityLabel ?? '-'}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="当前模型版本">
+                        {model.current_version_no
+                          ? model.current_version_label
+                            ? `v${model.current_version_no} · ${model.current_version_label}`
+                            : `v${model.current_version_no}`
+                          : '-'}
                       </Descriptions.Item>
                       <Descriptions.Item label="SHA-256" span={2}>
                         <Text code style={{ fontSize: 12 }}>

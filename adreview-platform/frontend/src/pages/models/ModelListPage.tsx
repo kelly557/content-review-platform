@@ -27,11 +27,13 @@ import type {
   RegisteredModelStatus,
   RegisteredProviderOption,
   SmallModelCategory,
+  SmallModelModality,
 } from '@/types/domain'
 import {
   LARGE_MODEL_CATEGORY_OPTIONS,
   REGISTERED_MODEL_STATUS_OPTIONS,
   SMALL_MODEL_CATEGORY_OPTIONS,
+  SMALL_MODEL_MODALITY_OPTIONS,
 } from '@/types/domain'
 import { useAuthStore } from '@/store'
 import CreateModelModal from './CreateModelModal'
@@ -214,7 +216,7 @@ export default function ModelListPage() {
       {
         title: '小模型分类',
         dataIndex: 'small_category',
-        width: '10%',
+        width: '8%',
         render: (v: SmallModelCategory | null) => {
           if (!v) return '-'
           const opt = SMALL_MODEL_CATEGORY_OPTIONS.find((o) => o.value === v)
@@ -222,11 +224,25 @@ export default function ModelListPage() {
         },
       },
       {
+        title: '模态',
+        dataIndex: 'modality',
+        width: '8%',
+        render: (v: SmallModelModality | null) => {
+          if (!v) return '-'
+          const opt = SMALL_MODEL_MODALITY_OPTIONS.find((o) => o.value === v)
+          return opt ? <Tag color={opt.color}>{opt.label}</Tag> : v
+        },
+      },
+      {
         title: '当前模型版本',
-        dataIndex: 'artifact_filename',
+        dataIndex: 'current_version_label',
         width: '20%',
-        render: (v: string | null) =>
-          v ? <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</span> : '-',
+        render: (_v: string | null, row: RegisteredModelListItem) => {
+          if (!row.current_version_no) return '-'
+          return row.current_version_label
+            ? `v${row.current_version_no} · ${row.current_version_label}`
+            : `v${row.current_version_no}`
+        },
       },
       {
         title: '大小',
