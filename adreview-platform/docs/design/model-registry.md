@@ -174,6 +174,7 @@ registered_model_versions
 - `endpoint_url` / `credential`：默认继承 Provider；**版本层不直接读写**
 - 状态机：`draft → validated → active ↔ inactive → archived`；`failed` 表示校验异常
 - 切换：`POST /models/{id}/versions/{vid}/activate` 把 `current_version_id` 指向该版本
+  - **ModelDetailPage 顶部「激活」按钮**：直接调此 endpoint 把 model.status 切到 active
 
 ### 5.1 注册 Provider 时一次性携带 model
 
