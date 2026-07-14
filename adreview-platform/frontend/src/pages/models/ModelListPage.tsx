@@ -42,7 +42,7 @@ import { useAuthStore } from '@/store'
 import SmallModelFormFields, {
   type SmallModelFormValues,
 } from './SmallModelFormFields'
-import CreateProviderModal from './CreateProviderModal'
+import CreateProviderModal from './CreateModelModal'
 
 const { Text } = Typography
 
@@ -649,9 +649,11 @@ export default function ModelListPage() {
 
       <CreateProviderModal
         open={providerOpen}
+        mode={activeTab === 'large' ? 'large' : 'small'}
         onClose={() => setProviderOpen(false)}
         onCreated={() => {
           void fetchProviders()
+          void fetchList()
         }}
       />
     </div>

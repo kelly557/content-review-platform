@@ -10,16 +10,22 @@ import {
   App,
 } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
-import { providersApi } from '@/api/registered-models'
+import { providersApi, registeredModelsApi } from '@/api/registered-models'
 import {
   LARGE_MODEL_CATEGORY_OPTIONS,
   REGISTERED_MODEL_PROVIDER_PRESETS,
+  SMALL_MODEL_CATEGORY_OPTIONS,
   type LargeModelCategory,
   type ProviderInitialModel,
   type RegisteredModelProvider,
+  type RegisteredModelKind,
+  type SmallModelCategory,
 } from '@/types/domain'
+import SmallModelFormFields, {
+  type SmallModelFormValues,
+} from './SmallModelFormFields'
 
-interface FormValues {
+interface LargeFormValues {
   display_name: string
   provider_preset?: RegisteredModelProvider
   endpoint_url: string
@@ -28,16 +34,23 @@ interface FormValues {
   initial_models: Array<ProviderInitialModel & { _key?: string }>
 }
 
-interface Props {
-  open: boolean
-  onClose: () => void
-  onCreated?: (providerId: number) => void
+interface CreateFormValues extends SmallModelFormValues, LargeFormValues {
+  kind: RegisteredModelKind
 }
 
-export default function CreateProviderModal({ open, onClose, onCreated }: Props) {
+interface Props {
+  open: boolean
+  /** 'large' = 建 Provider + 一组 model；'small' = 仅建一个小模型（无 Provider 字段） */
+  mode: 'large' | 'small'
+  onClose: () => void
+  onCreated?: (info: { providerId?: number; modelId?: number }) => void
+}
+
+export default function CreateModelModal({ open, mode, onClose, onCreated }: Props) {
   const { message } = App.useApp()
-  const [form] = Form.useForm<FormValues>()
+  const [form] = Form.useForm<CreateFormValues>()
   const [submitting, setSubmitting] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const currentPreset = Form.useWatch('provider_preset', form) as
     | RegisteredModelProvider
     | undefined
@@ -54,27 +67,61 @@ export default function CreateProviderModal({ open, onClose, onCreated }: Props)
     if (!v) return
     setSubmitting(true)
     try {
-      const initial = (v.initial_models || []).map((m) => ({
-        name: m.name?.trim() || undefined,
-        model_name: m.model_name.trim(),
-        large_category: m.large_category as LargeModelCategory,
-        description: m.description?.trim() || undefined,
-        version: m.version?.trim() || undefined,
-      }))
-      const created = await providersApi.create({
-        display_name: v.display_name.trim(),
-        provider_preset: v.provider_preset,
-        endpoint_url: v.endpoint_url.trim(),
-        api_key: v.api_key,
-        description: v.description?.trim() || undefined,
-        initial_models: initial,
-      })
-      message.success(
-        initial.length
-          ? `Provider 创建成功，并同时建好 ${initial.length} 个模型`
-          : 'Provider 创建成功',
-      )
-      onCreated?.(created.id)
+      if (mode === 'large') {
+        const initial = (v.initial_models || []).map((m) => ({
+          name: m.name?.trim() || undefined,
+          model_name: m.model_name.trim(),
+          large_category: m.large_category as LargeModelCategory,
+          description: m.description?.trim() || undefined,
+          version: m.version?.trim() || undefined,
+        }))
+        const created = await providersApi.create({
+          display_name: v.display_name.trim(),
+          provider_preset: v.provider_preset,
+          endpoint_url: v.endpoint_url.trim(),
+          api_key: v.api_key,
+          description: v.description?.trim() || undefined,
+          initial_models: initial,
+        })
+        message.success(
+          initial.length
+            ? `创建成功，已同时建好 ${initial.length} 个模型`
+            : 'Provider 创建成功（暂未添加模型）',
+        )
+        onCreated?.({ providerId: created.id })
+      } else {
+        const artifact = (v as CreateFormValues & { __artifact?: unknown })
+          .__artifact as
+          | import('@/types/domain').ArtifactUploadResponse
+          | undefined
+        if (!artifact) {
+          message.error('请上传小模型文件')
+          return
+        }
+        if (!v.small_category) {
+          message.error('请选择小模型分类')
+          return
+        }
+        if (!v.model_name || !v.model_name.trim()) {
+          message.error('请填写业务标识')
+          return
+        }
+        const created = await registeredModelsApi.create({
+          name: v.name ?? v.model_name.trim(),
+          description: v.description,
+          kind: 'small',
+          small_category: v.small_category as SmallModelCategory,
+          large_category: null,
+          provider_id: null,
+          model_name: v.model_name.trim(),
+          version: v.version,
+          max_output_tokens: v.max_output_tokens,
+          registration_method: 'uploaded_file',
+          artifact,
+        })
+        message.success('小模型创建成功')
+        onCreated?.({ modelId: created.id })
+      }
       form.resetFields()
       onClose()
     } catch (e: unknown) {
@@ -86,35 +133,64 @@ export default function CreateProviderModal({ open, onClose, onCreated }: Props)
     }
   }
 
+  const title = mode === 'large' ? '添加模型' : '添加小模型'
+
   return (
     <Drawer
-      title="添加 Provider"
+      title={title}
       open={open}
       onClose={onClose}
-      width={640}
+      width={mode === 'large' ? 640 : 560}
       destroyOnClose
       extra={
         <Space>
           <Button onClick={onClose}>取消</Button>
-          <Button type="primary" loading={submitting} onClick={submit}>
+          <Button type="primary" loading={submitting || uploading} onClick={submit}>
             保存
           </Button>
         </Space>
       }
     >
+      {mode === 'large' ? (
+        <LargeForm
+          form={form}
+          currentPreset={currentPreset}
+          handlePresetChange={handlePresetChange}
+        />
+      ) : (
+        <SmallForm
+          form={form}
+          uploading={uploading}
+          setUploading={setUploading}
+        />
+      )}
+    </Drawer>
+  )
+}
+
+interface LargeFormProps {
+  form: import('antd').FormInstance<CreateFormValues>
+  currentPreset: RegisteredModelProvider | undefined
+  handlePresetChange: (v: RegisteredModelProvider) => void
+}
+
+function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) {
+  return (
+    <>
       <Alert
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="一个 Provider = 一个厂商级接入配置（Base URL + API Key + 一组 Model）。同厂商多模型可在下方「模型列表」一次性建好。"
+        message="一个厂商级接入配置 = 一个 Provider（凭证 + Base URL）+ 一组 Model。同厂商多模型可在下方「模型列表」一次性建好。"
       />
-      <Form<FormValues>
+      <Form<CreateFormValues>
         form={form}
         layout="vertical"
         initialValues={{
           provider_preset: 'openai',
-          endpoint_url: REGISTERED_MODEL_PROVIDER_PRESETS.find((p) => p.value === 'openai')
-            ?.defaultEndpoint ?? '',
+          endpoint_url:
+            REGISTERED_MODEL_PROVIDER_PRESETS.find((p) => p.value === 'openai')
+              ?.defaultEndpoint ?? '',
           initial_models: [],
         }}
       >
@@ -160,9 +236,7 @@ export default function CreateProviderModal({ open, onClose, onCreated }: Props)
           />
         </Form.Item>
 
-        <div style={{ marginTop: 8, marginBottom: 8, fontWeight: 500 }}>
-          模型列表
-        </div>
+        <div style={{ marginTop: 8, marginBottom: 8, fontWeight: 500 }}>模型列表</div>
         <Alert
           type={currentPreset ? 'success' : 'info'}
           showIcon
@@ -197,10 +271,7 @@ export default function CreateProviderModal({ open, onClose, onCreated }: Props)
                         placeholder="model_id：gpt-4o-mini"
                       />
                     </Form.Item>
-                    <Form.Item
-                      name={[field.name, 'name']}
-                      noStyle
-                    >
+                    <Form.Item name={[field.name, 'name']} noStyle>
                       <Input
                         style={{ width: 'calc(50% - 24px)' }}
                         placeholder="显示名（可选）：用于策略下拉展示"
@@ -227,10 +298,7 @@ export default function CreateProviderModal({ open, onClose, onCreated }: Props)
                       }))}
                     />
                   </Form.Item>
-                  <Form.Item
-                    name={[field.name, 'version']}
-                    noStyle
-                  >
+                  <Form.Item name={[field.name, 'version']} noStyle>
                     <Input
                       style={{ marginTop: 8, width: '100%' }}
                       placeholder="起始版本号（可选）：1.0.0"
@@ -250,6 +318,50 @@ export default function CreateProviderModal({ open, onClose, onCreated }: Props)
           )}
         </Form.List>
       </Form>
-    </Drawer>
+    </>
   )
 }
+
+interface SmallFormProps {
+  form: import('antd').FormInstance<CreateFormValues>
+  uploading: boolean
+  setUploading: (b: boolean) => void
+}
+
+function SmallForm({ form, uploading, setUploading }: SmallFormProps) {
+  return (
+    <>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="小模型是自建的传统 ML / 深度学习权重文件（.onnx / .pt / .zip 等），不绑定任何 Provider。上传权重文件后填业务标识和分类即可。"
+      />
+      <Form<CreateFormValues>
+        form={form}
+        layout="vertical"
+        initialValues={{
+          small_category: 'politics' as SmallModelCategory,
+        }}
+      >
+        <SmallModelFormFields
+          form={form as never}
+          uploading={uploading}
+          setUploading={setUploading}
+        />
+        <Form.Item
+          label="模型名称"
+          name="name"
+          tooltip="留空则使用业务标识作为展示名"
+        >
+          <Input placeholder="如：涉政分类 v1" />
+        </Form.Item>
+        <Form.Item label="描述" name="description">
+          <Input.TextArea rows={2} placeholder="该小模型的用途 / 注意事项" />
+        </Form.Item>
+      </Form>
+    </>
+  )
+}
+
+export { SMALL_MODEL_CATEGORY_OPTIONS }
