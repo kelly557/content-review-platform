@@ -16,26 +16,25 @@ import {
   App,
 } from 'antd'
 import {
+  CloudDownloadOutlined,
   PlusOutlined,
-  EditOutlined,
-  DeleteOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
-import { registeredModelsApi, credentialsApi } from '@/api/registered-models'
+import { registeredModelsApi, providersApi } from '@/api/registered-models'
 import type {
+  LargeModelCategory,
   RegisteredModelCreate,
   RegisteredModelKind,
   RegisteredModelListItem,
-  RegisteredModelProvider,
   RegisteredModelStatus,
-  ResourceCredential,
+  RegisteredProviderOption,
   SmallModelCategory,
 } from '@/types/domain'
 import {
+  LARGE_MODEL_CATEGORY_OPTIONS,
   REGISTERED_MODEL_KIND_OPTIONS,
-  REGISTERED_MODEL_PROVIDER_PRESETS,
   REGISTERED_MODEL_STATUS_OPTIONS,
   SMALL_MODEL_CATEGORY_OPTIONS,
 } from '@/types/domain'
@@ -43,14 +42,14 @@ import { useAuthStore } from '@/store'
 import SmallModelFormFields, {
   type SmallModelFormValues,
 } from './SmallModelFormFields'
+import CreateProviderModal from './CreateProviderModal'
 
 const { Text } = Typography
 
 interface LargeModelFormValues {
-  provider?: RegisteredModelProvider
+  provider_id?: number
   model_name: string
-  endpoint_url?: string
-  credential_id?: number
+  large_category?: LargeModelCategory
   version?: string
 }
 
@@ -66,6 +65,7 @@ export default function ModelListPage() {
   const [q, setQ] = useState('')
   const [kind, setKind] = useState<RegisteredModelKind | null>(null)
   const [smallCategory, setSmallCategory] = useState<SmallModelCategory | null>(null)
+  const [largeCategory, setLargeCategory] = useState<LargeModelCategory | null>(null)
   const [status, setStatus] = useState<RegisteredModelStatus | null>(null)
   const [providerFilter, setProviderFilter] = useState<string | null>(null)
 
@@ -77,7 +77,8 @@ export default function ModelListPage() {
   const [creating, setCreating] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [createForm] = Form.useForm<CreateFormValues>()
-  const [credentials, setCredentials] = useState<ResourceCredential[]>([])
+  const [providerOptions, setProviderOptions] = useState<RegisteredProviderOption[]>([])
+  const [providerOpen, setProviderOpen] = useState(false)
 
   const fetchList = async () => {
     setLoading(true)
@@ -86,8 +87,9 @@ export default function ModelListPage() {
         q: q || undefined,
         kind: kind ?? undefined,
         small_category: smallCategory ?? undefined,
+        large_category: largeCategory ?? undefined,
+        provider_id: providerFilter ? Number(providerFilter) : undefined,
         status: status ?? undefined,
-        provider: providerFilter ?? undefined,
         size: 50,
       })
       setItems(data.items)
@@ -99,18 +101,18 @@ export default function ModelListPage() {
     }
   }
 
-  const fetchCredentials = async () => {
+  const fetchProviders = async () => {
     try {
-      const list = await credentialsApi.list()
-      setCredentials(list)
+      const list = await providersApi.options()
+      setProviderOptions(list)
     } catch {
-      setCredentials([])
+      setProviderOptions([])
     }
   }
 
   useEffect(() => {
     void fetchList()
-    void fetchCredentials()
+    void fetchProviders()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -119,10 +121,16 @@ export default function ModelListPage() {
       message.warning('仅管理员可添加模型')
       return
     }
+    if (providerOptions.length === 0) {
+      message.warning('请先创建一个 Provider，再添加模型')
+      setProviderOpen(true)
+      return
+    }
     createForm.resetFields()
     createForm.setFieldsValue({
       kind: 'large',
-      provider: 'openai',
+      large_category: 'text',
+      provider_id: providerOptions[0]?.id,
     })
     setCreateOpen(true)
   }
@@ -131,19 +139,9 @@ export default function ModelListPage() {
     if (next === 'large') {
       createForm.setFieldValue('small_category', undefined)
     } else if (next === 'small') {
-      createForm.setFieldValue('provider', undefined)
-      createForm.setFieldValue('endpoint_url', undefined)
-      createForm.setFieldValue('credential_id', undefined)
+      createForm.setFieldValue('large_category', undefined)
+      createForm.setFieldValue('provider_id', undefined)
     }
-  }
-
-  const onProviderChange = (next?: RegisteredModelProvider) => {
-    if (!next) {
-      createForm.setFieldValue('endpoint_url', '')
-      return
-    }
-    const preset = REGISTERED_MODEL_PROVIDER_PRESETS.find((p) => p.value === next)
-    createForm.setFieldValue('endpoint_url', preset?.defaultEndpoint ?? '')
   }
 
   const submitCreate = async () => {
@@ -154,17 +152,21 @@ export default function ModelListPage() {
       return
     }
     if (v.kind === 'large') {
-      if (!v.credential_id) {
-        message.error('请选择凭证（API key）')
+      if (!v.provider_id) {
+        message.error('请选择 Provider')
         return
       }
-      if (!v.endpoint_url) {
-        message.error('请填写 Base URL')
+      if (!v.large_category) {
+        message.error('大模型必须选择分类')
         return
       }
     } else {
       if (!v.small_category) {
         message.error('小模型必须选择分类')
+        return
+      }
+      if (!v.provider_id) {
+        message.error('小模型也必须挂载到某个 Provider')
         return
       }
       const artifact = (v as CreateFormValues & { __artifact?: unknown }).__artifact as
@@ -186,6 +188,8 @@ export default function ModelListPage() {
           description: v.description,
           kind: 'small',
           small_category: v.small_category,
+          large_category: null,
+          provider_id: v.provider_id!,
           model_name: v.model_name.trim(),
           version: v.version,
           max_output_tokens: v.max_output_tokens,
@@ -194,29 +198,25 @@ export default function ModelListPage() {
         }
         await registeredModelsApi.create(payload)
       } else {
-        const preset = v.provider
-          ? REGISTERED_MODEL_PROVIDER_PRESETS.find((p) => p.value === v.provider)
-          : undefined
         const payload: RegisteredModelCreate = {
           name: v.name,
           description: v.description,
           kind: 'large',
-          small_category: undefined,
-          provider: v.provider,
+          small_category: null,
+          large_category: v.large_category!,
+          provider_id: v.provider_id!,
           model_name: v.model_name.trim(),
-          endpoint_url: v.endpoint_url,
           version: v.version,
-          config: { protocol: preset?.protocol ?? 'custom' },
-          credential_id: v.credential_id ?? null,
-          registration_method: 'remote_api',
         }
         await registeredModelsApi.create(payload)
       }
       message.success('模型添加成功')
       setCreateOpen(false)
       await fetchList()
-    } catch {
-      // handled
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const text = typeof detail === 'string' ? detail : '添加失败'
+      message.error(text)
     } finally {
       setCreating(false)
     }
@@ -234,11 +234,11 @@ export default function ModelListPage() {
 
   const columns = useMemo(
     () => [
-      { title: '名称', dataIndex: 'name', width: '20%' },
+      { title: '名称', dataIndex: 'name', width: '18%' },
       {
         title: '类型',
         dataIndex: 'kind',
-        width: '8%',
+        width: '7%',
         render: (v: RegisteredModelKind) => {
           const opt = REGISTERED_MODEL_KIND_OPTIONS.find((o) => o.value === v)
           return <Tag color={opt?.color}>{opt?.label ?? v}</Tag>
@@ -246,34 +246,39 @@ export default function ModelListPage() {
       },
       {
         title: '分类',
-        dataIndex: 'small_category',
-        width: '9%',
-        render: (v: SmallModelCategory | null) => {
-          if (!v) return '-'
-          const opt = SMALL_MODEL_CATEGORY_OPTIONS.find((o) => o.value === v)
-          return opt ? <Tag color={opt.color}>{opt.label}</Tag> : v
+        dataIndex: 'large_category',
+        width: '8%',
+        render: (v: LargeModelCategory | null, row: RegisteredModelListItem) => {
+          if (row.kind === 'large') {
+            if (!v) return '-'
+            const opt = LARGE_MODEL_CATEGORY_OPTIONS.find((o) => o.value === v)
+            return opt ? <Tag color={opt.color}>{opt.label}</Tag> : v
+          }
+          if (!row.small_category) return '-'
+          const opt = SMALL_MODEL_CATEGORY_OPTIONS.find(
+            (o) => o.value === row.small_category,
+          )
+          return opt ? <Tag color={opt.color}>{opt.label}</Tag> : row.small_category
         },
       },
       {
         title: 'Provider',
-        dataIndex: 'provider',
-        width: '10%',
-        render: (v: string | null) => {
-          if (!v) return '-'
-          const opt = REGISTERED_MODEL_PROVIDER_PRESETS.find((p) => p.value === v)
-          return opt?.label ?? v
-        },
+        dataIndex: 'provider_label',
+        width: '12%',
+        render: (v: string | null, row: RegisteredModelListItem) =>
+          row.provider_id ? (
+            <Link to={`/resources/providers/${row.provider_id}`}>
+              <span style={{ color: '#0369A1' }}>{v || `#${row.provider_id}`}</span>
+            </Link>
+          ) : (
+            <Text type="secondary">未挂载</Text>
+          ),
       },
-      {
-        title: 'Model ID',
-        dataIndex: 'model_name',
-        width: '16%',
-        render: (v: string | null) => v || '-',
-      },
+      { title: 'Model ID', dataIndex: 'model_name', width: '14%' },
       {
         title: '状态',
         dataIndex: 'status',
-        width: '9%',
+        width: '8%',
         render: (v: RegisteredModelStatus) => {
           const opt = REGISTERED_MODEL_STATUS_OPTIONS.find((o) => o.value === v)
           return <Tag color={opt?.color}>{opt?.label ?? v}</Tag>
@@ -288,11 +293,11 @@ export default function ModelListPage() {
       },
       {
         title: '操作',
-        width: '10%',
+        width: '12%',
         render: (_v: unknown, row: RegisteredModelListItem) => (
           <Space size={4}>
             <Link to={`/resources/models/${row.id}`}>
-              <Button type="link" size="small" icon={<EditOutlined />}>
+              <Button type="link" size="small" icon={<CloudDownloadOutlined />}>
                 详情
               </Button>
             </Link>
@@ -308,7 +313,6 @@ export default function ModelListPage() {
                   type="link"
                   size="small"
                   danger
-                  icon={<DeleteOutlined />}
                   disabled={!canWrite}
                 >
                   删除
@@ -319,7 +323,6 @@ export default function ModelListPage() {
         ),
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [canWrite],
   )
 
@@ -337,8 +340,8 @@ export default function ModelListPage() {
         <Input.Search
           allowClear
           placeholder="搜索名称 / Model ID"
-          onSearch={(v) => {
-            setQ(v)
+          onSearch={(val) => {
+            setQ(val)
             void fetchList()
           }}
           style={{ width: 220 }}
@@ -353,7 +356,18 @@ export default function ModelListPage() {
         />
         <Select
           allowClear
-          placeholder="分类"
+          placeholder="大模型分类"
+          style={{ width: 130 }}
+          value={largeCategory ?? undefined}
+          onChange={(v) => setLargeCategory((v as LargeModelCategory) ?? null)}
+          options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
+            value: o.value,
+            label: o.label,
+          }))}
+        />
+        <Select
+          allowClear
+          placeholder="小模型分类"
           style={{ width: 130 }}
           value={smallCategory ?? undefined}
           onChange={(v) => setSmallCategory(v ?? null)}
@@ -362,10 +376,13 @@ export default function ModelListPage() {
         <Select
           allowClear
           placeholder="Provider"
-          style={{ width: 150 }}
+          style={{ width: 180 }}
           value={providerFilter ?? undefined}
           onChange={(v) => setProviderFilter(v ?? null)}
-          options={REGISTERED_MODEL_PROVIDER_PRESETS.map((p) => ({ value: p.value, label: p.label }))}
+          options={providerOptions.map((p) => ({
+            value: String(p.id),
+            label: p.display_name,
+          }))}
         />
         <Select
           allowClear
@@ -377,6 +394,13 @@ export default function ModelListPage() {
         />
         <Button icon={<ReloadOutlined />} onClick={() => fetchList()}>
           刷新
+        </Button>
+        <Button
+          icon={<CloudDownloadOutlined />}
+          onClick={() => setProviderOpen(true)}
+          disabled={!canWrite}
+        >
+          添加 Provider
         </Button>
         <Button
           type="primary"
@@ -402,9 +426,7 @@ export default function ModelListPage() {
           },
         }}
         scroll={{ x: 'max-content' }}
-        footer={() => (
-          <Text type="secondary">共 {total} 条</Text>
-        )}
+        footer={() => <Text type="secondary">共 {total} 条</Text>}
       />
 
       <Drawer
@@ -434,7 +456,10 @@ export default function ModelListPage() {
             </Radio.Group>
           </Form.Item>
 
-          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.kind !== curr.kind}>
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, curr) => prev.kind !== curr.kind}
+          >
             {({ getFieldValue }) =>
               getFieldValue('kind') === 'small' ? (
                 <SmallModelFormFields
@@ -451,14 +476,31 @@ export default function ModelListPage() {
                   >
                     <Input placeholder="如：GPT-4o 文本审核" />
                   </Form.Item>
-                  <Form.Item label="Provider" name="provider">
+                  <Form.Item
+                    label="Provider"
+                    name="provider_id"
+                    rules={[{ required: true, message: '请选择 Provider' }]}
+                    tooltip="凭证与端点统一继承自 Provider"
+                  >
                     <Select
-                      options={REGISTERED_MODEL_PROVIDER_PRESETS.map((p) => ({
-                        value: p.value,
-                        label: p.label,
+                      options={providerOptions.map((p) => ({
+                        value: p.id,
+                        label: `${p.display_name}${p.provider_preset ? ` (${p.provider_preset})` : ''}`,
                       }))}
-                      placeholder="选择厂商"
-                      onChange={(v) => onProviderChange(v as RegisteredModelProvider)}
+                      placeholder="选择厂商级 Provider"
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    label="大模型分类"
+                    name="large_category"
+                    rules={[{ required: true, message: '请选择大模型分类' }]}
+                  >
+                    <Select
+                      options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: o.label,
+                      }))}
+                      placeholder="文本 / 多模态 / 其他"
                     />
                   </Form.Item>
                   <Form.Item
@@ -470,41 +512,15 @@ export default function ModelListPage() {
                     <Input placeholder="gpt-4o-mini / claude-3-5-sonnet-latest" />
                   </Form.Item>
                   <Form.Item
-                    label="Base URL"
-                    name="endpoint_url"
-                    rules={[{ required: true, type: 'url', message: '请填写有效的 URL' }]}
-                  >
-                    <Input placeholder="https://api.openai.com/v1" />
-                  </Form.Item>
-                  <Form.Item
-                    label="API Key（凭证）"
-                    name="credential_id"
-                    rules={[{ required: true, message: '请选择凭证' }]}
-                    tooltip="可在「凭证管理」中创建；必填，上线后无凭证直接 401"
-                  >
-                    <Select
-                      allowClear
-                      placeholder="选择已保存的凭证"
-                      options={credentials.map((c) => ({
-                        value: c.id,
-                        label: `${c.name} · ${c.masked_token}`,
-                      }))}
-                      notFoundContent={
-                        <Text type="secondary">尚无可用凭证</Text>
-                      }
-                    />
-                  </Form.Item>
-                  <Form.Item
                     label="Version"
                     name="version"
-                    tooltip="语义版本号，如 1.0.0"
+                    tooltip="语义版本号，如 1.0.0（可选）"
                   >
                     <Input placeholder="1.0.0" />
                   </Form.Item>
                   <Form.Item
                     label="模型说明（Description）"
                     name="description"
-                    tooltip="这个模型用在什么审核场景 / 注意事项"
                   >
                     <Input.TextArea
                       rows={3}
@@ -515,8 +531,34 @@ export default function ModelListPage() {
               )
             }
           </Form.Item>
+
+          {/* 小模型也需要选择 Provider，移到 Form.List 之外仍可显示 */}
+          {createForm.getFieldValue('kind') === 'small' && (
+            <Form.Item
+              label="Provider"
+              name="provider_id"
+              rules={[{ required: true, message: '请选择 Provider' }]}
+              tooltip="凭证与端点统一继承自 Provider（小模型通常选 self-hosted）"
+            >
+              <Select
+                options={providerOptions.map((p) => ({
+                  value: p.id,
+                  label: `${p.display_name}${p.provider_preset ? ` (${p.provider_preset})` : ''}`,
+                }))}
+                placeholder="选择 Provider"
+              />
+            </Form.Item>
+          )}
         </Form>
       </Drawer>
+
+      <CreateProviderModal
+        open={providerOpen}
+        onClose={() => setProviderOpen(false)}
+        onCreated={() => {
+          void fetchProviders()
+        }}
+      />
     </div>
   )
 }
