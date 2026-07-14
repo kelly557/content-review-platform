@@ -231,7 +231,7 @@ export default function KnowledgeDocumentListPage() {
           onClick={openCreate}
           disabled={!canWrite}
         >
-          新建知识文档
+          新建知识
         </Button>
       </Space>
       <Table<KnowledgeDocumentListItem>
@@ -335,7 +335,7 @@ export default function KnowledgeDocumentListPage() {
       />
 
       <Drawer
-        title="新建知识文档"
+        title="新建知识"
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         width={560}
