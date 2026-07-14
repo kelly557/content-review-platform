@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { UploadFile } from 'antd'
 import {
   Alert,
   Button,
@@ -51,7 +52,6 @@ interface CreateFormValues {
   status?: KnowledgeDocumentStatus
   mode: RegistrationMode
   source_url?: string
-  file?: { fileList: { originFileObj?: File }[] }
 }
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -73,6 +73,14 @@ export default function KnowledgeDocumentListPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createForm] = Form.useForm<CreateFormValues>()
+  const currentMode = Form.useWatch('mode', createForm) as RegistrationMode | undefined
+  const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([])
+
+  useEffect(() => {
+    if (currentMode !== 'upload') {
+      setUploadFileList([])
+    }
+  }, [currentMode])
 
   const fetchList = async () => {
     setLoading(true)
@@ -103,6 +111,7 @@ export default function KnowledgeDocumentListPage() {
       message.warning('仅管理员可新建知识文档')
       return
     }
+    setUploadFileList([])
     createForm.resetFields()
     createForm.setFieldsValue({
       status: 'draft',
@@ -126,7 +135,7 @@ export default function KnowledgeDocumentListPage() {
       }
 
       if (v.mode === 'upload') {
-        const fileObj = v.file?.fileList?.[0]?.originFileObj
+        const fileObj = uploadFileList[0]?.originFileObj as File | undefined
         if (!fileObj) {
           message.error('请选择文件')
           setCreating(false)
@@ -381,39 +390,48 @@ export default function KnowledgeDocumentListPage() {
             noStyle
             shouldUpdate={(prev, curr) => prev.mode !== curr.mode}
           >
-            {({ getFieldValue }) =>
-              getFieldValue('mode') === 'upload' ? (
-                <Form.Item
-                  label="文件"
-                  name="file"
-                  valuePropName="fileList"
-                  getValueFromEvent={(e) => (Array.isArray(e) ? e : e?.fileList)}
-                  rules={[
-                    {
-                      validator: (_, value) =>
-                        Array.isArray(value) && value.length > 0
-                          ? Promise.resolve()
-                          : Promise.reject(new Error('请选择文件')),
-                    },
-                  ]}
-                >
-                  <Upload.Dragger beforeUpload={() => false} maxCount={1} accept=".pdf,.txt,.md,.doc,.docx">
-                    <p className="ant-upload-drag-icon">
-                      <InboxOutlined />
-                    </p>
-                    <p>点击或拖拽上传（支持 PDF、TXT、MD、DOC、DOCX，单文件 ≤ 20MB）</p>
-                  </Upload.Dragger>
-                </Form.Item>
-              ) : getFieldValue('mode') === 'url' ? (
-                <Form.Item
-                  label="原文 URL"
-                  name="source_url"
-                  rules={[{ required: true, type: 'url', message: '请填写有效 URL' }]}
-                >
-                  <Input placeholder="https://example.gov.cn/policy/xxx.html" />
-                </Form.Item>
-              ) : null
-            }
+            {({ getFieldValue }) => {
+              const m = getFieldValue('mode')
+              if (m === 'url') {
+                return (
+                  <Form.Item
+                    label="原文 URL"
+                    name="source_url"
+                    rules={[{ required: true, type: 'url', message: '请填写有效 URL' }]}
+                  >
+                    <Input placeholder="https://example.gov.cn/policy/xxx.html" />
+                  </Form.Item>
+                )
+              }
+              if (m === 'upload') {
+                return (
+                  <Form.Item
+                    label="文件"
+                    required
+                    tooltip="单文件 ≤ 20MB"
+                    validateStatus={uploadFileList.length === 0 ? 'error' : undefined}
+                    help={uploadFileList.length === 0 ? '请选择文件' : undefined}
+                  >
+                    <Upload.Dragger
+                      fileList={uploadFileList}
+                      onChange={(info) => {
+                        const list = info.fileList.slice(-1)
+                        setUploadFileList(list)
+                      }}
+                      beforeUpload={() => false}
+                      maxCount={1}
+                      accept=".pdf,.txt,.md,.doc,.docx"
+                    >
+                      <p className="ant-upload-drag-icon">
+                        <InboxOutlined />
+                      </p>
+                      <p>点击或拖拽上传（支持 PDF、TXT、MD、DOC、DOCX，单文件 ≤ 20MB）</p>
+                    </Upload.Dragger>
+                  </Form.Item>
+                )
+              }
+              return null
+            }}
           </Form.Item>
         </Form>
       </Drawer>
