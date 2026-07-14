@@ -46,6 +46,13 @@ def patched_deps(monkeypatch: pytest.MonkeyPatch):
     async def fake_generate(_db, _code, _item_id):
         return "ap_100_x"
 
+    async def fake_item_execute(_stmt, *args, **kwargs):
+        # _ensure_item_writable 现在用 select(AuditItem).where(id=item_id)
+        res = MagicMock()
+        res.scalar_one_or_none = MagicMock(return_value=item)
+        return res
+
+    db.execute.side_effect = fake_item_execute
     monkeypatch.setattr(
         "app.api.v1.audit_points._ensure_package", fake_ensure
     )
@@ -59,7 +66,6 @@ def patched_deps(monkeypatch: pytest.MonkeyPatch):
 @pytest.mark.asyncio
 async def test_batch_create_all_success(monkeypatch, patched_deps):
     db, user, item = patched_deps
-    db.get.side_effect = lambda _model, _id: item
 
     counter = {"n": 0}
 

@@ -25,6 +25,10 @@ from app.models import (
 )
 from app.models.audit_item import AuditItem
 from app.models.audit_point import AuditPoint
+from app.models.registered_model import (
+    RegisteredModel,
+    RegisteredModelStatus,
+)
 from app.models.strategy import Strategy, StrategyScope
 from app.models.strategy_item import StrategyItem
 from app.models.strategy_point import StrategyPoint
@@ -37,6 +41,7 @@ from app.schemas.strategy import (
     DocComposeModes,
     DocImageMode,
     DocTextMode,
+    LlmReviewConfig,
     StrategyCreate,
     StrategyDuplicateRequest,
     StrategyItemRef,
@@ -103,6 +108,133 @@ def _merge_video_frame_interval(definition: dict, interval: VideoFrameInterval) 
     return merged
 
 
+async def _validate_llm_review(
+    db: AsyncSession,
+    llm_review: LlmReviewConfig,
+) -> dict:
+    """校验策略级 LlmReviewConfig。
+
+    - 已启用时校验 model_id 真实存在（status=active + scale_class=large）。
+    - 不启用时清空 model_id。
+    - 已启用且 model_id 存在时，将 ``needs_multimodal_hint`` 写回，告知前端
+      「所选模型缺少本策略所需的模态能力」(供 image/audio/video/doc 提示)。
+
+    返回 ``{is_enabled, model_id, needs_multimodal_hint, expected_modalities,
+             model_modalities}``，用于 serialize。
+    """
+    normalized = llm_review.normalized()
+    if not normalized.is_enabled or normalized.model_id is None:
+        return {
+            "is_enabled": normalized.is_enabled,
+            "model_id": normalized.model_id,
+            "needs_multimodal_hint": False,
+            "expected_modalities": [],
+            "model_modalities": [],
+        }
+    model = await db.get(RegisteredModel, normalized.model_id)
+    if model is None or model.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"llm_review.model_id 引用了不存在的模型: {normalized.model_id}",
+        )
+    if model.status != RegisteredModelStatus.ACTIVE.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"llm_review.model_id 引用了未激活模型: {normalized.model_id} "
+                f"(status={model.status})"
+            ),
+        )
+    model_mods = set(model.modalities or [])
+    return {
+        "is_enabled": True,
+        "model_id": normalized.model_id,
+        # expected_modalities 由调用方（_serialize_strategy / create / update）根据
+        # 当前 enabled_items 计算；这里返回空，让调用方填充。
+        "needs_multimodal_hint": False,
+        "expected_modalities": [],
+        "model_modalities": sorted(model_mods),
+    }
+
+
+async def _expected_modalities_for_strategy(
+    db: AsyncSession,
+    enabled_items: list,
+    enabled_points: list,
+) -> set[str]:
+    """从策略所启用的 item / point 推断模型需要覆盖的 modality 集合。
+
+    同时支持 Phase A（启用了 AuditItem 但 AuditPoint 列表未记录）和 Phase B
+    (StrategyPointV2 在 rule_set 里)。当前策略编辑路径只读 StrategyPoint，
+    因此本函数以 ``enabled_points`` 含有的 item_id 为准：
+    - text-only item（name_cn 字段涵盖「文本」典型关键词）→ text
+    - 含图像、视/音频敏感词 → image / audio / video
+    - doc 文本走 text，图像部分走 image
+    """
+    item_ids = {ref.item_id for ref in (enabled_items or [])}
+    point_ids = {ref.point_id for ref in (enabled_points or [])}
+    candidate_ids = item_ids | {ref.item_id for ref in (enabled_points or [])}
+    if not candidate_ids:
+        return set()
+    items = (
+        (
+            await db.execute(
+                select(AuditItem).where(AuditItem.id.in_(candidate_ids))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pkg_to_media = MEDIA_BY_PACKAGE  # image_audit_pro → image
+    # 点位级别：若某 item 既启用 item 又显式启用部分 point；只要 item 启用了，就
+    # 视为该 item 的整类模态能力都纳入；具体到细粒度，仅在 user 启用 point 时
+    # 才把 point_id 加入 — 这里直接用 item 级即可（LlmReviewCard 不做精细化）。
+    mods: set[str] = set()
+    for it in items:
+        m = pkg_to_media.get(it.package_code)
+        if m:
+            mods.add(m)
+    return mods
+
+
+def _compute_multimodal_hint(expected: set[str], model_mods: set[str]) -> bool:
+    """当策略需要的 modality 不被模型能力覆盖时返回 True。
+
+    策略至少需要 text 时，只要所选模型具备 text 即可标记非必要 multimodal；
+    当策略需要 image/audio/video 时，所选模型必须能覆盖对应 modality 之一
+    （即 multimodal 模型），否则给提示。
+    """
+    if not expected:
+        return False
+    if expected <= {"text"}:
+        return False
+    # 至少 image/audio/video/doc 中一项需求未被模型覆盖时提示
+    media_required = expected - {"text"}
+    if not media_required:
+        return False
+    return not media_required.issubset(model_mods)
+
+
+def _load_llm_review_definition(definition: dict | None) -> dict:
+    """从 ``strategies.definition.llm_review`` 读出已规范化的字典。"""
+    raw = (definition or {}).get("llm_review")
+    if not isinstance(raw, dict):
+        return {
+            "is_enabled": False,
+            "model_id": None,
+            "needs_multimodal_hint": False,
+            "expected_modalities": [],
+            "model_modalities": [],
+        }
+    return {
+        "is_enabled": bool(raw.get("is_enabled", False)),
+        "model_id": raw.get("model_id"),
+        "needs_multimodal_hint": bool(raw.get("needs_multimodal_hint", False)),
+        "expected_modalities": raw.get("expected_modalities") or [],
+        "model_modalities": raw.get("model_modalities") or [],
+    }
+
+
 async def _validate_phase_b_fk(
     db: AsyncSession,
     rule_set_id: Optional[int],
@@ -143,6 +275,9 @@ async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyO
     Phase B：序列化时同时暴露 rule_set_id / disposition_rule_id；老的
     ``definition.human_review`` 字段保留在 definition dict 里供前端降级展示，
     但真相源是 disposition_rule_id。
+
+    策略级大模型审核配置从 `definition.llm_review` 读出，并按当前启用的
+    items 推算所需 modalities，刷新 ``needs_multimodal_hint``。上提为顶层 ``llm_review``。
     """
     await db.refresh(strategy)
     enabled = await _load_enabled_items(db, strategy.id)
@@ -157,6 +292,19 @@ async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyO
             "has_overrides": overrides_count > 0
             or _has_explicit_partial_selection(enabled, enabled_points),
         }
+    llm_raw = _load_llm_review_definition(definition)
+    expected_mods = await _expected_modalities_for_strategy(db, enabled, enabled_points)
+    model_mods = set(llm_raw.get("model_modalities") or [])
+    needs_hint = (
+        bool(llm_raw.get("is_enabled"))
+        and llm_raw.get("model_id") is not None
+        and _compute_multimodal_hint(expected_mods, model_mods)
+    )
+    llm_out = LlmReviewConfig(
+        is_enabled=bool(llm_raw.get("is_enabled")),
+        model_id=llm_raw.get("model_id"),
+        needs_multimodal_hint=needs_hint,
+    )
     data = {
         "id": strategy.id,
         "public_id": strategy.public_id,
@@ -173,6 +321,7 @@ async def _serialize_strategy(db: AsyncSession, strategy: Strategy) -> StrategyO
         "enabled_points": enabled_points,
         "rule_set_id": strategy.rule_set_id,
         "disposition_rule_id": strategy.disposition_rule_id,
+        "llm_review": llm_out,
         "created_at": strategy.created_at,
         "updated_at": strategy.updated_at,
     }
@@ -280,7 +429,6 @@ async def _load_enabled_points(
                 is_enabled=r.is_enabled,
                 medium_threshold=patch.get("medium_threshold"),
                 high_threshold=patch.get("high_threshold"),
-                linked_library_ids=patch.get("linked_library_ids"),
             )
         )
     return out
@@ -357,14 +505,13 @@ async def _replace_enabled_points(
                 )
             )
 
-        # 收集 override（中/高风险分 + 关联库）到 strategies.definition
+        # 收集 override（中/高风险分）到 strategies.definition
+        # 「关联自定义图库词库」已上移至审核项；策略级不再存 linked_library_ids override。
         patch: dict[str, Any] = {}
         if ref.medium_threshold is not None:
             patch["medium_threshold"] = ref.medium_threshold
         if ref.high_threshold is not None:
             patch["high_threshold"] = ref.high_threshold
-        if ref.linked_library_ids is not None:
-            patch["linked_library_ids"] = list(ref.linked_library_ids)
         if patch:
             overrides.setdefault(ref.media_type, {})
             overrides[ref.media_type].setdefault(str(ref.item_id), {})
@@ -529,6 +676,9 @@ async def create_strategy(
     merged_definition = _merge_video_frame_interval(merged_definition, video_frame_interval)
     merged_definition["services"] = list(body.services or [])
 
+    llm_review_payload = await _validate_llm_review(db, body.llm_review or LlmReviewConfig())
+    merged_definition["llm_review"] = llm_review_payload
+
     strategy = Strategy(
         code=code,
         name=body.name,
@@ -563,6 +713,10 @@ async def create_strategy(
             "enabled_point_count": len(body.enabled_points or []),
             "rule_set_id": body.rule_set_id,
             "disposition_rule_id": body.disposition_rule_id,
+            "llm_review": {
+                "is_enabled": llm_review_payload["is_enabled"],
+                "model_id": llm_review_payload["model_id"],
+            },
         },
     )
     await db.commit()
@@ -710,6 +864,13 @@ async def update_strategy(
         merged_def = _merge_video_frame_interval(merged_def, video_frame_interval)
         # 保留 enabled_point_overrides（已被 _replace_enabled_points 写过）
         strategy.definition = merged_def
+
+    # 「大模型审核能力」单一开关。PATCH 语义：body.llm_review=None → 不动；非 None → 全量替换。
+    if body.llm_review is not None and not is_default:
+        llm_review_payload = await _validate_llm_review(db, body.llm_review)
+        merged_def = dict(strategy.definition or {})
+        merged_def["llm_review"] = llm_review_payload
+        strategy.definition = merged_def
     if body.service_config is not None and not is_default:
         strategy.service_config = body.service_config
 
@@ -775,6 +936,15 @@ async def duplicate_strategy(
     # Phase B：duplicate 时清掉 definition.human_review（迁移后兜底），FK 沿用源策略的。
     dup_definition = dict(src.definition or {})
     dup_definition.pop("human_review", None)
+    # 复制时强制重置大模型 model_id，避免源策略已绑定的大模型被停用导致新策略失效。
+    src_llm = _load_llm_review_definition(dup_definition)
+    dup_definition["llm_review"] = {
+        "is_enabled": bool(src_llm.get("is_enabled", False)),
+        "model_id": None,
+        "needs_multimodal_hint": False,
+        "expected_modalities": [],
+        "model_modalities": [],
+    }
 
     dup = Strategy(
         code=new_code,
