@@ -80,7 +80,7 @@ export default function CreateAuditItemPage() {
     const targetMediaType = mediaType ?? MEDIA_BY_PACKAGE[code]
     navigate(
       targetMediaType
-        ? `/strategies/rules-by-type/${targetMediaType}/${s.item_id}`
+        ? `/rules/personal/${targetMediaType}/${s.item_id}`
         : `/packages/${code}/items/${s.item_id}/points`,
     )
   }
@@ -99,7 +99,7 @@ export default function CreateAuditItemPage() {
       const targetMediaType = mediaType ?? MEDIA_BY_PACKAGE[code]
       navigate(
         targetMediaType
-          ? `/strategies/rules-by-type/${targetMediaType}`
+          ? `/rules/personal/${targetMediaType}`
           : `/packages/${code}/items`,
       )
     } catch (err) {
@@ -242,7 +242,7 @@ export default function CreateAuditItemPage() {
                           const targetMediaType = mediaType ?? MEDIA_BY_PACKAGE[code]
                           navigate(
                             targetMediaType
-                              ? `/strategies/rules-by-type/${targetMediaType}`
+                              ? `/rules/personal/${targetMediaType}`
                               : `/packages/${code}/items`,
                           )
                         }}

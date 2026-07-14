@@ -13,9 +13,21 @@ function LegacyLibraryRedirect() {
   const params = useParams<LegacyLibraryParams>()
   const target =
     params.type === 'image'
-      ? `/knowledge/images/${params.id}`
-      : `/knowledge/words/${params.id}`
+      ? `/resources/images/${params.id}`
+      : `/resources/words/${params.id}`
   return <Navigate to={target} replace />
+}
+
+interface LegacyRulesByTypeParams extends Record<string, string | undefined> {
+  mediaType: string
+}
+
+function LegacyRulesByTypeRedirect() {
+  const params = useParams<LegacyRulesByTypeParams>()
+  // 老的 /strategies/rules-by-type/:mediaType 统一跳到「通用规则」页
+  // (向后兼容 — 老链接 / 文档 / TagsPage 跳转仍可用)
+  const mt = params.mediaType === 'text' ? 'text' : 'image'
+  return <Navigate to={`/rules/general/${mt}`} replace />
 }
 
 const LoginPage = lazy(() => import('@/pages/auth/LoginPage'))
@@ -32,15 +44,25 @@ const UsersAdminPage = lazy(() => import('@/pages/admin/UsersAdminPage'))
 const RolesAdminPage = lazy(() => import('@/pages/admin/RolesAdminPage'))
 const StrategyListPage = lazy(() => import('@/pages/strategy/StrategyListPage'))
 const CreateStrategyPage = lazy(() => import('@/pages/strategy/CreateStrategyPage'))
+const GeneralRuleListPage = lazy(() => import('@/pages/rules/GeneralRuleListPage'))
+const GeneralRuleDetailPage = lazy(() => import('@/pages/rules/GeneralRuleDetailPage'))
+const PersonalRuleListPage = lazy(() => import('@/pages/rules/PersonalRuleListPage'))
+const PersonalRuleDetailPage = lazy(() => import('@/pages/rules/PersonalRuleDetailPage'))
 const WordLibraryListPage = lazy(() => import('@/pages/strategy/WordLibraryListPage'))
 const ImageLibraryListPage = lazy(() => import('@/pages/strategy/ImageLibraryListPage'))
 const WordLibraryDetailPage = lazy(() => import('@/pages/strategy/WordLibraryDetailPage'))
 const ImageLibraryDetailPage = lazy(() => import('@/pages/strategy/ImageLibraryDetailPage'))
 const ReplyLibraryListPage = lazy(() => import('@/pages/strategy/ReplyLibraryListPage'))
 const ReplyLibraryDetailPage = lazy(() => import('@/pages/strategy/ReplyLibraryDetailPage'))
-const StrategyRulesByTypePage = lazy(
-  () => import('@/pages/strategy/StrategyRulesByTypePage'),
+const ModelListPage = lazy(() => import('@/pages/models/ModelListPage'))
+const ModelDetailPage = lazy(() => import('@/pages/models/ModelDetailPage'))
+const KnowledgeDocumentListPage = lazy(
+  () => import('@/pages/knowledge/KnowledgeDocumentListPage'),
 )
+const KnowledgeDocumentDetailPage = lazy(
+  () => import('@/pages/knowledge/KnowledgeDocumentDetailPage'),
+)
+// StrategyRulesByTypePage 已退役 — 改用 /rules/{general,personal}/:mediaType
 const ServiceRuleConfigPage = lazy(() => import('@/pages/strategy/ServiceRuleConfigPage'))
 const PackageItemsPage = lazy(() => import('@/pages/packages/PackageItemsPage'))
 const CreateAuditItemPage = lazy(() => import('@/pages/packages/CreateAuditItemPage'))
@@ -91,81 +113,117 @@ export default function AppRoutes() {
 
             <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin']} />}>
               <Route path="/strategies" element={<StrategyListPage />} />
-              <Route
-                path="/strategies/rules-by-type/audio"
-                element={<Navigate to="/strategies/rules-by-type/image" replace />}
-              />
-              <Route
-                path="/strategies/rules-by-type/doc"
-                element={<Navigate to="/strategies/rules-by-type/image" replace />}
-              />
-              <Route
-                path="/strategies/rules-by-type/video"
-                element={<Navigate to="/strategies/rules-by-type/image" replace />}
-              />
+              {/* 老的 rules-by-type 路径重定向到新的"通用"页(向后兼容) */}
               <Route
                 path="/strategies/rules-by-type/:mediaType"
-                element={<StrategyRulesByTypePage />}
-              >
-                <Route path=":itemId" element={<ServiceRuleConfigPage />} />
-                <Route path="new" element={<CreateAuditItemPage />} />
-              </Route>
+                element={<LegacyRulesByTypeRedirect />}
+              />
               <Route path="/strategies/new" element={<CreateStrategyPage />} />
               <Route path="/strategies/:id/edit" element={<CreateStrategyPage />} />
               <Route path="/strategies/rules/:serviceCode" element={<ServiceRuleConfigPage />} />
 
-              {/* 知识库（原「策略资源」） */}
-              <Route path="/knowledge/words" element={<WordLibraryListPage />} />
-              <Route path="/knowledge/words/:id" element={<WordLibraryDetailPage />} />
-              <Route path="/knowledge/images" element={<ImageLibraryListPage />} />
-              <Route path="/knowledge/images/:id" element={<ImageLibraryDetailPage />} />
-              <Route path="/knowledge/replies" element={<ReplyLibraryListPage />} />
-              <Route path="/knowledge/replies/:id" element={<ReplyLibraryDetailPage />} />
+              {/* 图片/文本审核规则 — 通用 ↔ 个性化 独立路由 */}
+              <Route
+                path="/rules/general/:mediaType"
+                element={<GeneralRuleListPage />}
+              />
+              <Route
+                path="/rules/general/:mediaType/:itemId"
+                element={<GeneralRuleDetailPage />}
+              />
+              <Route
+                path="/rules/personal/:mediaType"
+                element={<PersonalRuleListPage />}
+              />
+              <Route
+                path="/rules/personal/:mediaType/:itemId"
+                element={<PersonalRuleDetailPage />}
+              />
+              <Route
+                path="/rules/personal/:mediaType/new"
+                element={<CreateAuditItemPage />}
+              />
+
+              {/* 资源库（原「知识库」） */}
+              <Route path="/resources/words" element={<WordLibraryListPage />} />
+              <Route path="/resources/words/:id" element={<WordLibraryDetailPage />} />
+              <Route path="/resources/images" element={<ImageLibraryListPage />} />
+              <Route path="/resources/images/:id" element={<ImageLibraryDetailPage />} />
+              <Route path="/resources/replies" element={<ReplyLibraryListPage />} />
+              <Route path="/resources/replies/:id" element={<ReplyLibraryDetailPage />} />
+              <Route path="/resources/models" element={<ModelListPage />} />
+              <Route path="/resources/models/:id" element={<ModelDetailPage />} />
+              <Route path="/resources/knowledge" element={<KnowledgeDocumentListPage />} />
+              <Route path="/resources/knowledge/:id" element={<KnowledgeDocumentDetailPage />} />
 
               {/* 旧路径 redirect 到新前缀 */}
               <Route
+                path="/knowledge/words"
+                element={<Navigate to="/resources/words" replace />}
+              />
+              <Route
+                path="/knowledge/words/:id"
+                element={<Navigate to="/resources/words/:id" replace />}
+              />
+              <Route
+                path="/knowledge/images"
+                element={<Navigate to="/resources/images" replace />}
+              />
+              <Route
+                path="/knowledge/images/:id"
+                element={<Navigate to="/resources/images/:id" replace />}
+              />
+              <Route
+                path="/knowledge/replies"
+                element={<Navigate to="/resources/replies" replace />}
+              />
+              <Route
+                path="/knowledge/replies/:id"
+                element={<Navigate to="/resources/replies/:id" replace />}
+              />
+              <Route
                 path="/strategies/words"
-                element={<Navigate to="/knowledge/words" replace />}
+                element={<Navigate to="/resources/words" replace />}
               />
               <Route
                 path="/strategies/words/:id"
-                element={<Navigate to="/knowledge/words/:id" replace />}
+                element={<Navigate to="/resources/words/:id" replace />}
               />
               <Route
                 path="/strategies/images"
-                element={<Navigate to="/knowledge/images" replace />}
+                element={<Navigate to="/resources/images" replace />}
               />
               <Route
                 path="/strategies/images/:id"
-                element={<Navigate to="/knowledge/images/:id" replace />}
+                element={<Navigate to="/resources/images/:id" replace />}
               />
               <Route
                 path="/strategies/replies"
-                element={<Navigate to="/knowledge/replies" replace />}
+                element={<Navigate to="/resources/replies" replace />}
               />
               <Route
                 path="/strategies/replies/:id"
-                element={<Navigate to="/knowledge/replies/:id" replace />}
+                element={<Navigate to="/resources/replies/:id" replace />}
               />
               <Route
                 path="/strategies/library-groups"
-                element={<Navigate to="/knowledge/words" replace />}
+                element={<Navigate to="/resources/words" replace />}
               />
               <Route
                 path="/strategies/custom-image"
-                element={<Navigate to="/knowledge/images" replace />}
+                element={<Navigate to="/resources/images" replace />}
               />
               <Route
                 path="/strategies/custom-text"
-                element={<Navigate to="/knowledge/words" replace />}
+                element={<Navigate to="/resources/words" replace />}
               />
               <Route
                 path="/strategies/library/image"
-                element={<Navigate to="/knowledge/images" replace />}
+                element={<Navigate to="/resources/images" replace />}
               />
               <Route
                 path="/strategies/library/word"
-                element={<Navigate to="/knowledge/words" replace />}
+                element={<Navigate to="/resources/words" replace />}
               />
               <Route
                 path="/strategies/library/:type/:id"
@@ -210,7 +268,8 @@ export default function AppRoutes() {
         </Route>
 
         {/* 老的独立「知识库」页面（已下线） */}
-        <Route path="/knowledge" element={<Navigate to="/knowledge/words" replace />} />
+        <Route path="/knowledge" element={<Navigate to="/resources/knowledge" replace />} />
+        <Route path="/knowledge/*" element={<Navigate to="/resources/knowledge" replace />} />
 
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
