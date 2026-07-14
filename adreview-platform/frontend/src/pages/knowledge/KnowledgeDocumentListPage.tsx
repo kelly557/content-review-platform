@@ -388,7 +388,14 @@ export default function KnowledgeDocumentListPage() {
                   name="file"
                   valuePropName="fileList"
                   getValueFromEvent={(e) => (Array.isArray(e) ? e : e?.fileList)}
-                  rules={[{ required: true, message: '请选择文件' }]}
+                  rules={[
+                    {
+                      validator: (_, value) =>
+                        Array.isArray(value) && value.length > 0
+                          ? Promise.resolve()
+                          : Promise.reject(new Error('请选择文件')),
+                    },
+                  ]}
                 >
                   <Upload.Dragger beforeUpload={() => false} maxCount={1} accept=".pdf,.txt,.md,.doc,.docx">
                     <p className="ant-upload-drag-icon">
