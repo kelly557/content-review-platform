@@ -129,7 +129,7 @@ export default function ReplyLibraryListPage() {
       render: (v: string, row) => (
         <Space size={6}>
           <Link
-            to={`/knowledge/replies/${row.id}`}
+            to={`/resources/replies/${row.id}`}
             style={{ color: '#020617', fontWeight: 500 }}
           >
             {v}
@@ -178,7 +178,7 @@ export default function ReplyLibraryListPage() {
         const deleteDisabled = isPlatform && !isSuperadmin
         return (
           <Space size={4}>
-            <Link to={`/knowledge/replies/${row.id}`}>
+            <Link to={`/resources/replies/${row.id}`}>
               <Button type="link" size="small" icon={<EditOutlined />}>
                 编辑
               </Button>

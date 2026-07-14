@@ -149,7 +149,7 @@ export default function WordLibraryListPage() {
       render: (v: string, row) => (
         <Space size={6}>
           <Link
-            to={`/knowledge/words/${row.id}`}
+            to={`/resources/words/${row.id}`}
             style={{ color: '#020617', fontWeight: 500 }}
           >
             {v}
@@ -232,7 +232,7 @@ export default function WordLibraryListPage() {
         const deleteDisabled = isPlatform && !isSuperadmin
         return (
           <Space size={4}>
-            <Link to={`/knowledge/words/${row.id}`}>
+            <Link to={`/resources/words/${row.id}`}>
               <Button type="link" size="small" icon={<EditOutlined />}>
                 编辑
               </Button>

@@ -185,7 +185,7 @@ export default function WordLibraryDetailPage() {
   return (
     <div style={{ width: '100%' }}>
       <Space style={{ marginBottom: 12 }}>
-        <Link to="/knowledge/words" style={{ color: '#0369A1' }}>
+        <Link to="/resources/words" style={{ color: '#0369A1' }}>
           <Space size={4} align="center">
             <ArrowLeftOutlined />
             词库

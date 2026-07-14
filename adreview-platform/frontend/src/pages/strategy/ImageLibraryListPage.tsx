@@ -131,7 +131,7 @@ export default function ImageLibraryListPage() {
       render: (v: string, row) => (
         <Space size={6}>
           <Link
-            to={`/knowledge/images/${row.id}`}
+            to={`/resources/images/${row.id}`}
             style={{ color: '#020617', fontWeight: 500 }}
           >
             {v}
@@ -214,7 +214,7 @@ export default function ImageLibraryListPage() {
         const deleteDisabled = isPlatform && !isSuperadmin
         return (
           <Space size={4}>
-            <Link to={`/knowledge/images/${row.id}`}>
+            <Link to={`/resources/images/${row.id}`}>
               <Button type="link" size="small" icon={<EditOutlined />}>
                 编辑
               </Button>

@@ -218,7 +218,7 @@ export default function ReplyLibraryDetailPage() {
   return (
     <div style={{ width: '100%' }}>
       <Space style={{ marginBottom: 12 }}>
-        <Link to="/knowledge/replies" style={{ color: '#0369A1' }}>
+        <Link to="/resources/replies" style={{ color: '#0369A1' }}>
           <Space size={4} align="center">
             <ArrowLeftOutlined />
             代答库
