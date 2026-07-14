@@ -76,6 +76,9 @@ export default function TrendTab() {
             style={{ minWidth: 140 }}
           />
         </Space>
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+          口径: 拒绝率 = 已驳回 / 已提交; 机审占比字段后端未提供, 暂不显示。
+        </Text>
       </Card>
 
       {err && <Text type="danger">{err}</Text>}

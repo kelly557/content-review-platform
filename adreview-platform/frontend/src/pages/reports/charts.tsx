@@ -1,6 +1,12 @@
 import { Card, Empty, Spin } from 'antd'
-import { Line, Column, Pie } from '@ant-design/charts'
-import type { ReasonCount, TrendPoint } from '@/types/domain'
+import { Line, Column, Pie, Area } from '@ant-design/charts'
+import type {
+  ReasonCount,
+  TrendPoint,
+  RiskTimeseriesPoint,
+  RiskDistributionBucket,
+  RiskLevel,
+} from '@/types/domain'
 
 const REJECT_COLOR = '#DC2626'
 const REVIEW_COLOR = '#D97706'
@@ -206,5 +212,115 @@ export function TagPieChart({ data, title, loading, error, height = 260 }: TagPi
         )}
       </Spin>
     </Card>
+  )
+}
+
+// ─── Risk profile charts (v3 新增) ───────────────────────────────────────────
+
+const RISK_COLOR: Record<RiskLevel, string> = {
+  高风险: '#DC2626',
+  中风险: '#D97706',
+  低风险: '#2563EB',
+  敏感: '#7C3AED',
+  无风险: '#94A3B8',
+}
+
+const RISK_COLOR_LIST = [
+  RISK_COLOR['高风险'],
+  RISK_COLOR['中风险'],
+  RISK_COLOR['低风险'],
+  RISK_COLOR['敏感'],
+  RISK_COLOR['无风险'],
+]
+
+interface RiskStackedAreaProps {
+  points: RiskTimeseriesPoint[]
+  height?: number
+  loading?: boolean
+  error?: string | null
+  emptyText?: string
+}
+
+export function RiskStackedAreaChart({
+  points,
+  height = 280,
+  loading,
+  error,
+  emptyText = '暂无数据',
+}: RiskStackedAreaProps) {
+  const rows = points.flatMap((p) => {
+    const out: { date: string; level: RiskLevel; count: number }[] = []
+    if (p.high) out.push({ date: p.date, level: '高风险', count: p.high })
+    if (p.medium) out.push({ date: p.date, level: '中风险', count: p.medium })
+    if (p.low) out.push({ date: p.date, level: '低风险', count: p.low })
+    if (p.sensitive) out.push({ date: p.date, level: '敏感', count: p.sensitive })
+    if (p.none) out.push({ date: p.date, level: '无风险', count: p.none })
+    return out
+  })
+  return (
+    <Spin spinning={!!loading}>
+      {error ? (
+        <Empty description={error} />
+      ) : rows.length === 0 ? (
+        <Empty description={emptyText} />
+      ) : (
+        <Area
+          data={rows}
+          xField="date"
+          yField="count"
+          seriesField="level"
+          height={height}
+          stack
+          scale={{ color: { range: RISK_COLOR_LIST } }}
+          style={{ fillOpacity: 0.7 }}
+          axis={{
+            x: { labelAutoRotate: false, labelFontSize: 10 },
+            y: { labelFontSize: 10 },
+          }}
+          legend={{ color: { position: 'top-right' } }}
+        />
+      )}
+    </Spin>
+  )
+}
+
+interface RiskDistributionBarProps {
+  buckets: RiskDistributionBucket[]
+  height?: number
+  loading?: boolean
+  error?: string | null
+}
+
+export function RiskDistributionBarChart({
+  buckets,
+  height = 280,
+  loading,
+  error,
+}: RiskDistributionBarProps) {
+  const rows = buckets.map((b) => ({
+    level: b.level,
+    count: b.count,
+    color: RISK_COLOR[b.level] ?? '#94A3B8',
+  }))
+  return (
+    <Spin spinning={!!loading}>
+      {error ? (
+        <Empty description={error} />
+      ) : rows.length === 0 ? (
+        <Empty description="暂无数据" />
+      ) : (
+        <Column
+          data={rows}
+          xField="count"
+          yField="level"
+          height={height}
+          colorField="level"
+          color={RISK_COLOR}
+          label={{ position: 'right', style: { fill: '#475569', fontSize: 11 } }}
+          axis={{ x: { labelFontSize: 10 }, y: { labelFontSize: 11 } }}
+          animate={false}
+        />
+      )}
+    </Spin>
   )
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Button,
   Card,
@@ -16,7 +16,18 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { DownloadOutlined as DownloadIcon } from '@ant-design/icons'
 import { reportsApi } from '@/api/reports'
-import type { QualityDetailRow, QualityResponse } from '@/types/domain'
+import { strategiesApi } from '@/api/strategies'
+import type {
+  QualityDetailRow,
+  QualityResponse,
+  MaterialType,
+  MachineDecision,
+} from '@/types/domain'
+import {
+  MATERIAL_TYPE_OPTIONS,
+  MACHINE_DECISION_OPTIONS,
+  QUALITY_VERDICT_OPTIONS,
+} from '@/lib/reportsFilterOptions'
 import { ReasonBarChart, TagPieChart } from '../charts'
 
 const { Text } = Typography
@@ -41,10 +52,27 @@ const VERDICT_LABEL: Record<string, string> = {
 export default function QualityTab() {
   const [window, setWindow] = useState('7d')
   const [strategyCode, setStrategyCode] = useState<string | null>(null)
+  const [materialType, setMaterialType] = useState<MaterialType | null>(null)
+  const [machineDecision, setMachineDecision] = useState<MachineDecision | 'all'>('all')
+  const [verdict, setVerdict] = useState<'all' | 'misjudge' | 'miss' | 'agree'>('all')
+  const [strategies, setStrategies] = useState<{ code: string; name: string }[]>([])
   const [data, setData] = useState<QualityResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    strategiesApi
+      .list({ size: 100 })
+      .then((page) => {
+        setStrategies(
+          page.items
+            .filter((s) => s.is_active)
+            .map((s) => ({ code: s.code, name: s.name })),
+        )
+      })
+      .catch(() => setStrategies([]))
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -66,15 +94,31 @@ export default function QualityTab() {
     }
   }, [window, strategyCode])
 
-  const filtered = (data?.detail ?? []).filter((r) => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return (
-      String(r.task_id).includes(q) ||
-      (r.strategy_code ?? '').toLowerCase().includes(q) ||
-      (r.feedback ?? '').toLowerCase().includes(q)
-    )
-  })
+  const filtered = useMemo(() => {
+    return (data?.detail ?? []).filter((r) => {
+      if (materialType) {
+        const mt = (r as unknown as { material_type?: string }).material_type
+        if (mt && mt !== materialType) return false
+      }
+      if (machineDecision !== 'all' && r.machine_decision !== machineDecision) return false
+      if (verdict !== 'all' && r.verdict !== verdict) return false
+      if (!search) return true
+      const q = search.toLowerCase()
+      return (
+        String(r.task_id).includes(q) ||
+        (r.strategy_code ?? '').toLowerCase().includes(q) ||
+        (r.feedback ?? '').toLowerCase().includes(q)
+      )
+    })
+  }, [data?.detail, materialType, machineDecision, verdict, search])
+
+  const strategyOptions = useMemo(
+    () => [
+      { value: '', label: '全部策略' },
+      ...strategies.map((s) => ({ value: s.code, label: `${s.code} · ${s.name}` })),
+    ],
+    [strategies],
+  )
 
   const detailColumns: ColumnsType<QualityDetailRow> = [
     { title: 'Task ID', dataIndex: 'task_id', width: 90 },
@@ -126,12 +170,38 @@ export default function QualityTab() {
             style={{ minWidth: 120 }}
           />
           <Text type="secondary">策略</Text>
-          <Input
+          <Select
             value={strategyCode ?? ''}
-            onChange={(e) => setStrategyCode(e.target.value || null)}
-            placeholder="按策略 code 过滤 (可选)"
+            onChange={(v) => setStrategyCode(v ? v : null)}
+            options={strategyOptions}
+            placeholder="全部策略"
             allowClear
+            showSearch
+            optionFilterProp="label"
             style={{ minWidth: 220 }}
+          />
+          <Text type="secondary">素材</Text>
+          <Select
+            value={materialType ?? ''}
+            onChange={(v) => setMaterialType(v ? (v as MaterialType) : null)}
+            options={[{ value: '', label: '全部' }, ...MATERIAL_TYPE_OPTIONS]}
+            placeholder="全部"
+            allowClear
+            style={{ minWidth: 120 }}
+          />
+          <Text type="secondary">机审结果</Text>
+          <Select
+            value={machineDecision}
+            onChange={setMachineDecision}
+            options={MACHINE_DECISION_OPTIONS}
+            style={{ minWidth: 120 }}
+          />
+          <Text type="secondary">判定</Text>
+          <Select
+            value={verdict}
+            onChange={(v) => setVerdict(v as typeof verdict)}
+            options={QUALITY_VERDICT_OPTIONS}
+            style={{ minWidth: 160 }}
           />
           <Button
             icon={<DownloadIcon />}
@@ -142,6 +212,11 @@ export default function QualityTab() {
             导出 CSV
           </Button>
         </Space>
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+          本指标基于人工抽检样本(非全量), verdicts.total = 样本量;
+          误判=机器漏放, 漏判=机器误杀, 一致=机人一致;
+          素材维度后端暂未提供 material_type 字段, 当前为预留 UI。
+        </Text>
       </Card>
 
       {err && <Text type="danger">{err}</Text>}
@@ -197,7 +272,7 @@ export default function QualityTab() {
         <Col xs={24} md={12}>
           <ReasonBarChart
             data={data?.top_rejection_reasons ?? []}
-            title="Top 退回原因"
+            title="Top 退回审核点"
             color="#DC2626"
             loading={loading}
             error={err}
@@ -206,7 +281,7 @@ export default function QualityTab() {
         <Col xs={24} md={12}>
           <TagPieChart
             data={data?.top_false_positive_tags ?? []}
-            title="Top 误判标签"
+            title="Top 误判审核点"
             loading={loading}
             error={err}
           />
