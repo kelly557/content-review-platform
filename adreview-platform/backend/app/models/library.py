@@ -137,6 +137,13 @@ class Library(Base):
         lazy="selectin",
         overlaps="linked_libraries",
     )
+    back_audit_items: Mapped[list["AuditItem"]] = relationship(
+        "AuditItem",
+        secondary="audit_item_libraries",
+        viewonly=True,
+        lazy="selectin",
+        overlaps="linked_libraries",
+    )
 
     __table_args__ = (
         Index(
