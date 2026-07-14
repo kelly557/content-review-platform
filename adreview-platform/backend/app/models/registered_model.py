@@ -63,6 +63,31 @@ class SmallModelCategory(str, enum.Enum):
     UNHEALTHY = "unhealthy"        # 不良
 
 
+class LargeModelCategory(str, enum.Enum):
+    """大模型分类 — 文本 / 多模态 / 其他三选一，必须选择其一。"""
+
+    TEXT = "text"
+    MULTIMODAL = "multimodal"
+    OTHER = "other"
+
+
+class RegisteredProviderStatus(str, enum.Enum):
+    """Provider 状态：active 用于上线，archived 用于软归。"""
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+def make_provider_code(preset: str | None) -> str:
+    """自动生成的 Provider code：`prv_<preset-or-misc>_<random6>`，仅保留安全字符。"""
+    import re
+
+    base = re.sub(r"[^a-z0-9]+", "_", (preset or "misc").lower()).strip("_")
+    if not base:
+        base = "misc"
+    return f"prv_{base}_{uuid.uuid4().hex[:6]}"
+
+
 class RegisteredModelVersionStatus(str, enum.Enum):
     """版本状态：草稿/已校验/已启用/已停用/已归档。"""
 
@@ -89,6 +114,23 @@ class RegisteredModel(Base):
     # 小模型分类（kind=small 时必填；kind=large 时为 null）
     small_category: Mapped[Optional[str]] = mapped_column(
         String(32), nullable=True, index=True
+    )
+    # 大模型分类（kind=large 时必填；kind=small 时为 null）
+    large_category: Mapped[Optional[str]] = mapped_column(
+        String(16), nullable=True, index=True
+    )
+    # 归属 Provider（新增；模型本身不再独立持有 endpoint_url/credential_id，
+    # 由 Provider 统一管理认证和接入地址）
+    provider_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("registered_providers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    provider: Mapped[Optional["RegisteredProvider"]] = relationship(
+        "RegisteredProvider",
+        back_populates="models",
+        foreign_keys=[provider_id],
     )
     provider: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(
@@ -181,6 +223,10 @@ class RegisteredModelVersion(Base):
     # 版本标签（如 "1.0.0"）；可空，默认为 vN
     version_label: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 大模型分类（继承或覆盖）
+    large_category: Mapped[Optional[str]] = mapped_column(
+        String(16), nullable=True, index=True
+    )
     registration_method: Mapped[str] = mapped_column(String(16), nullable=False)
     provider: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(
@@ -245,4 +291,59 @@ class ResourceCredential(Base):
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class RegisteredProvider(Base):
+    """Provider 二级实体：承载大模型的接入地址、凭证与展示名。
+
+    由一组 model 共享同一份凭证 + endpoint，符合业务上一个厂商通常拥有
+    多个 model 的现实。code 字段由后端自动生成（不向业务字段暴露）。
+    """
+
+    __tablename__ = "registered_providers"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, default=lambda: str(uuid.uuid4())
+    )
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    provider_preset: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    endpoint_url: Mapped[str] = mapped_column(Text, nullable=False)
+    config: Mapped[Any] = mapped_column(JSONB, default=dict, nullable=False)
+    credential_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("resource_credentials.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=RegisteredProviderStatus.ACTIVE.value,
+        server_default=RegisteredProviderStatus.ACTIVE.value,
+    )
+    owner_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_by_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    credential = relationship("ResourceCredential", foreign_keys=[credential_id])
+    models = relationship(
+        "RegisteredModel",
+        back_populates="provider",
+        foreign_keys="RegisteredModel.provider_id",
     )
