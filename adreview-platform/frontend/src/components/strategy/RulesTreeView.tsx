@@ -574,6 +574,13 @@ function PointsColumn({
   items.forEach((it) => {
     const ps = pointsByItem[it.id] ?? []
     dataSource.push({
+      kind: 'librow',
+      key: `librow-${it.id}`,
+      item: it,
+      linkedLibraries: (it.linked_libraries ?? []) as LinkedLibraryRef[],
+      pending: pendingItems.has(it.id),
+    })
+    dataSource.push({
       kind: 'section',
       key: `section-${it.id}`,
       item: it,
@@ -593,13 +600,6 @@ function PointsColumn({
         isCustom: !p.is_builtin,
         editDisabled: pm[p.id] !== true,
       })
-    })
-    dataSource.push({
-      kind: 'librow',
-      key: `librow-${it.id}`,
-      item: it,
-      linkedLibraries: (it.linked_libraries ?? []) as LinkedLibraryRef[],
-      pending: pendingItems.has(it.id),
     })
   })
 
@@ -658,7 +658,7 @@ function PointsColumn({
                 background: '#F8FAFC',
                 borderRadius: 6,
                 padding: '10px 14px',
-                margin: '8px 0 24px',
+                margin: '16px 0 8px',
               }}
             >
               <div
