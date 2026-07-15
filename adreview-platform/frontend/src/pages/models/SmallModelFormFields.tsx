@@ -10,7 +10,7 @@ import {
   App,
 } from 'antd'
 import type { UploadRequestOption } from 'rc-upload/lib/interface'
-import { DeleteOutlined, FileOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
+import { DeleteOutlined, FileOutlined, UploadOutlined } from '@ant-design/icons'
 import { registeredModelsApi } from '@/api/registered-models'
 import type {
   ArtifactUploadResponse,
@@ -56,6 +56,8 @@ export default function SmallModelFormFields({
   const [artifact, setArtifact] = useState<ArtifactUploadResponse | null>(
     initialArtifact ?? null,
   )
+  const [auditJsonText, setAuditJsonText] = useState('')
+  const [auditPoints, setAuditPoints] = useState<string[] | null>(null)
 
   const beforeUpload = (file: File) => {
     const MAX = 512 * 1024 * 1024
@@ -86,6 +88,41 @@ export default function SmallModelFormFields({
   const removeArtifact = () => {
     setArtifact(null)
     form.setFieldValue('__artifact' as keyof SmallModelFormValues, undefined)
+  }
+
+  const parseJson = (text: string): string[] | null => {
+    try {
+      const data = JSON.parse(text)
+      if (Array.isArray(data.points) && data.points.every((p: unknown) => typeof p === 'string')) {
+        return data.points
+      }
+    } catch {}
+    return null
+  }
+
+  const handleJsonTextChange = (text: string) => {
+    setAuditJsonText(text)
+    const points = parseJson(text)
+    setAuditPoints(points)
+    form.setFieldValue('__auditPoints' as keyof SmallModelFormValues, points ?? undefined)
+  }
+
+  const handleJsonUpload = (file: File) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = (e.target?.result as string) ?? ''
+      const points = parseJson(text)
+      if (points) {
+        setAuditJsonText(text)
+        setAuditPoints(points)
+        form.setFieldValue('__auditPoints' as keyof SmallModelFormValues, points)
+        message.success(`已加载 ${points.length} 个审核标签`)
+      } else {
+        message.error('JSON 格式错误：需要 { "points": ["标签1", "标签2", ...] }')
+      }
+    }
+    reader.readAsText(file)
+    return false
   }
 
   return (
@@ -202,39 +239,34 @@ export default function SmallModelFormFields({
 
       <Form.Item
         label="模型审核点配置"
-        tooltip="该模型能识别的审核点列表，如：一号领导人、敏感地名"
+        tooltip='JSON 格式：{ "points": ["标签1", "标签2", ...] }'
       >
-        <Form.List name="__auditPoints">
-          {(fields, { add, remove }) => (
-            <>
-              {fields.map((field) => (
-                <Space key={field.key} style={{ display: 'flex', marginBottom: 8 }} align="center">
-                  <Form.Item name={field.name} noStyle>
-                    <Input placeholder="输入审核点名称" style={{ width: 320 }} />
-                  </Form.Item>
-                  <Button
-                    type="text"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => remove(field.name)}
-                  />
-                </Space>
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Space>
+            <Upload
+              accept=".json"
+              beforeUpload={handleJsonUpload}
+              showUploadList={false}
+            >
+              <Button icon={<UploadOutlined />}>选择 JSON 配置文件</Button>
+            </Upload>
+            <span style={{ fontSize: 12, color: '#64748B' }}>或直接编辑下方 JSON</span>
+          </Space>
+          <Input.TextArea
+            rows={6}
+            value={auditJsonText}
+            onChange={(e) => handleJsonTextChange(e.target.value)}
+            placeholder='{"points": ["一号领导人", "敏感地名"]}'
+            style={{ fontFamily: 'monospace', fontSize: 12 }}
+          />
+          {auditPoints && auditPoints.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {auditPoints.map((p, i) => (
+                <Tag key={i}>{p}</Tag>
               ))}
-              <Button
-                type="dashed"
-                block
-                icon={<PlusOutlined />}
-                onClick={() => add()}
-              >
-                添加审核点
-              </Button>
-            </>
+            </div>
           )}
-        </Form.List>
-      </Form.Item>
-
-      <Form.Item label="版本号" name="version" tooltip="语义版本号，如 1.0.0（可选）">
-        <Input placeholder="1.0.0" />
+        </Space>
       </Form.Item>
 
       <Form.Item

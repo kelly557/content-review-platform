@@ -34,8 +34,14 @@ import {
   type StrategyValidateResult,
 } from '@/types/domain'
 
-const DEFAULT_TOOLTIP =
-  '默认策略在以下任一情况发生时生效执行：未配置策略；所有策略均未启用；所有策略均未达到生效时间。'
+const DEFAULT_TOOLTIP = (
+  <div>
+    默认策略在以下任一情况发生时生效执行：未配置策略；所有策略均未启用；所有策略均未达到生效时间。
+    <br />
+    <br />
+    补充：默认开启所有的平台内置规则。
+  </div>
+)
 
 const SCOPE_OPTIONS: Array<{ value: 'all' | 'default' | 'general'; label: string }> = [
   { value: 'all', label: '全部' },

@@ -111,6 +111,7 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
           message.error('请填写业务标识')
           return
         }
+        const autoVersion = `${v.modality}-${v.small_category}`
         const created = await registeredModelsApi.create({
           name: v.name ?? v.model_name.trim(),
           description: v.description,
@@ -120,7 +121,7 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
           large_category: null,
           provider_id: null,
           model_name: v.model_name.trim(),
-          version: v.version,
+          version: autoVersion,
           config: v.__auditPoints?.length ? { points: v.__auditPoints } : undefined,
           registration_method: 'uploaded_file',
           artifact,
