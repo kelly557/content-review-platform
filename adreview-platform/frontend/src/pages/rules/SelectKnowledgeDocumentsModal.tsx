@@ -69,7 +69,8 @@ export function SelectKnowledgeDocumentsModal({
     setPicked(new Set(item.knowledge_document_ids))
     setLoading(true)
     knowledgeDocumentsApi
-      .list({ size: 500, status: 'active', include_deleted: false })
+      // backend caps size at le=100; 100 covers realistic dropdown set
+      .list({ size: 100, status: 'active', include_deleted: false })
       .then((p) => setDocs(p.items))
       .catch(() => message.error('加载知识文档失败'))
       .finally(() => setLoading(false))
@@ -221,7 +222,8 @@ export function KnowledgeSelectInline({ item, onSaved, compact }: InlineProps) {
     let cancelled = false
     setLoading(true)
     knowledgeDocumentsApi
-      .list({ size: 500, status: 'active', include_deleted: false })
+      // backend caps size at le=100; 100 covers realistic dropdown set
+      .list({ size: 100, status: 'active', include_deleted: false })
       .then((p) => {
         if (!cancelled) setDocs(p.items)
       })

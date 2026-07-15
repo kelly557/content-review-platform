@@ -53,7 +53,8 @@ export default function SelectSmallModelModal({
     setPicked(item.active_small_model_version_id ?? null)
     setLoading(true)
     registeredModelsApi
-      .list({ size: 200, kind: 'small', status: 'active' })
+      // backend caps size at le=100; 100 covers realistic dropdown set
+      .list({ size: 100, kind: 'small', status: 'active' })
       .then((p) => setModels(p.items.filter((m) => m.status === 'active')))
       .catch(() => message.error('加载模型失败'))
       .finally(() => setLoading(false))

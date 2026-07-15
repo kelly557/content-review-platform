@@ -77,7 +77,8 @@ export default function PersonalRuleListPage() {
     let cancelled = false
     setModelLoading(true)
     registeredModelsApi
-      .list({ size: 200, kind: 'small', status: 'active' })
+      // backend caps size at le=100 (registered-models pagination); 100 covers realistic dropdown set
+      .list({ size: 100, kind: 'small', status: 'active' })
       .then((p) => {
         if (cancelled) return
         setModels(p.items.filter((m) => m.status === 'active' && m.current_version_id != null))
