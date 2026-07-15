@@ -51,6 +51,7 @@ const PersonalRuleDetailPage = lazy(() => import('@/pages/rules/PersonalRuleDeta
 const PersonalRulePointsPage = lazy(() => import('@/pages/rules/PersonalRulePointsPage'))
 const AuditRulesPage = lazy(() => import('@/pages/audit-rules/AuditRulesPage'))
 const WordLibraryListPage = lazy(() => import('@/pages/strategy/WordLibraryListPage'))
+const KeywordsPage = lazy(() => import('@/pages/keywords/KeywordsPage'))
 const ImageLibraryListPage = lazy(() => import('@/pages/strategy/ImageLibraryListPage'))
 const WordLibraryDetailPage = lazy(() => import('@/pages/strategy/WordLibraryDetailPage'))
 const ImageLibraryDetailPage = lazy(() => import('@/pages/strategy/ImageLibraryDetailPage'))
@@ -158,6 +159,7 @@ export default function AppRoutes() {
               />
 
               {/* 资源库（原「知识库」） */}
+              <Route path="/keywords" element={<KeywordsPage />} />
               <Route path="/resources/words" element={<WordLibraryListPage />} />
               <Route path="/resources/words/:id" element={<WordLibraryDetailPage />} />
               <Route path="/resources/images" element={<ImageLibraryListPage />} />
