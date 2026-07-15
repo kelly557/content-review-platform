@@ -75,12 +75,19 @@ def _enforce_mutual_exclusion(item: AuditItem, body: AuditItemUpdate) -> None:
     - is_builtin=True 携带 ``knowledge_document_ids`` → 422
     - 个性化与通用都允许 ``active_small_model_version_id``（个性化用于绑定
       运行此规则 prompt 的小模型版本；通用用于切换生效版本）。
+    - is_builtin=True 携带 ``active_large_model_version_id`` → 422
+      （通用规则只能切换生效小模型版本；大模型版本仅个性化可用）。
     """
     fields_set = getattr(body, "model_fields_set", set())
     if item.is_builtin and "knowledge_document_ids" in fields_set:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="通用审核项不支持关联知识文档",
+        )
+    if item.is_builtin and "active_large_model_version_id" in fields_set:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="通用审核项不支持绑定大模型版本",
         )
 
 
@@ -137,6 +144,74 @@ async def _resolve_active_model_version(
     if item.active_small_model_version_id is None:
         return None
     version = await db.get(RegisteredModelVersion, item.active_small_model_version_id)
+    if version is None:
+        return None
+    parent = await db.get(RegisteredModel, version.model_id)
+    if parent is None:
+        return None
+    return ActiveModelVersionOut(
+        version_id=version.id,
+        model_id=parent.id,
+        model_code=parent.code,
+        model_name=parent.name,
+        version_no=version.version_no,
+        version_label=version.version_label,
+    )
+
+
+async def _validate_active_large_model_version(
+    db: AsyncSession, version_id: Optional[int]
+) -> Optional[RegisteredModelVersion]:
+    """校验 active_large_model_version_id 指向一个 active 大模型版本。
+
+    - None → 允许（清空）
+    - int → 必须存在且 version.status='active' + parent model.status='active' + parent.kind='large'
+    """
+    if version_id is None:
+        return None
+    version = await db.get(RegisteredModelVersion, version_id)
+    if version is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"active_large_model_version_id 引用的版本不存在: {version_id}",
+        )
+    if version.status != RegisteredModelVersionStatus.ACTIVE.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"active_large_model_version_id 引用的版本未启用 "
+                f"(status={version.status})"
+            ),
+        )
+    parent = await db.get(RegisteredModel, version.model_id)
+    if parent is None or parent.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"active_large_model_version_id 引用的模型不存在或已删除",
+        )
+    if parent.status != RegisteredModelStatus.ACTIVE.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"active_large_model_version_id 引用的模型未启用 "
+                f"(status={parent.status})"
+            ),
+        )
+    if parent.kind != "large":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="active_large_model_version_id 必须指向大模型版本（kind=large）",
+        )
+    return version
+
+
+async def _resolve_active_large_model_version(
+    db: AsyncSession, item: AuditItem
+) -> Optional[ActiveModelVersionOut]:
+    """加载 item.active_large_model_version_id 对应的展示对象。"""
+    if item.active_large_model_version_id is None:
+        return None
+    version = await db.get(RegisteredModelVersion, item.active_large_model_version_id)
     if version is None:
         return None
     parent = await db.get(RegisteredModel, version.model_id)
@@ -329,6 +404,7 @@ async def list_items_by_media_type(
     out: list[AuditItemOut] = []
     for r in rows:
         active = await _resolve_active_model_version(db, r)
+        active_large = await _resolve_active_large_model_version(db, r)
         out.append(
             AuditItemOut(
                 id=r.id,
@@ -344,6 +420,8 @@ async def list_items_by_media_type(
                 linked_libraries=_serialize_item_libraries(r),
                 active_small_model_version_id=r.active_small_model_version_id,
                 active_model_version=active,
+                active_large_model_version_id=r.active_large_model_version_id,
+                active_large_model_version=active_large,
                 knowledge_document_ids=list(r.knowledge_document_ids or []),
                 created_at=r.created_at,
                 updated_at=r.updated_at,
@@ -379,6 +457,7 @@ async def list_items(
     out: list[AuditItemOut] = []
     for r in rows:
         active = await _resolve_active_model_version(db, r)
+        active_large = await _resolve_active_large_model_version(db, r)
         out.append(
             AuditItemOut(
                 id=r.id,
@@ -394,6 +473,8 @@ async def list_items(
                 linked_libraries=_serialize_item_libraries(r),
                 active_small_model_version_id=r.active_small_model_version_id,
                 active_model_version=active,
+                active_large_model_version_id=r.active_large_model_version_id,
+                active_large_model_version=active_large,
                 knowledge_document_ids=list(r.knowledge_document_ids or []),
                 created_at=r.created_at,
                 updated_at=r.updated_at,
@@ -459,6 +540,8 @@ async def create_item(
         linked_libraries=_serialize_item_libraries(fresh),
         active_small_model_version_id=None,
         active_model_version=None,
+        active_large_model_version_id=None,
+        active_large_model_version=None,
         knowledge_document_ids=list(fresh.knowledge_document_ids or []),
         created_at=fresh.created_at,
         updated_at=fresh.updated_at,
@@ -494,6 +577,9 @@ async def update_item(
     if body.active_small_model_version_id is not None:
         await _validate_active_model_version(db, body.active_small_model_version_id)
         item.active_small_model_version_id = body.active_small_model_version_id
+    if body.active_large_model_version_id is not None:
+        await _validate_active_large_model_version(db, body.active_large_model_version_id)
+        item.active_large_model_version_id = body.active_large_model_version_id
     if body.knowledge_document_ids is not None:
         item.knowledge_document_ids = list(body.knowledge_document_ids)
     await db.flush()
@@ -511,6 +597,7 @@ async def update_item(
     ).scalar_one()
     counts = await _point_counts(db, code)
     active = await _resolve_active_model_version(db, fresh)
+    active_large = await _resolve_active_large_model_version(db, fresh)
     return AuditItemOut(
         id=fresh.id,
         package_code=fresh.package_code,
@@ -525,6 +612,8 @@ async def update_item(
         linked_libraries=_serialize_item_libraries(fresh),
         active_small_model_version_id=fresh.active_small_model_version_id,
         active_model_version=active,
+        active_large_model_version_id=fresh.active_large_model_version_id,
+        active_large_model_version=active_large,
         knowledge_document_ids=list(fresh.knowledge_document_ids or []),
         created_at=fresh.created_at,
         updated_at=fresh.updated_at,

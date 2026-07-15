@@ -1,7 +1,7 @@
 /**
  * 个性化图片/文本审核规则 — 列表页
  *
- * 列：规则名 / 模型（行内 Select 大模型）/ 选择知识（行内 Select 多选）/ 启用 / 操作（编辑审核点 + 删除）
+ * 列：规则名 / 大模型（行内 Select，LLM 作为 prompt 执行器）/ 选择知识（行内 Select 多选）/ 启用 / 操作（编辑审核点 + 删除）
  * 不再有 ⋮ 配置下拉，编辑/删除直接暴露。
  */
 import { useEffect, useMemo, useState } from 'react'
@@ -26,9 +26,9 @@ import type {
   MediaTypeKey,
   RegisteredModelListItem,
 } from '@/types/domain'
-import { SMALL_MODEL_CATEGORY_LABEL, SMALL_MODEL_CATEGORY_OPTIONS } from '@/types/domain'
+import { LARGE_MODEL_CATEGORY_LABEL, LARGE_MODEL_CATEGORY_OPTIONS } from '@/types/domain'
 
-const SMALL_CATEGORY_COLOR: Record<string, string> = SMALL_MODEL_CATEGORY_OPTIONS.reduce(
+const LARGE_CATEGORY_COLOR: Record<string, string> = LARGE_MODEL_CATEGORY_OPTIONS.reduce(
   (acc, o) => ({ ...acc, [o.value]: o.color }),
   {} as Record<string, string>,
 )
@@ -78,12 +78,12 @@ export default function PersonalRuleListPage() {
     setModelLoading(true)
     registeredModelsApi
       // backend caps size at le=100 (registered-models pagination); 100 covers realistic dropdown set
-      .list({ size: 100, kind: 'small', status: 'active' })
+      .list({ size: 100, kind: 'large', status: 'active' })
       .then((p) => {
         if (cancelled) return
         setModels(p.items.filter((m) => m.status === 'active' && m.current_version_id != null))
       })
-      .catch(() => message.error('加载模型失败'))
+      .catch(() => message.error('加载大模型失败'))
       .finally(() => !cancelled && setModelLoading(false))
     return () => {
       cancelled = true
@@ -115,12 +115,12 @@ export default function PersonalRuleListPage() {
     versionId: number | undefined,
   ) => {
     try {
-      await auditItemsApi.setActiveModelVersion(
+      await auditItemsApi.setActiveLargeModelVersion(
         row.package_code,
         row.id,
         versionId ?? null,
       )
-      message.success('已更新模型')
+      message.success('已更新大模型')
       await reload()
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -135,12 +135,12 @@ export default function PersonalRuleListPage() {
         label: (
           <Space size={6} wrap>
             <span>{m.name}</span>
-            {m.small_category && (
+            {m.large_category && (
               <Tag
-                color={SMALL_CATEGORY_COLOR[m.small_category] ?? 'default'}
+                color={LARGE_CATEGORY_COLOR[m.large_category] ?? 'default'}
                 style={{ marginInline: 0 }}
               >
-                {SMALL_MODEL_CATEGORY_LABEL[m.small_category]}
+                {LARGE_MODEL_CATEGORY_LABEL[m.large_category]}
               </Tag>
             )}
             {m.model_name && (
@@ -168,16 +168,16 @@ export default function PersonalRuleListPage() {
         ),
       },
       {
-        title: '模型',
+        title: '大模型',
         key: 'model',
         width: '24%',
         render: (_, row) => {
-          const currentId = row.active_small_model_version_id ?? undefined
+          const currentId = row.active_large_model_version_id ?? undefined
           return (
             <Select<number | undefined>
               value={currentId}
               onChange={(v) => handleModelChange(row, v)}
-              placeholder={modelLoading ? '加载模型中…' : '请选择模型 ▼'}
+              placeholder={modelLoading ? '加载大模型中…' : '请选择大模型 ▼'}
               loading={modelLoading}
               allowClear
               showSearch
@@ -189,7 +189,7 @@ export default function PersonalRuleListPage() {
               }
               options={modelOptions}
               labelRender={(props) => {
-                if (!props.value) return <span style={{ color: '#94A3B8' }}>请选择模型 ▼</span>
+                if (!props.value) return <span style={{ color: '#94A3B8' }}>请选择大模型 ▼</span>
                 const m: RegisteredModelListItem | undefined = models.find(
                   (x) => x.current_version_id === props.value,
                 )
@@ -197,12 +197,12 @@ export default function PersonalRuleListPage() {
                 return (
                   <Space size={6} wrap>
                     <span style={{ fontWeight: 600 }}>{m.model_name ?? m.name}</span>
-                    {m.small_category && (
+                    {m.large_category && (
                       <Tag
-                        color={SMALL_CATEGORY_COLOR[m.small_category] ?? 'default'}
+                        color={LARGE_CATEGORY_COLOR[m.large_category] ?? 'default'}
                         style={{ marginInline: 0 }}
                       >
-                        {SMALL_MODEL_CATEGORY_LABEL[m.small_category]}
+                        {LARGE_MODEL_CATEGORY_LABEL[m.large_category]}
                       </Tag>
                     )}
                     <Text type="secondary" style={{ fontSize: 12 }}>
