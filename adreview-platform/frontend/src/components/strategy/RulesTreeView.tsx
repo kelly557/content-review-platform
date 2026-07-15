@@ -617,8 +617,6 @@ function PointsColumn({
       render: (_, record) => {
         if (record.kind === 'section') {
           const hasLibs = record.linkedLibraries.length > 0
-          const pickerOpen =
-            allowLibraryLink && pickerOpenForItemId === record.item.id
           return (
             <div
               style={{
@@ -645,27 +643,6 @@ function PointsColumn({
                     · 关联 {record.linkedLibraries.length} 个自定义库
                   </Text>
                 )}
-                {allowLibraryLink && (
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() =>
-                      setPickerOpenForItemId(
-                        pickerOpen ? null : record.item.id,
-                      )
-                    }
-                    aria-label={`为「${record.item.name_cn}」编辑自定义库`}
-                    style={{
-                      padding: '0 4px',
-                      height: 'auto',
-                      fontSize: 14,
-                      fontWeight: 500,
-                      color: pickerOpen ? '#2563EB' : '#0F172A',
-                    }}
-                  >
-                    {`自定义库 ${pickerOpen ? '▲' : '▼'}`}
-                  </Button>
-                )}
               </div>
             </div>
           )
@@ -688,14 +665,49 @@ function PointsColumn({
               <div
                 style={{
                   display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 6,
                   alignItems: 'center',
-                  marginBottom: pickerOpen ? 8 : 0,
+                  gap: 8,
+                  marginBottom: 8,
                 }}
               >
-                {hasLibs ? (
-                  record.linkedLibraries.map((l) => {
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() =>
+                    setPickerOpenForItemId(
+                      pickerOpen ? null : record.item.id,
+                    )
+                  }
+                  aria-label={`为「${record.item.name_cn}」编辑自定义库`}
+                  style={{
+                    padding: '0 4px',
+                    height: 'auto',
+                    fontSize: 14,
+                    fontWeight: 500,
+                    color: pickerOpen ? '#2563EB' : '#0F172A',
+                  }}
+                >
+                  {`自定义库 ${pickerOpen ? '▲' : '▼'}`}
+                </Button>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {hasLibs
+                    ? `已关联 ${record.linkedLibraries.length} 个`
+                    : pickerOpen
+                      ? '勾选即时生效,可多选'
+                      : '暂无关联的自定义库'}
+                </Text>
+              </div>
+              {hasLibs && (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 6,
+                    alignItems: 'center',
+                    marginBottom: pickerOpen ? 8 : 0,
+                  }}
+                >
+                  {record.linkedLibraries.map((l) => {
                     const typeLabel =
                       TYPE_LABEL_BY_LIB[l.library_type] ?? '?'
                     return (
@@ -725,13 +737,9 @@ function PointsColumn({
                         </Space>
                       </Tag>
                     )
-                  })
-                ) : (
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    暂无关联自定义库
-                  </Text>
-                )}
-              </div>
+                  })}
+                </div>
+              )}
               {pickerOpen && (
                 <div
                   style={{
