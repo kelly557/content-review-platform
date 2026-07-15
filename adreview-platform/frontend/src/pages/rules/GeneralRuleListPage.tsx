@@ -13,7 +13,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { Link, useParams } from 'react-router-dom'
 import { auditItemsApi } from '@/api/auditItems'
 import type { AuditItem, MediaTypeKey } from '@/types/domain'
-import ChooseModelVersionModal from './ChooseModelVersionModal'
+import SmallModelChooseModal from './SmallModelChooseModal'
 
 const { Text, Title } = Typography
 
@@ -59,9 +59,9 @@ export default function GeneralRuleListPage() {
         ),
       },
       {
-        title: '生效模型·版本',
-        key: 'active',
-        width: '36%',
+        title: '生效模型',
+        key: 'active_model',
+        width: '18%',
         render: (_, row) => {
           const mv = row.active_model_version
           if (!mv) {
@@ -74,7 +74,25 @@ export default function GeneralRuleListPage() {
           return (
             <Space size={4} wrap>
               <Text>{mv.model_name}</Text>
-              <Text type="secondary">·</Text>
+            </Space>
+          )
+        },
+      },
+      {
+        title: '版本',
+        key: 'active_version',
+        width: '18%',
+        render: (_, row) => {
+          const mv = row.active_model_version
+          if (!mv) {
+            return (
+              <Text type="secondary" style={{ fontStyle: 'italic' }}>
+                —
+              </Text>
+            )
+          }
+          return (
+            <Space size={4} wrap>
               <Text style={{ fontVariantNumeric: 'tabular-nums' }}>
                 v{mv.version_no}
                 {mv.version_label ? ` (${mv.version_label})` : ''}
@@ -147,7 +165,7 @@ export default function GeneralRuleListPage() {
         </Space>
       </div>
       <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-        通用规则由平台统一发布，仅支持切换生效模型版本；不支持新增、删除或编辑阈值。
+        通用规则由平台统一发布，仅支持切换生效小模型版本；不支持新增、删除或编辑阈值。
       </Text>
       <Table<AuditItem>
         rowKey="id"
@@ -166,7 +184,7 @@ export default function GeneralRuleListPage() {
           ),
         }}
       />
-      <ChooseModelVersionModal
+      <SmallModelChooseModal
         item={switchTarget}
         mediaType={mediaType}
         onClose={() => setSwitchTarget(null)}

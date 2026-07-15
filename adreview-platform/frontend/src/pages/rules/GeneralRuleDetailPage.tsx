@@ -28,7 +28,7 @@ import type {
   AuditPointRisk,
   MediaTypeKey,
 } from '@/types/domain'
-import ChooseModelVersionModal from './ChooseModelVersionModal'
+import SmallModelChooseModal from './SmallModelChooseModal'
 
 const { Text, Title } = Typography
 
@@ -171,16 +171,26 @@ export default function GeneralRuleDetailPage() {
           >
             <Row gutter={16} align="middle">
               <Col flex="auto">
-                <Space size="small">
-                  <Text type="secondary">生效模型：</Text>
+                <Space direction="vertical" size={4}>
                   {item.active_model_version ? (
-                    <Text strong>
-                      {item.active_model_version.model_name} · v
-                      {item.active_model_version.version_no}
-                      {item.active_model_version.version_label
-                        ? ` (${item.active_model_version.version_label})`
-                        : ''}
-                    </Text>
+                    <>
+                      <Space size="small">
+                        <Text type="secondary">生效模型：</Text>
+                        <Text strong>{item.active_model_version.model_name}</Text>
+                        <Text type="secondary">
+                          ({item.active_model_version.model_code})
+                        </Text>
+                      </Space>
+                      <Space size="small">
+                        <Text type="secondary">版本：</Text>
+                        <Text style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          v{item.active_model_version.version_no}
+                          {item.active_model_version.version_label
+                            ? ` (${item.active_model_version.version_label})`
+                            : ''}
+                        </Text>
+                      </Space>
+                    </>
                   ) : (
                     <Text type="secondary" style={{ fontStyle: 'italic' }}>
                       未指定
@@ -271,7 +281,7 @@ export default function GeneralRuleDetailPage() {
         <Empty description={loading ? '加载中...' : '未找到该规则'} />
       )}
 
-      <ChooseModelVersionModal
+      <SmallModelChooseModal
         item={switchOpen ? item : null}
         mediaType={mediaType}
         onClose={() => setSwitchOpen(false)}

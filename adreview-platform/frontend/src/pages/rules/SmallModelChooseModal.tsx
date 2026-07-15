@@ -1,8 +1,8 @@
 /**
- * 「切换生效模型版本」弹窗 — 仅通用规则使用
+ * 「切换生效小模型版本」弹窗 — 仅通用规则使用
  *
- * 列出 scale_class=large 且 status=active 的大模型；点开行展开 RegisteredModelVersion。
- * 选中后 PUT /packages/{code}/items/{id} body={active_large_model_version_id: versionId}。
+ * 列出 kind=small 且 status=active 的小模型；点开行展开 RegisteredModelVersion。
+ * 选中后 PUT /packages/{code}/items/{id} body={active_small_model_version_id: versionId}。
  */
 import { useEffect, useState } from 'react'
 import {
@@ -48,7 +48,7 @@ interface Props {
   onSaved: () => void | Promise<void>
 }
 
-export default function ChooseModelVersionModal({
+export default function SmallModelChooseModal({
   item,
   mediaType,
   onClose,
@@ -62,10 +62,10 @@ export default function ChooseModelVersionModal({
 
   useEffect(() => {
     if (!item) return
-    setPicked(item.active_large_model_version_id ?? null)
+    setPicked(item.active_small_model_version_id ?? null)
     setLoading(true)
     registeredModelsApi
-      .listActiveModels({ kind: 'large' })
+      .listActiveModels({ kind: 'small' })
       .then((rows) => {
         setModels(
           rows.map((r) => ({
@@ -124,7 +124,7 @@ export default function ChooseModelVersionModal({
     try {
       const pkg = PACKAGE_BY_MEDIA[mediaType as MediaTypeKey] ?? mediaType
       await auditItemsApi.setActiveModelVersion(pkg, item.id, picked)
-      message.success('已切换生效模型版本')
+      message.success('已切换生效小模型版本')
       await onSaved()
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -136,7 +136,7 @@ export default function ChooseModelVersionModal({
 
   return (
     <Modal
-      title={item ? `切换生效模型版本 — ${item.name_cn}` : '切换生效模型版本'}
+      title={item ? `切换生效小模型版本 — ${item.name_cn}` : '切换生效小模型版本'}
       open={!!item}
       onCancel={onClose}
       width={640}
@@ -157,7 +157,7 @@ export default function ChooseModelVersionModal({
     >
       <Spin spinning={loading}>
         {models.length === 0 && !loading ? (
-          <Empty description="暂无 active 状态的大模型" />
+          <Empty description="暂无 active 状态的小模型" />
         ) : (
           <Collapse
             accordion
@@ -189,7 +189,7 @@ export default function ChooseModelVersionModal({
                   <Space direction="vertical" style={{ width: '100%' }}>
                     {m.versions.map((v) => {
                       const isCurrent =
-                        v.id === item?.active_large_model_version_id
+                        v.id === item?.active_small_model_version_id
                       const isLatest = m.versions[0]?.id === v.id
                       return (
                         <Radio key={v.id} value={v.id}>

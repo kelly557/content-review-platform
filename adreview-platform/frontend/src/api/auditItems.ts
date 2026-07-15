@@ -35,11 +35,11 @@ export const auditItemsApi = {
       .put<AuditItem>(`/packages/${packageCode}/items/${itemId}`, payload)
       .then((r) => r.data)
   },
-  /** 通用规则「切换生效模型版本」 */
+  /** 通用规则「切换生效小模型版本」 */
   setActiveModelVersion(packageCode: string, itemId: number, versionId: number | null) {
     return api
       .put<AuditItem>(`/packages/${packageCode}/items/${itemId}`, {
-        active_large_model_version_id: versionId,
+        active_small_model_version_id: versionId,
       })
       .then((r) => r.data)
   },

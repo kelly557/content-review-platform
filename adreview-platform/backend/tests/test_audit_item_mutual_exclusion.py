@@ -31,22 +31,18 @@ def test_mutual_exclusion_builtin_rejects_knowledge_documents():
     assert "通用审核项不支持关联知识文档" in exc.value.detail
 
 
-def test_mutual_exclusion_personal_rejects_model_version():
-    """is_builtin=false 携带 active_large_model_version_id → 422。"""
-    from fastapi import HTTPException
-
+def test_mutual_exclusion_personal_allows_model_version():
+    """is_builtin=false 携带 active_small_model_version_id 现在被允许（个性化可绑定大模型版本作为运行模型）。"""
     from app.api.v1.audit_items import _enforce_mutual_exclusion
 
     class _StubItem:
         is_builtin = False
 
     class _StubBody:
-        model_fields_set = {"active_large_model_version_id"}
+        model_fields_set = {"active_small_model_version_id"}
 
-    with pytest.raises(HTTPException) as exc:
-        _enforce_mutual_exclusion(_StubItem(), _StubBody())  # type: ignore[arg-type]
-    assert exc.value.status_code == 422
-    assert "个性化审核项不支持切换生效模型版本" in exc.value.detail
+    # 不应抛异常 — 个性化规则现在允许绑定/切换大模型版本
+    _enforce_mutual_exclusion(_StubItem(), _StubBody())  # type: ignore[arg-type]
 
 
 def test_mutual_exclusion_passes_when_no_conflict():
@@ -57,7 +53,7 @@ def test_mutual_exclusion_passes_when_no_conflict():
         is_builtin = True
 
     class _BodyBuiltinOk:
-        model_fields_set = {"is_enabled", "active_large_model_version_id"}
+        model_fields_set = {"is_enabled", "active_small_model_version_id"}
 
     class _StubPersonal:
         is_builtin = False
@@ -70,11 +66,27 @@ def test_mutual_exclusion_passes_when_no_conflict():
     _enforce_mutual_exclusion(_StubPersonal(), _BodyPersonalOk())  # type: ignore[arg-type]
 
 
+def test_mutual_exclusion_personal_allows_model_version_and_knowledge():
+    """个性化同时携带 model version + knowledge document ids → 不抛异常。"""
+    from app.api.v1.audit_items import _enforce_mutual_exclusion
+
+    class _StubItem:
+        is_builtin = False
+
+    class _StubBody:
+        model_fields_set = {
+            "active_small_model_version_id",
+            "knowledge_document_ids",
+        }
+
+    _enforce_mutual_exclusion(_StubItem(), _StubBody())  # type: ignore[arg-type]
+
+
 def test_builtin_item_whitelist_includes_model_version():
-    """白名单应包含 active_large_model_version_id（通用规则的唯一新增可写字段）。"""
+    """白名单应包含 active_small_model_version_id（通用规则的唯一新增可写字段）。"""
     from app.api.v1.audit_items import BUILTIN_ITEM_WRITABLE_FIELDS
 
-    assert "active_large_model_version_id" in BUILTIN_ITEM_WRITABLE_FIELDS
+    assert "active_small_model_version_id" in BUILTIN_ITEM_WRITABLE_FIELDS
     assert "is_enabled" in BUILTIN_ITEM_WRITABLE_FIELDS
     assert "description" in BUILTIN_ITEM_WRITABLE_FIELDS
     assert "linked_library_ids" in BUILTIN_ITEM_WRITABLE_FIELDS
@@ -84,7 +96,7 @@ def test_schema_out_has_new_fields():
     from app.schemas.audit_item import ActiveModelVersionOut, AuditItemOut
 
     fields = set(AuditItemOut.model_fields.keys())
-    assert "active_large_model_version_id" in fields
+    assert "active_small_model_version_id" in fields
     assert "active_model_version" in fields
     assert "knowledge_document_ids" in fields
     assert "version_no" in ActiveModelVersionOut.model_fields
@@ -95,7 +107,7 @@ def test_schema_update_has_new_fields():
     from app.schemas.audit_item import AuditItemUpdate
 
     fields = set(AuditItemUpdate.model_fields.keys())
-    assert "active_large_model_version_id" in fields
+    assert "active_small_model_version_id" in fields
     assert "knowledge_document_ids" in fields
 
 
@@ -107,7 +119,7 @@ def test_schema_update_forbids_unknown_fields():
 
     with pytest.raises(ValidationError):
         AuditItemUpdate.model_validate(
-            {"name_cn": "x", "active_large_model_version_id": 1, "unknown_field": 1}
+            {"name_cn": "x", "active_small_model_version_id": 1, "unknown_field": 1}
         )
 
 
@@ -130,7 +142,7 @@ def test_schema_update_rejects_non_int_version_id():
     from app.schemas.audit_item import AuditItemUpdate
 
     with pytest.raises(ValidationError):
-        AuditItemUpdate.model_validate({"active_large_model_version_id": "abc"})
+        AuditItemUpdate.model_validate({"active_small_model_version_id": "abc"})
 
 
 def test_schema_update_rejects_non_list_doc_ids():

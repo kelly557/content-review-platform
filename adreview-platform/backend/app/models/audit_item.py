@@ -57,9 +57,9 @@ class AuditItem(Base):
     is_builtin: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, server_default="false"
     )
-    # 通用规则「生效模型版本」指针：仅 is_builtin=true 时写入；FK 到
+    # 通用规则「生效小模型版本」指针：仅 is_builtin=true 时写入；FK 到
     # registered_model_versions.id。version 删除时 SET NULL（前端显示「未指定」）。
-    active_large_model_version_id: Mapped[Optional[int]] = mapped_column(
+    active_small_model_version_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("registered_model_versions.id", ondelete="SET NULL"),
         nullable=True,

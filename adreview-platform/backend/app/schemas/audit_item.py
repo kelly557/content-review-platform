@@ -20,7 +20,7 @@ class LinkedLibraryOut(BaseModel):
 
 
 class ActiveModelVersionOut(BaseModel):
-    """当前生效的大模型版本摘要 — 仅 is_builtin=true 时有值。"""
+    """当前生效的小模型版本摘要 — 仅 is_builtin=true 时有值。"""
 
     version_id: int
     model_id: int
@@ -43,8 +43,8 @@ class AuditItemOut(ORMBase):
     point_count: int = 0
     # N:M 关联：审核项 ↔ 自定义图库/词库
     linked_libraries: list[LinkedLibraryOut] = Field(default_factory=list)
-    # 通用规则: 生效大模型版本 (NULL = 未指定)
-    active_large_model_version_id: Optional[int] = None
+    # 通用规则: 生效小模型版本 (NULL = 未指定)
+    active_small_model_version_id: Optional[int] = None
     active_model_version: Optional[ActiveModelVersionOut] = None
     # 个性化规则: 关联知识文档 ID 列表 (NULL/[] = 未关联)
     knowledge_document_ids: list[int] = Field(default_factory=list)
@@ -72,7 +72,7 @@ class AuditItemUpdate(BaseModel):
     """写入 schema — 互斥校验在 service 层做。
 
     内置（is_builtin=True）规则允许修改 is_enabled / description /
-    linked_library_ids / active_large_model_version_id；其他字段在
+    linked_library_ids / active_small_model_version_id；其他字段在
     service 层 422 拦截。个性化规则可改上述 + name_cn / sort_order /
     aliases / knowledge_document_ids。
     """
@@ -85,8 +85,8 @@ class AuditItemUpdate(BaseModel):
     sort_order: Optional[int] = None
     is_enabled: Optional[bool] = None
     linked_library_ids: Optional[list[int]] = None
-    # 通用规则「切换生效模型版本」
-    active_large_model_version_id: Optional[int] = None
+    # 通用规则「切换生效小模型版本」
+    active_small_model_version_id: Optional[int] = None
     # 个性化规则「关联知识文档」（多选；None=不动，[]=清空，[非空]=替换）
     knowledge_document_ids: Optional[list[int]] = None
 

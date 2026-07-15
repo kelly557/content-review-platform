@@ -38,9 +38,9 @@ logger = logging.getLogger(__name__)
 
 
 # 内置审核项允许修改的字段白名单。
-# 允许启停 + 描述 + 关联自定义库 + 切换生效模型版本。
+# 允许启停 + 描述 + 关联自定义库 + 切换生效小模型版本。
 BUILTIN_ITEM_WRITABLE_FIELDS = frozenset(
-    {"is_enabled", "description", "linked_library_ids", "active_large_model_version_id"}
+    {"is_enabled", "description", "linked_library_ids", "active_small_model_version_id"}
 )
 
 
@@ -63,7 +63,7 @@ def _filter_payload_for_builtin_item(
             detail=(
                 "通用审核项不允许修改字段："
                 + "、".join(blocked)
-                + "；仅允许启停 / 调整描述 / 关联自定义图库词库 / 切换生效模型版本"
+                + "；仅允许启停 / 调整描述 / 关联自定义图库词库 / 切换生效小模型版本"
                 "（超级管理员可改任意字段）。"
             ),
         )
@@ -73,7 +73,8 @@ def _enforce_mutual_exclusion(item: AuditItem, body: AuditItemUpdate) -> None:
     """通用 ↔ 个性化 字段互斥校验。
 
     - is_builtin=True 携带 ``knowledge_document_ids`` → 422
-    - is_builtin=False 携带 ``active_large_model_version_id`` → 422
+    - 个性化与通用都允许 ``active_small_model_version_id``（个性化用于绑定
+      运行此规则 prompt 的小模型版本；通用用于切换生效版本）。
     """
     fields_set = getattr(body, "model_fields_set", set())
     if item.is_builtin and "knowledge_document_ids" in fields_set:
@@ -81,20 +82,15 @@ def _enforce_mutual_exclusion(item: AuditItem, body: AuditItemUpdate) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="通用审核项不支持关联知识文档",
         )
-    if not item.is_builtin and "active_large_model_version_id" in fields_set:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="个性化审核项不支持切换生效模型版本",
-        )
 
 
 async def _validate_active_model_version(
     db: AsyncSession, version_id: Optional[int]
 ) -> Optional[RegisteredModelVersion]:
-    """校验 active_large_model_version_id 指向一个 active 大模型版本。
+    """校验 active_small_model_version_id 指向一个 active 小模型版本。
 
     - None → 允许（清空）
-    - int → 必须存在且 version.status='active' + parent model.status='active'
+    - int → 必须存在且 version.status='active' + parent model.status='active' + parent.kind='small'
     """
     if version_id is None:
         return None
@@ -102,13 +98,13 @@ async def _validate_active_model_version(
     if version is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"active_large_model_version_id 引用的版本不存在: {version_id}",
+            detail=f"active_small_model_version_id 引用的版本不存在: {version_id}",
         )
     if version.status != RegisteredModelVersionStatus.ACTIVE.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"active_large_model_version_id 引用的版本未启用 "
+                f"active_small_model_version_id 引用的版本未启用 "
                 f"(status={version.status})"
             ),
         )
@@ -116,20 +112,20 @@ async def _validate_active_model_version(
     if parent is None or parent.is_deleted:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"active_large_model_version_id 引用的模型不存在或已删除",
+            detail=f"active_small_model_version_id 引用的模型不存在或已删除",
         )
     if parent.status != RegisteredModelStatus.ACTIVE.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"active_large_model_version_id 引用的模型未启用 "
+                f"active_small_model_version_id 引用的模型未启用 "
                 f"(status={parent.status})"
             ),
         )
-    if parent.kind != "large":
+    if parent.kind != "small":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="active_large_model_version_id 必须指向大模型版本（kind=large）",
+            detail="active_small_model_version_id 必须指向小模型版本（kind=small）",
         )
     return version
 
@@ -137,10 +133,10 @@ async def _validate_active_model_version(
 async def _resolve_active_model_version(
     db: AsyncSession, item: AuditItem
 ) -> Optional[ActiveModelVersionOut]:
-    """加载 item.active_large_model_version_id 对应的展示对象。"""
-    if item.active_large_model_version_id is None:
+    """加载 item.active_small_model_version_id 对应的展示对象。"""
+    if item.active_small_model_version_id is None:
         return None
-    version = await db.get(RegisteredModelVersion, item.active_large_model_version_id)
+    version = await db.get(RegisteredModelVersion, item.active_small_model_version_id)
     if version is None:
         return None
     parent = await db.get(RegisteredModel, version.model_id)
@@ -346,7 +342,7 @@ async def list_items_by_media_type(
                 is_builtin=r.is_builtin,
                 point_count=counts_per_pkg.get(r.package_code, {}).get(r.id, 0),
                 linked_libraries=_serialize_item_libraries(r),
-                active_large_model_version_id=r.active_large_model_version_id,
+                active_small_model_version_id=r.active_small_model_version_id,
                 active_model_version=active,
                 knowledge_document_ids=list(r.knowledge_document_ids or []),
                 created_at=r.created_at,
@@ -396,7 +392,7 @@ async def list_items(
                 is_builtin=r.is_builtin,
                 point_count=counts.get(r.id, 0),
                 linked_libraries=_serialize_item_libraries(r),
-                active_large_model_version_id=r.active_large_model_version_id,
+                active_small_model_version_id=r.active_small_model_version_id,
                 active_model_version=active,
                 knowledge_document_ids=list(r.knowledge_document_ids or []),
                 created_at=r.created_at,
@@ -461,7 +457,7 @@ async def create_item(
         is_builtin=fresh.is_builtin,
         point_count=0,
         linked_libraries=_serialize_item_libraries(fresh),
-        active_large_model_version_id=None,
+        active_small_model_version_id=None,
         active_model_version=None,
         knowledge_document_ids=list(fresh.knowledge_document_ids or []),
         created_at=fresh.created_at,
@@ -495,9 +491,9 @@ async def update_item(
         item.is_enabled = body.is_enabled
     if body.linked_library_ids is not None:
         await _replace_item_linked_libraries(db, item, body.linked_library_ids)
-    if body.active_large_model_version_id is not None:
-        await _validate_active_model_version(db, body.active_large_model_version_id)
-        item.active_large_model_version_id = body.active_large_model_version_id
+    if body.active_small_model_version_id is not None:
+        await _validate_active_model_version(db, body.active_small_model_version_id)
+        item.active_small_model_version_id = body.active_small_model_version_id
     if body.knowledge_document_ids is not None:
         item.knowledge_document_ids = list(body.knowledge_document_ids)
     await db.flush()
@@ -527,7 +523,7 @@ async def update_item(
         is_builtin=fresh.is_builtin,
         point_count=counts.get(fresh.id, 0),
         linked_libraries=_serialize_item_libraries(fresh),
-        active_large_model_version_id=fresh.active_large_model_version_id,
+        active_small_model_version_id=fresh.active_small_model_version_id,
         active_model_version=active,
         knowledge_document_ids=list(fresh.knowledge_document_ids or []),
         created_at=fresh.created_at,
