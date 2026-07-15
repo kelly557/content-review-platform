@@ -68,10 +68,10 @@ const NAV_SECTIONS: Array<{
     key: 'workspace',
     label: '工作区',
     items: [
-      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'root_admin'] },
-      { kind: 'leaf', key: 'tasks', path: '/tasks', label: '审核任务', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'root_admin'] },
-{ kind: 'leaf', key: 'triggers', path: '/triggers', label: '自动审核', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'root_admin'] },
-      { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'root_admin'] },
+      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
+      { kind: 'leaf', key: 'tasks', path: '/tasks', label: '审核任务', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
+      { kind: 'leaf', key: 'triggers', path: '/triggers', label: '自动审核', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
+      { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
     ],
   },
   {
@@ -107,7 +107,7 @@ const NAV_SECTIONS: Array<{
           { key: 'strategies-knowledge', path: '/resources/knowledge', label: '知识库', roles: ['root_admin'] },
         ],
       },
-      { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr', 'root_admin'] },
+      { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
     ],
   },
   {
@@ -130,10 +130,10 @@ const NAV_SECTIONS: Array<{
         path: '/admin/users',
         label: '账号管理',
         icon: <TeamOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'root_admin'],
+        roles: ['root_admin'],
         children: [
           { key: 'admin-users', path: '/admin/users', label: '用户管理' },
-          { key: 'admin-roles', path: '/admin/roles', label: '角色管理', roles: ['root_admin'] },
+          { key: 'admin-roles', path: '/admin/roles', label: '角色管理' },
         ],
       },
       // { kind: 'leaf', key: 'admin-tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
