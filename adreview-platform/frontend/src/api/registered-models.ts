@@ -130,6 +130,7 @@ export interface ActiveModelOption {
   kind: 'large' | 'small'
   small_category: string | null
   large_category: LargeModelCategory | null
+  modality: string | null
   provider_id: number | null
   model_name: string | null
   status: string

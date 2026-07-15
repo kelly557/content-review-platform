@@ -2344,6 +2344,8 @@ export interface RegisteredModelListItem {
   // 小模型专属：当前版本 artifact 摘要（来自 list 接口）
   artifact_filename: string | null
   artifact_size: number | null
+  // 小模型专属：当前版本 config（含审核点列表），用于树形展示
+  current_version_config: Record<string, unknown> | null
   owner_id: number | null
   owner_name?: string | null
   updated_at: string | null

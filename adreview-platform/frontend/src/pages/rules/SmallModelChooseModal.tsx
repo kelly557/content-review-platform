@@ -1,7 +1,7 @@
 /**
- * 「切换生效小模型版本」弹窗 — 仅通用规则使用
+ * 「切换审核模型版本」弹窗 — 仅通用规则使用
  *
- * 列出 kind=small 且 status=active 的小模型；点开行展开 RegisteredModelVersion。
+ * 根据当前规则的审核场景（small_category）和媒体类型（modality）过滤小模型。
  * 选中后 PUT /packages/{code}/items/{id} body={active_small_model_version_id: versionId}。
  */
 import { useEffect, useState } from 'react'
@@ -29,6 +29,49 @@ const PACKAGE_BY_MEDIA: Record<MediaTypeKey, string> = {
   audio: 'audio_audit_pro',
   doc: 'document_audit_pro',
   video: 'video_audit_pro',
+}
+
+const MODALITY_BY_MEDIA: Record<string, string> = {
+  image: 'image',
+  text: 'text',
+  audio: 'text',
+  doc: 'text',
+  video: 'image',
+}
+
+const CODE_TO_SMALL_CATEGORY: Record<string, string> = {
+  politics: 'politics',
+  terrorism: 'terrorism',
+  violence: 'terrorism',
+  porn: 'porn',
+  prohibited: 'illicit',
+  ad: 'ad',
+  adlaw: 'ad_law',
+  advertising: 'ad_law',
+  religion: 'religion',
+  abuse: 'abuse',
+  vulgar: 'unhealthy',
+  minor: 'unhealthy',
+  values: 'unhealthy',
+  illegal: 'unhealthy',
+  privacy: 'unhealthy',
+  promptattack: 'unhealthy',
+  bad: 'unhealthy',
+  sensitive: 'unhealthy',
+  voiceprint: 'unhealthy',
+  audioquality: 'unhealthy',
+  image: 'unhealthy',
+  text: 'unhealthy',
+  frame: 'unhealthy',
+  audio: 'unhealthy',
+  subtitle: 'unhealthy',
+}
+
+function extractSmallCategory(itemCode: string): string | null {
+  const parts = itemCode.split('_')
+  if (parts.length < 2) return null
+  const suffix = parts.slice(1).join('_')
+  return CODE_TO_SMALL_CATEGORY[suffix] ?? null
 }
 
 interface ModelGroup {
@@ -64,11 +107,21 @@ export default function SmallModelChooseModal({
     if (!item) return
     setPicked(item.active_small_model_version_id ?? null)
     setLoading(true)
+
+    const smallCategory = extractSmallCategory(item.code)
+    const modality = MODALITY_BY_MEDIA[mediaType] ?? null
+
     registeredModelsApi
-      .listActiveModels({ kind: 'small' })
+      .listActiveModels({
+        kind: 'small',
+        small_category: smallCategory ?? undefined,
+      })
       .then((rows) => {
+        const filtered = modality
+          ? rows.filter((r) => !r.modality || r.modality === modality)
+          : rows
         setModels(
-          rows.map((r) => ({
+          filtered.map((r) => ({
             id: r.id,
             code: r.code,
             name: r.name,
@@ -83,7 +136,7 @@ export default function SmallModelChooseModal({
         message.error('加载模型列表失败')
       })
       .finally(() => setLoading(false))
-  }, [item, message])
+  }, [item, mediaType, message])
 
   const expandModel = async (mid: number) => {
     setModels((prev) =>
@@ -124,7 +177,7 @@ export default function SmallModelChooseModal({
     try {
       const pkg = PACKAGE_BY_MEDIA[mediaType as MediaTypeKey] ?? mediaType
       await auditItemsApi.setActiveModelVersion(pkg, item.id, picked)
-      message.success('已切换生效小模型版本')
+      message.success('已切换审核模型版本')
       await onSaved()
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -136,7 +189,7 @@ export default function SmallModelChooseModal({
 
   return (
     <Modal
-      title={item ? `切换生效小模型版本 — ${item.name_cn}` : '切换生效小模型版本'}
+      title={item ? `切换审核模型版本 — ${item.name_cn}` : '切换审核模型版本'}
       open={!!item}
       onCancel={onClose}
       width={640}
@@ -157,7 +210,7 @@ export default function SmallModelChooseModal({
     >
       <Spin spinning={loading}>
         {models.length === 0 && !loading ? (
-          <Empty description="暂无 active 状态的小模型" />
+          <Empty description="暂无匹配的审核模型" />
         ) : (
           <Collapse
             accordion

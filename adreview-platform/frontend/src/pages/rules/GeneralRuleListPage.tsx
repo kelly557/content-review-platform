@@ -4,7 +4,7 @@
  * 视觉与行为故意与个性化页不同：
  * - 顶栏仅有「刷新」(无「新建规则」)
  * - 行操作只有「切换版本」(无「配置」)
- * - 「生效」列为「生效模型·版本」
+ * - 「审核模型」列为「审核模型·版本」
  * - 标签 [通用] 蓝底
  */
 import { useEffect, useMemo, useState } from 'react'
@@ -65,7 +65,7 @@ export default function GeneralRuleListPage({
         ),
       },
       {
-        title: '生效模型',
+        title: '审核模型',
         key: 'active_model',
         width: '18%',
         render: (_, row) => {

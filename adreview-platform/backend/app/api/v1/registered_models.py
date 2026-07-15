@@ -294,6 +294,7 @@ def _to_list_item(
     if artifact:
         payload["artifact_filename"] = artifact.get("artifact_filename")
         payload["artifact_size"] = artifact.get("artifact_size")
+        payload["current_version_config"] = artifact.get("config")
     return RegisteredModelListItem.model_validate(payload)
 
 
@@ -418,6 +419,7 @@ async def list_models(
 
     # 显式取 current_version artifact 摘要（小模型列表展示文件名 + 大小）
     # + version_no / version_label（用于列表展示「当前模型版本」）
+    # + config（用于树形展示审核点列表）
     cv_ids = [r.current_version_id for r in rows if r.current_version_id]
     version_artifact: dict[int, dict] = {}
     if cv_ids:
@@ -429,15 +431,17 @@ async def list_models(
                     RegisteredModelVersion.artifact_size,
                     RegisteredModelVersion.version_no,
                     RegisteredModelVersion.version_label,
+                    RegisteredModelVersion.config,
                 ).where(RegisteredModelVersion.id.in_(cv_ids))
             )
         ).all()
-        for vid, fn, sz, vno, vlbl in ver_rows:
+        for vid, fn, sz, vno, vlbl, cfg in ver_rows:
             version_artifact[vid] = {
                 "artifact_filename": fn,
                 "artifact_size": sz,
                 "version_no": vno,
                 "version_label": vlbl,
+                "config": cfg,
             }
 
     items = [
@@ -482,6 +486,7 @@ async def list_active_models(
             "kind": m.kind,
             "small_category": m.small_category,
             "large_category": m.large_category,
+            "modality": m.modality,
             "provider_id": m.provider_id,
             "model_name": m.model_name,
             "status": m.status,

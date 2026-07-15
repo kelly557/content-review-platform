@@ -12,9 +12,12 @@ import {
   App,
 } from 'antd'
 import {
-  CloudDownloadOutlined,
+  CaretDownOutlined,
+  CaretRightOutlined,
+  PictureOutlined,
   PlusOutlined,
   ReloadOutlined,
+  TagsOutlined,
 } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -25,13 +28,11 @@ import type {
   RegisteredModelStatus,
   RegisteredProviderOption,
   SmallModelCategory,
-  SmallModelModality,
 } from '@/types/domain'
 import {
   LARGE_MODEL_CATEGORY_OPTIONS,
   REGISTERED_MODEL_STATUS_OPTIONS,
   SMALL_MODEL_CATEGORY_OPTIONS,
-  SMALL_MODEL_MODALITY_OPTIONS,
 } from '@/types/domain'
 import { useAuthStore } from '@/store'
 import CreateModelModal from './CreateModelModal'
@@ -39,6 +40,37 @@ import CreateModelModal from './CreateModelModal'
 const { Text } = Typography
 
 type ModelTab = 'large' | 'small'
+
+type ModelRow = {
+  id: number
+  name: string
+  versionText: string
+  updatedAt: string | null
+  points: string[] | null
+}
+
+type CategoryGroup = {
+  key: string
+  label: string
+  color: string
+  count: number
+  models: ModelRow[]
+}
+
+type ModalityGroup = {
+  key: string
+  label: string
+  color: string
+  icon: React.ReactNode
+  count: number
+  categories: CategoryGroup[]
+}
+
+const MODALITY_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  text: { label: '文本', color: 'blue', icon: <TagsOutlined /> },
+  image: { label: '图片', color: 'geekblue', icon: <PictureOutlined /> },
+  unknown: { label: '未设置', color: 'default', icon: <TagsOutlined /> },
+}
 
 export default function ModelListPage() {
   const { message } = App.useApp()
@@ -162,55 +194,59 @@ export default function ModelListPage() {
     [],
   )
 
-  // 小模型列（无 Provider 概念）
-  const smallColumns = useMemo(
-    () => [
-      { title: '名称', dataIndex: 'name', width: '18%' },
-      {
-        title: '审核场景',
-        dataIndex: 'small_category',
-        width: '8%',
-        render: (v: SmallModelCategory | null) => {
-          if (!v) return '-'
-          const opt = SMALL_MODEL_CATEGORY_OPTIONS.find((o) => o.value === v)
-          return opt ? <Tag color={opt.color}>{opt.label}</Tag> : v
-        },
-      },
-      {
-        title: '模态',
-        dataIndex: 'modality',
-        width: '8%',
-        render: (v: SmallModelModality | null) => {
-          if (!v) return '-'
-          const opt = SMALL_MODEL_MODALITY_OPTIONS.find((o) => o.value === v)
-          return opt ? <Tag color={opt.color}>{opt.label}</Tag> : v
-        },
-      },
-      {
-        title: '当前版本',
-        dataIndex: 'current_version_label',
-        width: '20%',
-        render: (_v: string | null, row: RegisteredModelListItem) => {
-          if (!row.current_version_no) return '-'
-          return row.current_version_label
-            ? `v${row.current_version_no} · ${row.current_version_label}`
-            : `v${row.current_version_no}`
-        },
-      },
-      {
-        title: '操作',
-        width: '14%',
-        render: (_v: unknown, row: RegisteredModelListItem) => (
-          <Link to={`/resources/models/${row.id}`}>
-            <Button type="link" size="small" icon={<CloudDownloadOutlined />}>
-              详情
-            </Button>
-          </Link>
-        ),
-      },
-    ],
-    [],
-  )
+const smallGroups = useMemo<ModalityGroup[]>(() => {
+    const byModality = new Map<string, Map<string, ModelRow[]>>()
+    for (const m of items) {
+      const mod = m.modality ?? 'unknown'
+      const cat = m.small_category ?? 'unknown'
+      const versionText = m.current_version_no
+        ? m.current_version_label
+          ? `v${m.current_version_no} · ${m.current_version_label}`
+          : `v${m.current_version_no}`
+        : '-'
+      const points = m.current_version_config
+        ? (m.current_version_config as { points?: string[] }).points ?? null
+        : null
+      const row: ModelRow = {
+        id: m.id,
+        name: m.name,
+        versionText,
+        updatedAt: m.updated_at,
+        points,
+      }
+      if (!byModality.has(mod)) byModality.set(mod, new Map())
+      const byCat = byModality.get(mod)!
+      if (!byCat.has(cat)) byCat.set(cat, [])
+      byCat.get(cat)!.push(row)
+    }
+
+    const groups: ModalityGroup[] = []
+    for (const [mod, byCat] of byModality.entries()) {
+      const meta = MODALITY_META[mod] ?? MODALITY_META.unknown
+      let totalCount = 0
+      const categories: CategoryGroup[] = []
+      for (const [cat, models] of byCat.entries()) {
+        totalCount += models.length
+        const catOpt = SMALL_MODEL_CATEGORY_OPTIONS.find((o) => o.value === cat)
+        categories.push({
+          key: `${mod}-${cat}`,
+          label: catOpt?.label ?? cat,
+          color: catOpt?.color ?? 'default',
+          count: models.length,
+          models,
+        })
+      }
+      groups.push({
+        key: mod,
+        label: meta.label,
+        color: meta.color,
+        icon: meta.icon,
+        count: totalCount,
+        categories,
+      })
+    }
+    return groups
+  }, [items])
 
   return (
     <div style={{ width: '100%' }}>
@@ -318,22 +354,18 @@ export default function ModelListPage() {
             key: 'small',
             label: `小模型 (${activeTab === 'small' ? total : '...'})`,
             children: (
-              <Table<RegisteredModelListItem>
-                rowKey="id"
-                size="middle"
-                loading={loading}
-                columns={smallColumns}
-                dataSource={items}
-                pagination={{
-                  total,
-                  pageSize: 50,
-                  showSizeChanger: false,
-                  onChange: () => {},
-                }}
-                scroll={{ x: 'max-content' }}
-                footer={() => <Text type="secondary">共 {total} 条</Text>}
-                locale={{ emptyText: '暂无小模型，请先添加模型' }}
-              />
+              <div style={{ padding: '4px 0' }}>
+                {smallGroups.length === 0 ? (
+                  <Text type="secondary">暂无小模型，请先添加模型</Text>
+                ) : (
+                  smallGroups.map((mod) => (
+                    <SmallModalityGroup key={mod.key} group={mod} />
+                  ))
+                )}
+                <div style={{ marginTop: 12 }}>
+                  <Text type="secondary">共 {total} 条</Text>
+                </div>
+              </div>
             ),
           },
         ]}
@@ -348,6 +380,122 @@ export default function ModelListPage() {
           void fetchList()
         }}
       />
+    </div>
+  )
+}
+
+function SmallModalityGroup({ group }: { group: ModalityGroup }) {
+  const [expanded, setExpanded] = useState(true)
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div
+        onClick={() => setExpanded((v) => !v)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '8px 4px',
+          background: '#f8fafc',
+          borderRadius: 4,
+          cursor: 'pointer',
+        }}
+      >
+        <span style={{ width: 18, display: 'inline-flex', justifyContent: 'center' }}>
+          {expanded ? (
+            <CaretDownOutlined style={{ fontSize: 11, color: '#64748b' }} />
+          ) : (
+            <CaretRightOutlined style={{ fontSize: 11, color: '#64748b' }} />
+          )}
+        </span>
+        <Space size={8}>
+          <span style={{ color: '#475569' }}>{group.icon}</span>
+          <Tag color={group.color} style={{ fontWeight: 600 }}>
+            {group.label}
+          </Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {group.count} 个模型
+          </Text>
+        </Space>
+      </div>
+      {expanded && (
+        <div style={{ paddingLeft: 18, marginTop: 4 }}>
+          {group.categories.map((cat) => (
+            <SmallCategoryGroup key={cat.key} category={cat} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SmallCategoryGroup({ category }: { category: CategoryGroup }) {
+  const [expanded, setExpanded] = useState(true)
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div
+        onClick={() => setExpanded((v) => !v)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '4px 8px',
+          cursor: 'pointer',
+        }}
+      >
+        <span style={{ width: 18, display: 'inline-flex', justifyContent: 'center' }}>
+          {expanded ? (
+            <CaretDownOutlined style={{ fontSize: 10, color: '#94a3b8' }} />
+          ) : (
+            <CaretRightOutlined style={{ fontSize: 10, color: '#94a3b8' }} />
+          )}
+        </span>
+        <Space size={6}>
+          <Tag color={category.color}>{category.label}</Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {category.count} 个模型
+          </Text>
+        </Space>
+      </div>
+      {expanded && (
+        <div style={{ paddingLeft: 18, marginTop: 4 }}>
+          {category.models.map((m) => (
+            <SmallModelRow key={m.id} row={m} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SmallModelRow({ row }: { row: ModelRow }) {
+  return (
+    <div
+      style={{
+        padding: '8px 12px',
+        marginBottom: 6,
+        background: '#fff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 4,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 500, minWidth: 200 }}>{row.name}</span>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {row.versionText}
+        </Text>
+        <Text type="secondary" style={{ fontSize: 12, marginLeft: 'auto' }}>
+          {row.updatedAt ? dayjs(row.updatedAt).format('YYYY-MM-DD HH:mm') : '-'}
+        </Text>
+      </div>
+      <div style={{ marginTop: 6 }}>
+        {row.points && row.points.length > 0 ? (
+          <Space size={4} wrap>
+            {row.points.map((p, i) => (
+              <Tag key={i}>{p}</Tag>
+            ))}
+          </Space>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>未配置审核点</Text>
+        )}
+      </div>
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   App,
+  Button,
   Checkbox,
   Empty,
   Grid,
@@ -19,6 +20,7 @@ import {
   CloseOutlined,
   DatabaseOutlined,
   LockOutlined,
+  PlusOutlined,
   UnlockOutlined,
 } from '@ant-design/icons'
 import { auditItemsApi } from '@/api/auditItems'
@@ -645,7 +647,10 @@ function PointsColumn({
   onPointMapChange,
   onPointOverrideChange,
   onRemoveLibrary,
+  onAddLibrary,
   pendingItems,
+  highlightItemId,
+  allowLibraryLink,
   mediaKey,
 }: {
   items: AuditItem[]
@@ -666,7 +671,10 @@ function PointsColumn({
     },
   ) => void
   onRemoveLibrary: (item: AuditItem, libraryId: number) => void
+  onAddLibrary?: (item: AuditItem) => void
   pendingItems: Set<number>
+  highlightItemId: number | null
+  allowLibraryLink: boolean
   mediaKey: CategoryKey
 }) {
   const dataSource: FlatRowRecord[] = []
@@ -705,40 +713,114 @@ function PointsColumn({
         record.kind === 'section' ? { colSpan: COL_TOTAL } : {},
       render: (_, record) => {
         if (record.kind === 'section') {
+          const hasLibs = record.linkedLibraries.length > 0
+          const showLibCard = allowLibraryLink && (hasLibs || !!onAddLibrary)
           return (
             <div
               style={{
-                padding: '12px 0 6px',
+                padding: '16px 0 8px',
                 borderBottom: '1px dashed var(--color-border)',
               }}
             >
-              {record.linkedLibraries.length > 0 && (
-                <Space
-                  size={4}
-                  wrap
-                  style={{ paddingTop: 4, paddingBottom: 4 }}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  marginBottom: hasLibs ? 8 : 0,
+                }}
+              >
+                <Text strong style={{ fontSize: 15, color: '#0F172A' }}>
+                  {record.item.name_cn}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {record.pointCount} 个审核点
+                </Text>
+                {hasLibs && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    · 关联 {record.linkedLibraries.length} 个自定义库
+                  </Text>
+                )}
+              </div>
+              {showLibCard && (
+                <div
+                  style={{
+                    background: '#F8FAFC',
+                    borderRadius: 6,
+                    padding: '8px 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
                 >
-                  {record.linkedLibraries.map((l) => (
-                    <Tag
-                      key={l.library_id}
-                      color={TYPE_COLOR_BY_LIB[l.library_type] ?? 'default'}
-                      bordered={false}
-                      closeIcon={<CloseOutlined />}
-                      onClose={(e) => {
-                        e.preventDefault()
-                        onRemoveLibrary(record.item, l.library_id)
-                      }}
-                      style={{
-                        margin: 0,
-                        fontSize: 11,
-                        padding: '2px 8px',
-                        opacity: record.pending ? 0.6 : 1,
-                      }}
+                  {hasLibs && (
+                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                      {record.linkedLibraries.map((l) => {
+                        const typeLabel = TYPE_LABEL_BY_LIB[l.library_type] ?? '?'
+                        return (
+                          <div
+                            key={l.library_id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              background: '#fff',
+                              border: '1px solid var(--color-border)',
+                              borderRadius: 4,
+                              padding: '4px 8px',
+                              opacity: record.pending ? 0.6 : 1,
+                            }}
+                          >
+                            <Tag
+                              color={TYPE_COLOR_BY_LIB[l.library_type] ?? 'default'}
+                              bordered={false}
+                              style={{ margin: 0, fontSize: 10 }}
+                            >
+                              {typeLabel}
+                            </Tag>
+                            <Tooltip
+                              title={`已关联到「${record.item.name_cn}」· 类型: ${typeLabel}库 · 点击 × 移除`}
+                            >
+                              <span
+                                style={{
+                                  flex: 1,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  fontSize: 13,
+                                  color: '#0F172A',
+                                }}
+                              >
+                                {l.name}
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="移除该自定义库">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<CloseOutlined />}
+                                onClick={() => onRemoveLibrary(record.item, l.library_id)}
+                                aria-label={`移除 ${l.name}`}
+                                style={{ width: 22, height: 22, padding: 0 }}
+                              />
+                            </Tooltip>
+                          </div>
+                        )
+                      })}
+                    </Space>
+                  )}
+                  {onAddLibrary && (
+                    <Button
+                      type="dashed"
+                      size="small"
+                      icon={<PlusOutlined />}
+                      onClick={() => onAddLibrary(record.item)}
+                      style={{ alignSelf: 'flex-start' }}
                     >
-                      {TYPE_LABEL_BY_LIB[l.library_type] ?? '?'}: {l.name}
-                    </Tag>
-                  ))}
-                </Space>
+                      添加自定义库
+                    </Button>
+                  )}
+                </div>
               )}
             </div>
           )
@@ -877,9 +959,13 @@ function PointsColumn({
         size="small"
         rowKey="key"
         scroll={{ x: 720 }}
-        rowClassName={(record) =>
-          record.kind === 'section' ? 'rules-tree-row-section' : ''
-        }
+        rowClassName={(record) => {
+          if (record.kind !== 'section') return ''
+          if (highlightItemId != null && record.item.id === highlightItemId) {
+            return 'rules-tree-row-section rules-tree-row-flash'
+          }
+          return 'rules-tree-row-section'
+        }}
         onRow={(record) =>
           record.kind === 'section' ? { id: `rules-section-${record.item.id}` } : {}
         }
