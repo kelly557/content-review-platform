@@ -17,7 +17,6 @@ import {
   CheckOutlined,
   CloseOutlined,
   LockOutlined,
-  PlusOutlined,
   UnlockOutlined,
 } from '@ant-design/icons'
 import { auditItemsApi } from '@/api/auditItems'
@@ -510,7 +509,18 @@ type SectionHeaderRecord = {
   pending: boolean
 }
 
-type FlatRowRecord = PointRowRecord | SectionHeaderRecord
+type LibRowRecord = {
+  kind: 'librow'
+  key: string
+  item: AuditItem
+  linkedLibraries: LinkedLibraryRef[]
+  pending: boolean
+}
+
+type FlatRowRecord =
+  | PointRowRecord
+  | SectionHeaderRecord
+  | LibRowRecord
 
 function PointsColumn({
   items,
@@ -584,6 +594,13 @@ function PointsColumn({
         editDisabled: pm[p.id] !== true,
       })
     })
+    dataSource.push({
+      kind: 'librow',
+      key: `librow-${it.id}`,
+      item: it,
+      linkedLibraries: (it.linked_libraries ?? []) as LinkedLibraryRef[],
+      pending: pendingItems.has(it.id),
+    })
   })
 
   const COL_TOTAL = 5
@@ -592,8 +609,11 @@ function PointsColumn({
       title: '',
       dataIndex: 'checked',
       width: 40,
-      onCell: (record) =>
-        record.kind === 'section' ? { colSpan: COL_TOTAL } : {},
+      onCell: (record) => {
+        if (record.kind === 'section') return { colSpan: COL_TOTAL }
+        if (record.kind === 'librow') return { colSpan: COL_TOTAL }
+        return {}
+      },
       render: (_, record) => {
         if (record.kind === 'section') {
           const hasLibs = record.linkedLibraries.length > 0
@@ -611,7 +631,6 @@ function PointsColumn({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 12,
-                  marginBottom: allowLibraryLink && (hasLibs || pickerOpen) ? 8 : 0,
                   flexWrap: 'wrap',
                 }}
               >
@@ -630,13 +649,12 @@ function PointsColumn({
                   <Button
                     type="link"
                     size="small"
-                    icon={<PlusOutlined />}
                     onClick={() =>
                       setPickerOpenForItemId(
                         pickerOpen ? null : record.item.id,
                       )
                     }
-                    aria-label={`为「${record.item.name_cn}」添加自定义库`}
+                    aria-label={`为「${record.item.name_cn}」编辑自定义库`}
                     style={{
                       padding: '0 4px',
                       height: 'auto',
@@ -645,166 +663,160 @@ function PointsColumn({
                       color: pickerOpen ? '#2563EB' : '#0F172A',
                     }}
                   >
-                    {pickerOpen ? '收起自定义库' : '添加自定义库'}
+                    {pickerOpen ? '收起自定义库' : '自定义库'}
                   </Button>
                 )}
               </div>
-              {allowLibraryLink && (hasLibs || pickerOpen) && (
+            </div>
+          )
+        }
+        if (record.kind === 'librow') {
+          const hasLibs = record.linkedLibraries.length > 0
+          const pickerOpen =
+            allowLibraryLink && pickerOpenForItemId === record.item.id
+          if (!allowLibraryLink) return null
+          if (!hasLibs && !pickerOpen) return null
+          return (
+            <div
+              style={{
+                background: '#F8FAFC',
+                borderRadius: 6,
+                padding: '10px 14px',
+                margin: '8px 0 4px',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 6,
+                  alignItems: 'center',
+                  marginBottom: pickerOpen ? 8 : 0,
+                }}
+              >
+                {hasLibs ? (
+                  record.linkedLibraries.map((l) => {
+                    const typeLabel =
+                      TYPE_LABEL_BY_LIB[l.library_type] ?? '?'
+                    return (
+                      <Tag
+                        key={l.library_id}
+                        color={TYPE_COLOR_BY_LIB[l.library_type] ?? 'default'}
+                        bordered={false}
+                        closeIcon={<CloseOutlined />}
+                        onClose={(e) => {
+                          e.preventDefault()
+                          onRemoveLibrary(record.item, l.library_id)
+                        }}
+                        style={{
+                          margin: 0,
+                          fontSize: 12,
+                          padding: '2px 4px 2px 8px',
+                          opacity: record.pending ? 0.6 : 1,
+                        }}
+                      >
+                        <Space size={4} align="center">
+                          <span>{typeLabel}</span>
+                          <span
+                            style={{ color: '#0F172A', fontWeight: 500 }}
+                          >
+                            {l.name}
+                          </span>
+                        </Space>
+                      </Tag>
+                    )
+                  })
+                ) : (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    暂无关联自定义库
+                  </Text>
+                )}
+              </div>
+              {pickerOpen && (
                 <div
                   style={{
-                    background: '#F8FAFC',
-                    borderRadius: 6,
-                    padding: '10px 12px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 8,
-                    marginTop: 8,
+                    background: '#fff',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 4,
+                    padding: '8px 12px',
                   }}
                 >
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {record.linkedLibraries.length === 0
-                      ? pickerOpen
-                        ? '从下方勾选要关联的自定义库'
-                        : '暂无关联的自定义库'
-                      : `已关联 ${record.linkedLibraries.length} 个自定义库${
-                          pickerOpen ? ',勾选即时生效' : ''
-                        }`}
-                  </Text>
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: 6,
-                      alignItems: 'center',
-                    }}
-                  >
-                    {record.linkedLibraries.map((l) => {
-                      const typeLabel =
-                        TYPE_LABEL_BY_LIB[l.library_type] ?? '?'
-                      return (
-                        <Tag
-                          key={l.library_id}
-                          color={TYPE_COLOR_BY_LIB[l.library_type] ?? 'default'}
-                          bordered={false}
-                          closeIcon={<CloseOutlined />}
-                          onClose={(e) => {
-                            e.preventDefault()
-                            onRemoveLibrary(record.item, l.library_id)
-                          }}
-                          style={{
-                            margin: 0,
-                            fontSize: 12,
-                            padding: '2px 4px 2px 8px',
-                            opacity: record.pending ? 0.6 : 1,
-                          }}
-                        >
-                          <Space size={4} align="center">
-                            <span>{typeLabel}</span>
-                            <span
-                              style={{
-                                color: '#0F172A',
-                                fontWeight: 500,
-                              }}
-                            >
-                              {l.name}
-                            </span>
-                          </Space>
-                        </Tag>
-                      )
-                    })}
-                  </div>
-                  {pickerOpen && (
-                    <div
-                      style={{
-                        background: '#fff',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 4,
-                        padding: '8px 12px',
-                      }}
-                    >
-                      {availableLibraries.length === 0 ? (
-                        <Text
-                          type="secondary"
-                          style={{ fontSize: 12 }}
-                        >
-                          暂无可用的自定义库,请先到「资源库」创建。
-                        </Text>
-                      ) : (
-                        <>
-                          <Text
-                            type="secondary"
-                            style={{
-                              fontSize: 12,
-                              display: 'block',
-                              marginBottom: 6,
-                            }}
-                          >
-                            勾选即时生效,可多选
-                          </Text>
-                          <Checkbox.Group
-                            style={{
-                              display: 'flex',
-                              flexWrap: 'wrap',
-                              gap: '4px 12px',
-                              maxHeight: 240,
-                              overflowY: 'auto',
-                            }}
-                            value={record.linkedLibraries.map(
+                  {availableLibraries.length === 0 ? (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      暂无可用的自定义库,请先到「资源库」创建。
+                    </Text>
+                  ) : (
+                    <>
+                      <Text
+                        type="secondary"
+                        style={{
+                          fontSize: 12,
+                          display: 'block',
+                          marginBottom: 6,
+                        }}
+                      >
+                        勾选即时生效,可多选
+                      </Text>
+                      <Checkbox.Group
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: '4px 12px',
+                          maxHeight: 240,
+                          overflowY: 'auto',
+                        }}
+                        value={record.linkedLibraries.map(
+                          (l) => l.library_id,
+                        )}
+                        disabled={record.pending}
+                        onChange={(allChecked) => {
+                          const target = new Set<number>(
+                            allChecked as number[],
+                          )
+                          const current = new Set(
+                            record.linkedLibraries.map(
                               (l) => l.library_id,
-                            )}
-                            disabled={record.pending}
-                            onChange={(allChecked) => {
-                              const target = new Set<number>(
-                                allChecked as number[],
-                              )
-                              const current = new Set(
-                                record.linkedLibraries.map(
-                                  (l) => l.library_id,
-                                ),
-                              )
-                              const toAdd: number[] = []
-                              const toRemove: number[] = []
-                              target.forEach((id) => {
-                                if (!current.has(id)) toAdd.push(id)
-                              })
-                              current.forEach((id) => {
-                                if (!target.has(id)) toRemove.push(id)
-                              })
-                              toAdd.forEach((id) =>
-                                onToggleLibrary(record.item, id, true),
-                              )
-                              toRemove.forEach((id) =>
-                                onToggleLibrary(record.item, id, false),
-                              )
-                            }}
-                          >
-                            {availableLibraries.map((l) => (
-                              <Checkbox key={l.id} value={l.id}>
-                                <Space size={4} align="center">
-                                  <Tag
-                                    color={
-                                      TYPE_COLOR_BY_LIB[l.library_type] ??
-                                      'default'
-                                    }
-                                    bordered={false}
-                                    style={{
-                                      margin: 0,
-                                      fontSize: 10,
-                                      padding: '0 4px',
-                                    }}
-                                  >
-                                    {TYPE_LABEL_BY_LIB[l.library_type] ?? '?'}
-                                  </Tag>
-                                  <span style={{ fontSize: 13 }}>
-                                    {l.name}
-                                  </span>
-                                </Space>
-                              </Checkbox>
-                            ))}
-                          </Checkbox.Group>
-                        </>
-                      )}
-                    </div>
+                            ),
+                          )
+                          const toAdd: number[] = []
+                          const toRemove: number[] = []
+                          target.forEach((id) => {
+                            if (!current.has(id)) toAdd.push(id)
+                          })
+                          current.forEach((id) => {
+                            if (!target.has(id)) toRemove.push(id)
+                          })
+                          toAdd.forEach((id) =>
+                            onToggleLibrary(record.item, id, true),
+                          )
+                          toRemove.forEach((id) =>
+                            onToggleLibrary(record.item, id, false),
+                          )
+                        }}
+                      >
+                        {availableLibraries.map((l) => (
+                          <Checkbox key={l.id} value={l.id}>
+                            <Space size={4} align="center">
+                              <Tag
+                                color={
+                                  TYPE_COLOR_BY_LIB[l.library_type] ??
+                                  'default'
+                                }
+                                bordered={false}
+                                style={{
+                                  margin: 0,
+                                  fontSize: 10,
+                                  padding: '0 4px',
+                                }}
+                              >
+                                {TYPE_LABEL_BY_LIB[l.library_type] ?? '?'}
+                              </Tag>
+                              <span style={{ fontSize: 13 }}>{l.name}</span>
+                            </Space>
+                          </Checkbox>
+                        ))}
+                      </Checkbox.Group>
+                    </>
                   )}
                 </div>
               )}
@@ -832,9 +844,9 @@ function PointsColumn({
       title: '审核点',
       dataIndex: 'point',
       onCell: (record) =>
-        record.kind === 'section' ? { colSpan: 0 } : {},
+        record.kind === 'point' ? {} : { colSpan: 0 },
       render: (_, record) => {
-        if (record.kind === 'section') return null
+        if (record.kind !== 'point') return null
         const name = record.point.label_cn || record.point.label || record.point.code
         return (
           <Space size={6} align="center">
@@ -849,9 +861,9 @@ function PointsColumn({
       title: '审核说明',
       dataIndex: 'description',
       onCell: (record) =>
-        record.kind === 'section' ? { colSpan: 0 } : {},
+        record.kind === 'point' ? {} : { colSpan: 0 },
       render: (_, record) => {
-        if (record.kind === 'section') return null
+        if (record.kind !== 'point') return null
         if (record.point.description) {
           return (
             <Text
@@ -878,7 +890,7 @@ function PointsColumn({
       width: 180,
       align: 'left',
       onCell: (record) =>
-        record.kind === 'section' ? { colSpan: 0 } : {},
+        record.kind === 'point' ? {} : { colSpan: 0 },
       render: (_, record) => {
         if (record.kind !== 'point') return null
         return (
@@ -909,7 +921,7 @@ function PointsColumn({
       width: 180,
       align: 'left',
       onCell: (record) =>
-        record.kind === 'section' ? { colSpan: 0 } : {},
+        record.kind === 'point' ? {} : { colSpan: 0 },
       render: (_, record) => {
         if (record.kind !== 'point') return null
         return (
@@ -946,14 +958,18 @@ function PointsColumn({
         rowKey="key"
         scroll={{ x: 720 }}
         rowClassName={(record) => {
-          if (record.kind !== 'section') return ''
-          if (highlightItemId != null && record.item.id === highlightItemId) {
-            return 'rules-tree-row-section rules-tree-row-flash'
+          if (record.kind === 'section') {
+            if (highlightItemId != null && record.item.id === highlightItemId) {
+              return 'rules-tree-row-section rules-tree-row-flash'
+            }
+            return 'rules-tree-row-section'
           }
-          return 'rules-tree-row-section'
+          return ''
         }}
         onRow={(record) =>
-          record.kind === 'section' ? { id: `rules-section-${record.item.id}` } : {}
+          record.kind === 'section'
+            ? { id: `rules-section-${record.item.id}` }
+            : {}
         }
         locale={{
           emptyText: (
