@@ -104,7 +104,7 @@ const NAV_SECTIONS: Array<{
           { key: 'strategies-models', path: '/resources/models', label: '模型库' },
           { key: 'strategies-images', path: '/resources/images', label: '图片库' },
           { key: 'strategies-replies', path: '/resources/replies', label: '代答库' },
-          { key: 'strategies-knowledge', path: '/resources/knowledge', label: '知识库' },
+          { key: 'strategies-knowledge', path: '/resources/knowledge', label: '知识库', roles: ['root_admin'] },
         ],
       },
       { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr', 'root_admin'] },

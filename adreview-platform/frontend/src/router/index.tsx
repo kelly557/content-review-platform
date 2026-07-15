@@ -167,8 +167,6 @@ export default function AppRoutes() {
               <Route path="/resources/models" element={<ModelListPage />} />
               <Route path="/resources/models/:id" element={<ModelDetailPage />} />
               <Route path="/resources/providers/:id" element={<ProviderDetailPage />} />
-              <Route path="/resources/knowledge" element={<KnowledgeDocumentListPage />} />
-              <Route path="/resources/knowledge/:id" element={<KnowledgeDocumentDetailPage />} />
 
               {/* 旧路径 redirect 到新前缀 */}
               <Route
@@ -272,6 +270,11 @@ export default function AppRoutes() {
 
             <Route element={<ProtectedRoute allow={['superadmin', 'root_admin']} />}>
               <Route path="/admin/roles" element={<RolesAdminPage />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allow={['root_admin']} />}>
+              <Route path="/resources/knowledge" element={<KnowledgeDocumentListPage />} />
+              <Route path="/resources/knowledge/:id" element={<KnowledgeDocumentDetailPage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin', 'root_admin']} />}>
