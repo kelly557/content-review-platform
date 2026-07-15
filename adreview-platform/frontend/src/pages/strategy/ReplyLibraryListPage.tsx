@@ -50,7 +50,7 @@ interface CreateFormValues {
 export default function ReplyLibraryListPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
-  const isSuperadmin = user?.role === 'superadmin'
+  const isSuperadmin = user?.role === 'superadmin' || user?.role === 'root_admin'
   const [items, setItems] = useState<LibraryListItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)

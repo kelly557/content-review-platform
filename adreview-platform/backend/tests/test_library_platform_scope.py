@@ -78,10 +78,10 @@ def test_role_filter_is_wired_in_source():
         / "libraries.py"
     )
     text = src_path.read_text(encoding="utf-8")
-    assert "current_user.role != UserRole.SUPERADMIN" in text, (
+    assert "current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN)" in text, (
         "list_libraries must filter is_platform=False for non-superadmin"
     )
-    assert "is_platform and current_user.role != UserRole.SUPERADMIN" in text, (
+    assert "is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN)" in text, (
         "get_library and update_library must hide platform libs from non-superadmin"
     )
 
@@ -103,7 +103,7 @@ def test_post_library_superadmin_can_set_platform():
     )
     text = src_path.read_text(encoding="utf-8")
     # Non-super POST with is_platform=true must be rejected with 422
-    assert "body.is_platform and current_user.role != UserRole.SUPERADMIN" in text, (
+    assert "body.is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN)" in text, (
         "create_library must gate is_platform=true to superadmin only"
     )
     # The create_library body must forward body.is_platform rather than hard-code false

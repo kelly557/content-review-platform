@@ -43,7 +43,7 @@ router = APIRouter(prefix="/rule-sets", tags=["rule_sets"])
 
 
 def _is_admin(user: User) -> bool:
-    return user.role in (UserRole.ADMIN, UserRole.SUPERADMIN)
+    return user.role in (UserRole.ADMIN, UserRole.SUPERADMIN, UserRole.ROOT_ADMIN)
 
 
 def _require_admin(user: User) -> None:

@@ -55,7 +55,7 @@ export default function EditAuditPointPage() {
   const [submitting, setSubmitting] = useState(false)
 
   const { user } = useAuthStore()
-  const isSuperadmin = user?.role === 'superadmin'
+  const isSuperadmin = user?.role === 'superadmin' || user?.role === 'root_admin'
   const pointIdNum = Number(pointId)
   const itemIdNum = Number(itemId)
 

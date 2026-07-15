@@ -52,7 +52,7 @@ def test_audit_items_endpoints_accept_superadmin():
         "audit_items must allow both admin and superadmin"
     )
     # _filter_payload_for_builtin_item bypass for superadmin
-    assert "user.role == UserRole.SUPERADMIN" in text, (
+    assert "user.role in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN)" in text, (
         "builtin-item whitelist must be bypassed for superadmin"
     )
 
@@ -69,7 +69,7 @@ def test_audit_points_endpoints_accept_superadmin():
     assert 'require_roles("admin", "superadmin")' in text, (
         "audit_points must allow both admin and superadmin"
     )
-    assert "user.role == UserRole.SUPERADMIN" in text, (
+    assert "user.role in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN)" in text, (
         "builtin-point whitelist must be bypassed for superadmin"
     )
 

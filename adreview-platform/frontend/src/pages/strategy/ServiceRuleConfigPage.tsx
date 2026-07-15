@@ -108,7 +108,7 @@ export default function ServiceRuleConfigPage() {
   const [batchImporting, setBatchImporting] = useState(false)
 
   const { user } = useAuthStore()
-  const isSuperadmin = user?.role === 'superadmin'
+  const isSuperadmin = user?.role === 'superadmin' || user?.role === 'root_admin'
   // 通用规则 (is_builtin=true) 编辑权限:admin 与 superadmin 都可;删除权限:仅 superadmin。
   const canEditBuiltin = isSuperadmin || user?.role === 'admin' || user?.role === 'mlr'
   const canDeleteBuiltin = isSuperadmin

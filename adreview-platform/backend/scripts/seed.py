@@ -870,6 +870,7 @@ async def main(
         await _upsert_user(db, "mlr@adreview.example.com", "MLR 专家 Bob", UserRole.MLR, "mlr12345")
         await _upsert_user(db, "submitter@adreview.example.com", "提交者 Carol", UserRole.SUBMITTER, "submitter123")
         await _upsert_user(db, "superadmin@adreview.example.com", "超级管理员", UserRole.SUPERADMIN, settings.app_secret + "-superadmin")
+        await _upsert_user(db, "rootadmin@adreview.example.com", "根管理员", UserRole.ROOT_ADMIN, settings.app_secret + "-rootadmin")
         await _upsert_sample_triggers(db)
         await db.commit()
         from app.db.session import engine

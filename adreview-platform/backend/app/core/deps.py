@@ -33,12 +33,12 @@ async def get_current_user(
 def require_roles(*roles: str):
     """Dependency factory: enforce user role membership.
 
-    superadmin 隐式拥有所有角色权限（platform operator 全权），
+    superadmin / root_admin 隐式拥有所有角色权限（platform operator 全权），
     不需要在每个 require_roles 调用里手动列出。
     """
 
     async def _check(user: User = Depends(get_current_user)) -> User:
-        if user.role == UserRole.SUPERADMIN:
+        if user.role in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
             return user
         if user.role not in roles:
             raise HTTPException(
@@ -51,13 +51,13 @@ def require_roles(*roles: str):
 
 
 async def require_superadmin(user: User = Depends(get_current_user)) -> User:
-    """Dependency: ensure the caller is the superadmin role.
+    """Dependency: ensure the caller is the superadmin or root_admin role.
 
     Used to gate administrative actions that should only be reachable by the
     platform operator (e.g. editing 通用 AuditItem/AuditPoint, viewing the
     通用 platform libraries).
     """
-    if user.role != UserRole.SUPERADMIN:
+    if user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Requires role: superadmin",

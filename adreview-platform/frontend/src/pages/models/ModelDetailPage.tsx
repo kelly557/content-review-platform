@@ -83,7 +83,7 @@ export default function ModelDetailPage() {
   const modelId = Number(id)
   const { message } = App.useApp()
   const { user } = useAuthStore()
-  const canWrite = user?.role === 'admin' || user?.role === 'superadmin'
+  const canWrite = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'root_admin'
 
   const [model, setModel] = useState<RegisteredModel | null>(null)
   const [versions, setVersions] = useState<RegisteredModelVersion[]>([])

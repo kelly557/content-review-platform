@@ -73,7 +73,7 @@ def _read_router_source() -> str:
 def test_create_library_source_gates_platform_flag_to_superadmin():
     text = _read_router_source()
     # POST /libraries 内必须出现"非超管带 is_platform=true → 422"的兜底
-    assert "body.is_platform and current_user.role != UserRole.SUPERADMIN" in text
+    assert "body.is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN)" in text
     assert "仅超级管理员可将库设为「通用平台库」" in text
 
 
@@ -92,6 +92,6 @@ def test_update_library_source_gates_platform_flag_to_superadmin():
 def test_batch_create_libraries_source_gates_platform_flag_to_superadmin():
     text = _read_router_source()
     # batch-create 路径里也要有"非超管带 is_platform=true → 拒绝"的兜底
-    assert "item.is_platform and current_user.role != UserRole.SUPERADMIN" in text
+    assert "item.is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN)" in text
     # batch-create 创建 Library 时使用 item.is_platform 而非 hard-code False
     assert "is_platform=item.is_platform" in text

@@ -17,6 +17,11 @@ export interface DevAccount {
 
 export const DEV_ACCOUNTS: DevAccount[] = [
   {
+    role: 'root_admin',
+    email: 'rootadmin@adreview.example.com',
+    password: 'change-me-in-production-please-rootadmin',
+  },
+  {
     role: 'superadmin',
     email: 'superadmin@adreview.example.com',
     password: 'change-me-in-production-please-superadmin',

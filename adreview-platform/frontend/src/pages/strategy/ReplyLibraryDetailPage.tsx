@@ -36,7 +36,7 @@ export default function ReplyLibraryDetailPage() {
     rawId != null && !Number.isNaN(Number(rawId)) ? Number(rawId) : null
   const { message } = App.useApp()
   const { user } = useAuthStore()
-  const isSuperadmin = user?.role === 'superadmin'
+  const isSuperadmin = user?.role === 'superadmin' || user?.role === 'root_admin'
 
   const [library, setLibrary] = useState<Library | null>(null)
   const [loading, setLoading] = useState(false)

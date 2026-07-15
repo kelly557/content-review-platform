@@ -59,7 +59,7 @@ const MAX_FILE_BYTES = 20 * 1024 * 1024
 export default function KnowledgeDocumentListPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
-  const canWrite = user?.role === 'admin' || user?.role === 'superadmin'
+  const canWrite = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'root_admin'
 
   const [q, setQ] = useState('')
   const [tagFilter, setTagFilter] = useState<string | null>(null)

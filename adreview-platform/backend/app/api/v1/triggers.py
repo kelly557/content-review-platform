@@ -30,7 +30,7 @@ router = APIRouter(prefix="/triggers", tags=["triggers"])
 
 
 def _require_admin(user: User) -> None:
-    if user.role.value not in (UserRole.ADMIN.value, UserRole.SUPERADMIN.value):
+    if user.role.value not in (UserRole.ADMIN.value, UserRole.SUPERADMIN.value, UserRole.ROOT_ADMIN.value):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
 
 

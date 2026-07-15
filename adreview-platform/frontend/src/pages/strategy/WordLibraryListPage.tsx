@@ -59,7 +59,7 @@ interface CreateFormValues {
 export default function WordLibraryListPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
-  const isSuperadmin = user?.role === 'superadmin'
+  const isSuperadmin = user?.role === 'superadmin' || user?.role === 'root_admin'
   const [filterKind, setFilterKind] = useState<LibraryKind | null>(null)
   const [effectiveOnly, setEffectiveOnly] = useState(false)
   const [items, setItems] = useState<LibraryListItem[]>([])

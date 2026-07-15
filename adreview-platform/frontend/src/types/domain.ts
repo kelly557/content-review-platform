@@ -487,6 +487,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   mlr: 'MLR 专家',
   admin: '管理员',
   superadmin: '超级管理员',
+  root_admin: '根管理员',
 }
 
 export const STATUS_LABELS: Record<MaterialStatus, string> = {

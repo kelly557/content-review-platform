@@ -45,7 +45,7 @@ type ModelTab = 'large' | 'small'
 export default function ModelListPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
-  const canWrite = user?.role === 'admin' || user?.role === 'superadmin'
+  const canWrite = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'root_admin'
 
   const [activeTab, setActiveTab] = useState<ModelTab>('large')
   const [q, setQ] = useState('')

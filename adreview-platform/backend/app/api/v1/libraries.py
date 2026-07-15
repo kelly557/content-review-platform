@@ -97,7 +97,7 @@ def _enforce_platform_library_guard(
     """
     if not lib.is_platform:
         return
-    if user.role == UserRole.SUPERADMIN:
+    if user.role in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         return
     fields_set = getattr(body, "model_fields_set", set())
     blocked = sorted(k for k in fields_set if k not in PLATFORM_LIBRARY_WRITABLE_FIELDS)
@@ -313,7 +313,7 @@ async def list_libraries(
             )
         )
     # 通用平台库 (is_platform=true) 仅超级管理员可见;其他角色自动过滤。
-    if current_user.role != UserRole.SUPERADMIN:
+    if current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         conds.append(Library.is_platform == False)  # noqa: E712
     if conds:
         stmt = stmt.where(and_(*conds))
@@ -336,7 +336,7 @@ async def get_library(
     if not lib:
         raise HTTPException(status_code=404, detail="库不存在")
     # 通用平台库对非超级管理员不可见（避免泄漏存在性,用 404 而非 403）
-    if lib.is_platform and current_user.role != UserRole.SUPERADMIN:
+    if lib.is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(status_code=404, detail="库不存在")
     counts = await _counts_for_libraries(db, [lib.id])
     return _to_out(lib, counts.get(lib.id, 0))
@@ -368,7 +368,7 @@ async def create_library(
 
     # 「通用平台库」标记:仅超级管理员可设为 true。
     # 非超管请求即使带 is_platform=true,服务端兜底抹为 false 并返回 422。
-    if body.is_platform and current_user.role != UserRole.SUPERADMIN:
+    if body.is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="仅超级管理员可将库设为「通用平台库」",
@@ -483,7 +483,7 @@ async def batch_create_libraries(
                 raise ValueError("code 格式不合法")
 
             # 「通用平台库」标记:仅超管可设
-            if item.is_platform and current_user.role != UserRole.SUPERADMIN:
+            if item.is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
                 raise ValueError("仅超级管理员可将库设为「通用平台库」")
 
             lib = Library(
@@ -557,7 +557,7 @@ async def update_library(
     if not lib or lib.is_deleted:
         raise HTTPException(status_code=404, detail="库不存在")
     # 通用平台库对非超级管理员不可见（避免泄漏存在性,用 404 而非 403）
-    if lib.is_platform and current_user.role != UserRole.SUPERADMIN:
+    if lib.is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(status_code=404, detail="库不存在")
     # 通用平台库白名单守卫: 非超管只能改白名单字段
     _enforce_platform_library_guard(lib, body, current_user)
@@ -580,7 +580,7 @@ async def update_library(
         lib.kind = body.kind
     # 「通用平台库」标记:仅超级管理员可切换,且仅当客户端显式把 is_platform 放进 body 时才生效
     if "is_platform" in sent:
-        if current_user.role != UserRole.SUPERADMIN:
+        if current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="仅超级管理员可切换「通用平台库」属性",
@@ -615,10 +615,10 @@ async def delete_library(
     if not lib or lib.is_deleted:
         raise HTTPException(status_code=404, detail="库不存在")
     # 通用平台库对非超级管理员不可见（避免泄漏存在性,用 404 而非 403）
-    if lib.is_platform and current_user.role != UserRole.SUPERADMIN:
+    if lib.is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(status_code=404, detail="库不存在")
     # 通用平台库仅超级管理员可删
-    if lib.is_platform and current_user.role != UserRole.SUPERADMIN:
+    if lib.is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="通用平台库不允许删除;仅超级管理员可操作。",

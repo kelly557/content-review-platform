@@ -7,13 +7,13 @@
  */
 import type { User, UserRole } from '@/types/auth'
 
-/** superadmin 隐式为 admin */
+/** superadmin / root_admin 隐式为 admin */
 export const isAdminRole = (role: UserRole | undefined | null): boolean =>
-  role === 'admin' || role === 'superadmin'
+  role === 'admin' || role === 'superadmin' || role === 'root_admin'
 
-/** 平台 superadmin 专属（不能被 admin 冒充） */
+/** 平台 superadmin / root_admin 专属（不能被 admin 冒充） */
 export const isSuperadminOnly = (role: UserRole | undefined | null): boolean =>
-  role === 'superadmin'
+  role === 'superadmin' || role === 'root_admin'
 
 /** 可创建审核任务：reviewer / mlr / admin / superadmin */
 export const canCreateTask = (user: User | null | undefined): boolean => {

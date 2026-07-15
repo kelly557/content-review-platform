@@ -21,7 +21,7 @@ import { ROLE_LABELS, type UserRole } from '@/types/domain'
 
 const { Title } = Typography
 
-const EDITABLE_ROLES: UserRole[] = ['superadmin', 'admin', 'mlr', 'reviewer', 'submitter']
+const EDITABLE_ROLES: UserRole[] = ['root_admin', 'superadmin', 'admin', 'mlr', 'reviewer', 'submitter']
 
 function buildMockPermissions(): RolePermissions {
   const rows = flattenMenuForTable()

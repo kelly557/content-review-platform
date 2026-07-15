@@ -46,7 +46,7 @@ export default function KnowledgeDocumentDetailPage() {
   const docId = Number(id)
   const { message } = App.useApp()
   const { user } = useAuthStore()
-  const canWrite = user?.role === 'admin' || user?.role === 'superadmin'
+  const canWrite = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'root_admin'
 
   const [doc, setDoc] = useState<KnowledgeDocument | null>(null)
   const [versions, setVersions] = useState<KnowledgeDocumentVersion[]>([])

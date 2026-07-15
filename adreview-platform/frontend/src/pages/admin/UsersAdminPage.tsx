@@ -19,7 +19,7 @@ import { ROLE_LABELS, type User, type UserRole } from '@/types/domain'
 
 const { Title } = Typography
 
-const ROLE_OPTIONS: UserRole[] = ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin']
+const ROLE_OPTIONS: UserRole[] = ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin']
 
 interface EditFormValues {
   full_name: string
@@ -86,7 +86,7 @@ export default function UsersAdminPage() {
     {
       title: '角色', dataIndex: 'role', width: 140,
       render: (r: string) => (
-        <Tag color={r === 'superadmin' ? 'purple' : 'blue'}>
+        <Tag color={r === 'superadmin' || r === 'root_admin' ? 'purple' : 'blue'}>
           {ROLE_LABELS[r as keyof typeof ROLE_LABELS] || r}
         </Tag>
       ),

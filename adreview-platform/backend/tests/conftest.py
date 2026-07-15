@@ -151,6 +151,13 @@ async def client(db_session_factory):
                 is_active=True,
             ),
             User(
+                email="rootadmin@adreview.example.com",
+                full_name="RootAdmin",
+                hashed_password=hash_password("rootadmin123"),
+                role=UserRole.ROOT_ADMIN,
+                is_active=True,
+            ),
+            User(
                 email="mlr@adreview.example.com",
                 full_name="MLR",
                 hashed_password=hash_password("mlr12345"),

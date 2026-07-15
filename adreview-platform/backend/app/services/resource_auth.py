@@ -7,8 +7,8 @@ from app.core.deps import get_current_user
 from app.models.user import User, UserRole
 
 
-WRITE_ROLES = {UserRole.ADMIN, UserRole.SUPERADMIN}
-READ_ROLES = {UserRole.MLR, UserRole.ADMIN, UserRole.SUPERADMIN}
+WRITE_ROLES = {UserRole.ADMIN, UserRole.SUPERADMIN, UserRole.ROOT_ADMIN}
+READ_ROLES = {UserRole.MLR, UserRole.ADMIN, UserRole.SUPERADMIN, UserRole.ROOT_ADMIN}
 
 
 def require_writer(user=Depends(get_current_user)):

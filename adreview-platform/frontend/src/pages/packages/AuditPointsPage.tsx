@@ -32,7 +32,7 @@ export default function AuditPointsPage() {
   const { code = '', itemId = '' } = useParams<{ code: string; itemId: string }>()
   const { user } = useAuthStore()
   const isAdmin = canManageBackend(user)
-  const isSuperadmin = user?.role === 'superadmin'
+  const isSuperadmin = user?.role === 'superadmin' || user?.role === 'root_admin'
 
   const [item, setItem] = useState<AuditItem | null>(null)
   const [points, setPoints] = useState<AuditPoint[]>([])

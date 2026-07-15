@@ -101,7 +101,7 @@ def _filter_payload_for_builtin_point(
     """
     if not point.is_builtin:
         return
-    if user.role == UserRole.SUPERADMIN:
+    if user.role in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         return
     # Pydantic v2: model_fields_set 记录显式提供字段（含 null）
     fields_set = getattr(body, "model_fields_set", set())
@@ -167,7 +167,7 @@ async def create_point(
     await _ensure_package(db, code)
     item = await _ensure_item_writable(db, code, body.item_id)
     # 通用审核项下:仅超级管理员可新增审核点;其他角色需新建个性化 item
-    if item.is_builtin and current_user.role != UserRole.SUPERADMIN:
+    if item.is_builtin and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="通用审核项下不允许新增审核点；如需扩展，请在资源库新建个性化审核项，或由超级管理员操作。",
@@ -257,7 +257,7 @@ async def delete_point(
     point = await db.get(AuditPoint, point_id)
     if not point or point.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核点不存在")
-    if point.is_builtin and current_user.role != UserRole.SUPERADMIN:
+    if point.is_builtin and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="通用审核点不允许删除;仅超级管理员可操作。",
@@ -304,7 +304,7 @@ async def create_points_batch(
     await _ensure_package(db, code)
     item = await _ensure_item_writable(db, code, body.item_id)
     # 通用审核项下:仅超级管理员可批量新增审核点;其他角色需新建个性化 item
-    if item.is_builtin and current_user.role != UserRole.SUPERADMIN:
+    if item.is_builtin and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="通用审核项下不允许批量新增审核点；请新建个性化审核项，或由超级管理员操作。",

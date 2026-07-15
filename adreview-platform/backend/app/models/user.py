@@ -18,6 +18,7 @@ class UserRole(str, enum.Enum):
     MLR = "mlr"
     ADMIN = "admin"
     SUPERADMIN = "superadmin"
+    ROOT_ADMIN = "root_admin"
 
 
 class User(Base):

@@ -53,7 +53,7 @@ def _filter_payload_for_builtin_item(
     """
     if not item.is_builtin:
         return
-    if user.role == UserRole.SUPERADMIN:
+    if user.role in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         return
     fields_set = getattr(body, "model_fields_set", set())
     blocked = sorted(k for k in fields_set if k not in BUILTIN_ITEM_WRITABLE_FIELDS)
@@ -631,7 +631,7 @@ async def delete_item(
     item = await db.get(AuditItem, item_id)
     if not item or item.package_code != code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在")
-    if item.is_builtin and current_user.role != UserRole.SUPERADMIN:
+    if item.is_builtin and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="通用审核项不允许删除;仅超级管理员可操作。",
