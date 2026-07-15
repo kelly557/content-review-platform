@@ -49,6 +49,7 @@ const GeneralRuleDetailPage = lazy(() => import('@/pages/rules/GeneralRuleDetail
 const PersonalRuleListPage = lazy(() => import('@/pages/rules/PersonalRuleListPage'))
 const PersonalRuleDetailPage = lazy(() => import('@/pages/rules/PersonalRuleDetailPage'))
 const PersonalRulePointsPage = lazy(() => import('@/pages/rules/PersonalRulePointsPage'))
+const AuditRulesPage = lazy(() => import('@/pages/audit-rules/AuditRulesPage'))
 const WordLibraryListPage = lazy(() => import('@/pages/strategy/WordLibraryListPage'))
 const ImageLibraryListPage = lazy(() => import('@/pages/strategy/ImageLibraryListPage'))
 const WordLibraryDetailPage = lazy(() => import('@/pages/strategy/WordLibraryDetailPage'))
@@ -92,7 +93,7 @@ export default function AppRoutes() {
 
         <Route element={<ProtectedRoute />}>
           {/* 隐藏工具页：admin 才能进、不挂主产品 chrome，URL 不在侧栏菜单暴露 */}
-          <Route element={<ProtectedRoute allow={['admin']} />}>
+          <Route element={<ProtectedRoute allow={['admin', 'root_admin']} />}>
             <Route path="/import-rules" element={<ImportRulesPage />} />
           </Route>
 
@@ -108,12 +109,12 @@ export default function AppRoutes() {
             <Route path="/tasks/:id" element={<TaskDetailPage />} />
             <Route path="/tasks/package/:id" element={<PackageDetailPage />} />
 
-            <Route element={<ProtectedRoute allow={['reviewer', 'mlr', 'admin', 'superadmin']} />}>
+            <Route element={<ProtectedRoute allow={['reviewer', 'mlr', 'admin', 'superadmin', 'root_admin']} />}>
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/query" element={<QueryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin']} />}>
+            <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin', 'root_admin']} />}>
               <Route path="/strategies" element={<StrategyListPage />} />
               {/* 老的 rules-by-type 路径重定向到新的"通用"页(向后兼容) */}
               <Route
@@ -124,7 +125,13 @@ export default function AppRoutes() {
               <Route path="/strategies/:id/edit" element={<CreateStrategyPage />} />
               <Route path="/strategies/rules/:serviceCode" element={<ServiceRuleConfigPage />} />
 
-              {/* 图片/文本审核规则 — 通用 ↔ 个性化 独立路由 */}
+              {/* 图片/文本审核规则 — Tab 容器页 (系统规则 / 自定义 Agent) */}
+              <Route
+                path="/rules/audit/:mediaType"
+                element={<AuditRulesPage />}
+              />
+
+              {/* 旧路径保留 (向后兼容) — 仍可直达,菜单不再暴露 */}
               <Route
                 path="/rules/general/:mediaType"
                 element={<GeneralRuleListPage />}
@@ -256,18 +263,18 @@ export default function AppRoutes() {
             <Route path="/packages" element={<FeatureDisabledPage />} />
             <Route path="/packages/:id" element={<FeatureDisabledPage />} />
 
-            <Route element={<ProtectedRoute allow={['admin', 'superadmin']} />}>
+            <Route element={<ProtectedRoute allow={['admin', 'superadmin', 'root_admin']} />}>
               <Route path="/admin/users" element={<UsersAdminPage />} />
               <Route path="/triggers" element={<TriggersListPage />} />
               <Route path="/triggers/new" element={<CreateTriggerPage />} />
               <Route path="/triggers/:id" element={<TriggerDetailPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute allow={['superadmin']} />}>
+            <Route element={<ProtectedRoute allow={['superadmin', 'root_admin']} />}>
               <Route path="/admin/roles" element={<RolesAdminPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin']} />}>
+            <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin', 'root_admin']} />}>
               <Route path="/tags" element={<TagsPage />} />
               <Route path="/human-review-rules" element={<HumanReviewRulesPage />} />
             </Route>

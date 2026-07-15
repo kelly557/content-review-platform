@@ -11,22 +11,14 @@ export const MENU_TREE: MenuNode[] = [
     children: [
       { key: 'strategies-list', label: '策略列表', permissions: ['view', 'edit', 'delete'] },
       {
-        key: 'strategies-image-group',
+        key: 'strategies-image-rules',
         label: '图片审核规则',
         permissions: ['view', 'edit', 'delete'],
-        children: [
-          { key: 'rules-general-image', label: '通用图片规则', permissions: ['view', 'edit', 'delete'] },
-          { key: 'rules-personal-image', label: '个性化图片规则', permissions: ['view', 'edit', 'delete'] },
-        ],
       },
       {
-        key: 'strategies-text-group',
+        key: 'strategies-text-rules',
         label: '文本审核规则',
         permissions: ['view', 'edit', 'delete'],
-        children: [
-          { key: 'rules-general-text', label: '通用文本规则', permissions: ['view', 'edit', 'delete'] },
-          { key: 'rules-personal-text', label: '个性化文本规则', permissions: ['view', 'edit', 'delete'] },
-        ],
       },
     ],
   },

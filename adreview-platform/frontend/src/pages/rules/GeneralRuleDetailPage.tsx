@@ -75,7 +75,7 @@ export default function GeneralRuleDetailPage() {
           { title: '审核策略' },
           {
             title: (
-              <Link to={`/rules/general/${mediaType}`}>
+              <Link to={`/rules/audit/${mediaType}?tab=system`}>
                 {MEDIA_LABEL[mediaType as MediaTypeKey] ?? mediaType}审核规则
               </Link>
             ),

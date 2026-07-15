@@ -199,7 +199,7 @@ export default function PersonalRuleDetailPage() {
           { title: '审核策略' },
           {
             title: (
-              <Link to={`/rules/personal/${mediaType}`}>
+              <Link to={`/rules/audit/${mediaType}?tab=agent`}>
                 {MEDIA_LABEL[mediaType as MediaTypeKey] ?? mediaType}审核规则
               </Link>
             ),

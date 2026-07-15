@@ -45,8 +45,15 @@ const MEDIA_LABEL: Record<MediaTypeKey, string> = {
   video: '视频',
 }
 
-export default function PersonalRuleListPage() {
-  const { mediaType = 'image' } = useParams<{ mediaType: MediaTypeKey }>()
+export default function PersonalRuleListPage({
+  embedded = false,
+  mediaTypeProp,
+}: {
+  embedded?: boolean
+  mediaTypeProp?: MediaTypeKey
+}) {
+  const params = useParams<{ mediaType: MediaTypeKey }>()
+  const mediaType = (mediaTypeProp ?? params.mediaType ?? 'image') as MediaTypeKey
   const navigate = useNavigate()
   const { message, modal } = App.useApp()
   const [items, setItems] = useState<AuditItem[]>([])
@@ -70,7 +77,6 @@ export default function PersonalRuleListPage() {
 
   useEffect(() => {
     void reload()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaType])
 
   useEffect(() => {
@@ -259,48 +265,53 @@ export default function PersonalRuleListPage() {
         ),
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [mediaType, models, modelLoading, modelOptions],
   )
 
   return (
     <div style={{ width: '100%' }}>
-      <Breadcrumb
-        style={{ marginBottom: 12 }}
-        items={[
-          { title: <Link to="/strategies">策略中心</Link> },
-          { title: '审核策略' },
-          { title: `${MEDIA_LABEL[mediaType as MediaTypeKey] ?? mediaType}审核规则` },
-          { title: <Tag color="green">个性化</Tag> },
-        ]}
-      />
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <Space>
-          <Title level={4} style={{ margin: 0 }}>
-            个性化{MEDIA_LABEL[mediaType as MediaTypeKey] ?? mediaType}审核规则
-          </Title>
-          <Tag color="green">个性化</Tag>
-        </Space>
-        <Space>
-          <Button onClick={() => void reload()}>刷新</Button>
-          <Button
-            type="primary"
-            onClick={() => navigate(`/rules/personal/${mediaType}/new`)}
-          >
-            + 新建规则
-          </Button>
-        </Space>
-      </div>
-      <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-        个性化规则可关联知识库中的知识文档作为审核依据，仅自己可见，影响对应策略。
-      </Text>
+      {!embedded && (
+        <Breadcrumb
+          style={{ marginBottom: 12 }}
+          items={[
+            { title: <Link to="/strategies">策略中心</Link> },
+            { title: '审核策略' },
+            { title: `${MEDIA_LABEL[mediaType as MediaTypeKey] ?? mediaType}审核规则` },
+            { title: <Tag color="green">个性化</Tag> },
+          ]}
+        />
+      )}
+      {!embedded && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 12,
+          }}
+        >
+          <Space>
+            <Title level={4} style={{ margin: 0 }}>
+              个性化{MEDIA_LABEL[mediaType as MediaTypeKey] ?? mediaType}审核规则
+            </Title>
+            <Tag color="green">个性化</Tag>
+          </Space>
+          <Space>
+            <Button onClick={() => void reload()}>刷新</Button>
+            <Button
+              type="primary"
+              onClick={() => navigate(`/rules/personal/${mediaType}/new`)}
+            >
+              + 新建规则
+            </Button>
+          </Space>
+        </div>
+      )}
+      {!embedded && (
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+          个性化规则可关联知识库中的知识文档作为审核依据，仅自己可见，影响对应策略。
+        </Text>
+      )}
       <Table<AuditItem>
         rowKey="id"
         loading={loading}

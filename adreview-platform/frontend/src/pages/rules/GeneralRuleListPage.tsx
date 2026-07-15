@@ -25,8 +25,15 @@ const MEDIA_LABEL: Record<MediaTypeKey, string> = {
   video: '视频',
 }
 
-export default function GeneralRuleListPage() {
-  const { mediaType = 'image' } = useParams<{ mediaType: MediaTypeKey }>()
+export default function GeneralRuleListPage({
+  embedded = false,
+  mediaTypeProp,
+}: {
+  embedded?: boolean
+  mediaTypeProp?: MediaTypeKey
+}) {
+  const params = useParams<{ mediaType: MediaTypeKey }>()
+  const mediaType = (mediaTypeProp ?? params.mediaType ?? 'image') as MediaTypeKey
   const [items, setItems] = useState<AuditItem[]>([])
   const [loading, setLoading] = useState(false)
   const [switchTarget, setSwitchTarget] = useState<AuditItem | null>(null)
@@ -43,7 +50,6 @@ export default function GeneralRuleListPage() {
 
   useEffect(() => {
     void reload()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaType])
 
   const columns: ColumnsType<AuditItem> = useMemo(
@@ -137,33 +143,37 @@ export default function GeneralRuleListPage() {
 
   return (
     <div style={{ width: '100%' }}>
-      <Breadcrumb
-        style={{ marginBottom: 12 }}
-        items={[
-          { title: <Link to="/strategies">策略中心</Link> },
-          { title: '审核策略' },
-          { title: `${MEDIA_LABEL[mediaType as MediaTypeKey] ?? mediaType}审核规则` },
-          { title: <Tag color="blue">通用</Tag> },
-        ]}
-      />
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <Space>
-          <Title level={4} style={{ margin: 0 }}>
-            通用{MEDIA_LABEL[mediaType as MediaTypeKey] ?? mediaType}审核规则
-          </Title>
-          <Tag color="blue">通用</Tag>
-        </Space>
-        <Space>
-          <Button onClick={() => void reload()}>刷新</Button>
-        </Space>
-      </div>
+      {!embedded && (
+        <Breadcrumb
+          style={{ marginBottom: 12 }}
+          items={[
+            { title: <Link to="/strategies">策略中心</Link> },
+            { title: '审核策略' },
+            { title: `${MEDIA_LABEL[mediaType as MediaTypeKey] ?? mediaType}审核规则` },
+            { title: <Tag color="blue">通用</Tag> },
+          ]}
+        />
+      )}
+      {!embedded && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 12,
+          }}
+        >
+          <Space>
+            <Title level={4} style={{ margin: 0 }}>
+              通用{MEDIA_LABEL[mediaType as MediaTypeKey] ?? mediaType}审核规则
+            </Title>
+            <Tag color="blue">通用</Tag>
+          </Space>
+          <Space>
+            <Button onClick={() => void reload()}>刷新</Button>
+          </Space>
+        </div>
+      )}
       <Table<AuditItem>
         rowKey="id"
         loading={loading}
