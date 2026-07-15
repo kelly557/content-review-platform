@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   App,
   Button,
@@ -49,28 +49,6 @@ const TYPE_COLOR_BY_LIB: Record<string, string> = {
   image: 'blue',
   word: 'green',
   reply: 'purple',
-}
-
-function libsBadge(item: AuditItem): React.ReactNode {
-  const list = item.linked_libraries ?? []
-  if (list.length === 0) {
-    return null
-  }
-  const type = list[0]?.library_type
-  const label = TYPE_LABEL_BY_LIB[type] ?? '?'
-  const color = TYPE_COLOR_BY_LIB[type] ?? 'default'
-  const names = list.map((l) => l.name).join('、')
-  return (
-    <Tooltip title={names}>
-      <Tag
-        color={color}
-        bordered={false}
-        style={{ margin: 0, fontSize: 11, padding: '0 6px' }}
-      >
-        {label}×{list.length}
-      </Tag>
-    </Tooltip>
-  )
 }
 
 interface Props {
@@ -275,6 +253,28 @@ export default function RulesTreeView({
     return out
   }, [items, pointsByItem, getPointMap])
 
+  // 左栏点击 → 滚到右栏 section + 1.5s 闪烁高亮
+  const [highlightItemId, setHighlightItemId] = useState<number | null>(null)
+  const rightPaneRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (selectedItemId == null) return
+    const el = document.getElementById(`rules-section-${selectedItemId}`)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const rect = rightPaneRef.current?.getBoundingClientRect()
+    if (rect) {
+      const elRect = el.getBoundingClientRect()
+      const headerH = rect.top
+      const offset = elRect.top - headerH
+      if (Math.abs(offset) > 4) {
+        rightPaneRef.current?.scrollBy({ top: offset - 8, behavior: 'smooth' })
+      }
+    }
+    setHighlightItemId(selectedItemId)
+    const t = window.setTimeout(() => setHighlightItemId(null), 1500)
+    return () => window.clearTimeout(t)
+  }, [selectedItemId])
+
   if (!packageCode) {
     return (
       <Empty
@@ -353,6 +353,7 @@ export default function RulesTreeView({
 
         {/* 右栏：所有 item 的审核点摊平 + 共用一个滚动容器 */}
         <div
+          ref={rightPaneRef}
           style={{
             paddingLeft: isStacked ? 0 : 16,
             maxHeight: isStacked ? 'none' : 720,
@@ -369,7 +370,10 @@ export default function RulesTreeView({
               onPointMapChange={onPointMapChange}
               onPointOverrideChange={onPointOverrideChange}
               onRemoveLibrary={handleRemoveLibrary}
+              onAddLibrary={onItemLibraryLink}
               pendingItems={pendingItems}
+              highlightItemId={highlightItemId}
+              allowLibraryLink={mediaKey !== 'image'}
               mediaKey={mediaKey}
             />
           ) : (
@@ -506,7 +510,6 @@ function ItemGroup({
                   启用
                 </Tag>
               )}
-              {libsBadge(it)}
               {allowLibraryLink && visibleLibs.length > 0 && (() => {
                 const linkedLibs = it.linked_libraries ?? []
                 const open = popoverOpenForItemId === it.id

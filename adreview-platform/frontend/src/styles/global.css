@@ -110,7 +110,15 @@ a:hover { text-decoration: underline; }
 .rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-section > td {
   background: transparent;
   padding: 0 8px;
+  scroll-margin-top: 8px;
 }
 .rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-section:hover > td {
   background: transparent;
+}
+@keyframes rules-section-flash {
+  0%   { background: rgba(37, 99, 235, 0.22); }
+  100% { background: transparent; }
+}
+.rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-flash > td {
+  animation: rules-section-flash 1.5s ease-out;
 }
