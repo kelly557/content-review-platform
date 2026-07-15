@@ -11,22 +11,29 @@
  *   /rules/audit/text   （文本）
  *   ?tab=system | ?tab=agent
  */
-import { useEffect, useMemo } from 'react'
-import { App, Breadcrumb, Space, Tabs, Tag, Typography } from 'antd'
+import { useEffect, useMemo, useState } from 'react'
+import { App, Breadcrumb, Button, Modal, Form, Input, Select, Space, Tabs, Tag, Typography } from 'antd'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '@/store'
 import { isSuperadminOnly } from '@/lib/permissions'
+import { auditItemsApi } from '@/api/auditItems'
 import GeneralRuleListPage from '@/pages/rules/GeneralRuleListPage'
 import PersonalRuleListPage from '@/pages/rules/PersonalRuleListPage'
 import type { MediaTypeKey } from '@/types/domain'
 
 const { Title } = Typography
+const { TextArea } = Input
 
 type MediaType = 'image' | 'text'
 
 const MEDIA_LABEL: Record<MediaType, string> = {
   image: '图片',
   text: '文本',
+}
+
+const PACKAGE_BY_MEDIA: Record<MediaType, string> = {
+  image: 'image_audit_pro',
+  text: 'text_audit_pro',
 }
 
 type TabKey = 'system' | 'agent'

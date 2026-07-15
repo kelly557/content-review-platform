@@ -27,7 +27,7 @@ def _enum_values(bind, type_name: str) -> list[str]:
     rows = bind.execute(
         sa.text(
             "SELECT enumlabel FROM pg_enum "
-            "WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = :name) "
+            "WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = :name LIMIT 1) "
             "ORDER BY enumsortorder"
         ),
         {"name": type_name},

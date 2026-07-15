@@ -290,13 +290,6 @@ export default function RulesTreeView({
     ? '260px 1fr'
     : '1fr'
 
-  const currentItem =
-    selectedItemId != null
-      ? items.find((it) => it.id === selectedItemId)
-      : items.find((it) => enabledSet.has(it.id))
-  const currentPoints = currentItem ? pointsByItem[currentItem.id] ?? [] : []
-  const currentPointMap = currentItem ? getPointMap(currentItem.id) : {}
-
   return (
     <div style={{ width: '100%' }}>
       <div
@@ -334,6 +327,7 @@ export default function RulesTreeView({
             pendingItems={pendingItems}
             handleToggleLibrary={handleToggleLibrary}
             handleRemoveLibrary={handleRemoveLibrary}
+            allowLibraryLink={mediaKey !== 'image'}
           />
           <ItemGroup
             title="自定义"
@@ -352,10 +346,11 @@ export default function RulesTreeView({
             pendingItems={pendingItems}
             handleToggleLibrary={handleToggleLibrary}
             handleRemoveLibrary={handleRemoveLibrary}
+            allowLibraryLink={mediaKey !== 'image'}
           />
         </div>
 
-        {/* 右栏：当前选中 item 的 point 列表 */}
+        {/* 右栏：所有 item 的审核点摊平 + 共用一个滚动容器 */}
         <div
           style={{
             background: '#F8FAFC',
@@ -364,11 +359,11 @@ export default function RulesTreeView({
             minHeight: isStacked ? 'auto' : 540,
           }}
         >
-          {currentItem ? (
+          {items.length > 0 ? (
             <PointsColumn
-              item={currentItem}
-              points={currentPoints}
-              pointMap={currentPointMap}
+              items={items}
+              pointsByItem={pointsByItem}
+              getPointMap={getPointMap}
               pointOverrides={pointOverrides}
               onPointMapChange={onPointMapChange}
               onPointOverrideChange={onPointOverrideChange}
@@ -378,9 +373,7 @@ export default function RulesTreeView({
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={
-                <Space direction="vertical" size={4}>
-                  <Text>点击左侧某条审核项以查看其下的审核点</Text>
-                </Space>
+                <Text type="secondary">该审核类型暂无审核项</Text>
               }
               style={{ padding: '80px 0' }}
             />
@@ -408,6 +401,7 @@ function ItemGroup({
   pendingItems,
   handleToggleLibrary,
   handleRemoveLibrary,
+  allowLibraryLink,
 }: {
   title: string
   icon: React.ReactNode
@@ -427,8 +421,9 @@ function ItemGroup({
     item: AuditItem,
     libraryId: number,
     checked: boolean,
-  ) => void
-  handleRemoveLibrary: (item: AuditItem, libraryId: number) => void
+  ) => Promise<void> | void
+  handleRemoveLibrary: (item: AuditItem, libraryId: number) => Promise<void> | void
+  allowLibraryLink: boolean
 }) {
   return (
     <div style={{ marginBottom: 8 }}>
@@ -510,7 +505,7 @@ function ItemGroup({
                 </Tag>
               )}
               {libsBadge(it)}
-              {visibleLibs.length > 0 && (() => {
+              {allowLibraryLink && visibleLibs.length > 0 && (() => {
                 const linkedLibs = it.linked_libraries ?? []
                 const open = popoverOpenForItemId === it.id
                 return (
@@ -575,7 +570,7 @@ function ItemGroup({
                   </Popover>
                 )
               })()}
-              {onItemLibraryLink && visibleLibs.length === 0 && (
+              {allowLibraryLink && onItemLibraryLink && visibleLibs.length === 0 && (
                 <Tooltip title="为该审核项关联自定义库">
                   <span
                     role="button"
@@ -644,7 +639,9 @@ function ItemGroup({
 }
 
 type PointRowRecord = {
-  key: number
+  kind: 'point'
+  key: string
+  item: AuditItem
   point: AuditPoint
   checked: boolean
   override: {
@@ -659,18 +656,27 @@ type PointRowRecord = {
   editDisabled: boolean
 }
 
+type SectionHeaderRecord = {
+  kind: 'section'
+  key: string
+  item: AuditItem
+  pointCount: number
+}
+
+type FlatRowRecord = PointRowRecord | SectionHeaderRecord
+
 function PointsColumn({
-  item,
-  points,
-  pointMap,
+  items,
+  pointsByItem,
+  getPointMap,
   pointOverrides,
   onPointMapChange,
   onPointOverrideChange,
   mediaKey,
 }: {
-  item: AuditItem
-  points: AuditPoint[]
-  pointMap: PointMap
+  items: AuditItem[]
+  pointsByItem: Record<number, AuditPoint[]>
+  getPointMap: (itemId: number) => PointMap
   pointOverrides: MediaPointOverrideMap
   onPointMapChange: (itemId: number, next: PointMap) => void
   onPointOverrideChange: (
@@ -687,39 +693,90 @@ function PointsColumn({
   ) => void
   mediaKey: CategoryKey
 }) {
-  const dataSource: PointRowRecord[] = points.map((p) => ({
-    key: p.id,
-    point: p,
-    checked: pointMap[p.id] === true,
-    override: pointOverrides[mediaKey]?.[item.id]?.[p.id] ?? {},
-    isCustom: !p.is_builtin,
-    editDisabled: pointMap[p.id] !== true,
-  }))
+  const dataSource: FlatRowRecord[] = []
+  items.forEach((it) => {
+    const ps = pointsByItem[it.id] ?? []
+    dataSource.push({
+      kind: 'section',
+      key: `section-${it.id}`,
+      item: it,
+      pointCount: ps.length,
+    })
+    const pm = getPointMap(it.id)
+    ps.forEach((p) => {
+      dataSource.push({
+        kind: 'point',
+        key: `point-${it.id}-${p.id}`,
+        item: it,
+        point: p,
+        checked: pm[p.id] === true,
+        override: pointOverrides[mediaKey]?.[it.id]?.[p.id] ?? {},
+        isCustom: !p.is_builtin,
+        editDisabled: pm[p.id] !== true,
+      })
+    })
+  })
 
-  const columns: TableColumnsType<PointRowRecord> = [
+  const COL_TOTAL = 5
+  const columns: TableColumnsType<FlatRowRecord> = [
     {
       title: '',
       dataIndex: 'checked',
       width: 40,
-      render: (_, record) => (
-        <input
-          type="checkbox"
-          checked={record.checked}
-          onChange={(e) =>
-            onPointMapChange(item.id, {
-              ...pointMap,
-              [record.point.id]: e.target.checked,
-            })
-          }
-          aria-label={`启用审核点 ${record.point.label_cn}`}
-          style={{ margin: 0 }}
-        />
-      ),
+      onCell: (record) =>
+        record.kind === 'section' ? { colSpan: COL_TOTAL } : {},
+      render: (_, record) => {
+        if (record.kind === 'section') {
+          return (
+            <div
+              style={{
+                padding: '12px 0 6px',
+                borderBottom: '1px dashed var(--color-border)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <Text strong style={{ fontSize: 14, color: '#0F172A' }}>
+                {record.item.name_cn}
+              </Text>
+              <Tag
+                color={record.item.is_builtin ? 'gold' : 'blue'}
+                bordered={false}
+                style={{ margin: 0, fontSize: 11 }}
+              >
+                {record.item.is_builtin ? '通用' : '自定义'}
+              </Tag>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {record.pointCount} 个审核点
+              </Text>
+            </div>
+          )
+        }
+        const pm = getPointMap(record.item.id)
+        return (
+          <input
+            type="checkbox"
+            checked={record.checked}
+            onChange={(e) =>
+              onPointMapChange(record.item.id, {
+                ...pm,
+                [record.point.id]: e.target.checked,
+              })
+            }
+            aria-label={`启用审核点 ${record.point.label_cn}`}
+            style={{ margin: 0 }}
+          />
+        )
+      },
     },
     {
       title: '审核点',
       dataIndex: 'point',
+      onCell: (record) =>
+        record.kind === 'section' ? { colSpan: 0 } : {},
       render: (_, record) => {
+        if (record.kind === 'section') return null
         const name = record.point.label_cn || record.point.label || record.point.code
         return (
           <Space size={6} align="center">
@@ -733,7 +790,10 @@ function PointsColumn({
     {
       title: '审核说明',
       dataIndex: 'description',
+      onCell: (record) =>
+        record.kind === 'section' ? { colSpan: 0 } : {},
       render: (_, record) => {
+        if (record.kind === 'section') return null
         if (record.point.description) {
           return (
             <Text
@@ -762,68 +822,85 @@ function PointsColumn({
       dataIndex: 'mediumThreshold',
       width: 180,
       align: 'left',
-      render: (_, record) => (
-        <RangeThresholdInput
-          disabled={record.editDisabled}
-          minValue={
-            record.override.medium_threshold_min ??
-            (record.override.medium_threshold ?? undefined)
-          }
-          maxValue={
-            record.override.medium_threshold_max ?? record.point.medium_threshold
-          }
-          onChange={(min, max) =>
-            onPointOverrideChange(item.id, record.point.id, {
-              medium_threshold_min: min,
-              medium_threshold_max: max,
-              medium_threshold: undefined,
-            })
-          }
-          label="中风险分"
-        />
-      ),
+      onCell: (record) =>
+        record.kind === 'section' ? { colSpan: 0 } : {},
+      render: (_, record) => {
+        if (record.kind !== 'point') return null
+        return (
+          <RangeThresholdInput
+            disabled={record.editDisabled}
+            minValue={
+              record.override.medium_threshold_min ??
+              (record.override.medium_threshold ?? undefined)
+            }
+            maxValue={
+              record.override.medium_threshold_max ?? record.point.medium_threshold
+            }
+            onChange={(min, max) =>
+              onPointOverrideChange(record.item.id, record.point.id, {
+                medium_threshold_min: min,
+                medium_threshold_max: max,
+                medium_threshold: undefined,
+              })
+            }
+            label="中风险分"
+          />
+        )
+      },
     },
     {
       title: '高风险分',
       dataIndex: 'highThreshold',
       width: 180,
       align: 'left',
-      render: (_, record) => (
-        <RangeThresholdInput
-          disabled={record.editDisabled}
-          minValue={
-            record.override.high_threshold_min ?? record.point.high_threshold
-          }
-          maxValue={
-            record.override.high_threshold_max ?? 100
-          }
-          onChange={(min, max) =>
-            onPointOverrideChange(item.id, record.point.id, {
-              high_threshold_min: min,
-              high_threshold_max: max,
-              high_threshold: undefined,
-            })
-          }
-          label="高风险分"
-        />
-      ),
+      onCell: (record) =>
+        record.kind === 'section' ? { colSpan: 0 } : {},
+      render: (_, record) => {
+        if (record.kind !== 'point') return null
+        return (
+          <RangeThresholdInput
+            disabled={record.editDisabled}
+            minValue={
+              record.override.high_threshold_min ?? record.point.high_threshold
+            }
+            maxValue={
+              record.override.high_threshold_max ?? 100
+            }
+            onChange={(min, max) =>
+              onPointOverrideChange(record.item.id, record.point.id, {
+                high_threshold_min: min,
+                high_threshold_max: max,
+                high_threshold: undefined,
+              })
+            }
+            label="高风险分"
+          />
+        )
+      },
     },
   ]
 
   return (
     <div style={{ width: '100%', textAlign: 'left' }}>
-      <Table<PointRowRecord>
+      <Table<FlatRowRecord>
+        className="rules-tree-table"
         columns={columns}
         dataSource={dataSource}
         pagination={false}
         size="small"
         rowKey="key"
         scroll={{ x: 720 }}
+        rowClassName={(record) =>
+          record.kind === 'section' ? 'rules-tree-row-section' : ''
+        }
+        onRow={(record) =>
+          record.kind === 'section' ? { id: `rules-section-${record.item.id}` } : {}
+        }
         locale={{
           emptyText: (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="该审核项下暂无审核点"
+              description="暂无审核点"
               style={{ padding: '24px 0' }}
             />
           ),
