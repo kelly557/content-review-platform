@@ -147,7 +147,7 @@ export function ItemLibrariesEditor({
       const updated = await auditItemsApi.update(code, item.id, {
         linked_library_ids: selectedIds,
       })
-      message.success('已保存关联库 (全局生效)')
+      message.success('已保存关联词库 (全局生效)')
       onSaved(updated)
       onCancel()
     } catch (e: unknown) {
@@ -191,7 +191,7 @@ export function ItemLibrariesEditor({
     >
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <div>
-          <Text strong>{'选择已激活的自定义库'}</Text>
+          <Text strong>{'选择已激活的自定义词库'}</Text>
           <div style={{ marginTop: 6 }}>
             {loading ? (
               <Spin size="small" />
@@ -239,7 +239,7 @@ export function ItemLibrariesEditor({
                 placeholder={
                   lockedType
                     ? `已锁定为 ${TYPE_LABEL[lockedType]} 类型,仅可选 ${TYPE_LABEL[lockedType]}`
-                    : '选择自定义库 (同 item 下只能选一种类型)'
+                    : '选择自定义词库 (同 item 下只能选一种类型)'
                 }
                 style={{ width: '100%' }}
                 options={options}

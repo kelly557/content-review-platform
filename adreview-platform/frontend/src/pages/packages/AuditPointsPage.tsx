@@ -144,7 +144,7 @@ export default function AuditPointsPage() {
                 </Link>
               </Tooltip>
             ) : showLimitedLabel ? (
-              <Tooltip title="通用审核点:仅允许修改启用 / 中/高风险分 / 关联自定义库">
+              <Tooltip title="通用审核点:仅允许修改启用 / 中/高风险分 / 关联自定义词库">
                 <Link
                   to={`/packages/${code}/items/${itemId}/points/${row.id}`}
                   style={{ color: '#94A3B8' }}

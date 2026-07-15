@@ -450,7 +450,7 @@ export default function ServiceRuleConfigPage() {
                 </Tag>
               ) : (
                 <Tag style={{ margin: 0, color: '#64748B' }}>
-                  仅启用 / 中高分 / 关联库
+                  仅启用 / 中高分 / 关联词库
                 </Tag>
               )}
             </Space>
