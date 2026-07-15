@@ -2,11 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   App,
   Button,
-  Checkbox,
   Empty,
   Grid,
   InputNumber,
-  Popover,
   Space,
   Table,
   Tag,
@@ -15,22 +13,17 @@ import {
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import {
-  AppstoreAddOutlined,
   CheckOutlined,
   CloseOutlined,
-  DatabaseOutlined,
   LockOutlined,
   PlusOutlined,
   UnlockOutlined,
 } from '@ant-design/icons'
 import { auditItemsApi } from '@/api/auditItems'
 import { auditPointsApi } from '@/api/auditPoints'
-import { librariesApi } from '@/api/libraries'
 import type {
   AuditItem,
   AuditPoint,
-  LibraryListItem,
-  LibraryType,
 } from '@/types/domain'
 import { type CategoryKey } from './constants'
 import {
@@ -86,14 +79,6 @@ const PACKAGE_TO_MEDIA: Record<string, CategoryKey> = {
   audio_audit_pro: 'audio',
   document_audit_pro: 'doc',
   video_audit_pro: 'video',
-}
-
-const ALLOWED_LIB_TYPES_BY_MEDIA: Record<CategoryKey, LibraryType[]> = {
-  image: ['word', 'reply'],
-  text: ['word', 'reply'],
-  audio: ['word', 'reply'],
-  doc: ['image', 'word', 'reply'],
-  video: ['image', 'word', 'reply'],
 }
 
 export default function RulesTreeView({
@@ -165,67 +150,28 @@ export default function RulesTreeView({
 
   const enabledSet = useMemo(() => new Set(enabledItemIds), [enabledItemIds])
 
-  const allowedLibTypes = ALLOWED_LIB_TYPES_BY_MEDIA[mediaKey]
-  const [libsCache, setLibsCache] = useState<LibraryListItem[]>([])
-  const [popoverOpenForItemId, setPopoverOpenForItemId] = useState<
-    number | null
-  >(null)
   const [pendingItems, setPendingItems] = useState<Set<number>>(new Set())
   const { message } = App.useApp()
 
-  useEffect(() => {
-    let cancel = false
-    Promise.all(
-      (['image', 'word', 'reply'] as LibraryType[]).map((t) =>
-        librariesApi
-          .list({ type: t, size: 200 })
-          .then((p) => p.items.filter((l) => !l.is_deleted && l.is_active))
-          .catch(() => [] as LibraryListItem[]),
-      ),
-    )
-      .then(([img, word, reply]) => {
-        if (cancel) return
-        setLibsCache([...img, ...word, ...reply])
-      })
-      .catch(() => {
-        if (!cancel) setLibsCache([])
-      })
-    return () => {
-      cancel = true
-    }
-  }, [refreshKey])
-
-  const visibleLibs = useMemo(
-    () => libsCache.filter((l) => allowedLibTypes.includes(l.library_type)),
-    [libsCache, allowedLibTypes],
-  )
-
-  const handleItemLibrariesPatched = (updated: AuditItem) => {
-    setItems((prev) =>
-      prev.map((it) => (it.id === updated.id ? updated : it)),
-    )
-  }
-
-  const handleToggleLibrary = async (
+  const handleRemoveLibrary = async (
     item: AuditItem,
     libraryId: number,
-    checked: boolean,
   ) => {
     if (!packageCode) return
     const currentIds = (item.linked_libraries ?? []).map((l) => l.library_id)
-    const nextIds = checked
-      ? Array.from(new Set([...currentIds, libraryId]))
-      : currentIds.filter((id) => id !== libraryId)
+    const nextIds = currentIds.filter((id) => id !== libraryId)
     setPendingItems((prev) => new Set(prev).add(item.id))
     try {
       const updated = await auditItemsApi.update(packageCode, item.id, {
         linked_library_ids: nextIds,
       })
-      handleItemLibrariesPatched(updated)
+      setItems((prev) =>
+        prev.map((it) => (it.id === updated.id ? updated : it)),
+      )
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response
         ?.data?.detail
-      message.error(detail ?? (e as Error).message ?? '关联失败')
+      message.error(detail ?? (e as Error).message ?? '移除失败')
     } finally {
       setPendingItems((prev) => {
         const next = new Set(prev)
@@ -233,13 +179,6 @@ export default function RulesTreeView({
         return next
       })
     }
-  }
-
-  const handleRemoveLibrary = async (
-    item: AuditItem,
-    libraryId: number,
-  ) => {
-    await handleToggleLibrary(item, libraryId, false)
   }
 
   // 计算每个 item 下"已选 point 数"用于左栏视觉标记
@@ -321,14 +260,6 @@ export default function RulesTreeView({
             onPick={(id) => setSelectedItemId(id)}
             loading={loading}
             emptyText="暂无通用规则"
-            onItemLibraryLink={onItemLibraryLink}
-            visibleLibs={visibleLibs}
-            popoverOpenForItemId={popoverOpenForItemId}
-            setPopoverOpenForItemId={setPopoverOpenForItemId}
-            pendingItems={pendingItems}
-            handleToggleLibrary={handleToggleLibrary}
-            handleRemoveLibrary={handleRemoveLibrary}
-            allowLibraryLink={mediaKey !== 'image'}
           />
           <ItemGroup
             title="自定义"
@@ -340,14 +271,6 @@ export default function RulesTreeView({
             onPick={(id) => setSelectedItemId(id)}
             loading={loading}
             emptyText="暂无自定义规则"
-            onItemLibraryLink={onItemLibraryLink}
-            visibleLibs={visibleLibs}
-            popoverOpenForItemId={popoverOpenForItemId}
-            setPopoverOpenForItemId={setPopoverOpenForItemId}
-            pendingItems={pendingItems}
-            handleToggleLibrary={handleToggleLibrary}
-            handleRemoveLibrary={handleRemoveLibrary}
-            allowLibraryLink={mediaKey !== 'image'}
           />
         </div>
 
@@ -401,14 +324,6 @@ function ItemGroup({
   onPick,
   loading,
   emptyText,
-  onItemLibraryLink,
-  visibleLibs,
-  popoverOpenForItemId,
-  setPopoverOpenForItemId,
-  pendingItems,
-  handleToggleLibrary,
-  handleRemoveLibrary: _handleRemoveLibrary,
-  allowLibraryLink,
 }: {
   title: string
   icon: React.ReactNode
@@ -419,18 +334,6 @@ function ItemGroup({
   onPick: (id: number) => void
   loading: boolean
   emptyText: string
-  onItemLibraryLink?: (item: AuditItem) => void
-  visibleLibs: LibraryListItem[]
-  popoverOpenForItemId: number | null
-  setPopoverOpenForItemId: (id: number | null) => void
-  pendingItems: Set<number>
-  handleToggleLibrary: (
-    item: AuditItem,
-    libraryId: number,
-    checked: boolean,
-  ) => Promise<void> | void
-  handleRemoveLibrary: (item: AuditItem, libraryId: number) => Promise<void> | void
-  allowLibraryLink: boolean
 }) {
   return (
     <div style={{ marginBottom: 8 }}>
@@ -509,95 +412,6 @@ function ItemGroup({
                 >
                   启用
                 </Tag>
-              )}
-              {allowLibraryLink && visibleLibs.length > 0 && (() => {
-                const linkedLibs = it.linked_libraries ?? []
-                const open = popoverOpenForItemId === it.id
-                return (
-                  <Popover
-                    trigger="click"
-                    open={open}
-                    onOpenChange={(next) =>
-                      setPopoverOpenForItemId(next ? it.id : null)
-                    }
-                    destroyTooltipOnHide
-                    placement="right"
-                    content={
-                      <LibraryChoiceList
-                        item={it}
-                        libOptions={visibleLibs}
-                        pending={pendingItems.has(it.id)}
-                        onToggle={handleToggleLibrary}
-                      />
-                    }
-                  >
-                    <Tooltip
-                      title={
-                        linkedLibs.length > 0
-                          ? `已关联 ${linkedLibs.length} 个自定义库，点击管理`
-                          : '为该审核项关联自定义库'
-                      }
-                    >
-                      <span
-                        role="button"
-                        aria-label={`关联库 ${it.name_cn}`}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4,
-                          padding: '0 6px',
-                          height: 22,
-                          borderRadius: 4,
-                          cursor: 'pointer',
-                          color: linkedLibs.length > 0 ? '#0369A1' : '#0EA5E9',
-                          background:
-                            linkedLibs.length > 0 ? '#E0F2FE' : 'transparent',
-                          fontSize: 12,
-                        }}
-                      >
-                        <AppstoreAddOutlined style={{ fontSize: 13 }} />
-                        自定义词库
-                        <Tag
-                          color="blue"
-                          bordered={false}
-                          style={{
-                            margin: 0,
-                            fontSize: 10,
-                            padding: '0 4px',
-                            lineHeight: '14px',
-                          }}
-                        >
-                          {linkedLibs.length}
-                        </Tag>
-                      </span>
-                    </Tooltip>
-                  </Popover>
-                )
-              })()}
-              {allowLibraryLink && onItemLibraryLink && visibleLibs.length === 0 && (
-                <Tooltip title="为该审核项关联自定义库">
-                  <span
-                    role="button"
-                    aria-label={`关联库 ${it.name_cn}`}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onItemLibraryLink(it)
-                    }}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 22,
-                      height: 22,
-                      borderRadius: 4,
-                      cursor: 'pointer',
-                      color: '#0EA5E9',
-                    }}
-                  >
-                    <AppstoreAddOutlined style={{ fontSize: 14 }} />
-                  </span>
-                </Tooltip>
               )}
             </div>
           )
@@ -1033,94 +847,5 @@ function RangeThresholdInput({
         />
       </Tooltip>
     </Space>
-  )
-}
-
-function LibraryChoiceList({
-  item,
-  libOptions,
-  pending,
-  onToggle,
-}: {
-  item: AuditItem
-  libOptions: LibraryListItem[]
-  pending: boolean
-  onToggle: (item: AuditItem, libraryId: number, checked: boolean) => void
-}) {
-  const currentIds = (item.linked_libraries ?? []).map((l) => l.library_id)
-  if (libOptions.length === 0) {
-    return (
-      <Empty
-        image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description={
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            暂无可用的自定义库
-          </Text>
-        }
-        style={{ padding: '8px 0' }}
-      />
-    )
-  }
-  return (
-    <div style={{ width: 280 }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          marginBottom: 8,
-        }}
-      >
-        <DatabaseOutlined style={{ color: '#2563EB' }} />
-        <Text strong style={{ fontSize: 12 }}>
-          为「{item.name_cn}」关联自定义库
-        </Text>
-      </div>
-      <Text
-        type="secondary"
-        style={{ fontSize: 12, display: 'block', marginBottom: 6 }}
-      >
-        勾选即时生效，可多选
-      </Text>
-      <Checkbox.Group
-        style={{
-          width: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-        }}
-        value={currentIds}
-        disabled={pending}
-        onChange={(allChecked) => {
-          const target = new Set<number>(allChecked as number[])
-          const current = new Set(currentIds)
-          const toAdd: number[] = []
-          const toRemove: number[] = []
-          target.forEach((id) => {
-            if (!current.has(id)) toAdd.push(id)
-          })
-          current.forEach((id) => {
-            if (!target.has(id)) toRemove.push(id)
-          })
-          toAdd.forEach((id) => onToggle(item, id, true))
-          toRemove.forEach((id) => onToggle(item, id, false))
-        }}
-      >
-        {libOptions.map((l) => (
-          <Checkbox key={l.id} value={l.id}>
-            <Space size={4} align="center">
-              <Tag
-                color={TYPE_COLOR_BY_LIB[l.library_type] ?? 'default'}
-                bordered={false}
-                style={{ margin: 0, fontSize: 11, padding: '0 6px' }}
-              >
-                {TYPE_LABEL_BY_LIB[l.library_type] ?? '?'}
-              </Tag>
-              <span style={{ fontSize: 12 }}>{l.name}</span>
-            </Space>
-          </Checkbox>
-        ))}
-      </Checkbox.Group>
-    </div>
   )
 }
