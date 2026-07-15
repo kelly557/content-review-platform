@@ -253,14 +253,24 @@ export default function AppLayout() {
     })
   })
 
+  const collectPaths = (
+    nodes: ReadonlyArray<NavNode | NavChild>,
+  ): string[] => {
+    const out: string[] = []
+    for (const n of nodes) {
+      const roleOk =
+        !('roles' in n) || !n.roles || n.roles.includes(user.role)
+      if ('path' in n && n.path && roleOk) {
+        out.push(n.path)
+      }
+      if ('children' in n && n.children) {
+        out.push(...collectPaths(n.children))
+      }
+    }
+    return out
+  }
   const allPaths = visibleSections.flatMap((section) =>
-    section.items.flatMap((node): string[] => {
-      if (node.kind === 'leaf') return [node.path]
-      const visibleChildren = node.children.filter(
-        (c) => !c.roles || c.roles.includes(user.role),
-      )
-      return [node.key, ...visibleChildren.map((c) => c.path).filter((p): p is string => Boolean(p))]
-    }),
+    collectPaths(section.items),
   )
   const candidates = allPaths
     .sort((a, b) => b.length - a.length)
@@ -270,7 +280,7 @@ export default function AppLayout() {
       (k) =>
         location.pathname === k ||
         (k.startsWith('/') && location.pathname.startsWith(`${k}/`)),
-    ) || '/overview'
+    ) ?? ''
 
   const openKeys = visibleSections
     .flatMap((section) => section.items)
