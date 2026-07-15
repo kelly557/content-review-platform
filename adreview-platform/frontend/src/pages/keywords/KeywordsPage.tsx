@@ -4,6 +4,7 @@ import {
   Button,
   DatePicker,
   Drawer,
+  Empty,
   Form,
   Input,
   Popconfirm,
@@ -25,13 +26,14 @@ import {
   DeleteOutlined,
   InboxOutlined,
   ReloadOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
 import dayjs, { type Dayjs } from 'dayjs'
 import { librariesApi } from '@/api/libraries'
 import type {
   Library,
   LibraryCreate,
+  LibraryItem,
   LibraryKind,
   LibraryListItem,
 } from '@/types/domain'
@@ -39,6 +41,9 @@ import { LIBRARY_KIND_OPTIONS } from '@/types/domain'
 import { parseWordsFile } from '@/lib/libraryImport'
 import { deriveEffectiveMeta } from '@/lib/libraryEffective'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
+import EditWordDrawer from '@/components/library/EditWordDrawer'
+import EditLibraryEffectiveModal from '@/components/library/EditLibraryEffectiveModal'
+import EditPlatformToggleModal from '@/components/library/EditPlatformToggleModal'
 import PlatformToggle from '@/components/library/PlatformToggle'
 import { useAuthStore } from '@/store'
 
@@ -59,7 +64,6 @@ interface CreateFormValues {
 export default function KeywordsPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
-  const navigate = useNavigate()
   const isSuperadmin = user?.role === 'superadmin' || user?.role === 'root_admin'
 
   const [filterKind, setFilterKind] = useState<LibraryKind>('黑名单')
@@ -75,6 +79,17 @@ export default function KeywordsPage() {
   const [createForm] = Form.useForm<CreateFormValues>()
 
   const [deleteTarget, setDeleteTarget] = useState<Library | null>(null)
+
+  // 词条编辑器状态 — 点 chip 打开 Drawer
+  const [editingLibrary, setEditingLibrary] = useState<Library | null>(null)
+  const [entryKeyword, setEntryKeyword] = useState('')
+  const [entries, setEntries] = useState<LibraryItem[]>([])
+  const [entriesTotal, setEntriesTotal] = useState(0)
+  const [entriesLoading, setEntriesLoading] = useState(false)
+  const [selectedEntryIds, setSelectedEntryIds] = useState<number[]>([])
+  const [addEntryOpen, setAddEntryOpen] = useState(false)
+  const [editEffOpen, setEditEffOpen] = useState(false)
+  const [editPlatformOpen, setEditPlatformOpen] = useState(false)
 
   const fetchLibraries = async () => {
     setLoading(true)
@@ -143,6 +158,135 @@ export default function KeywordsPage() {
     }
   }
 
+  // 打开词条编辑器
+  const openEntries = async (row: LibraryListItem) => {
+    setEditingLibrary(row as Library)
+    setEntryKeyword('')
+    setSelectedEntryIds([])
+    await fetchEntries(row.id, '')
+  }
+
+  const closeEntries = () => {
+    setEditingLibrary(null)
+    setEntries([])
+    setEntriesTotal(0)
+    setEntryKeyword('')
+    setSelectedEntryIds([])
+    setAddEntryOpen(false)
+  }
+
+  const fetchEntries = async (libraryId: number, kw: string) => {
+    setEntriesLoading(true)
+    try {
+      const data = await librariesApi.listItems(libraryId, {
+        keyword: kw || undefined,
+        size: 50,
+      })
+      setEntries(data.items)
+      setEntriesTotal(data.total)
+      setSelectedEntryIds([])
+    } finally {
+      setEntriesLoading(false)
+    }
+  }
+
+  const reloadEntries = async () => {
+    if (!editingLibrary) return
+    // 拉最新 library 元数据
+    try {
+      const fresh = await librariesApi.get(editingLibrary.id)
+      setEditingLibrary(fresh)
+      await fetchEntries(fresh.id, entryKeyword)
+      void fetchLibraries()
+    } catch (e: unknown) {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(d ?? '刷新失败')
+    }
+  }
+
+  const onDeleteEntry = async (entryId: number) => {
+    if (!editingLibrary) return
+    try {
+      await librariesApi.deleteItem(editingLibrary.id, entryId)
+      message.success('已删除')
+      await reloadEntries()
+    } catch (e: unknown) {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(d ?? '删除失败')
+    }
+  }
+
+  const onBatchDeleteEntries = async () => {
+    if (!editingLibrary || selectedEntryIds.length === 0) return
+    try {
+      const res = await librariesApi.batchDeleteItems(
+        editingLibrary.id,
+        selectedEntryIds,
+      )
+      message.success(`已删除 ${res.deleted} 个`)
+      await reloadEntries()
+    } catch (e: unknown) {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(d ?? '删除失败')
+    }
+  }
+
+  const effectiveMeta = editingLibrary
+    ? deriveEffectiveMeta(
+        editingLibrary.is_active,
+        editingLibrary.effective_from ?? null,
+        editingLibrary.effective_until ?? null,
+      )
+    : null
+
+  function effectiveTooltip(lib: Library): string {
+    if (lib.library_type === 'reply') return '代答库不支持有效时间'
+    if (!lib.effective_from && !lib.effective_until) return '永久：一直生效'
+    return '到期后审核默认不生效'
+  }
+
+  const entryCols: TableColumnsType<LibraryItem> = [
+    {
+      title: '文本',
+      dataIndex: 'word',
+      render: (v: string | null, row) => (
+        <Text style={{ fontFamily: v ? 'monospace' : undefined, color: '#020617' }}>
+          {v ?? row.original_filename ?? '—'}
+        </Text>
+      ),
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      width: '36%',
+      defaultSortOrder: 'descend',
+      sorter: (a, b) =>
+        dayjs(a.created_at).valueOf() - dayjs(b.created_at).valueOf(),
+      render: (v: string) => (
+        <Text style={{ color: '#64748B', fontSize: 12 }}>
+          {dayjs(v).format('YYYY-MM-DD HH:mm:ss')}
+        </Text>
+      ),
+    },
+    {
+      title: '操作',
+      width: '12%',
+      render: (_v, row) => (
+        <Popconfirm
+          title="确认删除该词条？"
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+          onConfirm={() => onDeleteEntry(row.id)}
+        >
+          <Button type="link" size="small" danger>
+            删除
+          </Button>
+        </Popconfirm>
+      ),
+    },
+  ]
+
   const cols: TableColumnsType<LibraryListItem> = [
     {
       title: '名称',
@@ -150,7 +294,14 @@ export default function KeywordsPage() {
       width: '24%',
       render: (v: string, row) => (
         <Space size={6}>
-          <span style={{ color: '#020617', fontWeight: 500 }}>{v}</span>
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0, fontWeight: 500 }}
+            onClick={() => openEntries(row)}
+          >
+            {v}
+          </Button>
           {!row.is_active && <Tag>已停用</Tag>}
         </Space>
       ),
@@ -218,9 +369,9 @@ export default function KeywordsPage() {
               type="link"
               size="small"
               icon={<EditOutlined />}
-              onClick={() => navigate(`/resources/words/${row.id}`)}
+              onClick={() => openEntries(row)}
             >
-              编辑词条
+              管理词条
             </Button>
             {deleteDisabled ? (
               <Tooltip title="通用平台库:仅超级管理员可删除">
@@ -589,6 +740,184 @@ export default function KeywordsPage() {
         onCancel={() => setDeleteTarget(null)}
         onSuccess={() => {
           setDeleteTarget(null)
+          void fetchLibraries()
+        }}
+      />
+
+      {/* 词条编辑器 Drawer — 点 chip 名 / '管理词条' 打开 */}
+      <Drawer
+        open={editingLibrary != null}
+        onClose={closeEntries}
+        width={780}
+        destroyOnClose
+        title={
+          editingLibrary ? (
+            <Space size={8} align="center" wrap>
+              <Text strong>{editingLibrary.name}</Text>
+              {editingLibrary.kind && (
+                <Tag color={editingLibrary.kind === '黑名单' ? 'red' : 'green'}>
+                  {editingLibrary.kind}
+                </Tag>
+              )}
+              {effectiveMeta && (
+                <Tooltip title={effectiveTooltip(editingLibrary)}>
+                  <Tag color={effectiveMeta.color}>{effectiveMeta.status}</Tag>
+                </Tooltip>
+              )}
+              {editingLibrary.is_platform && (
+                <Tag color="purple">通用平台</Tag>
+              )}
+              {!editingLibrary.is_active && <Tag>已停用</Tag>}
+            </Space>
+          ) : (
+            '词条'
+          )
+        }
+        extra={
+          editingLibrary ? (
+            <Space>
+              <Button
+                type="text"
+                size="small"
+                icon={<ClockCircleOutlined />}
+                onClick={() => setEditEffOpen(true)}
+              >
+                编辑有效期
+              </Button>
+              {isSuperadmin && (
+                <Button
+                  type="text"
+                  size="small"
+                  onClick={() => setEditPlatformOpen(true)}
+                >
+                  {editingLibrary.is_platform ? '改为个性化' : '设为通用平台'}
+                </Button>
+              )}
+            </Space>
+          ) : null
+        }
+      >
+        {editingLibrary && (
+          <>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 12,
+                flexWrap: 'wrap',
+                gap: 12,
+              }}
+            >
+              <Space>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setAddEntryOpen(true)}
+                  disabled={!editingLibrary.is_active}
+                >
+                  添加
+                </Button>
+                <Input.Search
+                  placeholder="请输入文本"
+                  allowClear
+                  style={{ width: 260 }}
+                  onSearch={(v) => {
+                    const kw = v.trim()
+                    setEntryKeyword(kw)
+                    void fetchEntries(editingLibrary.id, kw)
+                  }}
+                />
+              </Space>
+              <Space>
+                <Button icon={<ReloadOutlined />} onClick={() => void reloadEntries()} />
+              </Space>
+            </div>
+            {!editingLibrary.is_active && (
+              <Alert
+                type="warning"
+                showIcon
+                message="该词库已停用,无法添加新词条"
+                style={{ marginBottom: 12 }}
+              />
+            )}
+
+            <Table<LibraryItem>
+              rowKey="id"
+              loading={entriesLoading}
+              dataSource={entries}
+              columns={entryCols}
+              rowSelection={{
+                selectedRowKeys: selectedEntryIds,
+                onChange: (keys) => setSelectedEntryIds(keys.map(Number)),
+              }}
+              pagination={{
+                total: entriesTotal,
+                pageSize: 50,
+                showSizeChanger: false,
+                showTotal: (t) => `共 ${t} 条`,
+              }}
+              size="middle"
+              scroll={{ x: true }}
+              locale={{ emptyText: <Empty description="暂无词条,点击「添加」批量导入" /> }}
+            />
+
+            {entriesTotal > 0 && (
+              <div
+                style={{
+                  position: 'sticky',
+                  bottom: 0,
+                  background: '#fff',
+                  padding: '8px 0',
+                  marginTop: 12,
+                  borderTop: '1px solid #E2E8F0',
+                }}
+              >
+                <Popconfirm
+                  title={`确认删除 ${selectedEntryIds.length} 个词条？`}
+                  disabled={selectedEntryIds.length === 0}
+                  onConfirm={onBatchDeleteEntries}
+                >
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    disabled={selectedEntryIds.length === 0}
+                  >
+                    批量删除({selectedEntryIds.length})
+                  </Button>
+                </Popconfirm>
+              </div>
+            )}
+          </>
+        )}
+      </Drawer>
+
+      <EditWordDrawer
+        open={addEntryOpen}
+        library={editingLibrary}
+        onCancel={() => setAddEntryOpen(false)}
+        onSuccess={() => {
+          setAddEntryOpen(false)
+          void reloadEntries()
+        }}
+      />
+      <EditLibraryEffectiveModal
+        open={editEffOpen}
+        library={editingLibrary}
+        onClose={() => setEditEffOpen(false)}
+        onSuccess={(updated) => {
+          setEditingLibrary(updated)
+          setEditEffOpen(false)
+          void fetchLibraries()
+        }}
+      />
+      <EditPlatformToggleModal
+        open={editPlatformOpen}
+        library={editingLibrary}
+        onClose={() => setEditPlatformOpen(false)}
+        onSuccess={(updated) => {
+          setEditingLibrary(updated)
+          setEditPlatformOpen(false)
           void fetchLibraries()
         }}
       />
