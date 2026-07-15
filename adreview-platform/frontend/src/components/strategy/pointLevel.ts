@@ -5,11 +5,18 @@ export type PointMap = Record<number, boolean>
 export type ItemPointMap = Record<number, PointMap>
 export type MediaPointMap = Record<CategoryKey, ItemPointMap>
 
-/** 单个 point 的策略级 override（中/高风险分 + 关联库） */
+/** 单个 point 的策略级 override（中/高风险分）。
+ * 关联自定义图库词库已上移至审核项；策略级不再持有 linked_library_ids override。 */
 export interface PointOverride {
+  /** 单值（兼容旧数据）。优先使用区间字段。 */
   medium_threshold?: number
   high_threshold?: number
-  linked_library_ids?: number[]
+  /** 区间形态：中风险分 = [min, max] */
+  medium_threshold_min?: number
+  medium_threshold_max?: number
+  /** 区间形态：高风险分 = [min, max] */
+  high_threshold_min?: number
+  high_threshold_max?: number
 }
 /** itemId → pointId → override */
 export type ItemPointOverrideMap = Record<number, Record<number, PointOverride>>
@@ -83,8 +90,9 @@ export function flattenEnabledPoints(
 }
 
 /**
- * 同时把 MediaPointOverrideMap 中的覆盖（中/高风险分 + 关联库）合并到结果。
+ * 同时把 MediaPointOverrideMap 中的覆盖（中/高风险分）合并到结果。
  * 仅对 is_enabled=true 的 point 输出 override；is_enabled=false 不带。
+ * 「关联自定义图库词库」已从策略级 override 移除（已上移至审核项）。
  */
 export function flattenEnabledPointsWithOverride(
   pointMap: MediaPointMap,
@@ -112,8 +120,14 @@ export function flattenEnabledPointsWithOverride(
             ref.medium_threshold = ov.medium_threshold
           if (ov.high_threshold !== undefined)
             ref.high_threshold = ov.high_threshold
-          if (ov.linked_library_ids !== undefined)
-            ref.linked_library_ids = ov.linked_library_ids
+          if (ov.medium_threshold_min !== undefined)
+            ref.medium_threshold_min = ov.medium_threshold_min
+          if (ov.medium_threshold_max !== undefined)
+            ref.medium_threshold_max = ov.medium_threshold_max
+          if (ov.high_threshold_min !== undefined)
+            ref.high_threshold_min = ov.high_threshold_min
+          if (ov.high_threshold_max !== undefined)
+            ref.high_threshold_max = ov.high_threshold_max
         }
         out.push(ref)
       }

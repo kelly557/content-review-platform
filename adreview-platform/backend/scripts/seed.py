@@ -577,7 +577,7 @@ DEFAULT_AUDIT_POINTS: list[tuple[str, str, str, str, str, float, float, str]] = 
     ("text_audit_pro", "tx_minor_protection", "tx_minor_protection","未成年保护",          "未成年人保护违规",            55.0, 80.0, "高风险"),
     ("text_audit_pro", "tx_values",           "tx_values",          "价值观",              "价值观违规",                  55.0, 80.0, "中风险"),
     ("text_audit_pro", "tx_illegal",          "tx_illegal",         "违法违规",            "违法违规",                    60.0, 85.0, "高风险"),
-    ("text_audit_pro", "tx_privacy",          "tx_privacy_pii",     "PII 检测",            "PII 检测：身份证/手机/银行卡", 60.0, 85.0, "高风险"),
+    ("text_audit_pro", "tx_privacy",          "tx_privacy_pii",     "PII 检测",            "PII 检测：身份证/手机/银行卡", 60.0, 85.0, "敏感"),
     ("text_audit_pro", "tx_privacy",          "tx_privacy_contact", "联系方式检测",        "联系方式检测：地址/邮箱/微信", 55.0, 80.0, "中风险"),
     ("text_audit_pro", "tx_promptattack",     "tx_promptattack_basic","基础越狱指令",      "基础越狱指令识别",          70.0, 90.0, "高风险"),
     ("text_audit_pro", "tx_promptattack",     "tx_promptattack_adv", "高级越狱指令",        "高级越狱指令识别",            65.0, 85.0, "高风险"),

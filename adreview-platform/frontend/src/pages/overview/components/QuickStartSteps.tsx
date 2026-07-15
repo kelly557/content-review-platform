@@ -56,7 +56,7 @@ const STEPS: StepDef[] = [
     description: '配置审核策略、规则、词库 / 图片库 / 代答库、人工审核策略。',
     ctas: [
       { label: '审核策略', to: '/strategies', primary: true },
-      { label: '知识库', to: '/knowledge/words' },
+      { label: '资源库', to: '/resources/words' },
       { label: '人工审核策略', to: '/human-review-rules' },
     ],
     visibleTo: ['admin', 'mlr'],

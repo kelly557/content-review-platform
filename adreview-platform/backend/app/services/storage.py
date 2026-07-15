@@ -109,18 +109,23 @@ def export_path(name: str) -> Path:
     return settings.storage_root / "exports" / name
 
 
-def _safe_knowledge_key(doc_id: str, original_filename: str) -> str:
+def _safe_knowledge_key(doc_id: int, original_filename: str, version_no: int) -> str:
     ext = Path(original_filename).suffix.lower()
     if not ext:
         ext = ".bin"
     stamp = datetime.utcnow().strftime("%Y%m")
-    return f"knowledge/{stamp}/{doc_id}{ext}"
+    return f"knowledge/{stamp}/{doc_id}/v{version_no}{ext}"
 
 
 def save_knowledge_upload(
-    doc_id: str, original_filename: str, source: BinaryIO
+    doc_id: int,
+    version_no: int,
+    original_filename: str,
+    source: BinaryIO,
+    max_bytes: int | None = None,
 ) -> tuple[str, int, str]:
-    """Save a knowledge base document (PDF/TXT/MD) to the knowledge namespace.
+    """Stream a policy knowledge document to disk without buffering the
+    whole file in memory.
 
     Returns (storage_key, size, sha256).
     """
@@ -128,24 +133,34 @@ def save_knowledge_upload(
     if not original_filename:
         raise StorageError("filename required")
 
-    sha = hashlib.sha256()
-    size = 0
-    buf = bytearray()
-    while True:
-        chunk = source.read(1024 * 1024)
-        if not chunk:
-            break
-        buf.extend(chunk)
-        sha.update(chunk)
-        size += len(chunk)
-    if size == 0:
-        raise StorageError("empty file")
-    if size > settings.storage_max_upload_mb * 1024 * 1024:
-        raise StorageError(f"file exceeds max size {settings.storage_max_upload_mb}MB")
-
-    key = _safe_knowledge_key(doc_id, original_filename)
+    cap = (
+        max_bytes
+        if max_bytes is not None
+        else settings.storage_max_upload_mb * 1024 * 1024
+    )
+    key = _safe_knowledge_key(doc_id, original_filename, version_no)
     dest_path = settings.storage_root / "uploads" / key
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    with dest_path.open("wb") as out:
-        out.write(bytes(buf))
+
+    sha = hashlib.sha256()
+    size = 0
+    try:
+        with dest_path.open("wb") as out:
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > cap:
+                    raise StorageError(f"file exceeds max size {cap // (1024 * 1024)}MB")
+                out.write(chunk)
+                sha.update(chunk)
+    except StorageError:
+        dest_path.unlink(missing_ok=True)
+        raise
+
+    if size == 0:
+        dest_path.unlink(missing_ok=True)
+        raise StorageError("empty file")
+
     return key, size, sha.hexdigest()

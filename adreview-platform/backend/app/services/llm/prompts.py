@@ -57,7 +57,8 @@ def build_moderation_prompt(text_body: str, enabled_services: list[str]) -> Tupl
       "label_cn": "<中文违规名，例如 医疗绝对化宣称>",
       "score": 0.0,
       "quote": "<必须是上面待审核文本中真实存在的子串，最长 60 字>",
-      "sensitive_grade": "S0|S1|S2|S3"
+      "sensitive_grade": "S0|S1|S2|S3",
+      "risk": "高风险|中风险|低风险|敏感|无风险 (可选)"
     }}
   ],
   "rule_hits": [
@@ -78,7 +79,8 @@ def build_moderation_prompt(text_body: str, enabled_services: list[str]) -> Tupl
 2. score 在 [0, 1] 之间，越高越确定。
 3. sensitive_grade：PII-only（身份证/手机号/住址）→ S1；明显违规 → S2；高危合规事件 → S3；其他 → S0。
 4. 不输出 schema 之外的字段。
-5. 直接以 ``{{`` 开头，不要加 markdown 围栏。"""
+5. 直接以 ``{{`` 开头，不要加 markdown 围栏。
+6. `risk_level` 字段不得低于所有 hit.risk 字段的最高档。"""
     return _SYSTEM, user
 
 

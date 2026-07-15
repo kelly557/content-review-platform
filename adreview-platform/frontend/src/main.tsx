@@ -23,7 +23,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <ConfigProvider locale={zhCN} theme={theme}>
       <AntdApp>
         <MessageBridge />
-        <BrowserRouter>
+        <BrowserRouter
+          future={{ v7_relativeSplatPath: true, v7_startTransition: true }}
+        >
           <App />
         </BrowserRouter>
       </AntdApp>

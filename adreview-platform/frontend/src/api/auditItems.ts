@@ -35,6 +35,30 @@ export const auditItemsApi = {
       .put<AuditItem>(`/packages/${packageCode}/items/${itemId}`, payload)
       .then((r) => r.data)
   },
+  /** 通用规则「切换生效小模型版本」 */
+  setActiveModelVersion(packageCode: string, itemId: number, versionId: number | null) {
+    return api
+      .put<AuditItem>(`/packages/${packageCode}/items/${itemId}`, {
+        active_small_model_version_id: versionId,
+      })
+      .then((r) => r.data)
+  },
+  /** 个性化规则「切换生效大模型版本」(LLM，prompt 执行器) */
+  setActiveLargeModelVersion(packageCode: string, itemId: number, versionId: number | null) {
+    return api
+      .put<AuditItem>(`/packages/${packageCode}/items/${itemId}`, {
+        active_large_model_version_id: versionId,
+      })
+      .then((r) => r.data)
+  },
+  /** 个性化规则「关联知识文档」全量替换 */
+  setKnowledgeDocuments(packageCode: string, itemId: number, documentIds: number[]) {
+    return api
+      .put<AuditItem>(`/packages/${packageCode}/items/${itemId}`, {
+        knowledge_document_ids: documentIds,
+      })
+      .then((r) => r.data)
+  },
   remove(packageCode: string, itemId: number) {
     return api
       .delete(`/packages/${packageCode}/items/${itemId}`)

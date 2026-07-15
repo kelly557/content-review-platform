@@ -10,17 +10,35 @@ export const MENU_TREE: MenuNode[] = [
     label: '审核策略',
     children: [
       { key: 'strategies-list', label: '策略列表', permissions: ['view', 'edit', 'delete'] },
-      { key: 'strategies-image', label: '图片审核规则', permissions: ['view', 'edit', 'delete'] },
-      { key: 'strategies-text', label: '文本审核规则', permissions: ['view', 'edit', 'delete'] },
+      {
+        key: 'strategies-image-group',
+        label: '图片审核规则',
+        permissions: ['view', 'edit', 'delete'],
+        children: [
+          { key: 'rules-general-image', label: '通用图片规则', permissions: ['view', 'edit', 'delete'] },
+          { key: 'rules-personal-image', label: '个性化图片规则', permissions: ['view', 'edit', 'delete'] },
+        ],
+      },
+      {
+        key: 'strategies-text-group',
+        label: '文本审核规则',
+        permissions: ['view', 'edit', 'delete'],
+        children: [
+          { key: 'rules-general-text', label: '通用文本规则', permissions: ['view', 'edit', 'delete'] },
+          { key: 'rules-personal-text', label: '个性化文本规则', permissions: ['view', 'edit', 'delete'] },
+        ],
+      },
     ],
   },
   {
-    key: 'knowledge',
-    label: '知识库',
+    key: 'resources',
+    label: '资源库',
     children: [
-      { key: 'knowledge-words', label: '词库', permissions: ['view', 'edit', 'delete'] },
-      { key: 'knowledge-images', label: '图片库', permissions: ['view', 'edit', 'delete'] },
-      { key: 'knowledge-replies', label: '代答库', permissions: ['view', 'edit', 'delete'] },
+      { key: 'resources-words', label: '词库', permissions: ['view', 'edit', 'delete'] },
+      { key: 'resources-models', label: '模型库', permissions: ['view', 'edit', 'delete'] },
+      { key: 'resources-images', label: '图片库', permissions: ['view', 'edit', 'delete'] },
+      { key: 'resources-replies', label: '代答库', permissions: ['view', 'edit', 'delete'] },
+      { key: 'resources-knowledge', label: '知识库', permissions: ['view', 'edit', 'delete'] },
     ],
   },
   { key: 'human-review-rules', label: '人工审核策略', permissions: ['view', 'edit', 'delete'] },

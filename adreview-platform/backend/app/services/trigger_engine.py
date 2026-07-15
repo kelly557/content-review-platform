@@ -249,10 +249,14 @@ async def _query_materials(db: AsyncSession, trigger: Trigger, batch_size: int) 
 
     Refines by spec.scope.material_type if present. Heavy filtering
     (date / tag / status exclusions) lives in spec.scope for future use.
+
+    Incremental mode (spec.scope == 'incremental'): only materials whose
+    updated_at is strictly greater than the trigger's last_run_at are scanned.
     """
     spec = trigger.spec or {}
     scope = spec.get("scope", {}) if isinstance(spec, dict) else {}
     material_types = scope.get("material_type") if isinstance(scope, dict) else None
+    incremental = scope == "incremental"
 
     q = select(Material).where(
         Material.status.in_(
@@ -266,6 +270,8 @@ async def _query_materials(db: AsyncSession, trigger: Trigger, batch_size: int) 
     )
     if material_types:
         q = q.where(Material.material_type.in_(material_types))
+    if incremental and trigger.last_run_at is not None:
+        q = q.where(Material.updated_at > trigger.last_run_at)
     q = q.order_by(Material.id.asc()).limit(batch_size)
     result = await db.execute(q)
     return list(result.scalars())

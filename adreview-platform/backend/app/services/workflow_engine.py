@@ -117,6 +117,7 @@ async def start_instance(
         workflow_instance_id=instance.id,
         stage_key=first["key"],
         title=task_title,
+        strategy_id=strategy.id if strategy is not None else None,
         review_type=ReviewType.MACHINE if review_type == "machine" else ReviewType.HUMAN,
         machine_status=MachineStatus.PENDING if review_type == "machine" else None,
     )

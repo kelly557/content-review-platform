@@ -13,11 +13,21 @@ import {
   Statistic,
   Table,
   Tag as AntTag,
+  Tooltip,
   Typography,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { SettingOutlined } from '@ant-design/icons'
 import { reportsApi, alertsApi } from '@/api/reports'
 import type { AlertEventOut, AnomalyResponse } from '@/types/domain'
+import { useAnomalyThresholds } from '@/hooks/useAnomalyThresholds'
+import {
+  ANOMALY_RULE_CODES,
+  AnomalyRuleCode,
+  AnomalyThreshold,
+  SEVERITY_TAG_COLOR,
+} from '@/lib/anomalyThresholds'
+import AnomalyThresholdModal from './AnomalyThresholdModal'
 import { MultiMetricLineChart } from '../charts'
 
 const { Text } = Typography
@@ -43,6 +53,9 @@ const RULE_LABEL: Record<string, string> = {
   reject_rate_spike: '拒绝率突升',
   high_risk_concentration: '高风险账号聚集',
   submit_drop: '提交量骤降',
+  reject_rate_high: '拒绝率异常',
+  high_risk_content_high: '高风险内容异常',
+  high_risk_account_concentration: '高风险账号聚集',
 }
 
 export default function AnomalyTab() {
@@ -53,6 +66,12 @@ export default function AnomalyTab() {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [acking, setAcking] = useState<number | null>(null)
+  const [thresholdModalOpen, setThresholdModalOpen] = useState(false)
+  const { thresholds, setAll, reset } = useAnomalyThresholds()
+
+  const tReject = thresholds[ANOMALY_RULE_CODES.REJECT_RATE]
+  const tContent = thresholds[ANOMALY_RULE_CODES.HIGH_RISK_CONTENT]
+  const tAccount = thresholds[ANOMALY_RULE_CODES.HIGH_RISK_ACCOUNT]
 
   const refresh = async (win: string, st: typeof status) => {
     setLoading(true)
@@ -107,6 +126,34 @@ export default function AnomalyTab() {
       title: '指标',
       dataIndex: 'metric',
       width: 140,
+    },
+    {
+      title: '阈值',
+      key: 'threshold',
+      width: 160,
+      render: (_v, row) => {
+        const t = thresholds[row.rule_code as AnomalyRuleCode] as
+          | AnomalyThreshold
+          | undefined
+        if (!t) {
+          return <Text type="secondary">—</Text>
+        }
+        const unit = t.unit === '%' ? '%' : ''
+        return (
+          <Space direction="vertical" size={0}>
+            <Text style={{ fontSize: 12 }}>
+              {t.metric} ≥ {t.threshold}
+              {unit}
+            </Text>
+            <AntTag
+              color={SEVERITY_TAG_COLOR[t.severity]}
+              style={{ fontSize: 10, margin: 0 }}
+            >
+              {t.severity === 'warn' ? '预警' : '严重'}
+            </AntTag>
+          </Space>
+        )
+      },
     },
     {
       title: '观测值',
@@ -183,8 +230,28 @@ export default function AnomalyTab() {
             style={{ minWidth: 120 }}
           />
           <Button onClick={() => void refresh(window, status)}>刷新</Button>
+          <Tooltip title="配置本机预警阈值 (localStorage)">
+            <Button
+              icon={<SettingOutlined />}
+              onClick={() => setThresholdModalOpen(true)}
+            >
+              配置阈值
+            </Button>
+          </Tooltip>
         </Space>
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+          阈值仅本浏览器生效, 团队统一请在 admin 后台配置 (后续接入);
+          当前 3 项阈值: 拒绝率 ≥ {tReject.threshold}%, 高风险内容 ≥ {tContent.threshold} 条, 高风险账号 ≥ {tAccount.threshold} 个。
+        </Text>
       </Card>
+
+      <AnomalyThresholdModal
+        open={thresholdModalOpen}
+        thresholds={thresholds}
+        onSave={setAll}
+        onReset={reset}
+        onClose={() => setThresholdModalOpen(false)}
+      />
 
       {err && <Text type="danger">{err}</Text>}
 
@@ -192,12 +259,29 @@ export default function AnomalyTab() {
         <Row gutter={[16, 16]}>
           <Col xs={12} md={6}>
             <Statistic
-              title="当前拒绝率"
+              title={`当前拒绝率 (阈值 ${tReject.threshold}%)`}
               value={anomaly?.current.reject_rate ?? 0}
               precision={2}
               suffix="%"
-              valueStyle={{ color: '#DC2626' }}
+              valueStyle={{
+                color:
+                  (anomaly?.current.reject_rate ?? 0) >= tReject.threshold
+                    ? '#DC2626'
+                    : '#475569',
+              }}
             />
+            <Text
+              type={
+                (anomaly?.current.reject_rate ?? 0) >= tReject.threshold
+                  ? 'danger'
+                  : 'secondary'
+              }
+              style={{ fontSize: 11 }}
+            >
+              {(anomaly?.current.reject_rate ?? 0) >= tReject.threshold
+                ? `已超阈值 (${tReject.threshold}%)`
+                : `正常 (阈值 ${tReject.threshold}%)`}
+            </Text>
           </Col>
           <Col xs={12} md={6}>
             <Statistic
@@ -219,16 +303,45 @@ export default function AnomalyTab() {
           </Col>
           <Col xs={12} md={6}>
             <Statistic
-              title="提交量 / 高风险账号"
-              value={anomaly?.current.submitted ?? 0}
+              title={`高风险账号 (1h, 阈值 ${tAccount.threshold})`}
+              value={anomaly?.current.high_risk_accounts ?? 0}
               suffix={
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {' '}
-                  / {anomaly?.current.high_risk_accounts ?? 0}
+                  / 提交 {anomaly?.current.submitted ?? 0}
                 </Text>
               }
-              valueStyle={{ color: '#2563EB' }}
+              valueStyle={{
+                color:
+                  (anomaly?.current.high_risk_accounts ?? 0) >= tAccount.threshold
+                    ? '#DC2626'
+                    : '#475569',
+              }}
             />
+            <Text
+              type={
+                (anomaly?.current.high_risk_accounts ?? 0) >= tAccount.threshold
+                  ? 'danger'
+                  : 'secondary'
+              }
+              style={{ fontSize: 11 }}
+            >
+              {(anomaly?.current.high_risk_accounts ?? 0) >= tAccount.threshold
+                ? `已超阈值 (${tAccount.threshold})`
+                : `正常 (阈值 ${tAccount.threshold})`}
+            </Text>
+          </Col>
+          <Col xs={12} md={6}>
+            <Card size="small" style={{ background: '#FAFAFA' }}>
+              <Statistic
+                title={`高风险内容 (1h, 阈值 ${tContent.threshold})`}
+                value={'—'}
+                valueStyle={{ color: '#94A3B8', fontSize: 22 }}
+              />
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                待后端补 high_risk_content_count 字段
+              </Text>
+            </Card>
           </Col>
         </Row>
         <div style={{ height: 320, marginTop: 16 }}>

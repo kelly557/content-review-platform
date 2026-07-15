@@ -10,6 +10,7 @@ import os
 import pytest_asyncio
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 # Default to the local dev DB; override via env if needed.
 DEFAULT_DSN = "postgresql+asyncpg://adreview:adreview@localhost:5432/adreview"
@@ -27,6 +28,47 @@ def _make_test_schema_name() -> str:
     return f"test_{uuid.uuid4().hex[:12]}"
 
 
+def _apply_schema(schema: str | None) -> None:
+    """Stamp the schema on every table and column. When None, reset to default.
+
+    SQLAlchemy 2 的 ORM 层通过 cache_key 跟踪 schema。column.table 重新绑定
+    后需要重新设置 column._cache_key_traversal，否则会沿用上一个测试的
+    编译表达式（包含旧 schema 名）。
+    """
+    for table in Base.metadata.tables.values():
+        table.schema = schema
+        for column in table.columns:
+            column.table = table
+            # 清 column 自身的 annotations cache 和 compiler dispatch，
+            # 强制下次访问时重新生成绑定 schema 名的表达式
+            try:
+                for attr in ("__annotations_cache__", "_compile_w_cache"):
+                    if hasattr(column, attr):
+                        v = getattr(column, attr, None)
+                        if v and hasattr(v, "clear"):
+                            v.clear()
+                        elif isinstance(v, dict):
+                            v.clear()
+            except Exception:
+                pass
+    # 同时清掉 ORM mapper 的全局 compile cache
+    try:
+        from sqlalchemy.orm import mapper as _mapper_mod
+
+        for m in _mapper_mod.Mapper.registry.mappers:
+            cache = getattr(m, "_compiled_cache", None)
+            if cache is not None and hasattr(cache, "clear"):
+                cache.clear()
+            # mapper 上每个 ColumnProperty 也可能持有 cache
+            for prop in m.attrs.values():
+                for attr in ("_cache_key_traversal", "__annotations_cache__"):
+                    v = getattr(prop, attr, None)
+                    if isinstance(v, dict) and hasattr(v, "clear"):
+                        v.clear()
+    except Exception:
+        pass
+
+
 @pytest_asyncio.fixture
 async def db_engine():
     dsn = os.environ.get("DATABASE_URL", DEFAULT_DSN)
@@ -37,10 +79,14 @@ async def db_engine():
         conn.execute(text(f'CREATE SCHEMA "{schema}"'))
     sync_engine.dispose()
 
-    engine = create_async_engine(dsn, connect_args={"server_settings": {"search_path": schema}})
-    # Force all models to use this schema.
-    for table in Base.metadata.tables.values():
-        table.schema = schema
+    # 关键：每次测试都新建一个 NullPool 的 engine，避免连接池复用导致 cached statement 残留
+    # 上一个测试的 search_path。
+    engine = create_async_engine(
+        dsn,
+        connect_args={"server_settings": {"search_path": schema}},
+        poolclass=NullPool,
+    )
+    _apply_schema(schema)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -54,8 +100,7 @@ async def db_engine():
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         sync_engine.dispose()
         # Reset schema assignment so other tests don't leak it.
-        for table in Base.metadata.tables.values():
-            table.schema = None
+        _apply_schema(None)
 
 
 @pytest_asyncio.fixture

@@ -11,10 +11,13 @@ from app.api.v1 import (
     detection_rules,
     dispositions,
     health,
+    knowledge_documents,
     libraries,
     material_packages,
     materials,
     query,
+    registered_models,
+    registered_providers,
     reports,
     reviews,
     rule_sets,
@@ -53,3 +56,7 @@ api_router.include_router(health.router)
 api_router.include_router(rule_sets.router)
 api_router.include_router(dispositions.router)
 api_router.include_router(admin_import_rules.router)
+api_router.include_router(knowledge_documents.router)
+api_router.include_router(registered_models.router)
+api_router.include_router(registered_models.credentials_router)
+api_router.include_router(registered_providers.router)

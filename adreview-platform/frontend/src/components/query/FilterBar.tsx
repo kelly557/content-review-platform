@@ -3,9 +3,11 @@ import { DatePicker, Flex, Input, Select } from 'antd'
 import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import {
+  CONTENT_MEDIA_OPTIONS,
   DETECTION_MODALITIES,
   FEEDBACK_OPTIONS,
   MACHINE_DECISION_OPTIONS,
+  type ContentMedia,
   type DetectionModality,
   type MachineDecision,
   type QueryFilters,
@@ -82,6 +84,20 @@ export default function FilterBar({ value, onChange, labelOptions }: FilterBarPr
       </div>
 
       <div style={{ flex: '1 1 240px', minWidth: 220 }}>
+        <div style={{ marginBottom: 4, fontSize: 12, color: '#64748B' }}>呈现内容</div>
+        <Select<ContentMedia[]>
+          mode="multiple"
+          value={value.content_medias ?? []}
+          onChange={(v) => onChange({ ...value, content_medias: v.length ? v : undefined })}
+          options={CONTENT_MEDIA_OPTIONS}
+          placeholder="文本/图片/音频/视频"
+          allowClear
+          maxTagCount="responsive"
+          style={{ width: '100%' }}
+        />
+      </div>
+
+      <div style={{ flex: '1 1 240px', minWidth: 220 }}>
         <div style={{ marginBottom: 4, fontSize: 12, color: '#64748B' }}>审核策略</div>
         <StrategySelect
           value={value.strategy_code}
@@ -141,13 +157,13 @@ export default function FilterBar({ value, onChange, labelOptions }: FilterBarPr
       </div>
 
       <div style={{ flex: '1 1 240px', minWidth: 220 }}>
-        <div style={{ marginBottom: 4, fontSize: 12, color: '#64748B' }}>标签</div>
+        <div style={{ marginBottom: 4, fontSize: 12, color: '#64748B' }}>审核点</div>
         <Select<string[]>
           mode="multiple"
           value={value.labels ?? []}
           onChange={(v) => onChange({ ...value, labels: v.length ? v : undefined })}
           options={labelOptions.map((l) => ({ value: l, label: l }))}
-          placeholder="请选择标签"
+          placeholder="请选择审核点"
           allowClear
           maxTagCount="responsive"
           style={{ width: '100%' }}

@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Page } from '@/types/domain'
+import type { Page, StrategyHumanReview } from '@/types/domain'
 
 export type TriggerTypeStr = 'cron' | 'external_callback'
 
@@ -15,6 +15,7 @@ export interface Trigger {
   strategy_name: string | null
   match_conditions: Record<string, string[]>
   scan_interval_sec: number
+  override_human_review: StrategyHumanReview | null
   last_run_at: string | null
   next_run_at: string | null
   run_count: number
@@ -34,6 +35,7 @@ export interface TriggerCreatePayload {
   strategy_id: number | null
   match_conditions: Record<string, string[]>
   scan_interval_sec: number
+  override_human_review?: StrategyHumanReview | null
 }
 
 export interface TriggerUpdatePayload {
@@ -44,6 +46,7 @@ export interface TriggerUpdatePayload {
   strategy_id?: number | null
   match_conditions?: Record<string, string[]>
   scan_interval_sec?: number
+  override_human_review?: StrategyHumanReview | null
 }
 
 export interface TriggerRun {

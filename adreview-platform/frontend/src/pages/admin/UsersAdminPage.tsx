@@ -139,7 +139,7 @@ export default function UsersAdminPage() {
             name="role"
             label="角色"
             rules={[{ required: true, message: '请选择角色' }]}
-            extra="超级管理员可管理通用规则与通用平台知识库"
+            extra="超级管理员可管理通用规则与通用平台资源"
           >
             <Select
               options={ROLE_OPTIONS.map((r) => ({ value: r, label: ROLE_LABELS[r] }))}

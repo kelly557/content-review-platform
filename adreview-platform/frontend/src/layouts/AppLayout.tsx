@@ -32,9 +32,10 @@ type MenuItem = NonNullable<MenuProps['items']>[number]
 
 type NavChild = {
   key: string
-  path: string
+  path?: string
   label: string
   roles?: string[]
+  children?: NavChild[]
 }
 
 type NavNode =
@@ -87,21 +88,37 @@ const NAV_SECTIONS: Array<{
         roles: ['admin', 'mlr', 'superadmin'],
         children: [
           { key: 'strategies-list', path: '/strategies', label: '策略列表' },
-          { key: 'strategies-image', path: '/strategies/rules-by-type/image', label: '图片审核规则' },
-          { key: 'strategies-text', path: '/strategies/rules-by-type/text', label: '文本审核规则' },
+          {
+            key: 'strategies-image-group',
+            label: '图片审核规则',
+            children: [
+              { key: 'rules-general-image', path: '/rules/general/image', label: '通用图片规则' },
+              { key: 'rules-personal-image', path: '/rules/personal/image', label: '个性化图片规则' },
+            ],
+          },
+          {
+            key: 'strategies-text-group',
+            label: '文本审核规则',
+            children: [
+              { key: 'rules-general-text', path: '/rules/general/text', label: '通用文本规则' },
+              { key: 'rules-personal-text', path: '/rules/personal/text', label: '个性化文本规则' },
+            ],
+          },
         ],
       },
       {
         kind: 'group',
         key: 'strategy-resources',
-        path: '/knowledge/words',
-        label: '知识库',
+        path: '/resources/words',
+        label: '资源库',
         icon: <DatabaseOutlined style={{ fontSize: ICON_SIZE }} />,
         roles: ['admin', 'mlr', 'superadmin'],
         children: [
-          { key: 'strategies-words', path: '/knowledge/words', label: '词库' },
-          { key: 'strategies-images', path: '/knowledge/images', label: '图片库' },
-          { key: 'strategies-replies', path: '/knowledge/replies', label: '代答库' },
+          { key: 'strategies-words', path: '/resources/words', label: '词库' },
+          { key: 'strategies-models', path: '/resources/models', label: '模型库' },
+          { key: 'strategies-images', path: '/resources/images', label: '图片库' },
+          { key: 'strategies-replies', path: '/resources/replies', label: '代答库' },
+          { key: 'strategies-knowledge', path: '/resources/knowledge', label: '知识库' },
         ],
       },
       { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr', 'superadmin'] },
@@ -211,23 +228,49 @@ export default function AppLayout() {
           key: node.key,
           icon: node.icon,
           label: node.label,
-          children: visibleChildren.map((c) => ({
-            key: c.path,
-            label: <Link to={c.path}>{c.label}</Link>,
-          })),
+          children: visibleChildren.map((c) => {
+            if (c.children && c.children.length > 0) {
+              // 二级 group (例如 "图片审核规则" 下挂 "通用图片规则 / 个性化图片规则")
+              const visibleGrand = c.children.filter(
+                (gc) => !gc.roles || gc.roles.includes(user.role),
+              )
+              return {
+                key: c.key,
+                label: c.label,
+                children: visibleGrand.map((gc) => ({
+                  key: gc.path ?? gc.key,
+                  label: <Link to={gc.path ?? '#'}>{gc.label}</Link>,
+                })),
+              }
+            }
+            return {
+              key: c.path ?? c.key,
+              label: <Link to={c.path ?? '#'}>{c.label}</Link>,
+            }
+          }),
         })
       }
     })
   })
 
+  const collectPaths = (
+    nodes: ReadonlyArray<NavNode | NavChild>,
+  ): string[] => {
+    const out: string[] = []
+    for (const n of nodes) {
+      const roleOk =
+        !('roles' in n) || !n.roles || n.roles.includes(user.role)
+      if ('path' in n && n.path && roleOk) {
+        out.push(n.path)
+      }
+      if ('children' in n && n.children) {
+        out.push(...collectPaths(n.children))
+      }
+    }
+    return out
+  }
   const allPaths = visibleSections.flatMap((section) =>
-    section.items.flatMap((node) => {
-      if (node.kind === 'leaf') return [node.path]
-      const visibleChildren = node.children.filter(
-        (c) => !c.roles || c.roles.includes(user.role),
-      )
-      return [node.key, ...visibleChildren.map((c) => c.path)]
-    }),
+    collectPaths(section.items),
   )
   const candidates = allPaths
     .sort((a, b) => b.length - a.length)
@@ -237,7 +280,7 @@ export default function AppLayout() {
       (k) =>
         location.pathname === k ||
         (k.startsWith('/') && location.pathname.startsWith(`${k}/`)),
-    ) || '/overview'
+    ) ?? ''
 
   const openKeys = visibleSections
     .flatMap((section) => section.items)
@@ -246,8 +289,10 @@ export default function AppLayout() {
       const visibleChildren = n.children.filter(
         (c) => !c.roles || c.roles.includes(user.role),
       )
-      if (location.pathname.startsWith(n.path)) return true
-      return visibleChildren.some((c) => location.pathname.startsWith(c.path))
+      if (n.path && location.pathname.startsWith(n.path)) return true
+      return visibleChildren.some(
+        (c) => c.path && location.pathname.startsWith(c.path),
+      )
     })
     .map((n) => n.key)
 

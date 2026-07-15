@@ -109,13 +109,13 @@ export default function PackageItemsPage() {
     {
       title: '说明',
       dataIndex: 'description',
-      width: '24%',
+      width: '30%',
       render: (v) => v ?? <span style={{ color: '#94A3B8' }}>—</span>,
     },
     {
       title: '审核点数',
       dataIndex: 'point_count',
-      width: '10%',
+      width: '12%',
       align: 'center',
       render: (v: number) => <Tag color={v > 0 ? 'blue' : 'default'}>{v}</Tag>,
     },
@@ -134,7 +134,7 @@ export default function PackageItemsPage() {
     },
     {
       title: '操作',
-      width: '14%',
+      width: '10%',
       render: (_, row) => (
         <Space size={4}>
           <Link to={`/packages/${code}/items/${row.id}/points`}>审核点</Link>

@@ -33,6 +33,7 @@ export default function TasksPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterVisible, setFilterVisible] = useState(false)
   const [filters, setFilters] = useState<TaskFilters>({})
+
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
   const [counts, setCounts] = useState({

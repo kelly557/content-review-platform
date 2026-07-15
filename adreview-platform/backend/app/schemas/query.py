@@ -8,7 +8,7 @@ everything we need.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,6 +27,54 @@ DECISION_LABELS: Dict[str, str] = {
     "review": "复核",
     "pass": "通过",
 }
+
+
+ContentMedia = Literal["text", "image", "audio", "video"]
+"""呈现内容维度: 文本 / 图片 / 音频 / 视频.
+
+与 ``MaterialType`` (image/video/pdf/text) 的差异:
+- ``pdf`` 折叠进 ``text`` (文本已被抽到 material_versions.text_body)
+- ``audio`` 由 ``material_versions.mime_type`` 派生 (audio/*), 当前不在 MaterialType 枚举中
+"""
+
+CONTENT_MEDIA_LABELS: Dict[str, str] = {
+    "text": "文本",
+    "image": "图片",
+    "audio": "音频",
+    "video": "视频",
+}
+
+
+def derive_content_media(
+    material_type: Optional[str],
+    mime_type: Optional[str],
+) -> Optional[ContentMedia]:
+    """把 ``MaterialType`` + ``mime_type`` 归一到 4 值呈现内容.
+
+    优先级: ``mime_type`` 前缀优先 (mime 更细), 在 mime 缺失时回退到 ``material_type``.
+    """
+    if mime_type:
+        mt = mime_type.lower()
+        if mt.startswith("audio/"):
+            return "audio"
+        if mt.startswith("video/"):
+            return "video"
+        if mt.startswith("image/"):
+            return "image"
+        if mt.startswith("text/"):
+            return "text"
+    if material_type is None:
+        return None
+    mt = str(material_type).lower()
+    if mt in ("text", "pdf"):
+        return "text"
+    if mt == "image":
+        return "image"
+    if mt == "video":
+        return "video"
+    if mt == "audio":
+        return "audio"
+    return None
 
 
 class AdvancedCondition(BaseModel):
@@ -58,6 +106,11 @@ class MachineReviewRecordOut(ORMBase):
     material_id: Optional[int] = None
     material_version_id: Optional[int] = None
     material_type: Optional[str] = None
+
+    content_media: Optional[ContentMedia] = None
+    preview_url: Optional[str] = None
+    mime_type: Optional[str] = None
+    text_body: Optional[str] = None
 
     strategy_code: Optional[str] = None
     strategy_name: Optional[str] = None

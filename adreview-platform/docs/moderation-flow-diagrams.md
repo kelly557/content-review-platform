@@ -17,6 +17,7 @@ flowchart TD
     C --> C1["输入类型<br/>audio / video / file / batch"]
     C --> C2["预处理能力<br/>ASR / OCR / 抽帧 / 文件解析"]
     C --> C3["任务状态<br/>pending / processing / succeeded / failed / cancelled / expired"]
+    C --> C5["结果获取<br/>poll / callback push / hybrid"]
     C --> C4["输出模型<br/>与同步接口一致 + summary + segment"]
 
     D --> D1["处理中<br/>jobId + status + progress"]
@@ -68,7 +69,7 @@ flowchart TD
     S --> T["执行各审核引擎"]
     T --> U["按 type + source 产出 details[]"]
     U --> V["统一聚合为最终 suggestion"]
-    V --> W["GET /v1/moderation/jobs/{jobId} 查询结果或回调下发"]
+    V --> W["GET /v1/moderation/jobs/{jobId} 查询结果或 callbackUrl 回调下发"]
 ```
 
 ## 3. 同步审核详细流程图
@@ -154,7 +155,8 @@ flowchart TD
     M --> N["聚合器"]
     N --> O["生成 summary + aggregation + advice + details"]
     O --> P["更新任务状态=succeeded"]
-    P --> Q["GET /v1/moderation/jobs/{jobId} / callbackUrl"]
+    P --> Q["GET /v1/moderation/jobs/{jobId} / callbackUrl
+轮询或主动推送返回终态审核结果"]
 ```
 
 ## 5. 结果聚合规则图

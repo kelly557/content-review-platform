@@ -9,7 +9,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -21,10 +24,14 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 from app.core.id_generator import new_public_id
+
+if TYPE_CHECKING:
+    from app.models.audit_item_library import AuditItemLibrary
+    from app.models.library import Library
 
 
 class AuditItem(Base):
@@ -50,12 +57,46 @@ class AuditItem(Base):
     is_builtin: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, server_default="false"
     )
+    # 通用规则「生效小模型版本」指针：仅 is_builtin=true 时写入；FK 到
+    # registered_model_versions.id。version 删除时 SET NULL（前端显示「未指定」）。
+    active_small_model_version_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("registered_model_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # 个性化规则「生效大模型版本」指针：仅 is_builtin=false 时写入；
+    # 指向 kind='large' 的 RegisteredModelVersion（LLM，prompt 执行器）。
+    active_large_model_version_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("registered_model_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # 个性化规则「关联知识文档」ID 列表（多选）。JSONB 存 list[int]。
+    # 仅 is_builtin=false 时写入；通用规则不接受该字段。
+    knowledge_document_ids: Mapped[Optional[list[int]]] = mapped_column(
+        JSONB, nullable=True, default=list
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=False), onupdate=func.now(), nullable=True
+    )
+
+    # ─── N:M 关联：审核项 ↔ 库（同一 item 下的库必须共享单一 library_type） ───
+    linked_libraries: Mapped[list["Library"]] = relationship(
+        "Library",
+        secondary="audit_item_libraries",
+        lazy="selectin",
+        order_by="Library.id",
+        overlaps="back_audit_items",
+    )
+    linked_library_links: Mapped[list["AuditItemLibrary"]] = relationship(
+        "AuditItemLibrary",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        overlaps="linked_libraries",
     )
 
     __table_args__ = (

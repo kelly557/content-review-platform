@@ -19,6 +19,11 @@ import { useAuthStore } from '@/store'
 import { canManageBackend } from '@/lib/permissions'
 import SchedulePicker, { type SchedulePickerValue } from '@/components/triggers/SchedulePicker'
 import { describeCron } from '@/lib/cronDescriber'
+import { HumanReviewSettings } from '@/components/strategy/HumanReviewSettings'
+import SourcePicker, {
+  type SourcePickerValue,
+} from '@/components/task-list/SourcePicker'
+import { EMPTY_HUMAN_REVIEW, type StrategyHumanReview } from '@/types/domain'
 
 const { Text } = Typography
 
@@ -83,7 +88,7 @@ export default function CreateTriggerPage() {
   })
 
   // Step 3 — 适用素材
-  const [workflowTemplateCode, setWorkflowTemplateCode] = useState<string | null>('hybrid')
+  const [humanReview, setHumanReview] = useState<StrategyHumanReview>(EMPTY_HUMAN_REVIEW)
   const [strategyId, setStrategyId] = useState<number | null>(null)
   const [match, setMatch] = useState<Record<RoutingKey, string[]>>({
     material_type: [],
@@ -94,15 +99,18 @@ export default function CreateTriggerPage() {
   })
   const [isEnabled, setIsEnabled] = useState(true)
 
+  // 素材来源 + 扫描范围
+  const [sourcePickerValue, setSourcePickerValue] = useState<SourcePickerValue>({
+    source: 'library',
+    scope: 'full',
+  })
+
   // 模板与策略
-  const [templates, setTemplates] = useState<Array<{ id: number; code: string; name: string }>>([])
   const [strategies, setStrategies] = useState<Array<{ id: number; code: string; name: string }>>([])
 
   useEffect(() => {
     if (!canManageBackend(user)) return
-    workflowsApi.list({ include_inactive: false }).then((d) => {
-      setTemplates(d.map((t) => ({ id: t.id, code: t.code, name: t.name })))
-    }).catch(() => {})
+    workflowsApi.list({ include_inactive: false }).catch(() => {})
     strategiesApi.list({ size: 100 }).then((d) => {
       setStrategies(d.items.map((s) => ({ id: s.id, code: s.code, name: s.name })))
     }).catch(() => {})
@@ -122,16 +130,19 @@ export default function CreateTriggerPage() {
       const spec: Record<string, unknown> = {
         cron: cronPreview,
         timezone,
+        source: sourcePickerValue.source,
+        scope: sourcePickerValue.source === 'library' ? sourcePickerValue.scope : 'full',
       }
       const payload: TriggerCreatePayload = {
         name: name.trim(),
         trigger_type: triggerType,
         is_enabled: isEnabled,
         spec,
-        workflow_template_code: workflowTemplateCode,
+        workflow_template_code: null,
         strategy_id: strategyId,
         match_conditions: match,
         scan_interval_sec: schedule.scanIntervalSec,
+        override_human_review: humanReview,
       }
       const created = await triggersApi.create(payload)
       message.success('已创建')
@@ -266,15 +277,8 @@ export default function CreateTriggerPage() {
               </div>
 
               <div>
-                <div style={{ marginBottom: 4, fontSize: 13 }}>工作流模板</div>
-                <Select
-                  value={workflowTemplateCode ?? undefined}
-                  onChange={setWorkflowTemplateCode}
-                  style={{ width: 320 }}
-                  allowClear
-                  placeholder="请选择工作流模板"
-                  options={templates.map((t) => ({ value: t.code, label: `${t.name} (${t.code})` }))}
-                />
+                <div style={{ marginBottom: 4, fontSize: 13 }}>人审设置</div>
+                <HumanReviewSettings value={humanReview} onChange={setHumanReview} />
               </div>
               <div>
                 <div style={{ marginBottom: 4, fontSize: 13 }}>命中策略</div>
@@ -287,6 +291,8 @@ export default function CreateTriggerPage() {
                   options={strategies.map((s) => ({ value: s.id, label: s.name }))}
                 />
               </div>
+
+              <SourcePicker value={sourcePickerValue} onChange={setSourcePickerValue} />
 
               <div>
                 <Checkbox checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)}>
@@ -312,7 +318,7 @@ export default function CreateTriggerPage() {
               <DescriptionRow label="启动方式" value="按时间计划" />
               <DescriptionRow label="启动时间" value={cronHuman} />
               <DescriptionRow label="时间基准" value={timezone === 'Asia/Shanghai' ? '北京时间' : timezone} />
-              <DescriptionRow label="工作流模板" value={workflowTemplateCode ?? '-'} />
+              <DescriptionRow label="人审设置" value={humanReview.is_enabled ? `已启用（${humanReview.risk_levels?.length ?? 0} 风险等级 / 抽审 ${Math.round((humanReview.sample_ratio ?? 0) * 100)}%）` : '未启用（默认走处置表）'} />
               <DescriptionRow
                 label="命中策略"
                 value={

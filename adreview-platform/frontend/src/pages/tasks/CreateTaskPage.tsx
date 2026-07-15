@@ -5,7 +5,6 @@ import {
   Breadcrumb,
   Button,
   Card,
-  Checkbox,
   Collapse,
   Radio,
   Space,
@@ -34,7 +33,6 @@ import type { MaterialType, StrategyHumanReview } from '@/types/domain'
 import { strategiesApi } from '@/api/strategies'
 import { colors } from '@/styles/theme'
 import { generateTaskName } from '@/lib/taskName'
-
 const { Text } = Typography
 
 type TabKind = MaterialType | 'audio'
@@ -97,7 +95,6 @@ export default function CreateTaskPage() {
   const [submitting, setSubmitting] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
   const stepRefs = useRef<(HTMLDivElement | null)[]>([])
-  const [skipMachineReview, setSkipMachineReview] = useState(false)
   // 任务级 step-3 处置覆盖：undefined 或全空对象表示「走策略默认值」
   const [overrideHumanReview, setOverrideHumanReview] = useState<Partial<StrategyHumanReview> | undefined>(undefined)
   // 选中策略的完整定义（用于预览 step-3 默认值）
@@ -319,7 +316,6 @@ export default function CreateTaskPage() {
     }
     await materialsApi.submit(created.id, {
       task_name: taskName,
-      skip_machine_review: skipMachineReview,
       override_human_review: overrideHumanReview,
     })
     return created.id
@@ -331,7 +327,6 @@ export default function CreateTaskPage() {
     await materialsApi.update(mid, { tags: mergedTags })
     await materialsApi.submit(mid, {
       task_name: taskName,
-      skip_machine_review: skipMachineReview,
       override_human_review: overrideHumanReview,
     })
     return mid
@@ -432,18 +427,6 @@ export default function CreateTaskPage() {
         </div>
       )}
 
-      {/* 第 4 层：跳过机审 */}
-      <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 16 }}>
-        <Checkbox
-          checked={skipMachineReview}
-          onChange={(e) => setSkipMachineReview(e.target.checked)}
-        >
-          <span style={{ fontSize: 13 }}>暂不执行 AI 审核，提交后手动触发</span>
-        </Checkbox>
-        <div style={{ fontSize: 12, color: colors.secondary, marginTop: 4, marginLeft: 24 }}>
-          勾选后任务将跳过自动 AI 审核，可在任务详情页手动执行
-        </div>
-      </div>
     </Card>
   )
 

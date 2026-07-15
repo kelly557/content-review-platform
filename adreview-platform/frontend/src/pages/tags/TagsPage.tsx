@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   App,
   Button,
@@ -585,6 +586,7 @@ export default function TagsPage() {
 }
 
 function RuleTagsTab() {
+  const navigate = useNavigate()
   const [packageKey, setPackageKey] = useState<string>('image')
   const [items, setItems] = useState<RuleTagRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -672,12 +674,13 @@ function RuleTagsTab() {
         <Button
           type="link"
           size="small"
-          onClick={() =>
-            row.package &&
-            window.location.assign(
-              `/strategies/rules-by-type/${packageKey}/${extractItemId(row.id)}`,
+          onClick={() => {
+            if (!row.package || row.id.startsWith('point-')) return
+            const scope = row.builtin ? 'general' : 'personal'
+            navigate(
+              `/rules/${scope}/${packageKey}/${extractItemId(row.id)}`,
             )
-          }
+          }}
         >
           查看
         </Button>
@@ -727,12 +730,13 @@ function RuleTagsTab() {
         <Button
           type="link"
           size="small"
-          onClick={() =>
-            row.package &&
-            window.location.assign(
-              `/strategies/rules-by-type/${packageKey}/${extractItemId(row.id)}`,
+          onClick={() => {
+            if (!row.package || row.id.startsWith('point-')) return
+            const scope = row.builtin ? 'general' : 'personal'
+            navigate(
+              `/rules/${scope}/${packageKey}/${extractItemId(row.id)}`,
             )
-          }
+          }}
         >
           查看
         </Button>

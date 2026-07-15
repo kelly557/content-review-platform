@@ -22,6 +22,7 @@ import FilterBar from '@/components/query/FilterBar'
 import AdvancedFilters from '@/components/query/AdvancedFilters'
 import ColumnSettingsMenu from '@/components/query/ColumnSettingsMenu'
 import RecordDetailDrawer from '@/components/query/RecordDetailDrawer'
+import ContentPreviewCell from '@/components/query/ContentPreviewCell'
 
 const decisionMeta = (v?: string | null) => MACHINE_DECISION_OPTIONS.find((m) => m.value === v)
 const feedbackMeta = (v?: string | null) =>
@@ -97,6 +98,12 @@ export default function QueryPage() {
 
   const columnsAll: TableColumnsType<MachineReviewRecord> = [
     {
+      title: '任务名称',
+      key: 'task_title',
+      width: 220,
+      render: (_, r) => r.title || '-',
+    },
+    {
       title: '策略名称',
       key: 'strategy_name',
       width: 180,
@@ -119,6 +126,12 @@ export default function QueryPage() {
       render: (_, r) => feedbackMeta(r.final_decision) || r.final_decision || '-',
     },
     {
+      title: '呈现内容',
+      key: 'content_preview',
+      width: 280,
+      render: (_, r) => <ContentPreviewCell record={r} />,
+    },
+    {
       title: 'Request ID',
       key: 'request_id',
       width: 110,
@@ -131,7 +144,7 @@ export default function QueryPage() {
       render: (_, r) => r.material_version_id ?? '-',
     },
     {
-      title: '命中标签及置信度',
+      title: '命中审核点及置信度',
       key: 'labels',
       render: (_, r) => {
         if (!r.hits?.length) return '-'

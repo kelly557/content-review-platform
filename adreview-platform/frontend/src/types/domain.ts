@@ -148,6 +148,10 @@ export interface AgentHit {
   bbox?: { x: number; y: number; w: number; h: number } | null
   page?: number | null
   timestamp_ms?: number | null
+  /** LLM 自评或本地词库标注的风险等级 */
+  risk?: string | null
+  /** "llm" or "local_wordset" */
+  source?: 'llm' | 'local_wordset' | string
 }
 
 export interface AgentStrategyRef {
@@ -163,6 +167,8 @@ export interface AgentRuleHit {
   label_cn: string
   threshold: number
   matched: boolean
+  /** "llm" (default) or "local_wordset" — 本地词库命中时为后者 */
+  source?: 'llm' | 'local_wordset' | string
 }
 
 export interface AgentReviewResult {
@@ -505,7 +511,7 @@ export const TYPE_LABELS: Record<MaterialType, string> = {
   image: '图片',
   video: '视频',
   pdf: 'PDF',
-  text: '文案',
+  text: '文本',
 }
 
 export const DECISION_LABELS: Record<ReviewDecision, string> = {
@@ -585,8 +591,25 @@ export interface StrategyPointRef {
   /** 策略级 override（中/高风险分），范围 50~100 */
   medium_threshold?: number
   high_threshold?: number
-  /** 策略级 override 关联自定义库 ID 列表 */
-  linked_library_ids?: number[]
+  /** 区间形态：中风险分 = [min, max] */
+  medium_threshold_min?: number
+  medium_threshold_max?: number
+  /** 区间形态：高风险分 = [min, max] */
+  high_threshold_min?: number
+  high_threshold_max?: number
+}
+
+/** 策略级「大模型审核能力」开关（不区分媒体类型）+ 选定的已激活大模型。 */
+export interface LlmReviewConfig {
+  is_enabled: boolean
+  /** 资源库中已激活的大模型 ID；None 表示启用但未选模型。 */
+  model_id: number | null
+  /**
+   * 后端按策略所启用的 items 推算：
+   * - 当策略涉及图片 / 音频 / 视频 / 文档等非纯文本媒体，而所选模型不覆盖对应 modality 时为 true。
+   * - 前端据此展示「请选择支持多模态的大模型」提示。
+   */
+  needs_multimodal_hint: boolean
 }
 
 export interface StrategyEnabledPointsMeta {
@@ -610,6 +633,7 @@ export interface Strategy {
   service_config: Record<string, unknown>
   enabled_items: StrategyItemRef[]
   enabled_points?: StrategyPointRef[]
+  llm_review?: LlmReviewConfig
   created_at: string
   updated_at: string | null
 }
@@ -627,6 +651,7 @@ export interface StrategyCreatePayload {
   enabled_items?: StrategyItemRef[]
   enabled_points?: StrategyPointRef[]
   definition?: Record<string, unknown>
+  llm_review?: LlmReviewConfig
 }
 
 export const APPLICATION_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
@@ -647,6 +672,7 @@ export interface StrategyUpdatePayload {
   enabled_points?: StrategyPointRef[]
   definition?: Record<string, unknown>
   service_config?: Record<string, unknown>
+  llm_review?: LlmReviewConfig
 }
 
 export interface StrategyValidateResult {
@@ -1151,6 +1177,15 @@ export const TAG_JURISDICTION_OPTIONS: { value: string; label: string }[] = [
   { value: 'global', label: '全球' },
 ]
 
+export interface AuditItemActiveModelVersion {
+  version_id: number
+  model_id: number
+  model_code: string
+  model_name: string
+  version_no: number
+  version_label: string | null
+}
+
 export interface AuditItem {
   id: number
   public_id?: string
@@ -1163,8 +1198,28 @@ export interface AuditItem {
   is_enabled: boolean
   is_builtin: boolean
   point_count: number
+  /** 「关联自定义图库词库」上移至审核项；同 item 下须共享单一 library_type。 */
+  linked_libraries: AuditItemLinkedLibrary[]
+  /** 通用规则「生效小模型版本」指针 — 仅 is_builtin=true 时可写。 */
+  active_small_model_version_id: number | null
+  active_model_version: AuditItemActiveModelVersion | null
+  /** 个性化规则「生效大模型版本」指针 — 仅 is_builtin=false 时可写。 */
+  active_large_model_version_id: number | null
+  active_large_model_version: AuditItemActiveModelVersion | null
+  /** 个性化规则「关联知识文档」ID 列表（多选）— 仅 is_builtin=false 时可写。 */
+  knowledge_document_ids: number[]
   created_at: string
   updated_at: string | null
+}
+
+export interface AuditItemLinkedLibrary {
+  library_id: number
+  library_type: string
+  code: string
+  name: string
+  group_id: number | null
+  group_name: string | null
+  sort_order: number
 }
 
 export interface AuditItemCreate {
@@ -1173,6 +1228,10 @@ export interface AuditItemCreate {
   description?: string
   sort_order?: number
   is_enabled?: boolean
+  /** PATCH semantics: undefined=不动；[]=清空；[非空]=全量替换 */
+  linked_library_ids?: number[]
+  /** 个性化规则「关联知识文档」(多选) */
+  knowledge_document_ids?: number[]
 }
 
 export interface AuditItemUpdate {
@@ -1181,19 +1240,23 @@ export interface AuditItemUpdate {
   description?: string
   sort_order?: number
   is_enabled?: boolean
+  /** PATCH semantics: undefined=不动；[]=清空；[非空]=全量替换 */
+  linked_library_ids?: number[]
+  /**
+   * 通用规则「切换生效小模型版本」；个性化规则「绑定运行此 prompt 的小模型版本」。
+   * null=清空。
+   */
+  active_small_model_version_id?: number | null
+  /**
+   * 个性化规则「切换生效大模型版本」(LLM，作为 prompt 执行器)。
+   * null=清空。通用规则不可写。
+   */
+  active_large_model_version_id?: number | null
+  /** 个性化规则「关联知识文档」(多选); undefined=不动, []=清空, [非空]=替换 */
+  knowledge_document_ids?: number[]
 }
 
 export type AuditPointRisk = '低风险' | '中风险' | '高风险'
-
-export interface LinkedLibrary {
-  library_id: number
-  library_type: LibraryType
-  code: string
-  name: string
-  group_id: number | null
-  group_name: string | null
-  sort_order: number
-}
 
 export interface AuditPoint {
   id: number
@@ -1211,9 +1274,6 @@ export interface AuditPoint {
   is_enabled: boolean
   is_builtin: boolean
   custom_wordset_id: number | null
-  custom_library_id?: number | null
-  custom_reply_library_id?: number | null
-  linked_libraries: LinkedLibrary[]
   sort_order: number
   created_at: string
   updated_at: string | null
@@ -1230,7 +1290,6 @@ export interface AuditPointCreate {
   is_enabled?: boolean
   custom_wordset_id?: number
   sort_order?: number
-  linked_library_ids?: number[]
 }
 
 export interface AuditPointUpdate {
@@ -1238,15 +1297,15 @@ export interface AuditPointUpdate {
   description?: string
   medium_threshold?: number
   high_threshold?: number
+  medium_threshold_min?: number
+  medium_threshold_max?: number
+  high_threshold_min?: number
+  high_threshold_max?: number
   scope_text?: string
   risk_level?: AuditPointRisk
   is_enabled?: boolean
   custom_wordset_id?: number
-  custom_library_id?: number | null
-  custom_reply_library_id?: number | null
   sort_order?: number
-  /** PATCH 语义: undefined=不动；[]=清空；[非空]=全量替换 */
-  linked_library_ids?: number[]
 }
 
 export interface AuditPointBatchItem {
@@ -1767,6 +1826,18 @@ export const DETECTION_MODALITIES: { value: DetectionModality; label: string }[]
   { value: 'pdf', label: '文件' },
 ]
 
+// 呈现内容(text/image/audio/video) — 与 DetectionModality 的差异:
+// pdf 在呈现内容维度折叠到 text；audio 不在 DetectionModality 内，
+// 由 material_versions.mime_type 派生。
+export type ContentMedia = 'text' | 'image' | 'audio' | 'video'
+
+export const CONTENT_MEDIA_OPTIONS: { value: ContentMedia; label: string }[] = [
+  { value: 'text', label: '文本' },
+  { value: 'image', label: '图片' },
+  { value: 'audio', label: '音频' },
+  { value: 'video', label: '视频' },
+]
+
 export type MachineDecision = 'block' | 'review' | 'pass'
 
 export const MACHINE_DECISION_OPTIONS: { value: MachineDecision; label: string; color: string }[] = [
@@ -1800,6 +1871,10 @@ export interface MachineReviewRecord {
   material_id?: number | null
   material_version_id?: number | null
   material_type?: DetectionModality | string | null
+  content_media?: ContentMedia | null
+  preview_url?: string | null
+  mime_type?: string | null
+  text_body?: string | null
   strategy_code?: string | null
   strategy_name?: string | null
   risk_level?: string | null
@@ -1827,6 +1902,7 @@ export interface QueryFilters {
   start?: string
   end?: string
   material_types?: DetectionModality[]
+  content_medias?: ContentMedia[]
   strategy_code?: string
   machine_decision?: MachineDecision
   request_ids?: number[]
@@ -1840,6 +1916,7 @@ export interface QueryFilters {
 }
 
 export type QueryColumnKey =
+  | 'task_title'
   | 'strategy_name'
   | 'machine_decision'
   | 'feedback'
@@ -1850,6 +1927,7 @@ export type QueryColumnKey =
   | 'requested_at'
   | 'ip'
   | 'account_id'
+  | 'content_preview'
 
 export interface QueryColumnDef {
   key: QueryColumnKey
@@ -1858,12 +1936,14 @@ export interface QueryColumnDef {
 }
 
 export const QUERY_COLUMNS: QueryColumnDef[] = [
+  { key: 'task_title', title: '任务名称', defaultVisible: true },
   { key: 'strategy_name', title: '策略名称', defaultVisible: true },
   { key: 'machine_decision', title: '检测结果', defaultVisible: true },
   { key: 'feedback', title: '反馈结果', defaultVisible: true },
+  { key: 'content_preview', title: '呈现内容', defaultVisible: false },
   { key: 'request_id', title: 'Request ID', defaultVisible: false },
   { key: 'task_id', title: 'Task ID', defaultVisible: false },
-  { key: 'labels', title: '命中标签及置信度', defaultVisible: false },
+  { key: 'labels', title: '命中审核点及置信度', defaultVisible: false },
   { key: 'risk_level', title: '风险等级', defaultVisible: false },
   { key: 'requested_at', title: '请求时间', defaultVisible: false },
   { key: 'ip', title: 'IP', defaultVisible: false },
@@ -1917,4 +1997,475 @@ export interface ReviewFilters {
   final_decision?: ReviewDecision
   page?: number
   size?: number
+}
+
+// ─── 内容审核业务知识库 ───
+
+export type KnowledgeDocumentStatus = 'draft' | 'active' | 'archived'
+
+export const KNOWLEDGE_DOCUMENT_STATUS_OPTIONS: {
+  value: KnowledgeDocumentStatus
+  label: string
+  color: string
+}[] = [
+  { value: 'draft', label: '草稿', color: 'default' },
+  { value: 'active', label: '已启用', color: 'green' },
+  { value: 'archived', label: '已归档', color: 'default' },
+]
+
+export type KnowledgeDocumentSourceType = 'upload' | 'url' | 'manual'
+
+export const KNOWLEDGE_DOCUMENT_SOURCE_TYPE_LABELS: Record<KnowledgeDocumentSourceType, string> = {
+  upload: '本地上传',
+  url: '外部链接',
+  manual: '仅元数据',
+}
+
+export interface KnowledgeDocumentVersion {
+  id: number
+  public_id?: string
+  document_id: number
+  version_no: number
+  original_filename: string | null
+  mime_type: string | null
+  file_size: number | null
+  sha256: string | null
+  source_url: string | null
+  metadata: Record<string, unknown>
+  created_by_id: number | null
+  created_by_name?: string | null
+  created_at: string
+}
+
+export interface KnowledgeDocument {
+  id: number
+  public_id?: string
+  code: string
+  title: string
+  description: string | null
+  tags: string[]
+  issued_at: string | null
+  status: KnowledgeDocumentStatus
+  source_type: KnowledgeDocumentSourceType
+  source_url: string | null
+  current_version_id: number | null
+  current_version?: KnowledgeDocumentVersion | null
+  owner_id: number | null
+  owner_name?: string | null
+  created_by_id: number | null
+  created_by_name?: string | null
+  updated_by_id: number | null
+  updated_by_name?: string | null
+  is_deleted: boolean
+  deleted_at: string | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface KnowledgeDocumentListItem {
+  id: number
+  public_id?: string
+  code: string
+  title: string
+  tags: string[]
+  source_type: KnowledgeDocumentSourceType
+  issued_at: string | null
+  status: KnowledgeDocumentStatus
+  current_version_id: number | null
+  current_version_no?: number | null
+  current_version?: KnowledgeDocumentVersion | null
+  owner_id: number | null
+  owner_name?: string | null
+  updated_at: string | null
+  created_at: string
+}
+
+export interface KnowledgeDocumentCreate {
+  code?: string
+  title: string
+  description?: string | null
+  tags?: string[]
+  issued_at?: string | null
+  status?: KnowledgeDocumentStatus
+  source_type: KnowledgeDocumentSourceType
+  source_url?: string | null
+}
+
+export interface KnowledgeDocumentUpdate {
+  title?: string
+  description?: string | null
+  tags?: string[]
+  issued_at?: string | null
+  status?: KnowledgeDocumentStatus
+  source_url?: string | null
+}
+
+// ─── 模型库 ───
+
+export type RegisteredModelProvider =
+  | 'openai'
+  | 'anthropic'
+  | 'bailian'
+  | 'deepseek'
+  | 'self-hosted'
+  | 'custom'
+
+export const REGISTERED_MODEL_PROVIDER_PRESETS: {
+  value: RegisteredModelProvider
+  label: string
+  defaultEndpoint: string | null
+  protocol: 'openai-compatible' | 'anthropic-messages' | 'custom'
+}[] = [
+  { value: 'openai', label: 'OpenAI', defaultEndpoint: 'https://api.openai.com/v1', protocol: 'openai-compatible' },
+  { value: 'anthropic', label: 'Anthropic', defaultEndpoint: 'https://api.anthropic.com/v1', protocol: 'anthropic-messages' },
+  { value: 'bailian', label: '阿里百炼 (DashScope)', defaultEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1', protocol: 'openai-compatible' },
+  { value: 'deepseek', label: 'DeepSeek', defaultEndpoint: 'https://api.deepseek.com/v1', protocol: 'openai-compatible' },
+  { value: 'self-hosted', label: '自建 / 私有部署', defaultEndpoint: null, protocol: 'openai-compatible' },
+  { value: 'custom', label: '自定义', defaultEndpoint: null, protocol: 'custom' },
+]
+
+export type RegisteredModelModality = 'text' | 'image' | 'audio' | 'video'
+
+export const REGISTERED_MODEL_MODALITY_OPTIONS: {
+  value: RegisteredModelModality
+  label: string
+}[] = [
+  { value: 'text', label: '文本' },
+  { value: 'image', label: '图片' },
+  { value: 'audio', label: '音频' },
+  { value: 'video', label: '视频' },
+]
+
+export type RegisteredModelKind = 'large' | 'small'
+
+export const REGISTERED_MODEL_KIND_OPTIONS: { value: RegisteredModelKind; label: string; color: string }[] = [
+  { value: 'large', label: '大模型', color: 'magenta' },
+  { value: 'small', label: '小模型', color: 'blue' },
+]
+
+export type SmallModelCategory =
+  | 'politics'
+  | 'terrorism'
+  | 'porn'
+  | 'illicit'
+  | 'ad'
+  | 'religion'
+  | 'ad_law'
+  | 'abuse'
+  | 'unhealthy'
+
+export const SMALL_MODEL_CATEGORY_OPTIONS: { value: SmallModelCategory; label: string; color: string }[] = [
+  { value: 'politics', label: '涉政', color: 'red' },
+  { value: 'terrorism', label: '涉恐', color: 'red' },
+  { value: 'porn', label: '涉黄', color: 'red' },
+  { value: 'illicit', label: '违禁', color: 'red' },
+  { value: 'ad', label: '广告', color: 'orange' },
+  { value: 'religion', label: '宗教', color: 'orange' },
+  { value: 'ad_law', label: '广告法', color: 'orange' },
+  { value: 'abuse', label: '辱骂', color: 'volcano' },
+  { value: 'unhealthy', label: '不良', color: 'volcano' },
+]
+
+export const SMALL_MODEL_CATEGORY_LABEL: Record<SmallModelCategory, string> = SMALL_MODEL_CATEGORY_OPTIONS.reduce(
+  (acc, opt) => ({ ...acc, [opt.value]: opt.label }),
+  {} as Record<SmallModelCategory, string>,
+)
+
+export type SmallModelModality = 'text' | 'image'
+
+export const SMALL_MODEL_MODALITY_OPTIONS: { value: SmallModelModality; label: string; color: string }[] = [
+  { value: 'text', label: '文本', color: 'blue' },
+  { value: 'image', label: '图片', color: 'geekblue' },
+]
+
+export const SMALL_MODEL_MODALITY_LABEL: Record<SmallModelModality, string> = SMALL_MODEL_MODALITY_OPTIONS.reduce(
+  (acc, opt) => ({ ...acc, [opt.value]: opt.label }),
+  {} as Record<SmallModelModality, string>,
+)
+
+export type LargeModelCategory = 'text' | 'multimodal' | 'other'
+
+export const LARGE_MODEL_CATEGORY_OPTIONS: {
+  value: LargeModelCategory
+  label: string
+  color: string
+}[] = [
+  { value: 'text', label: '文本模型', color: 'blue' },
+  { value: 'multimodal', label: '多模态模型', color: 'purple' },
+  { value: 'other', label: '其他模型', color: 'default' },
+]
+
+export const LARGE_MODEL_CATEGORY_LABEL: Record<LargeModelCategory, string> = LARGE_MODEL_CATEGORY_OPTIONS.reduce(
+  (acc, o) => {
+    acc[o.value] = o.label
+    return acc
+  },
+  {} as Record<LargeModelCategory, string>,
+) as Record<LargeModelCategory, string>
+
+export type RegisteredModelRegistrationMethod = 'remote_api' | 'uploaded_file'
+
+export type RegisteredModelStatus =
+  | 'draft'
+  | 'validating'
+  | 'active'
+  | 'inactive'
+  | 'failed'
+  | 'archived'
+
+export const REGISTERED_MODEL_STATUS_OPTIONS: {
+  value: RegisteredModelStatus
+  label: string
+  color: string
+}[] = [
+  { value: 'draft', label: '草稿', color: 'default' },
+  { value: 'validating', label: '校验中', color: 'processing' },
+  { value: 'active', label: '已启用', color: 'green' },
+  { value: 'inactive', label: '已停用', color: 'default' },
+  { value: 'failed', label: '校验失败', color: 'red' },
+  { value: 'archived', label: '已归档', color: 'default' },
+]
+
+export interface RegisteredModelValidationLog {
+  checked_at: string
+  ok: boolean
+  http_status: number | null
+  latency_ms: number | null
+  message: string
+}
+
+export interface ArtifactUploadResponse {
+  storage_key: string
+  filename: string
+  mime_type: string | null
+  size: number
+  sha256: string
+}
+
+export interface RegisteredModelVersion {
+  id: number
+  public_id?: string
+  model_id: number
+  version_no: number
+  version_label: string | null
+  notes: string | null
+  large_category: LargeModelCategory | null
+  registration_method: RegisteredModelRegistrationMethod
+  provider: string | null
+  model_name: string | null
+  endpoint_url: string | null
+  config: Record<string, unknown>
+  credential_id: number | null
+  artifact_storage_key: string | null
+  artifact_filename: string | null
+  artifact_mime_type: string | null
+  artifact_size: number | null
+  artifact_sha256: string | null
+  status: string
+  validation_log: RegisteredModelValidationLog[] | null
+  created_by_id: number | null
+  created_by_name?: string | null
+  created_at: string
+}
+
+export interface RegisteredProviderSummary {
+  id: number
+  public_id?: string
+  display_name: string
+  provider_preset: RegisteredModelProvider | null
+  endpoint_url: string | null
+  masked_token: string | null
+  status: string
+}
+
+export interface RegisteredModel {
+  id: number
+  public_id?: string
+  code: string
+  name: string
+  description: string | null
+  kind: RegisteredModelKind
+  small_category: SmallModelCategory | null
+  modality: SmallModelModality | null
+  large_category: LargeModelCategory | null
+  provider_id: number | null
+  provider: RegisteredProviderSummary | null
+  provider_preset: RegisteredModelProvider | null
+  model_name: string | null
+  max_output_tokens: number | null
+  registration_method: RegisteredModelRegistrationMethod
+  status: RegisteredModelStatus
+  version: string | null
+  config: Record<string, unknown>
+  credential_label?: string | null
+  is_deleted: boolean
+  deleted_at: string | null
+  owner_id: number | null
+  owner_name?: string | null
+  created_by_id: number | null
+  created_by_name?: string | null
+  updated_by_id: number | null
+  updated_by_name?: string | null
+  current_version_id: number | null
+  current_version_no: number | null
+  current_version_label: string | null
+  current_version?: RegisteredModelVersion | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface RegisteredModelListItem {
+  id: number
+  public_id?: string
+  code: string
+  name: string
+  kind: RegisteredModelKind
+  small_category: SmallModelCategory | null
+  modality: SmallModelModality | null
+  large_category: LargeModelCategory | null
+  provider_id: number | null
+  provider_preset: RegisteredModelProvider | null
+  provider_label: string | null
+  model_name: string | null
+  max_output_tokens: number | null
+  registration_method: RegisteredModelRegistrationMethod
+  status: RegisteredModelStatus
+  version: string | null
+  current_version_id: number | null
+  current_version_no: number | null
+  current_version_label: string | null
+  // 小模型专属：当前版本 artifact 摘要（来自 list 接口）
+  artifact_filename: string | null
+  artifact_size: number | null
+  owner_id: number | null
+  owner_name?: string | null
+  updated_at: string | null
+  created_at: string
+}
+
+export interface RegisteredModelCreate {
+  code?: string
+  name: string
+  description?: string | null
+  kind?: RegisteredModelKind
+  small_category?: SmallModelCategory | null
+  modality?: SmallModelModality | null
+  large_category?: LargeModelCategory | null
+  // 大模型必填；小模型可空（不绑定任何 Provider）
+  provider_id?: number | null
+  model_name?: string | null
+  status?: RegisteredModelStatus
+  version?: string | null
+  config?: Record<string, unknown>
+  // —— 小模型专用 ——
+  registration_method?: RegisteredModelRegistrationMethod
+  max_output_tokens?: number | null
+  artifact?: ArtifactUploadResponse | null
+}
+
+export interface RegisteredModelUpdate {
+  name?: string
+  description?: string | null
+  small_category?: SmallModelCategory | null
+  modality?: SmallModelModality | null
+  large_category?: LargeModelCategory | null
+  model_name?: string | null
+  max_output_tokens?: number | null
+  status?: RegisteredModelStatus
+  version?: string | null
+  config?: Record<string, unknown>
+}
+
+export interface RegisteredModelVersionCreate {
+  version_label?: string | null
+  notes?: string | null
+  large_category?: LargeModelCategory | null
+  modality?: SmallModelModality | null
+  model_name?: string | null
+  config?: Record<string, unknown>
+  // —— 小模型上传新版本时携带 ——
+  artifact?: ArtifactUploadResponse | null
+}
+
+// ─── Provider（4 级实体） ───
+
+export interface ProviderInitialModel {
+  model_name: string
+  name?: string
+  large_category: LargeModelCategory
+  description?: string
+  version?: string
+}
+
+export interface RegisteredProvider {
+  id: number
+  public_id?: string
+  display_name: string
+  description: string | null
+  provider_preset: RegisteredModelProvider | null
+  endpoint_url: string
+  config: Record<string, unknown>
+  credential_id: number | null
+  masked_token: string | null
+  credential_label: string | null
+  status: 'active' | 'archived'
+  model_count: number
+  owner_id: number | null
+  created_by_id: number | null
+  updated_by_id: number | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface RegisteredProviderDetail extends RegisteredProvider {
+  models: RegisteredModelListItem[]
+}
+
+export interface RegisteredProviderOption {
+  id: number
+  display_name: string
+  provider_preset: RegisteredModelProvider | null
+  endpoint_url: string | null
+  masked_token: string | null
+  status: 'active' | 'archived'
+}
+
+export interface RegisteredProviderCreate {
+  display_name: string
+  description?: string
+  provider_preset?: RegisteredModelProvider | null
+  endpoint_url: string
+  api_key: string
+  initial_models: ProviderInitialModel[]
+}
+
+export interface RegisteredProviderUpdate {
+  display_name?: string
+  description?: string
+  provider_preset?: RegisteredModelProvider | null
+  endpoint_url?: string
+}
+
+export interface RegisteredProviderRotateApiKey {
+  api_key: string
+}
+
+// ─── 凭证 ───
+
+export interface ResourceCredential {
+  id: number
+  public_id?: string
+  name: string
+  provider: string | null
+  masked_token: string
+  created_by_id: number | null
+  created_by_name?: string | null
+  created_at: string
+}
+
+export interface ResourceCredentialCreate {
+  name: string
+  provider?: string | null
+  token: string
+  metadata?: Record<string, unknown>
 }

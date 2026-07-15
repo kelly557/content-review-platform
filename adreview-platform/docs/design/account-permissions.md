@@ -75,7 +75,7 @@
 | **质检管理** | ✓ | ✓ |  | ✓ | 质检功能 |
 | **检测结果查询** | ✓ | ✓ | ✓ | ✓ | 查询功能 |
 | **素材查询** | ✓ | ✓ | ✓ | ✓ | 查询功能 |
-| **知识库** (词库/图片库/代答库) | ✓ | ✓ |  |  | 运营功能 |
+| **资源库** (词库/模型库/图片库/代答库/知识库) | ✓ | ✓ |  |  | 运营功能 |
 | **规则管理** | ✓ | ✓ |  |  | 运营功能 |
 | **策略配置** | ✓ | ✓ |  |  | 运营功能 |
 | **处置结果配置** | ✓ | ✓ |  |  | 运营功能 |
@@ -92,7 +92,9 @@
 | 质检管理 | (无) | (无) | ❌ **Phase 3 新建** |
 | 检测结果查询 | `/query` | `QueryPage` | ✅ 已有 |
 | 素材查询 | `/materials`, `/materials/:id` | `MaterialsListPage`, `MaterialDetailPage` | ✅ 已有(标签名"素材库"待对齐截图的"素材查询") |
-| 知识库 | `/knowledge/{words,images,replies}` | `*LibraryListPage`, `*LibraryDetailPage` | ✅ 已有 |
+| 资源库 (词库/图片库/代答库) | `/resources/{words,images,replies}` | `*LibraryListPage`, `*LibraryDetailPage` | ✅ 已有 |
+| 资源库 · 模型库 | `/resources/models`, `/resources/models/:id` | `ModelListPage`, `ModelDetailPage` | 🆕 本次新增 |
+| 资源库 · 知识库（政策文件） | `/resources/knowledge`, `/resources/knowledge/:id` | `KnowledgeDocumentListPage`, `KnowledgeDocumentDetailPage` | 🆕 本次新增 |
 | 规则管理 | `/strategies/rules-by-type/{image,text,...}` | `StrategyRulesByTypePage` | ✅ 已有 |
 | 策略配置 | `/strategies`, `/strategies/new`, `/strategies/:id/edit` | `StrategyListPage`, `CreateStrategyPage` | ✅ 已有 |
 | 处置结果配置 | `/human-review-rules` | `HumanReviewRulesPage` | ⚠️ 已有(标签名待改成"处置结果配置") |
@@ -113,7 +115,7 @@
 | 自动审核 | `/triggers` | `admin` | `admin, super_admin` |
 | 素材库 (→"素材查询") | `/materials` | `submitter, reviewer, mlr, admin` | `reviewer, inspector, admin, super_admin` |
 | 审核策略 (组) | `/strategies` | `admin, mlr` | `admin, super_admin` |
-| 知识库 (组) | `/knowledge/*` | `admin, mlr` | `admin, super_admin` |
+| 资源库 (组) | `/resources/*` | `admin, mlr` | `admin, super_admin` |
 | 人工审核策略 (→"处置结果配置") | `/human-review-rules` | `admin, mlr` | `admin, super_admin` |
 | 数据查询 | `/query` | `reviewer, mlr, admin` | `reviewer, inspector, admin, super_admin` |
 | 数据报表 | `/reports` | `reviewer, mlr, admin` | `reviewer, inspector, admin, super_admin` |
@@ -126,7 +128,7 @@
 | 路由组 | 现有 `allow` | 新 `allow` |
 |---|---|---|
 | `/reports`, `/query` | `['reviewer', 'mlr', 'admin']` | `['reviewer', 'inspector', 'admin', 'super_admin']` |
-| `/strategies/*`, `/knowledge/*`, `/human-review-rules`, `/tags` | `['admin', 'mlr']` | `['admin', 'super_admin']` (+ 留 `inspector` 只读见 §3.3) |
+| `/strategies/*`, `/resources/*`, `/human-review-rules`, `/tags` | `['admin', 'mlr']` | `['admin', 'super_admin']` (+ 留 `inspector` 只读见 §3.3) |
 | `/admin/users`, `/triggers/*` | `['admin']` | `['admin', 'super_admin']` |
 | **`/admin/roles` (新)** | — | `['super_admin']` |
 
@@ -159,7 +161,7 @@
 | 质检功能 — 质检管理 | (不存在) | 🆕 新建 | 3 |
 | 查询功能 — 检测结果查询 | 数据查询 | ⚠️ 改名候选 | 5 |
 | 查询功能 — 素材查询 | 素材库 | ⚠️ 改名候选 | 5 |
-| 运营功能 — 知识库 | 知识库 | – | – |
+| 运营功能 — 资源库 | 资源库 | – | – |
 | 运营功能 — 规则管理 | (审核策略组里 "图片/文本审核规则") | ⚠️ 拆分子菜单显式化 | 5 |
 | 运营功能 — 策略配置 | 审核策略 (列表) | ⚠️ 改名候选 | 5 |
 | 运营功能 — 处置结果配置 | 人工审核策略 | ✅ **改名** | 5 |

@@ -16,6 +16,10 @@ class ModerationHit(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
     quote: Optional[str] = None
     sensitive_grade: str = Field(default="S0")
+    # LLM 自评的单 hit 风险等级 (高风险|中风险|低风险|敏感|无风险).
+    # aggregate_risk_level_v2 会优先采用此值 (若在合法 5 档内), 避免
+    # 仅靠 label_cn 关键字 substring 猜的脆弱判定.
+    risk: Optional[str] = None
 
     @field_validator("sensitive_grade")
     @classmethod

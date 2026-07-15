@@ -23,9 +23,11 @@ from app.models.review import (
     ReviewTask,
     ReviewType,
 )
+from app.models.strategy import Strategy
 from app.models.user import User
 from app.schemas.query import (
     AdvancedCondition,
+    ContentMedia,
     DECISION_LABELS,
     MachineHitOut,
     MachineReviewRecordOut,
@@ -34,6 +36,7 @@ from app.schemas.query import (
     ReviewPage,
     ReviewRecordOut,
     RISK_TO_DECISION,
+    derive_content_media,
 )
 
 router = APIRouter(prefix="/query", tags=["query"])
@@ -53,12 +56,14 @@ def _enum_value(value: Any) -> Optional[str]:
 def _to_record(
     task: ReviewTask,
     material: Optional[Material],
+    material_version: Optional[MaterialVersion],
     submitter: Optional[User],
     assignee: Optional[User],
     tag_snapshots: List[Dict[str, Any]],
+    strategy_orm: Optional[Strategy] = None,
 ) -> MachineReviewRecordOut:
     mr: Dict[str, Any] = dict(task.machine_result or {})
-    strategy = mr.get("strategy") or {}
+    strategy_snapshot = mr.get("strategy") or {}
     risk_level = mr.get("risk_level")
     if isinstance(risk_level, str):
         machine_decision = RISK_TO_DECISION.get(risk_level)
@@ -76,10 +81,24 @@ def _to_record(
             except Exception:
                 continue
 
-    strategy_code = strategy.get("code") if isinstance(strategy, dict) else None
-    strategy_name = strategy.get("name") if isinstance(strategy, dict) else None
-    if not strategy_code:
-        strategy_code = task.stage_key or None
+    # 优先级：FK 真名 > machine_result.strategy JSONB 快照 > stage_key
+    # production 写路径不再写 JSONB 快照，FK 是唯一权威来源。
+    if strategy_orm is not None:
+        strategy_code = strategy_orm.code
+        strategy_name = strategy_orm.name
+    else:
+        strategy_code = (
+            strategy_snapshot.get("code")
+            if isinstance(strategy_snapshot, dict)
+            else None
+        )
+        strategy_name = (
+            strategy_snapshot.get("name")
+            if isinstance(strategy_snapshot, dict)
+            else None
+        )
+        if not strategy_code:
+            strategy_code = task.stage_key or None
 
     bailian = mr.get("trace_id") or mr.get("bailian_request_id")
 
@@ -91,6 +110,23 @@ def _to_record(
 
     requested_at = task.machine_started_at or task.created_at
 
+    preview_url: Optional[str] = None
+    mime_type: Optional[str] = None
+    text_body: Optional[str] = None
+    if material_version is not None:
+        if task.material_id and task.material_version_id:
+            preview_url = (
+                f"/api/v1/materials/{task.material_id}"
+                f"/versions/{task.material_version_id}/download"
+            )
+        mime_type = material_version.mime_type
+        if material_version.text_body:
+            body = material_version.text_body
+            text_body = body if len(body) <= 500 else body[:500] + "…"
+
+    material_type_str = _enum_value(material.material_type) if material else None
+    content_media = derive_content_media(material_type_str, mime_type)
+
     return MachineReviewRecordOut(
         id=task.id,
         title=task.title,
@@ -98,7 +134,11 @@ def _to_record(
         final_decision=_enum_value(task.final_decision),
         material_id=task.material_id,
         material_version_id=task.material_version_id,
-        material_type=_enum_value(material.material_type) if material else None,
+        material_type=material_type_str,
+        content_media=content_media,
+        preview_url=preview_url,
+        mime_type=mime_type,
+        text_body=text_body,
         strategy_code=strategy_code,
         strategy_name=strategy_name or strategy_code,
         risk_level=risk_level,
@@ -158,6 +198,7 @@ def _apply_filters(
     labels,
     feedback,
     conditions,
+    content_medias,
 ):
     if start is not None:
         ts = ReviewTask.machine_started_at
@@ -167,6 +208,44 @@ def _apply_filters(
         stmt = stmt.where(or_(ts <= end, and_(ts.is_(None), ReviewTask.created_at <= end)))
     if material_types:
         stmt = stmt.where(Material.material_type.in_(material_types))
+    if content_medias:
+        media_clauses = []
+        if "audio" in content_medias:
+            media_clauses.append(MaterialVersion.mime_type.ilike("audio/%"))
+        if "video" in content_medias:
+            media_clauses.append(
+                or_(
+                    MaterialVersion.mime_type.ilike("video/%"),
+                    and_(
+                        MaterialVersion.mime_type.is_(None),
+                        Material.material_type == MaterialType.VIDEO,
+                    ),
+                )
+            )
+        if "image" in content_medias:
+            media_clauses.append(
+                or_(
+                    MaterialVersion.mime_type.ilike("image/%"),
+                    and_(
+                        MaterialVersion.mime_type.is_(None),
+                        Material.material_type == MaterialType.IMAGE,
+                    ),
+                )
+            )
+        if "text" in content_medias:
+            media_clauses.append(
+                or_(
+                    MaterialVersion.mime_type.ilike("text/%"),
+                    and_(
+                        MaterialVersion.mime_type.is_(None),
+                        Material.material_type.in_(
+                            [MaterialType.TEXT, MaterialType.PDF]
+                        ),
+                    ),
+                )
+            )
+        if media_clauses:
+            stmt = stmt.where(or_(*media_clauses))
     if request_ids:
         stmt = stmt.where(ReviewTask.id.in_(request_ids))
     if task_ids:
@@ -174,7 +253,14 @@ def _apply_filters(
     if feedback is not None:
         stmt = stmt.where(ReviewTask.final_decision == feedback)
     if strategy_code:
-        stmt = stmt.where(ReviewTask.machine_result["strategy"]["code"].astext == strategy_code)
+        stmt = stmt.where(
+            or_(
+                ReviewTask.machine_result["strategy"]["code"].astext == strategy_code,
+                ReviewTask.strategy_id.in_(
+                    select(Strategy.id).where(Strategy.code == strategy_code)
+                ),
+            )
+        )
     if machine_decision:
         target_risks = [r for r, d in RISK_TO_DECISION.items() if d == machine_decision]
         if target_risks:
@@ -215,6 +301,7 @@ async def _run_query(
     labels,
     feedback,
     conditions,
+    content_medias,
     page: int,
     size: int,
 ) -> List[MachineReviewRecordOut]:
@@ -222,7 +309,7 @@ async def _run_query(
     Assignee = aliased(User, name="assignee")
 
     stmt = (
-        select(ReviewTask, Material, Submitter, Assignee)
+        select(ReviewTask, Material, Submitter, Assignee, Strategy, MaterialVersion)
         .join(Material, Material.id == ReviewTask.material_id)
         .outerjoin(Submitter, Submitter.id == Material.submitter_id)
         .outerjoin(
@@ -233,6 +320,14 @@ async def _run_query(
             ),
         )
         .outerjoin(Assignee, Assignee.id == ReviewAssignment.assignee_id)
+        .outerjoin(Strategy, Strategy.id == ReviewTask.strategy_id)
+        .outerjoin(
+            MaterialVersion,
+            and_(
+                MaterialVersion.id == ReviewTask.material_version_id,
+                MaterialVersion.material_id == ReviewTask.material_id,
+            ),
+        )
     )
     stmt = _apply_filters(
         stmt,
@@ -247,6 +342,7 @@ async def _run_query(
         labels=labels,
         feedback=feedback,
         conditions=conditions,
+        content_medias=content_medias,
     )
     stmt = stmt.order_by(ReviewTask.id.desc()).offset((page - 1) * size).limit(size)
 
@@ -254,7 +350,7 @@ async def _run_query(
     if not rows:
         return []
 
-    task_ids_out = [t.id for t, _, _, _ in rows]
+    task_ids_out = [t.id for t, _, _, _, _, _ in rows]
     tag_stmt = (
         select(ReviewAssignmentTag.tag_id, ReviewAssignmentTag.tag_snapshot, ReviewAssignment.task_id)
         .join(ReviewAssignment, ReviewAssignment.id == ReviewAssignmentTag.assignment_id)
@@ -266,8 +362,18 @@ async def _run_query(
         tags_by_task.setdefault(task_id, []).append({"id": tag_id, "snapshot": snap})
 
     out: List[MachineReviewRecordOut] = []
-    for task, material, submitter, assignee in rows:
-        out.append(_to_record(task, material, submitter, assignee, tags_by_task.get(task.id, [])))
+    for task, material, submitter, assignee, strategy_orm, material_version in rows:
+        out.append(
+            _to_record(
+                task,
+                material,
+                material_version,
+                submitter,
+                assignee,
+                tags_by_task.get(task.id, []),
+                strategy_orm=strategy_orm,
+            )
+        )
     return out
 
 
@@ -290,6 +396,10 @@ async def list_results(
     labels: List[str] = Query(default_factory=list, description="返回标签多选"),
     feedback: Optional[ReviewDecision] = Query(None, description="反馈结果"),
     conditions: Optional[str] = Query(None, description="高级条件 JSON"),
+    content_medias: List[ContentMedia] = Query(
+        default_factory=list,
+        description="呈现内容多选: text/image/audio/video",
+    ),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=MAX_PAGE_SIZE),
 ) -> QueryPage:
@@ -298,6 +408,14 @@ async def list_results(
     conds = _parse_conditions(conditions)
 
     base_count = select(func.count(ReviewTask.id)).join(Material, Material.id == ReviewTask.material_id)
+    if content_medias:
+        base_count = base_count.outerjoin(
+            MaterialVersion,
+            and_(
+                MaterialVersion.id == ReviewTask.material_version_id,
+                MaterialVersion.material_id == ReviewTask.material_id,
+            ),
+        )
     base_count = _apply_filters(
         base_count,
         start=start,
@@ -311,6 +429,7 @@ async def list_results(
         labels=labels,
         feedback=feedback,
         conditions=conds,
+        content_medias=content_medias,
     )
     total = await db.scalar(base_count) or 0
 
@@ -327,6 +446,7 @@ async def list_results(
         labels=labels,
         feedback=feedback,
         conditions=conds,
+        content_medias=content_medias,
         page=page,
         size=size,
     )
@@ -348,6 +468,7 @@ async def export_results(
     labels: List[str] = Query(default_factory=list),
     feedback: Optional[ReviewDecision] = Query(None),
     conditions: Optional[str] = Query(None),
+    content_medias: List[ContentMedia] = Query(default_factory=list),
 ) -> StreamingResponse:
     req_ids = [int(x) for x in _split_csv(request_ids)]
     t_ids = [int(x) for x in _split_csv(task_ids)]
@@ -369,6 +490,7 @@ async def export_results(
             labels=labels,
             feedback=feedback,
             conditions=conds,
+            content_medias=content_medias,
             page=cursor,
             size=MAX_PAGE_SIZE,
         )

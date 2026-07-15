@@ -7,6 +7,7 @@ import ComposeRuleCard, { type ComposeSegment } from './ComposeRuleCard'
 import VideoFrameIntervalInput from './VideoFrameIntervalInput'
 import type {
   AudioFeatures,
+  AuditItem,
   DocComposeModes,
   DocImageMode,
   DocTextMode,
@@ -42,7 +43,15 @@ interface Props {
     media: CategoryKey,
     itemId: number,
     pointId: number,
-    override: { medium_threshold?: number; high_threshold?: number; linked_library_ids?: number[] },
+    override: {
+      medium_threshold?: number | null
+      high_threshold?: number | null
+      medium_threshold_min?: number | null
+      medium_threshold_max?: number | null
+      high_threshold_min?: number | null
+      high_threshold_max?: number | null
+      linked_library_ids?: number[]
+    },
   ) => void
   onPointToggle: (
     media: CategoryKey,
@@ -64,6 +73,13 @@ interface Props {
   onVideoComposeModesChange?: (next: VideoComposeModes) => void
   videoFrameInterval?: number
   onVideoFrameIntervalChange?: (next: number) => void
+  // 点击 item 行「关联库」入口 → 父级 (CreateStrategyForm) 打开 ItemLibrariesEditor 并即时 PATCH
+  onItemLibraryLink?: (item: AuditItem) => void
+  /**
+   * 关联库成功保存后由父级 +1, 各 RulesTreeView 用它做 remount key,
+   * 重新拉 items 让左栏 badge 同步刷新。
+   */
+  libraryRefreshTick?: number
 }
 
 export default function StrategyTypeTabs({
@@ -84,6 +100,8 @@ export default function StrategyTypeTabs({
   onVideoComposeModesChange,
   videoFrameInterval = DEFAULT_VIDEO_FRAME_INTERVAL_SEC,
   onVideoFrameIntervalChange,
+  onItemLibraryLink,
+  libraryRefreshTick,
 }: Props) {
   const [activeCategory, setActiveCategory] = useState<CategoryKey>(defaultActiveKey)
 
@@ -280,6 +298,8 @@ export default function StrategyTypeTabs({
               onPointToggle={(itemId, pointId, checked) =>
                 onPointToggle('audio', itemId, pointId, checked)
               }
+              onItemLibraryLink={onItemLibraryLink}
+              refreshKey={libraryRefreshTick}
             />
           )}
           {cat.key === 'doc' && showDocRulesTree && (
@@ -296,6 +316,8 @@ export default function StrategyTypeTabs({
               onPointToggle={(itemId, pointId, checked) =>
                 onPointToggle('doc', itemId, pointId, checked)
               }
+              onItemLibraryLink={onItemLibraryLink}
+              refreshKey={libraryRefreshTick}
             />
           )}
           {cat.key === 'video' && showVideoRulesTree && (
@@ -312,6 +334,8 @@ export default function StrategyTypeTabs({
               onPointToggle={(itemId, pointId, checked) =>
                 onPointToggle('video', itemId, pointId, checked)
               }
+              onItemLibraryLink={onItemLibraryLink}
+              refreshKey={libraryRefreshTick}
             />
           )}
           {/* 普通 tab（非合成类）的规则树 */}
@@ -328,6 +352,8 @@ export default function StrategyTypeTabs({
               onPointToggle={(itemId, pointId, checked) =>
                 onPointToggle(cat.key, itemId, pointId, checked)
               }
+              onItemLibraryLink={onItemLibraryLink}
+              refreshKey={libraryRefreshTick}
             />
           )}
           {!['audio', 'doc', 'video'].includes(cat.key) && cat.description && (

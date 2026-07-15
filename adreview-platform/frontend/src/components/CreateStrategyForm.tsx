@@ -31,11 +31,15 @@ import {
   extractVoiceRuleMode,
   type AudioFeatures,
   type DocComposeModes,
+  type LibraryType,
+  type LlmReviewConfig,
   type StrategyPointRef,
   type VideoComposeModes,
   type VoiceRuleMode,
 } from '@/types/domain'
 import type { Strategy } from '@/types/domain'
+import type { AuditItem } from '@/types/domain'
+import { ItemLibrariesEditor } from '@/components/packages/ItemLibrariesEditor'
 import {
   buildPointMapFromStrategy,
   countEnabledPoints,
@@ -47,6 +51,7 @@ import {
   type MediaPointOverrideMap,
   type PointOverride,
 } from './strategy/pointLevel'
+import { LlmReviewCard } from './strategy/LlmReviewCard'
 
 const { Text } = Typography
 
@@ -82,6 +87,22 @@ const EMPTY_ENABLED: Record<CategoryKey, number[]> = {
   video: [],
 }
 
+const CATEGORY_TO_PACKAGE: Record<CategoryKey, string> = {
+  image: 'image_audit_pro',
+  text: 'text_audit_pro',
+  audio: 'audio_audit_pro',
+  doc: 'document_audit_pro',
+  video: 'video_audit_pro',
+}
+
+const ALLOWED_LIB_TYPES_BY_CATEGORY: Record<CategoryKey, LibraryType[]> = {
+  image: ['image', 'word', 'reply'],
+  text: ['word', 'reply'],
+  audio: ['word', 'reply'],
+  doc: ['image', 'word', 'reply'],
+  video: ['image', 'word', 'reply'],
+}
+
 const EMPTY_POINTS: MediaPointMap = {
   image: {},
   text: {},
@@ -104,6 +125,14 @@ function flattenEnabledItems(
     }
   }
   return out
+}
+
+/** 根据 item.package_code 找到对应的 media/CategoryKey。 */
+function categoryOfPackage(packageCode: string): CategoryKey | null {
+  for (const [cat, pkg] of Object.entries(CATEGORY_TO_PACKAGE)) {
+    if (pkg === packageCode) return cat as CategoryKey
+  }
+  return null
 }
 
 export default function CreateStrategyForm({
@@ -134,7 +163,19 @@ export default function CreateStrategyForm({
   const [docComposeModes, setDocComposeModes] = useState<DocComposeModes>(DEFAULT_DOC_COMPOSE_MODES)
   const [videoComposeModes, setVideoComposeModes] = useState<VideoComposeModes>(DEFAULT_VIDEO_COMPOSE_MODES)
   const [videoFrameInterval, setVideoFrameInterval] = useState<number>(DEFAULT_VIDEO_FRAME_INTERVAL_SEC)
+  const [llmReview, setLlmReview] = useState<LlmReviewConfig>({
+    is_enabled: false,
+    model_id: null,
+    needs_multimodal_hint: false,
+  })
   const [hydrated, setHydrated] = useState(mode === 'create')
+  /** 关联库编辑 modal 当前编辑的 item；null=关闭 */
+  const [linkLibraryItem, setLinkLibraryItem] = useState<AuditItem | null>(null)
+  /**
+   * 库关联保存/取消成功的次数, 用作 RulesTreeView 的 remount key,
+   * 强制各 RulesTreeView 重新拉 items 以更新左栏 badge。
+   */
+  const [libraryRefreshTick, setLibraryRefreshTick] = useState(0)
   const [saveResult, setSaveResult] = useState<{
     open: boolean
     strategyId?: number
@@ -178,8 +219,14 @@ export default function CreateStrategyForm({
         patch.medium_threshold = p.medium_threshold
       if (p.high_threshold !== undefined)
         patch.high_threshold = p.high_threshold
-      if (p.linked_library_ids != null)
-        patch.linked_library_ids = [...p.linked_library_ids]
+      if (p.medium_threshold_min !== undefined)
+        patch.medium_threshold_min = p.medium_threshold_min
+      if (p.medium_threshold_max !== undefined)
+        patch.medium_threshold_max = p.medium_threshold_max
+      if (p.high_threshold_min !== undefined)
+        patch.high_threshold_min = p.high_threshold_min
+      if (p.high_threshold_max !== undefined)
+        patch.high_threshold_max = p.high_threshold_max
       if (Object.keys(patch).length > 0) {
         if (!overridesFromBackend[mt][p.item_id])
           overridesFromBackend[mt][p.item_id] = {}
@@ -187,6 +234,13 @@ export default function CreateStrategyForm({
       }
     }
     setPointOverrides(overridesFromBackend)
+    setLlmReview(
+      initial.llm_review ?? {
+        is_enabled: false,
+        model_id: null,
+        needs_multimodal_hint: false,
+      },
+    )
     setVoiceRuleMode(extractVoiceRuleMode(initial.definition))
     setAudioFeatures(extractAudioFeatures(initial.definition))
     setDocComposeModes(extractDocComposeModes(initial.definition))
@@ -211,6 +265,19 @@ export default function CreateStrategyForm({
   }
 
   const goBackOne = () => setStep((s) => Math.max(0, s - 1) as 0 | 1)
+
+  /** 点击 item 行 ◫ 入口 → 打开 modal，让 ItemLibrariesEditor 处理保存+即时 PATCH */
+  const onItemLibraryLink = (it: AuditItem) => {
+    setLinkLibraryItem(it)
+  }
+
+  /** PATCH 成功后递增 libraryRefreshTick，强制 RulesTreeView 重新加载以同步左栏 badge */
+  const onLibrarySaved = (_next: AuditItem) => {
+    setLibraryRefreshTick((n) => n + 1)
+  }
+
+  /** modal 取消/关闭 */
+  const onLibraryCancel = () => setLinkLibraryItem(null)
 
   const buildDefinitionPayload = (): Record<string, unknown> | undefined => {
     const out: Record<string, unknown> = {}
@@ -246,6 +313,16 @@ export default function CreateStrategyForm({
     const definition = buildDefinitionPayload()
     const enabledPointsPayload: StrategyPointRef[] =
       flattenEnabledPointsWithOverride(pointMap, pointOverrides)
+    // 策略级大模型审核：未开启或未选模型时，把开关一并清空；
+    // needs_multimodal_hint 为后端回填字段，提交前丢弃以避免 stale 提示。
+    const cleanedLlmReview: LlmReviewConfig = {
+      is_enabled: !!llmReview.is_enabled && llmReview.model_id != null,
+      model_id:
+        llmReview.is_enabled && llmReview.model_id != null
+          ? llmReview.model_id
+          : null,
+      needs_multimodal_hint: false,
+    }
     setSubmitting(true)
     try {
       if (mode === 'edit' && strategyId) {
@@ -262,6 +339,7 @@ export default function CreateStrategyForm({
               ? values.range[1].toISOString()
               : null,
           definition,
+          llm_review: cleanedLlmReview,
         })
         message.success('已保存策略')
         setSaveResult({
@@ -280,11 +358,12 @@ export default function CreateStrategyForm({
           values.durationMode === 'range' && values.range?.[0]
             ? values.range[0].toISOString()
             : null,
-        effective_until:
-          values.durationMode === 'range' && values.range?.[1]
-            ? values.range[1].toISOString()
-            : null,
-        definition,
+          effective_until:
+            values.durationMode === 'range' && values.range?.[1]
+              ? values.range[1].toISOString()
+              : null,
+          definition,
+          llm_review: cleanedLlmReview,
       })
       message.success('已创建策略')
       setSaveResult({
@@ -454,10 +533,14 @@ export default function CreateStrategyForm({
               width: '100%',
             }}
           >
+            {/* 大模型审核能力：单一开关，置于通用规则上方。needs_multimodal_hint 由后端按 enabled_items 回填 */}
+            <LlmReviewCard value={llmReview} onChange={setLlmReview} />
             <StrategyTypeTabs
               enabledItemIds={enabledItems}
               pointMap={pointMap}
               pointOverrides={pointOverrides}
+              onItemLibraryLink={onItemLibraryLink}
+              libraryRefreshTick={libraryRefreshTick}
               onPointMapChange={setPointMap}
               onPointOverrideChange={(media, itemId, pointId, override) =>
                 setPointOverrides((prev) => {
@@ -468,7 +551,10 @@ export default function CreateStrategyForm({
                   // 清理 null / empty
                   if (merged.medium_threshold === null) delete merged.medium_threshold
                   if (merged.high_threshold === null) delete merged.high_threshold
-                  if (merged.linked_library_ids === null) delete merged.linked_library_ids
+                  if (merged.medium_threshold_min === null) delete merged.medium_threshold_min
+                  if (merged.medium_threshold_max === null) delete merged.medium_threshold_max
+                  if (merged.high_threshold_min === null) delete merged.high_threshold_min
+                  if (merged.high_threshold_max === null) delete merged.high_threshold_max
                   if (Object.keys(merged).length === 0) {
                     delete itemBucket[pointId]
                   } else {
@@ -514,6 +600,27 @@ export default function CreateStrategyForm({
               videoFrameInterval={videoFrameInterval}
               onVideoFrameIntervalChange={setVideoFrameInterval}
             />
+
+            {/* 「策略下启用审核项时为其绑词库」入口。即时 PATCH 写 audit_item_libraries。 */}
+            {linkLibraryItem && (() => {
+              const cat = categoryOfPackage(linkLibraryItem.package_code)
+              const allowedTypes = cat
+                ? ALLOWED_LIB_TYPES_BY_CATEGORY[cat]
+                : (['image', 'word', 'reply'] as LibraryType[])
+              const strategyName =
+                form.getFieldValue('name') || (initial?.name ?? undefined)
+              return (
+                <ItemLibrariesEditor
+                  open
+                  code={linkLibraryItem.package_code}
+                  item={linkLibraryItem}
+                  strategyName={strategyName}
+                  allowedTypes={allowedTypes}
+                  onCancel={onLibraryCancel}
+                  onSaved={onLibrarySaved}
+                />
+              )
+            })()}
 
             <div
               style={{
@@ -598,7 +705,7 @@ export default function CreateStrategyForm({
                 {(['image', 'text', 'audio', 'doc', 'video'] as CategoryKey[]).map((k) => (
                   <Link
                     key={k}
-                    to={`/strategies/rules-by-type/${k}?strategy=${saveResult.strategyId}`}
+                    to={`/rules/personal/${k}?strategy=${saveResult.strategyId}`}
                   >
                     <Button>
                       按类型管理：{MEDIA_TYPE_LABEL_MAP[k]}

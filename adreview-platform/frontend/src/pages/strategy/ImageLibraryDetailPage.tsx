@@ -106,7 +106,7 @@ export default function ImageLibraryDetailPage() {
   return (
     <div style={{ width: '100%' }}>
       <Space style={{ marginBottom: 12 }}>
-        <Link to="/knowledge/images" style={{ color: '#0369A1' }}>
+        <Link to="/resources/images" style={{ color: '#0369A1' }}>
           <Space size={4} align="center">
             <ArrowLeftOutlined />
             图片库

@@ -15,6 +15,7 @@ from app.models.library_item import LibraryItem  # noqa: F401
 from app.models.library_item_reference import LibraryItemReference  # noqa: F401
 from app.models.detection_rule import DetectionRule  # noqa: F401
 from app.models.audit_item import AuditItem  # noqa: F401
+from app.models.audit_item_library import AuditItemLibrary  # noqa: F401
 from app.models.audit_point import AuditPoint, AuditPointRisk  # noqa: F401
 from app.models.audit_point_library import AuditPointLibrary  # noqa: F401
 from app.models.strategy_item import StrategyItem  # noqa: F401
@@ -34,3 +35,5 @@ from app.models.alert_event import AlertEvent  # noqa: F401
 from app.models.llm_call import LlmCall  # noqa: F401
 from app.models.ops_log import OpsLog  # noqa: F401
 from app.models.trigger import Trigger, TriggerRun, TriggerType, TriggerRunSource, TriggerRunStatus  # noqa: F401
+from app.models.knowledge_document import KnowledgeDocument, KnowledgeDocumentVersion  # noqa: F401
+from app.models.registered_model import RegisteredModel, RegisteredModelVersion, ResourceCredential  # noqa: F401

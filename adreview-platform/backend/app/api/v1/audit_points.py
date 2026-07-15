@@ -6,16 +6,15 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import ValidationError
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models.audit_item import AuditItem
 from app.models.audit_point import AuditPoint
-from app.models.audit_point_library import AuditPointLibrary
-from app.models.library import Library
 from app.models.service import Service
 from app.models.user import User, UserRole
 from app.schemas.audit_point import (
@@ -61,8 +60,24 @@ async def _ensure_item_writable(
     package_code: str,
     item_id: int,
 ) -> AuditItem:
-    """返回 item 实例，便于调用方读取 is_builtin。"""
-    item = await db.get(AuditItem, item_id)
+    """返回 item 实例，便于调用方读取 is_builtin。
+
+    使用 select + noload 显式关闭 ``linked_libraries`` / ``linked_library_links``
+    的 selectin 自动加载，避免在已有 selectin 关系的 item 上做异步 db.get
+    引发关联 IO 阻塞。
+    """
+    from sqlalchemy.orm import noload
+
+    item = (
+        await db.execute(
+            select(AuditItem)
+            .where(AuditItem.id == item_id)
+            .options(
+                noload(AuditItem.linked_libraries),
+                noload(AuditItem.linked_library_links),
+            )
+        )
+    ).scalar_one_or_none()
     if not item or item.package_code != package_code:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核项不存在")
     return item
@@ -73,7 +88,7 @@ async def _ensure_item_writable(
 # sort_order）由下列 _filter_payload_for_builtin_point 函数在 router 层拦截；
 # 即便绕过前端直接请求，也兜底 422。
 BUILTIN_POINT_WRITABLE_FIELDS = frozenset(
-    {"is_enabled", "medium_threshold", "high_threshold", "linked_library_ids"}
+    {"is_enabled", "medium_threshold", "high_threshold"}
 )
 
 
@@ -97,7 +112,7 @@ def _filter_payload_for_builtin_point(
             detail=(
                 "通用审核点不允许修改字段："
                 + "、".join(blocked)
-                + "；仅允许启用 / 中/高风险分 / 关联自定义库（超级管理员可改任意字段）。"
+                + "；仅允许启用 / 中/高风险分（超级管理员可改任意字段）。"
             ),
         )
 
@@ -107,75 +122,11 @@ async def _replace_linked_libraries(
     point: AuditPoint,
     library_ids: Optional[list[int]],
 ) -> None:
-    """PATCH semantics for audit_point_libraries join rows.
+    """DEPRECATED — 关联自定义库已上移至审核项。
 
-    - library_ids is None  → 不动
-    - library_ids == []     → 清空该点所有关联
-    - library_ids == [非空]  → 校验 ID 存在 + 类型一致 → 全量替换
-
-    Also refreshes the point's `linked_library_links` relationship so the
-    response reflects the new state without stale cache.
+    保留函数用于向后兼容旧的 admin_import_rules 接口；路由层不再调用本函数。
     """
-    if library_ids is None:
-        return
-
-    if library_ids:
-        # 去重，保持顺序
-        unique_ids: list[int] = []
-        seen: set[int] = set()
-        for lid in library_ids:
-            if lid in seen:
-                continue
-            seen.add(lid)
-            unique_ids.append(lid)
-
-        rows = await db.execute(
-            select(Library.id, Library.library_type).where(Library.id.in_(unique_ids))
-        )
-        found = rows.all()
-        found_ids = {r[0] for r in found}
-        missing = set(unique_ids) - found_ids
-        if missing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"linked_libraries: libraries not found: {sorted(missing)}",
-            )
-
-        types = {r[1] for r in found}
-        if len(types) > 1:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"linked_libraries must share a single library_type; "
-                    f"got {sorted(t.value if hasattr(t, 'value') else t for t in types)}"
-                ),
-            )
-
-    # 全量替换
-    await db.execute(
-        delete(AuditPointLibrary).where(
-            AuditPointLibrary.audit_point_id == point.id
-        )
-    )
-    if library_ids:
-        unique_ids = []
-        seen = set()
-        for lid in library_ids:
-            if lid in seen:
-                continue
-            seen.add(lid)
-            unique_ids.append(lid)
-        await db.execute(
-            insert(AuditPointLibrary).values(
-                [
-                    {"audit_point_id": point.id, "library_id": lid}
-                    for lid in unique_ids
-                ]
-            )
-        )
-
-    # 让 relationship 缓存失效,响应能看到最新行（由外层 commit + refresh）
-    pass
+    return None
 
 
 @router.get("/{code}/points", response_model=list[AuditPointOut])
@@ -219,7 +170,7 @@ async def create_point(
     if item.is_builtin and current_user.role != UserRole.SUPERADMIN:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="通用审核项下不允许新增审核点；如需扩展，请在知识库新建个性化审核项，或由超级管理员操作。",
+            detail="通用审核项下不允许新增审核点；如需扩展，请在资源库新建个性化审核项，或由超级管理员操作。",
         )
     generated_code = await _generate_point_code(db, code, body.item_id)
     point = AuditPoint(
@@ -246,25 +197,7 @@ async def create_point(
             status_code=status.HTTP_409_CONFLICT,
             detail="审核点编码生成冲突，请重试",
         )
-    # linked_libraries
-    if body.linked_library_ids is not None:
-        await _replace_linked_libraries(db, point, body.linked_library_ids)
-        await db.commit()
-        db.expire(point, ["linked_library_links", "linked_libraries"])
-        from sqlalchemy import select
-        from sqlalchemy.orm import selectinload
-
-        fresh = (
-            await db.execute(
-                select(AuditPoint)
-                .where(AuditPoint.id == point.id)
-                .options(
-                    selectinload(AuditPoint.linked_library_links),
-                    selectinload(AuditPoint.linked_libraries),
-                )
-            )
-        ).scalar_one()
-        return AuditPointOut.model_validate(serialize_audit_point(fresh))
+    # 「关联自定义图库词库」已上移至审核项；此处不再处理 linked_library_ids。
     await db.refresh(point)
     await db.commit()
     return AuditPointOut.model_validate(serialize_audit_point(point))
@@ -301,32 +234,12 @@ async def update_point(
         # 旧列：写入但不进新表；log 一次提示
         logger.warning(
             "audit_point(%s) custom_wordset_id being written via legacy field; "
-            "consider migrating to linked_library_ids",
+            "consider migrating to item-level linked_library_ids",
             point.id,
         )
         point.custom_wordset_id = body.custom_wordset_id
     if body.sort_order is not None:
         point.sort_order = body.sort_order
-    if body.linked_library_ids is not None:
-        await _replace_linked_libraries(db, point, body.linked_library_ids)
-        await db.flush()
-        await db.commit()
-        # 显式 expire 当前 point 的关联，避免 selectin 拿旧 cache
-        db.expire(point, ["linked_library_links", "linked_libraries"])
-        from sqlalchemy import select
-        from sqlalchemy.orm import selectinload
-
-        fresh = (
-            await db.execute(
-                select(AuditPoint)
-                .where(AuditPoint.id == point.id)
-                .options(
-                    selectinload(AuditPoint.linked_library_links),
-                    selectinload(AuditPoint.linked_libraries),
-                )
-            )
-        ).scalar_one()
-        return AuditPointOut.model_validate(serialize_audit_point(fresh))
     await db.flush()
     await db.refresh(point)
     await db.commit()
@@ -434,28 +347,10 @@ async def create_points_batch(
             )
             db.add(point)
             await db.flush()
-            if payload.linked_library_ids is not None:
-                await _replace_linked_libraries(db, point, payload.linked_library_ids)
-                await db.commit()
-                db.expire(point, ["linked_library_links", "linked_libraries"])
-                from sqlalchemy import select
-                from sqlalchemy.orm import selectinload
-
-                fresh = (
-                    await db.execute(
-                        select(AuditPoint)
-                        .where(AuditPoint.id == point.id)
-                        .options(
-                            selectinload(AuditPoint.linked_library_links),
-                            selectinload(AuditPoint.linked_libraries),
-                        )
-                    )
-                ).scalar_one()
-                serialized = serialize_audit_point(fresh)
-            else:
-                await db.refresh(point)
-                await db.commit()
-                serialized = serialize_audit_point(point)
+            # 「关联自定义图库词库」已上移至审核项；批量创建不再处理 linked_library_ids。
+            await db.refresh(point)
+            await db.commit()
+            serialized = serialize_audit_point(point)
             items.append(
                 AuditPointBatchItem(
                     index=idx,
