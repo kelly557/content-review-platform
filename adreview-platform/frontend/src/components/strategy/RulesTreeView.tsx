@@ -296,16 +296,15 @@ export default function RulesTreeView({
         style={{
           display: 'grid',
           gridTemplateColumns: leftColTemplate,
-          gap: 16,
+          gap: 0,
           alignItems: 'start',
         }}
       >
-        {/* 左栏：分组 item 列表 */}
+        {/* 左栏：分组 item 列表(无 box 包裹,通过右侧边框划分左右栏) */}
         <div
           style={{
-            background: '#fff',
-            borderRadius: 8,
-            padding: '12px 0',
+            paddingRight: isStacked ? 0 : 16,
+            borderRight: isStacked ? 'none' : '1px solid var(--color-border)',
             maxHeight: isStacked ? 'none' : 540,
             overflowY: isStacked ? 'visible' : 'auto',
           }}
@@ -353,9 +352,7 @@ export default function RulesTreeView({
         {/* 右栏：所有 item 的审核点摊平 + 共用一个滚动容器 */}
         <div
           style={{
-            background: '#F8FAFC',
-            borderRadius: 8,
-            padding: '4px 8px',
+            paddingLeft: isStacked ? 0 : 16,
             maxHeight: isStacked ? 'none' : 720,
             minHeight: isStacked ? 'auto' : 540,
             overflowY: isStacked ? 'visible' : 'auto',
