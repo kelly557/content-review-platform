@@ -1,32 +1,39 @@
 /**
  * 个性化图片/文本审核规则 — 列表页
  *
- * 视觉与行为故意与通用页不同：
- * - 顶栏有「+ 新建规则」
- * - 行操作「⋮ 配置」下拉含编辑/删除
- * - 「生效」列为「关联知识文档」chip
- * - 标签 [个性化] 绿底
+ * 列：规则名 / 模型（行内 Select 大模型）/ 选择知识（行内 Select 多选）/ 启用 / 操作（编辑审核点 + 删除）
+ * 不再有 ⋮ 配置下拉，编辑/删除直接暴露。
  */
 import { useEffect, useMemo, useState } from 'react'
 import {
   App,
   Breadcrumb,
   Button,
-  Dropdown,
   Empty,
+  Select,
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { auditItemsApi } from '@/api/auditItems'
-import { knowledgeDocumentsApi } from '@/api/knowledge-documents'
+import { registeredModelsApi } from '@/api/registered-models'
 import type {
   AuditItem,
   MediaTypeKey,
+  RegisteredModelListItem,
 } from '@/types/domain'
+import { SMALL_MODEL_CATEGORY_LABEL, SMALL_MODEL_CATEGORY_OPTIONS } from '@/types/domain'
+
+const SMALL_CATEGORY_COLOR: Record<string, string> = SMALL_MODEL_CATEGORY_OPTIONS.reduce(
+  (acc, o) => ({ ...acc, [o.value]: o.color }),
+  {} as Record<string, string>,
+)
+import { KnowledgeSelectInline } from './SelectKnowledgeDocumentsModal'
+import SelectSmallModelModal from './SelectSmallModelModal'
 
 const { Text, Title } = Typography
 
@@ -44,23 +51,18 @@ export default function PersonalRuleListPage() {
   const { message, modal } = App.useApp()
   const [items, setItems] = useState<AuditItem[]>([])
   const [loading, setLoading] = useState(false)
-  const [docIndex, setDocIndex] = useState<Map<number, string>>(new Map())
+  const [models, setModels] = useState<RegisteredModelListItem[]>([])
+  const [modelLoading, setModelLoading] = useState(false)
+  const [modelItem, setModelItem] = useState<AuditItem | null>(null)
 
   const reload = async () => {
     setLoading(true)
     try {
-      const [all, docsPage] = await Promise.all([
-        auditItemsApi.listByMediaType(mediaType),
-        knowledgeDocumentsApi
-          .list({ size: 200, include_deleted: false })
-          .catch(() => null),
-      ])
+      const all = await auditItemsApi.listByMediaType(mediaType)
       setItems(all.filter((it) => !it.is_builtin))
-      if (docsPage) {
-        const idx = new Map<number, string>()
-        for (const d of docsPage.items) idx.set(d.id, d.title)
-        setDocIndex(idx)
-      }
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '加载个性化规则失败')
     } finally {
       setLoading(false)
     }
@@ -70,6 +72,22 @@ export default function PersonalRuleListPage() {
     void reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaType])
+
+  useEffect(() => {
+    let cancelled = false
+    setModelLoading(true)
+    registeredModelsApi
+      .list({ size: 200, kind: 'small', status: 'active' })
+      .then((p) => {
+        if (cancelled) return
+        setModels(p.items.filter((m) => m.status === 'active' && m.current_version_id != null))
+      })
+      .catch(() => message.error('加载模型失败'))
+      .finally(() => !cancelled && setModelLoading(false))
+    return () => {
+      cancelled = true
+    }
+  }, [message])
 
   const onDelete = (row: AuditItem) => {
     modal.confirm({
@@ -91,12 +109,57 @@ export default function PersonalRuleListPage() {
     })
   }
 
+  const handleModelChange = async (
+    row: AuditItem,
+    versionId: number | undefined,
+  ) => {
+    try {
+      await auditItemsApi.setActiveModelVersion(
+        row.package_code,
+        row.id,
+        versionId ?? null,
+      )
+      message.success('已更新模型')
+      await reload()
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '保存失败')
+    }
+  }
+
+  const modelOptions = useMemo(
+    () =>
+      models.map((m) => ({
+        value: m.current_version_id!,
+        label: (
+          <Space size={6} wrap>
+            <span>{m.name}</span>
+            {m.small_category && (
+              <Tag
+                color={SMALL_CATEGORY_COLOR[m.small_category] ?? 'default'}
+                style={{ marginInline: 0 }}
+              >
+                {SMALL_MODEL_CATEGORY_LABEL[m.small_category]}
+              </Tag>
+            )}
+            {m.model_name && (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {m.model_name}
+              </Text>
+            )}
+          </Space>
+        ),
+        data: m,
+      })),
+    [models],
+  )
+
   const columns: ColumnsType<AuditItem> = useMemo(
     () => [
       {
         title: '规则名',
         dataIndex: 'name_cn',
-        width: '28%',
+        width: '18%',
         render: (v: string, row) => (
           <Link to={`/rules/personal/${mediaType}/${row.id}`}>
             <Text strong>{v}</Text>
@@ -104,33 +167,66 @@ export default function PersonalRuleListPage() {
         ),
       },
       {
-        title: '关联知识文档',
-        key: 'docs',
-        width: '40%',
+        title: '模型',
+        key: 'model',
+        width: '24%',
         render: (_, row) => {
-          const ids = row.knowledge_document_ids ?? []
-          if (ids.length === 0) {
-            return (
-              <Text type="secondary" style={{ fontStyle: 'italic' }}>
-                (未关联)
-              </Text>
-            )
-          }
+          const currentId = row.active_small_model_version_id ?? undefined
           return (
-            <Space size={4} wrap>
-              {ids.map((id) => (
-                <Tag key={id} color="cyan" style={{ margin: 0 }}>
-                  📚 {docIndex.get(id) ?? `#${id}`}
-                </Tag>
-              ))}
-            </Space>
+            <Select<number | undefined>
+              value={currentId}
+              onChange={(v) => handleModelChange(row, v)}
+              placeholder={modelLoading ? '加载模型中…' : '请选择模型 ▼'}
+              loading={modelLoading}
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              style={{ width: '100%', minWidth: 200 }}
+              popupMatchSelectWidth={420}
+              notFoundContent={
+                modelLoading ? '加载中…' : <Empty description="暂无可用大模型" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              }
+              options={modelOptions}
+              labelRender={(props) => {
+                if (!props.value) return <span style={{ color: '#94A3B8' }}>请选择模型 ▼</span>
+                const m: RegisteredModelListItem | undefined = models.find(
+                  (x) => x.current_version_id === props.value,
+                )
+                if (!m) return <span>#{props.value}</span>
+                return (
+                  <Space size={6} wrap>
+                    <span style={{ fontWeight: 600 }}>{m.model_name ?? m.name}</span>
+                    {m.small_category && (
+                      <Tag
+                        color={SMALL_CATEGORY_COLOR[m.small_category] ?? 'default'}
+                        style={{ marginInline: 0 }}
+                      >
+                        {SMALL_MODEL_CATEGORY_LABEL[m.small_category]}
+                      </Tag>
+                    )}
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      v{m.current_version_no ?? 1}
+                      {m.current_version_label ? ` · ${m.current_version_label}` : ''}
+                    </Text>
+                  </Space>
+                )
+              }}
+            />
           )
         },
       },
       {
+        title: '选择知识',
+        key: 'docs',
+        width: '28%',
+        render: (_, row) => (
+          <KnowledgeSelectInline item={row} onSaved={() => void reload()} compact />
+        ),
+      },
+      {
         title: '启用',
         dataIndex: 'is_enabled',
-        width: '12%',
+        width: '10%',
         render: (v: boolean) => (
           <Tag color={v ? 'green' : 'default'}>{v ? '已启用' : '已停用'}</Tag>
         ),
@@ -140,33 +236,30 @@ export default function PersonalRuleListPage() {
         key: 'action',
         width: '20%',
         render: (_, row) => (
-          <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'view',
-                  label: '查看 / 编辑',
-                  onClick: () =>
-                    navigate(`/rules/personal/${mediaType}/${row.id}`),
-                },
-                { type: 'divider' },
-                {
-                  key: 'delete',
-                  label: '删除',
-                  danger: true,
-                  onClick: () => onDelete(row),
-                },
-              ],
-            }}
-            trigger={['click']}
-          >
-            <Button size="small">⋮ 配置</Button>
-          </Dropdown>
+          <Space size={12}>
+            <Tooltip title="进入「审核点和审核内容」编辑器">
+              <a
+                onClick={() =>
+                  navigate(`/rules/personal/${mediaType}/${row.id}/points`)
+                }
+              >
+                编辑审核点
+              </a>
+            </Tooltip>
+            <Tooltip title="删除该规则及其下所有审核点">
+              <a
+                style={{ color: '#DC2626' }}
+                onClick={() => onDelete(row)}
+              >
+                删除
+              </a>
+            </Tooltip>
+          </Space>
         ),
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mediaType, docIndex],
+    [mediaType, models, modelLoading, modelOptions],
   )
 
   return (
@@ -222,6 +315,16 @@ export default function PersonalRuleListPage() {
               style={{ padding: '24px 0' }}
             />
           ),
+        }}
+      />
+
+      {/* 兼容入口：保留模型 Modal 形式（备用）。 */}
+      <SelectSmallModelModal
+        item={modelItem}
+        onClose={() => setModelItem(null)}
+        onSaved={async () => {
+          await reload()
+          setModelItem(null)
         }}
       />
     </div>

@@ -48,6 +48,7 @@ const GeneralRuleListPage = lazy(() => import('@/pages/rules/GeneralRuleListPage
 const GeneralRuleDetailPage = lazy(() => import('@/pages/rules/GeneralRuleDetailPage'))
 const PersonalRuleListPage = lazy(() => import('@/pages/rules/PersonalRuleListPage'))
 const PersonalRuleDetailPage = lazy(() => import('@/pages/rules/PersonalRuleDetailPage'))
+const PersonalRulePointsPage = lazy(() => import('@/pages/rules/PersonalRulePointsPage'))
 const WordLibraryListPage = lazy(() => import('@/pages/strategy/WordLibraryListPage'))
 const ImageLibraryListPage = lazy(() => import('@/pages/strategy/ImageLibraryListPage'))
 const WordLibraryDetailPage = lazy(() => import('@/pages/strategy/WordLibraryDetailPage'))
@@ -139,6 +140,10 @@ export default function AppRoutes() {
               <Route
                 path="/rules/personal/:mediaType/:itemId"
                 element={<PersonalRuleDetailPage />}
+              />
+              <Route
+                path="/rules/personal/:mediaType/:itemId/points"
+                element={<PersonalRulePointsPage />}
               />
               <Route
                 path="/rules/personal/:mediaType/new"
