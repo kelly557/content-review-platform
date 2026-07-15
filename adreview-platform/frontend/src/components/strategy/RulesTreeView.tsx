@@ -612,6 +612,7 @@ function PointsColumn({
                   alignItems: 'center',
                   gap: 12,
                   marginBottom: allowLibraryLink ? 8 : 0,
+                  flexWrap: 'wrap',
                 }}
               >
                 <Text strong style={{ fontSize: 15, color: '#0F172A' }}>
@@ -624,22 +625,6 @@ function PointsColumn({
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     · 关联 {record.linkedLibraries.length} 个自定义库
                   </Text>
-                )}
-                {allowLibraryLink && (
-                  <Button
-                    type={hasLibs ? 'default' : 'primary'}
-                    size="small"
-                    icon={<PlusOutlined />}
-                    onClick={() =>
-                      setPickerOpenForItemId(
-                        pickerOpen ? null : record.item.id,
-                      )
-                    }
-                    aria-label={`为「${record.item.name_cn}」添加自定义库`}
-                    style={hasLibs ? { marginLeft: 'auto' } : {}}
-                  >
-                    添加自定义库
-                  </Button>
                 )}
               </div>
               {allowLibraryLink && (hasLibs || pickerOpen) && (
@@ -662,12 +647,9 @@ function PointsColumn({
                       alignItems: 'center',
                     }}
                   >
-                    {record.linkedLibraries.length === 0 && (
-                      <Text
-                        type="secondary"
-                        style={{ fontSize: 12 }}
-                      >
-                        暂无关联自定义库,从下方勾选 →
+                    {record.linkedLibraries.length === 0 && !pickerOpen && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        暂无关联自定义库,点右侧按钮添加 →
                       </Text>
                     )}
                     {record.linkedLibraries.map((l) => {
@@ -704,6 +686,20 @@ function PointsColumn({
                         </Tag>
                       )
                     })}
+                    <Button
+                      type={pickerOpen ? 'primary' : 'default'}
+                      size="small"
+                      icon={<PlusOutlined />}
+                      onClick={() =>
+                        setPickerOpenForItemId(
+                          pickerOpen ? null : record.item.id,
+                        )
+                      }
+                      aria-label={`为「${record.item.name_cn}」添加自定义库`}
+                      style={{ marginLeft: 'auto' }}
+                    >
+                      {pickerOpen ? '收起' : '添加自定义库'}
+                    </Button>
                   </div>
                   {pickerOpen && (
                     <div
