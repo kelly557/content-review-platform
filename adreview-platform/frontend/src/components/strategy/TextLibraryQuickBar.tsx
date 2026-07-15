@@ -160,7 +160,7 @@ export default function TextLibraryQuickBar() {
           border: '1px solid #E2E8F0',
           borderRadius: 6,
           padding: '12px 16px',
-          marginBottom: 12,
+          marginBottom: 0,
         }}
       >
         {loading ? (

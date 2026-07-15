@@ -5,6 +5,7 @@ import RulesTreeView from './RulesTreeView'
 import AudioRuleCard from './AudioRuleCard'
 import ComposeRuleCard, { type ComposeSegment } from './ComposeRuleCard'
 import VideoFrameIntervalInput from './VideoFrameIntervalInput'
+import TextLibraryQuickBar from './TextLibraryQuickBar'
 import type {
   AudioFeatures,
   AuditItem,
@@ -105,19 +106,8 @@ export default function StrategyTypeTabs({
   onVideoFrameIntervalChange,
   onItemLibraryLink,
   libraryRefreshTick,
-  activeKey: controlledActiveKey,
-  onActiveKeyChange,
 }: Props) {
-  const [internalActive, setInternalActive] = useState<CategoryKey>(defaultActiveKey)
-  const isControlled = controlledActiveKey !== undefined
-  const activeCategory = isControlled ? controlledActiveKey : internalActive
-  const setActiveCategory = (k: CategoryKey) => {
-    if (isControlled) {
-      onActiveKeyChange?.(k)
-    } else {
-      setInternalActive(k)
-    }
-  }
+  const [activeCategory, setActiveCategory] = useState<CategoryKey>(defaultActiveKey)
 
   const setPointsForItem = (media: CategoryKey, itemId: number, next: PointMap) => {
     onPointMapChange({ ...pointMap, [media]: { ...pointMap[media], [itemId]: next } })
@@ -354,21 +344,26 @@ export default function StrategyTypeTabs({
           )}
           {/* 普通 tab（非合成类）的规则树 */}
           {cat.key !== 'audio' && cat.key !== 'doc' && cat.key !== 'video' && (
-            <RulesTreeView
-              packageCode={PACKAGE_BY_MEDIA[cat.key]}
-              enabledItemIds={selectedItems}
-              getPointMap={(itemId) => pointMap[cat.key]?.[itemId] ?? {}}
-              onPointMapChange={(itemId, next) => setPointsForItem(cat.key, itemId, next)}
-              pointOverrides={pointOverrides}
-              onPointOverrideChange={(itemId, pointId, override) =>
-                onPointOverrideChange(cat.key, itemId, pointId, override)
-              }
-              onPointToggle={(itemId, pointId, checked) =>
-                onPointToggle(cat.key, itemId, pointId, checked)
-              }
-              onItemLibraryLink={onItemLibraryLink}
-              refreshKey={libraryRefreshTick}
-            />
+            <>
+              {/* 配置词库快捷栏：仅文本 tab 时,在规则树之上(作为右栏顶部)。
+                  选择状态仅本地,刷新即丢。 */}
+              {cat.key === 'text' && <TextLibraryQuickBar />}
+              <RulesTreeView
+                packageCode={PACKAGE_BY_MEDIA[cat.key]}
+                enabledItemIds={selectedItems}
+                getPointMap={(itemId) => pointMap[cat.key]?.[itemId] ?? {}}
+                onPointMapChange={(itemId, next) => setPointsForItem(cat.key, itemId, next)}
+                pointOverrides={pointOverrides}
+                onPointOverrideChange={(itemId, pointId, override) =>
+                  onPointOverrideChange(cat.key, itemId, pointId, override)
+                }
+                onPointToggle={(itemId, pointId, checked) =>
+                  onPointToggle(cat.key, itemId, pointId, checked)
+                }
+                onItemLibraryLink={onItemLibraryLink}
+                refreshKey={libraryRefreshTick}
+              />
+            </>
           )}
           {!['audio', 'doc', 'video'].includes(cat.key) && cat.description && (
             <Alert

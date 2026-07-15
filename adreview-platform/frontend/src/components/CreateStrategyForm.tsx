@@ -19,7 +19,6 @@ import {
   type CategoryKey,
 } from './strategy/constants'
 import StrategyTypeTabs from './strategy/StrategyTypeTabs'
-import TextLibraryQuickBar from './strategy/TextLibraryQuickBar'
 import {
   DEFAULT_AUDIO_FEATURES,
   DEFAULT_DOC_COMPOSE_MODES,
@@ -169,7 +168,6 @@ export default function CreateStrategyForm({
     model_id: null,
     needs_multimodal_hint: false,
   })
-  const [activeMediaKey, setActiveMediaKey] = useState<CategoryKey>('image')
   const [hydrated, setHydrated] = useState(mode === 'create')
   /** 关联库编辑 modal 当前编辑的 item；null=关闭 */
   const [linkLibraryItem, setLinkLibraryItem] = useState<AuditItem | null>(null)
@@ -538,8 +536,6 @@ export default function CreateStrategyForm({
             {/* 大模型审核能力：单一开关，置于通用规则上方。needs_multimodal_hint 由后端按 enabled_items 回填 */}
             <LlmReviewCard value={llmReview} onChange={setLlmReview} />
             <StrategyTypeTabs
-              activeKey={activeMediaKey}
-              onActiveKeyChange={setActiveMediaKey}
               enabledItemIds={enabledItems}
               pointMap={pointMap}
               pointOverrides={pointOverrides}
@@ -604,10 +600,6 @@ export default function CreateStrategyForm({
               videoFrameInterval={videoFrameInterval}
               onVideoFrameIntervalChange={setVideoFrameInterval}
             />
-
-            {/* 配置词库快捷栏：仅文本 tab 时显示（横排两行：黑名单 / 白名单）。
-                选择状态仅本地,刷新即丢(用户决策)。 */}
-            {activeMediaKey === 'text' && <TextLibraryQuickBar />}
 
             {/* 「策略下启用审核项时为其绑词库」入口。即时 PATCH 写 audit_item_libraries。 */}
             {linkLibraryItem && (() => {
