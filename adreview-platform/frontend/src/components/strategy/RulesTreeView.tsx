@@ -356,7 +356,9 @@ export default function RulesTreeView({
             background: '#F8FAFC',
             borderRadius: 8,
             padding: '4px 8px',
+            maxHeight: isStacked ? 'none' : 720,
             minHeight: isStacked ? 'auto' : 540,
+            overflowY: isStacked ? 'visible' : 'auto',
           }}
         >
           {items.length > 0 ? (
@@ -385,8 +387,8 @@ export default function RulesTreeView({
 }
 
 function ItemGroup({
-  title,
-  icon,
+  title: _title,
+  icon: _icon,
   items,
   enabledSet,
   enabledPointCountByItem,
@@ -427,24 +429,6 @@ function ItemGroup({
 }) {
   return (
     <div style={{ marginBottom: 8 }}>
-      <div
-        style={{
-          padding: '4px 16px 8px',
-          fontSize: 12,
-          color: '#64748B',
-          fontWeight: 500,
-          letterSpacing: 0.5,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-        }}
-      >
-        {icon}
-        <span>{title}</span>
-        <span style={{ color: '#94A3B8', fontWeight: 400 }}>
-          {items.length}
-        </span>
-      </div>
       {items.length === 0 ? (
         <div
           style={{
