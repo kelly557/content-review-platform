@@ -663,7 +663,7 @@ function PointsColumn({
                       color: pickerOpen ? '#2563EB' : '#0F172A',
                     }}
                   >
-                    {pickerOpen ? '收起自定义库' : '自定义库'}
+                    {`自定义库 ${pickerOpen ? '▲' : '▼'}`}
                   </Button>
                 )}
               </div>
@@ -682,7 +682,7 @@ function PointsColumn({
                 background: '#F8FAFC',
                 borderRadius: 6,
                 padding: '10px 14px',
-                margin: '8px 0 4px',
+                margin: '8px 0 24px',
               }}
             >
               <div
@@ -701,7 +701,6 @@ function PointsColumn({
                     return (
                       <Tag
                         key={l.library_id}
-                        color={TYPE_COLOR_BY_LIB[l.library_type] ?? 'default'}
                         bordered={false}
                         closeIcon={<CloseOutlined />}
                         onClose={(e) => {
@@ -712,14 +711,15 @@ function PointsColumn({
                           margin: 0,
                           fontSize: 12,
                           padding: '2px 4px 2px 8px',
+                          color: '#0F172A',
+                          background: '#fff',
+                          border: '1px solid var(--color-border)',
                           opacity: record.pending ? 0.6 : 1,
                         }}
                       >
                         <Space size={4} align="center">
                           <span>{typeLabel}</span>
-                          <span
-                            style={{ color: '#0F172A', fontWeight: 500 }}
-                          >
+                          <span style={{ fontWeight: 500 }}>
                             {l.name}
                           </span>
                         </Space>
