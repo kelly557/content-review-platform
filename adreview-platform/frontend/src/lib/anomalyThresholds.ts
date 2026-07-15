@@ -1,11 +1,8 @@
-export type AnomalySeverity = 'warn' | 'critical'
-
 export interface AnomalyThreshold {
   rule_code: string
   label: string
   metric: string
   threshold: number
-  severity: AnomalySeverity
   unit: '%' | 'count'
   description: string
   source: 'default' | 'custom'
@@ -26,7 +23,6 @@ export const DEFAULT_ANOMALY_THRESHOLDS: Record<AnomalyRuleCode, AnomalyThreshol
     label: '拒绝率异常',
     metric: '拒绝率',
     threshold: 30,
-    severity: 'warn',
     unit: '%',
     description: '拒绝率过高',
     source: 'default',
@@ -36,7 +32,6 @@ export const DEFAULT_ANOMALY_THRESHOLDS: Record<AnomalyRuleCode, AnomalyThreshol
     label: '高风险内容异常',
     metric: '1h 高风险内容数',
     threshold: 50,
-    severity: 'critical',
     unit: 'count',
     description: '1 小时内高风险内容数量过多',
     source: 'default',
@@ -46,19 +41,8 @@ export const DEFAULT_ANOMALY_THRESHOLDS: Record<AnomalyRuleCode, AnomalyThreshol
     label: '高风险账号聚集',
     metric: '1h 高风险账号数',
     threshold: 20,
-    severity: 'critical',
     unit: 'count',
     description: '1 小时内高风险账号聚集',
     source: 'default',
   },
-}
-
-export const SEVERITY_TAG_COLOR: Record<AnomalySeverity, string> = {
-  warn: 'orange',
-  critical: 'red',
-}
-
-export const SEVERITY_LABEL: Record<AnomalySeverity, string> = {
-  warn: '预警',
-  critical: '严重',
 }

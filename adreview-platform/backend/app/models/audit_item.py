@@ -64,11 +64,11 @@ class AuditItem(Base):
         ForeignKey("registered_model_versions.id", ondelete="SET NULL"),
         nullable=True,
     )
-    # 个性化规则「生效大模型版本」指针：仅 is_builtin=false 时写入；
-    # 指向 kind='large' 的 RegisteredModelVersion（LLM，prompt 执行器）。
-    active_large_model_version_id: Mapped[Optional[int]] = mapped_column(
+    # 个性化规则「生效大模型」指针：仅 is_builtin=false 时写入；
+    # 指向 kind='large' 的 RegisteredModel（LLM，prompt 执行器）。
+    active_large_model_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
-        ForeignKey("registered_model_versions.id", ondelete="SET NULL"),
+        ForeignKey("registered_models.id", ondelete="SET NULL"),
         nullable=True,
     )
     # 个性化规则「关联知识文档」ID 列表（多选）。JSONB 存 list[int]。

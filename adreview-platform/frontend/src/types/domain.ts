@@ -1187,6 +1187,12 @@ export interface AuditItemActiveModelVersion {
   version_label: string | null
 }
 
+export interface AuditItemActiveLargeModel {
+  model_id: number
+  model_code: string
+  model_name: string
+}
+
 export interface AuditItem {
   id: number
   public_id?: string
@@ -1204,9 +1210,9 @@ export interface AuditItem {
   /** 通用规则「生效小模型版本」指针 — 仅 is_builtin=true 时可写。 */
   active_small_model_version_id: number | null
   active_model_version: AuditItemActiveModelVersion | null
-  /** 个性化规则「生效大模型版本」指针 — 仅 is_builtin=false 时可写。 */
-  active_large_model_version_id: number | null
-  active_large_model_version: AuditItemActiveModelVersion | null
+  /** 个性化规则「生效大模型」指针 — 仅 is_builtin=false 时可写。 */
+  active_large_model_id: number | null
+  active_large_model: AuditItemActiveLargeModel | null
   /** 个性化规则「关联知识文档」ID 列表（多选）— 仅 is_builtin=false 时可写。 */
   knowledge_document_ids: number[]
   created_at: string
@@ -1249,10 +1255,10 @@ export interface AuditItemUpdate {
    */
   active_small_model_version_id?: number | null
   /**
-   * 个性化规则「切换生效大模型版本」(LLM，作为 prompt 执行器)。
+   * 个性化规则「切换生效大模型」(LLM，作为 prompt 执行器)。
    * null=清空。通用规则不可写。
    */
-  active_large_model_version_id?: number | null
+  active_large_model_id?: number | null
   /** 个性化规则「关联知识文档」(多选); undefined=不动, []=清空, [非空]=替换 */
   knowledge_document_ids?: number[]
 }

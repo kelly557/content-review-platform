@@ -25,7 +25,6 @@ import {
   ANOMALY_RULE_CODES,
   AnomalyRuleCode,
   AnomalyThreshold,
-  SEVERITY_TAG_COLOR,
 } from '@/lib/anomalyThresholds'
 import AnomalyThresholdModal from './AnomalyThresholdModal'
 import { MultiMetricLineChart } from '../charts'
@@ -140,18 +139,10 @@ export default function AnomalyTab() {
         }
         const unit = t.unit === '%' ? '%' : ''
         return (
-          <Space direction="vertical" size={0}>
-            <Text style={{ fontSize: 12 }}>
-              {t.metric} ≥ {t.threshold}
-              {unit}
-            </Text>
-            <AntTag
-              color={SEVERITY_TAG_COLOR[t.severity]}
-              style={{ fontSize: 10, margin: 0 }}
-            >
-              {t.severity === 'warn' ? '预警' : '严重'}
-            </AntTag>
-          </Space>
+          <Text style={{ fontSize: 12 }}>
+            {t.metric} ≥ {t.threshold}
+            {unit}
+          </Text>
         )
       },
     },
@@ -230,7 +221,7 @@ export default function AnomalyTab() {
             style={{ minWidth: 120 }}
           />
           <Button onClick={() => void refresh(window, status)}>刷新</Button>
-          <Tooltip title="配置本机预警阈值 (localStorage)">
+          <Tooltip title="配置预警阈值">
             <Button
               icon={<SettingOutlined />}
               onClick={() => setThresholdModalOpen(true)}
@@ -240,8 +231,7 @@ export default function AnomalyTab() {
           </Tooltip>
         </Space>
         <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-          阈值仅本浏览器生效, 团队统一请在 admin 后台配置 (后续接入);
-          当前 3 项阈值: 拒绝率 ≥ {tReject.threshold}%, 高风险内容 ≥ {tContent.threshold} 条, 高风险账号 ≥ {tAccount.threshold} 个。
+          当前阈值: 拒绝率 ≥ {tReject.threshold}%, 高风险内容 ≥ {tContent.threshold} 条, 高风险账号 ≥ {tAccount.threshold} 个。
         </Text>
       </Card>
 

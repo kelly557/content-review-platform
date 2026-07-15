@@ -39,7 +39,6 @@ export function useAnomalyThresholds() {
       (Object.values(thresholds) as AnomalyThreshold[]).map((t) => ({
         code: t.rule_code,
         threshold: t.threshold,
-        severity: t.severity,
         unit: t.unit,
       })),
     [thresholds],

@@ -43,11 +43,11 @@ export const auditItemsApi = {
       })
       .then((r) => r.data)
   },
-  /** 个性化规则「切换生效大模型版本」(LLM，prompt 执行器) */
-  setActiveLargeModelVersion(packageCode: string, itemId: number, versionId: number | null) {
+  /** 个性化规则「切换生效大模型」(LLM，prompt 执行器) */
+  setActiveLargeModel(packageCode: string, itemId: number, modelId: number | null) {
     return api
       .put<AuditItem>(`/packages/${packageCode}/items/${itemId}`, {
-        active_large_model_version_id: versionId,
+        active_large_model_id: modelId,
       })
       .then((r) => r.data)
   },

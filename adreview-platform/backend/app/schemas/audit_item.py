@@ -30,6 +30,14 @@ class ActiveModelVersionOut(BaseModel):
     version_label: Optional[str] = None
 
 
+class ActiveLargeModelOut(BaseModel):
+    """个性化规则生效大模型摘要 — 仅 is_builtin=false 时有值。"""
+
+    model_id: int
+    model_code: str
+    model_name: str
+
+
 class AuditItemOut(ORMBase):
     id: int
     package_code: str
@@ -46,9 +54,9 @@ class AuditItemOut(ORMBase):
     # 通用规则: 生效小模型版本 (NULL = 未指定)
     active_small_model_version_id: Optional[int] = None
     active_model_version: Optional[ActiveModelVersionOut] = None
-    # 个性化规则: 生效大模型版本 (NULL = 未指定)
-    active_large_model_version_id: Optional[int] = None
-    active_large_model_version: Optional[ActiveModelVersionOut] = None
+    # 个性化规则: 生效大模型 (NULL = 未指定)
+    active_large_model_id: Optional[int] = None
+    active_large_model: Optional[ActiveLargeModelOut] = None
     # 个性化规则: 关联知识文档 ID 列表 (NULL/[] = 未关联)
     knowledge_document_ids: list[int] = Field(default_factory=list)
     created_at: datetime
@@ -90,8 +98,8 @@ class AuditItemUpdate(BaseModel):
     linked_library_ids: Optional[list[int]] = None
     # 通用规则「切换生效小模型版本」
     active_small_model_version_id: Optional[int] = None
-    # 个性化规则「切换生效大模型版本」
-    active_large_model_version_id: Optional[int] = None
+    # 个性化规则「切换生效大模型」
+    active_large_model_id: Optional[int] = None
     # 个性化规则「关联知识文档」（多选；None=不动，[]=清空，[非空]=替换）
     knowledge_document_ids: Optional[list[int]] = None
 

@@ -311,7 +311,7 @@ export default function RulesTreeView({
           }}
         >
           <ItemGroup
-            title="通用"
+            title="平台内置"
             icon={<LockOutlined style={{ color: '#D97706' }} />}
             items={builtinItems}
             enabledSet={enabledSet}
@@ -387,8 +387,8 @@ export default function RulesTreeView({
 }
 
 function ItemGroup({
-  title: _title,
-  icon: _icon,
+  title,
+  icon,
   items,
   enabledSet,
   enabledPointCountByItem,
@@ -429,6 +429,24 @@ function ItemGroup({
 }) {
   return (
     <div style={{ marginBottom: 8 }}>
+      <div
+        style={{
+          padding: '4px 16px 8px',
+          fontSize: 12,
+          color: '#64748B',
+          fontWeight: 500,
+          letterSpacing: 0.5,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        {icon}
+        <span>{title}</span>
+        <span style={{ color: '#94A3B8', fontWeight: 400 }}>
+          {items.length}
+        </span>
+      </div>
       {items.length === 0 ? (
         <div
           style={{
@@ -716,25 +734,8 @@ function PointsColumn({
               style={{
                 padding: '12px 0 6px',
                 borderBottom: '1px dashed var(--color-border)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
               }}
-            >
-              <Text strong style={{ fontSize: 14, color: '#0F172A' }}>
-                {record.item.name_cn}
-              </Text>
-              <Tag
-                color={record.item.is_builtin ? 'gold' : 'blue'}
-                bordered={false}
-                style={{ margin: 0, fontSize: 11 }}
-              >
-                {record.item.is_builtin ? '通用' : '自定义'}
-              </Tag>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {record.pointCount} 个审核点
-              </Text>
-            </div>
+            />
           )
         }
         const pm = getPointMap(record.item.id)
@@ -794,9 +795,6 @@ function PointsColumn({
             <Text type="secondary" style={{ fontSize: 12 }}>
               暂无审核说明
             </Text>
-            <Tag style={{ margin: 0, fontSize: 11, padding: '0 6px' }}>
-              后期导入
-            </Tag>
           </Space>
         )
       },

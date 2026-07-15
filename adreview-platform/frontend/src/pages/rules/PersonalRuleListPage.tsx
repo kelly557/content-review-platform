@@ -328,13 +328,13 @@ export default function PersonalRuleListPage({
 
   const handleModelChange = async (
     row: AuditItem,
-    versionId: number | undefined,
+    modelId: number | undefined,
   ) => {
     try {
-      await auditItemsApi.setActiveLargeModelVersion(
+      await auditItemsApi.setActiveLargeModel(
         row.package_code,
         row.id,
-        versionId ?? null,
+        modelId ?? null,
       )
       message.success('已更新大模型')
       await reload()
@@ -347,7 +347,7 @@ export default function PersonalRuleListPage({
   const modelOptions = useMemo(
     () =>
       models.map((m) => ({
-        value: m.current_version_id!,
+        value: m.id!,
         label: (
           <Space size={6} wrap>
             <span>{m.name}</span>
@@ -388,7 +388,7 @@ export default function PersonalRuleListPage({
         key: 'model',
         width: '24%',
         render: (_, row) => {
-          const currentId = row.active_large_model_version_id ?? undefined
+          const currentId = row.active_large_model_id ?? undefined
           return (
             <Select<number | undefined>
               value={currentId}
@@ -407,7 +407,7 @@ export default function PersonalRuleListPage({
               labelRender={(props) => {
                 if (!props.value) return <span style={{ color: '#94A3B8' }}>请选择大模型 ▼</span>
                 const m: RegisteredModelListItem | undefined = models.find(
-                  (x) => x.current_version_id === props.value,
+                  (x) => x.id === props.value,
                 )
                 if (!m) return <span>#{props.value}</span>
                 return (
@@ -421,10 +421,6 @@ export default function PersonalRuleListPage({
                         {LARGE_MODEL_CATEGORY_LABEL[m.large_category]}
                       </Tag>
                     )}
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      v{m.current_version_no ?? 1}
-                      {m.current_version_label ? ` · ${m.current_version_label}` : ''}
-                    </Text>
                   </Space>
                 )
               }}

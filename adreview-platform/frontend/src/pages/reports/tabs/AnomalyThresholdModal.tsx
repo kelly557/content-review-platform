@@ -5,7 +5,6 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
-  Select,
   Space,
   Table,
   Tag,
@@ -16,17 +15,10 @@ import { ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import {
   ANOMALY_RULE_CODES,
   AnomalyRuleCode,
-  AnomalySeverity,
   AnomalyThreshold,
-  SEVERITY_LABEL,
 } from '@/lib/anomalyThresholds'
 
 const { Text } = Typography
-
-const SEVERITY_OPTIONS: { value: AnomalySeverity; label: string }[] = [
-  { value: 'warn', label: SEVERITY_LABEL.warn },
-  { value: 'critical', label: SEVERITY_LABEL.critical },
-]
 
 interface Props {
   open: boolean
@@ -94,28 +86,6 @@ export default function AnomalyThresholdModal({
       ),
     },
     {
-      title: '级别',
-      dataIndex: 'severity',
-      width: 120,
-      render: (_v: AnomalySeverity, row) => (
-        <Select
-          value={draft[row.rule_code as AnomalyRuleCode].severity}
-          options={SEVERITY_OPTIONS}
-          style={{ width: '100%' }}
-          onChange={(nv) => {
-            const code = row.rule_code as AnomalyRuleCode
-            setDraft((d) => ({ ...d, [code]: { ...d[code], severity: nv } }))
-          }}
-        />
-      ),
-    },
-    {
-      title: '单位',
-      dataIndex: 'unit',
-      width: 80,
-      render: (v: string) => (v === '%' ? '%' : '条'),
-    },
-    {
       title: '说明',
       dataIndex: 'description',
       render: (v: string, row) => {
@@ -177,10 +147,7 @@ export default function AnomalyThresholdModal({
           pagination={false}
         />
       </Form>
-      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 12 }}>
-        提示: 阈值仅在本浏览器生效 (localStorage);
-        团队统一阈值请在 admin 后台配置 (后续接入)。
-      </Text>
+
     </Modal>
   )
 }
