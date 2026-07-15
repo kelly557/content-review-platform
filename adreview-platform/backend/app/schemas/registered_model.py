@@ -22,6 +22,14 @@ class RegisteredModelValidationLog(BaseModel):
     message: str
 
 
+class ModelPrecheckRequest(BaseModel):
+    endpoint_url: str
+    protocol: str = "openai-compatible"
+    model_name: Optional[str] = None
+    api_key: Optional[str] = None
+    timeout: int = 30
+
+
 class ArtifactUploadResponse(BaseModel):
     """小模型文件上传后返回的元信息；前端把整段 JSON 存进表单隐藏字段。"""
 

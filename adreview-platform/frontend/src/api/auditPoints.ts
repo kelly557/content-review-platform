@@ -6,6 +6,16 @@ import type {
   AuditPointUpdate,
 } from '@/types/domain'
 
+export interface ParsedAuditPoint {
+  label_cn: string
+  scope_text?: string
+}
+
+export interface DocumentParseResult {
+  points: ParsedAuditPoint[]
+  source_info?: string
+}
+
 export const auditPointsApi = {
   list(
     packageCode: string,
@@ -54,6 +64,15 @@ export const auditPointsApi = {
   reset(packageCode: string) {
     return api
       .post<{ items: AuditPoint[] }>(`/packages/${packageCode}/points/reset`)
+      .then((r) => r.data)
+  },
+  parseDocument(file: File) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api
+      .post<DocumentParseResult>(`/points/parse-document`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
       .then((r) => r.data)
   },
 }

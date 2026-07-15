@@ -7,9 +7,10 @@ import {
   Input,
   Select,
   Space,
+  Tag,
   App,
 } from 'antd'
-import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { ApiOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { providersApi, registeredModelsApi } from '@/api/registered-models'
 import {
   LARGE_MODEL_CATEGORY_OPTIONS,
@@ -180,6 +181,43 @@ interface LargeFormProps {
 }
 
 function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) {
+  const { message } = App.useApp()
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  const handleTest = async () => {
+    const endpointUrl = form.getFieldValue('endpoint_url')?.trim()
+    const apiKey = form.getFieldValue('api_key')
+    if (!endpointUrl) {
+      message.error('请先填写 Base URL')
+      return
+    }
+    const protocol =
+      REGISTERED_MODEL_PROVIDER_PRESETS.find((p) => p.value === currentPreset)?.protocol ?? 'custom'
+    const models = form.getFieldValue('initial_models') as
+      | Array<{ model_name?: string }>
+      | undefined
+    const modelName = models?.[0]?.model_name?.trim() || undefined
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const r = await registeredModelsApi.precheck({
+        endpoint_url: endpointUrl,
+        protocol,
+        model_name: modelName ?? null,
+        api_key: apiKey ?? null,
+      })
+      setTestResult({
+        ok: r.ok,
+        msg: `${r.ok ? '连接成功' : '连接失败'} · HTTP ${r.http_status ?? '-'} · ${r.latency_ms ?? '-'}ms`,
+      })
+    } catch {
+      setTestResult({ ok: false, msg: '请求失败，请检查网络或服务端' })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   return (
     <>
       <Form<CreateFormValues>
@@ -227,6 +265,22 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
           tooltip="原始 token；服务端加密入库，列表只返 masked 预览"
         >
           <Input.Password placeholder="sk-..." visibilityToggle />
+        </Form.Item>
+        <Form.Item label="测试连接" tooltip="保存前验证 Provider 接入地址与 API Key 是否可用">
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Space>
+              <Button
+                icon={<ApiOutlined />}
+                loading={testing}
+                onClick={handleTest}
+              >
+                测试连接
+              </Button>
+              {testResult && (
+                <Tag color={testResult.ok ? 'green' : 'red'}>{testResult.msg}</Tag>
+              )}
+            </Space>
+          </Space>
         </Form.Item>
         <Form.Item label="描述（可选）" name="description">
           <Input.TextArea

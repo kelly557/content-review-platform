@@ -11,7 +11,6 @@ import {
   Breadcrumb,
   Button,
   Empty,
-  Form,
   Input,
   Modal,
   Select,
@@ -44,7 +43,6 @@ const LARGE_CATEGORY_COLOR: Record<string, string> = LARGE_MODEL_CATEGORY_OPTION
 import SelectSmallModelModal from './SelectSmallModelModal'
 
 const { Text, Title } = Typography
-const { TextArea } = Input
 
 const MEDIA_LABEL: Record<MediaTypeKey, string> = {
   image: '图片',
@@ -63,84 +61,6 @@ const PACKAGE_BY_MEDIA: Record<MediaTypeKey, string> = {
 }
 
 const MAX_UPLOAD_POINTS = 100
-
-/* ─────────────── CreateAgentModal ─────────────── */
-
-function CreateAgentModal({
-  open,
-  mediaType,
-  onClose,
-  onCreated,
-}: {
-  open: boolean
-  mediaType: MediaTypeKey
-  onClose: () => void
-  onCreated: () => void | Promise<void>
-}) {
-  const { message } = App.useApp()
-  const [form] = Form.useForm()
-  const [creating, setCreating] = useState(false)
-
-  const pkg = PACKAGE_BY_MEDIA[mediaType]
-
-  const handleOk = async () => {
-    const values = await form.validateFields().catch(() => null)
-    if (!values) return
-    setCreating(true)
-    try {
-      await auditItemsApi.create(pkg, {
-        name_cn: values.name_cn,
-        aliases: values.aliases ?? [],
-        description: values.description,
-      })
-      message.success('已创建审核 Agent')
-      form.resetFields()
-      await onCreated()
-    } catch (err) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail ?? '创建失败')
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  return (
-    <Modal
-      title="新增审核 Agent"
-      open={open}
-      onCancel={() => {
-        if (creating) return
-        form.resetFields()
-        onClose()
-      }}
-      onOk={handleOk}
-      confirmLoading={creating}
-      okText="创建"
-      cancelText="取消"
-      destroyOnClose
-    >
-      <Form form={form} layout="vertical" initialValues={{ aliases: [] }}>
-        <Form.Item
-          name="name_cn"
-          label="Agent 名称"
-          rules={[{ required: true, message: '请输入名称' }]}
-        >
-          <Input placeholder="例如：涉政检测" maxLength={64} />
-        </Form.Item>
-        <Form.Item name="aliases" label="别名">
-          <Select
-            mode="tags"
-            placeholder="按回车添加别名"
-            tokenSeparators={[',']}
-          />
-        </Form.Item>
-        <Form.Item name="description" label="说明">
-          <TextArea rows={3} placeholder="描述该 Agent 的审核范围" />
-        </Form.Item>
-      </Form>
-    </Modal>
-  )
-}
 
 /* ─────────────── UploadAuditPointsModal ─────────────── */
 
@@ -189,13 +109,29 @@ function UploadAuditPointsModal({
   const handleFileUpload = async (file: File) => {
     setImporting(true)
     try {
-      const { rows, errors } = await parseImportFile(file)
-      if (errors.length > 0 || rows.length === 0) {
-        message.error(errors[0] ?? '文件无有效数据')
-        return false
+      const name = file.name.toLowerCase()
+      const isDocument = name.endsWith('.pdf') || name.endsWith('.doc') || name.endsWith('.docx')
+
+      if (isDocument) {
+        const result = await auditPointsApi.parseDocument(file)
+        if (result.points.length === 0) {
+          message.error('文档未解析出有效审核点')
+          return false
+        }
+        const text = result.points
+          .map((p) => `${p.label_cn} | ${p.scope_text ?? ''}`)
+          .join('\n')
+        setBatchText(text)
+        message.success(`已从文档解析 ${result.points.length} 条审核点，请确认后提交`)
+      } else {
+        const { rows, errors } = await parseImportFile(file)
+        if (errors.length > 0 || rows.length === 0) {
+          message.error(errors[0] ?? '文件无有效数据')
+          return false
+        }
+        setBatchText(rowsToText(rows))
+        message.success(`已解析 ${rows.length} 条审核点，请确认后提交`)
       }
-      setBatchText(rowsToText(rows))
-      message.success(`已解析 ${rows.length} 条审核点，请确认后提交`)
       return false
     } catch (e) {
       message.error('解析失败：' + (e as Error).message)
@@ -257,14 +193,16 @@ function UploadAuditPointsModal({
           message="上传的文件会被 AI 解析为审核点"
           description={
             <span>
-              支持 <code>.txt / .csv / .xlsx</code> 格式。每行格式：<code>审核点 | 审核内容</code>
+              支持结构化数据文件（<code>.txt / .csv / .xlsx</code>）和文档文件（<code>.pdf / .doc / .docx</code>，如法律法规、行业标准等）。
               <br />
-              以 <code>#</code> 开头的行作为注释忽略。xlsx 首行表头须包含「审核点」「审核内容」。
+              结构化文件每行格式：<code>审核点 | 审核内容</code>，以 <code>#</code> 开头的行作为注释忽略。
+              <br />
+              文档文件将由 AI 自动提取审核要点。
             </span>
           }
         />
         <Upload
-          accept=".txt,.csv,.xlsx,.xls"
+          accept=".txt,.csv,.xlsx,.xls,.pdf,.doc,.docx"
           showUploadList={false}
           beforeUpload={(file) => {
             void handleFileUpload(file as File)
@@ -332,7 +270,6 @@ export default function PersonalRuleListPage({
   const [models, setModels] = useState<RegisteredModelListItem[]>([])
   const [modelLoading, setModelLoading] = useState(false)
   const [modelItem, setModelItem] = useState<AuditItem | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
   const [uploadItem, setUploadItem] = useState<AuditItem | null>(null)
 
   const reload = async () => {
@@ -581,12 +518,6 @@ export default function PersonalRuleListPage({
           </Space>
           <Space>
             <Button onClick={() => void reload()}>刷新</Button>
-            <Button
-              type="primary"
-              onClick={() => setCreateOpen(true)}
-            >
-              + 新增审核 Agent
-            </Button>
           </Space>
         </div>
       )}
@@ -620,16 +551,6 @@ export default function PersonalRuleListPage({
         onSaved={async () => {
           await reload()
           setModelItem(null)
-        }}
-      />
-
-      <CreateAgentModal
-        open={createOpen}
-        mediaType={mediaType}
-        onClose={() => setCreateOpen(false)}
-        onCreated={async () => {
-          setCreateOpen(false)
-          await reload()
         }}
       />
 

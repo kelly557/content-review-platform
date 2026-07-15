@@ -54,11 +54,41 @@ export default function AuditRulesPage() {
   const { mediaType = 'image' } = useParams<{ mediaType: MediaType }>()
   const { user } = useAuthStore()
   const { message } = App.useApp()
+  const [createOpen, setCreateOpen] = useState(false)
+  const [form] = Form.useForm()
+  const [creating, setCreating] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   const isSuperadmin = isSuperadminOnly(user?.role)
   const allowed: TabKey[] = isSuperadmin ? ['system', 'agent'] : ['agent']
   const defaultTab: TabKey = isSuperadmin ? 'system' : 'agent'
   const [activeTab, setActiveTab] = useTabFromUrl(allowed, defaultTab)
+
+  const mediaKey = mediaType as MediaType
+  const mediaKeyForApi = mediaType as MediaTypeKey
+  const pkg = PACKAGE_BY_MEDIA[mediaKey]
+
+  const handleCreate = async () => {
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
+    setCreating(true)
+    try {
+      await auditItemsApi.create(pkg, {
+        name_cn: values.name_cn,
+        aliases: values.aliases ?? [],
+        description: values.description,
+      })
+      message.success('已创建审核 Agent')
+      form.resetFields()
+      setCreateOpen(false)
+      setReloadKey((k) => k + 1)
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '创建失败')
+    } finally {
+      setCreating(false)
+    }
+  }
 
   // 角色越权 fallback：普通用户在 system tab 时纠正到 agent
   useEffect(() => {
@@ -77,8 +107,7 @@ export default function AuditRulesPage() {
     [allowed],
   )
 
-  const mediaLabel = MEDIA_LABEL[mediaType as MediaType] ?? mediaType
-  const mediaKey = mediaType as MediaTypeKey
+  const mediaLabel = MEDIA_LABEL[mediaKey] ?? mediaType
 
   return (
     <div style={{ width: '100%' }}>
@@ -106,6 +135,11 @@ export default function AuditRulesPage() {
             {activeTab === 'system' ? '系统规则' : '自定义 Agent'}
           </Tag>
         </Space>
+        {activeTab === 'agent' && (
+          <Button type="primary" onClick={() => setCreateOpen(true)}>
+            + 新增审核 Agent
+          </Button>
+        )}
       </div>
 
       {tabItems.length > 1 && (
@@ -117,14 +151,49 @@ export default function AuditRulesPage() {
         />
       )}
 
-      <div style={{ marginTop: tabItems.length > 1 ? 8 : 0 }}>
+      <div style={{ marginTop: tabItems.length > 1 ? 8 : 0 }} key={reloadKey}>
         {activeTab === 'system' && isSuperadmin && (
-          <GeneralRuleListPage embedded mediaTypeProp={mediaKey} />
+          <GeneralRuleListPage embedded mediaTypeProp={mediaKeyForApi} />
         )}
         {activeTab === 'agent' && (
-          <PersonalRuleListPage embedded mediaTypeProp={mediaKey} />
+          <PersonalRuleListPage embedded mediaTypeProp={mediaKeyForApi} />
         )}
       </div>
+
+      <Modal
+        title="新增审核 Agent"
+        open={createOpen}
+        onCancel={() => {
+          if (creating) return
+          form.resetFields()
+          setCreateOpen(false)
+        }}
+        onOk={handleCreate}
+        confirmLoading={creating}
+        okText="创建"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Form form={form} layout="vertical" initialValues={{ aliases: [] }}>
+          <Form.Item
+            name="name_cn"
+            label="Agent 名称"
+            rules={[{ required: true, message: '请输入名称' }]}
+          >
+            <Input placeholder="例如：涉政检测" maxLength={64} />
+          </Form.Item>
+          <Form.Item name="aliases" label="别名">
+            <Select
+              mode="tags"
+              placeholder="按回车添加别名"
+              tokenSeparators={[',']}
+            />
+          </Form.Item>
+          <Form.Item name="description" label="说明">
+            <TextArea rows={3} placeholder="描述该 Agent 的审核范围" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   )
 }

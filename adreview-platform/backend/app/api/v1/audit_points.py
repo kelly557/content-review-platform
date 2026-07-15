@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import ValidationError
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,7 @@ from app.schemas.audit_point import (
     AuditPointUpdate,
     serialize_audit_point,
 )
+from app.services.document_parser import extract_text_from_file
 
 logger = logging.getLogger(__name__)
 
@@ -376,3 +377,114 @@ async def create_points_batch(
         failed=len(body.points) - succeeded,
         items=items,
     )
+
+
+# ─────────────── Document parsing ───────────────
+
+
+ALLOWED_DOC_EXT = {".pdf", ".txt", ".md", ".doc", ".docx"}
+MAX_DOC_BYTES = 20 * 1024 * 1024
+
+
+class ParsedAuditPoint(BaseModel):
+    label_cn: str
+    scope_text: str = ""
+
+
+class DocumentParseResult(BaseModel):
+    points: list[ParsedAuditPoint]
+    source_info: str = ""
+
+
+@router.post("/points/parse-document", response_model=DocumentParseResult)
+async def parse_document(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
+    """Parse a document (PDF/DOC/DOCX/TXT) into audit points using AI.
+
+    The document text is extracted and then parsed by the LLM to identify
+    audit points. This allows users to upload legal regulations, industry
+    standards, or other reference documents and have them automatically
+    converted into structured audit points.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="缺少文件名")
+
+    from pathlib import Path
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_DOC_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的文件格式: {ext}，仅支持 {', '.join(ALLOWED_DOC_EXT)}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_DOC_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"文件超过 {MAX_DOC_BYTES // 1024 // 1024}MB 上限",
+        )
+
+    try:
+        text = extract_text_from_file(content, file.filename)
+    except Exception as e:
+        logger.error("Failed to extract text from %s: %s", file.filename, e)
+        raise HTTPException(status_code=400, detail=f"文件解析失败: {e}")
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="文件内容为空")
+
+    # Use LLM to parse audit points from the document text
+    try:
+        from app.services.llm.client import get_llm_client
+
+        llm = get_llm_client()
+        prompt = f"""请从以下文档内容中提取审核点。每个审核点包含：
+- label_cn: 审核点名称（简短描述要审核的内容）
+- scope_text: 审核内容描述（具体的审核标准或判断依据）
+
+请以 JSON 数组格式返回，每个元素包含 label_cn 和 scope_text 字段。
+如果无法提取到有效的审核点，返回空数组 []。
+
+文档内容：
+{text[:10000]}
+"""
+        response = await llm.chat(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+        )
+
+        import json
+        import re
+
+        # Try to extract JSON from the response
+        json_match = re.search(r"\[[\s\S]*\]", response)
+        if json_match:
+            raw_points = json.loads(json_match.group())
+        else:
+            raw_points = json.loads(response)
+
+        points = []
+        for item in raw_points:
+            if isinstance(item, dict) and "label_cn" in item:
+                points.append(
+                    ParsedAuditPoint(
+                        label_cn=str(item.get("label_cn", "")),
+                        scope_text=str(item.get("scope_text", "")),
+                    )
+                )
+
+        return DocumentParseResult(
+            points=points,
+            source_info=f"从 {file.filename} 解析",
+        )
+
+    except Exception as e:
+        logger.error("LLM parsing failed for %s: %s", file.filename, e)
+        # Return empty result instead of error, so user can manually input
+        return DocumentParseResult(
+            points=[],
+            source_info=f"AI 解析失败，请手动输入。错误: {e}",
+        )

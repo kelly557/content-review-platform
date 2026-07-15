@@ -43,6 +43,7 @@ from app.models.user import User
 from app.schemas.common import Page
 from app.schemas.registered_model import (
     ArtifactUploadResponse,
+    ModelPrecheckRequest,
     RegisteredModelCreate,
     RegisteredModelListItem,
     RegisteredModelOut,
@@ -1150,6 +1151,17 @@ async def activate_version(
 
 
 # ─── Artifact 上传 / 下载（小模型权重文件） ───
+
+
+@router.post("/precheck", operation_id="registered_models_precheck")
+async def precheck_model(
+    body: ModelPrecheckRequest,
+    user=Depends(require_writer),
+) -> RegisteredModelValidationLog:
+    """保存前测试模型连通性，复用 _validate_endpoint 纯函数。"""
+    return await _validate_endpoint(
+        body.endpoint_url, body.protocol, body.model_name, body.api_key, body.timeout
+    )
 
 
 @router.post(

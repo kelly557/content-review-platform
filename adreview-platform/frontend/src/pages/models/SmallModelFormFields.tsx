@@ -10,7 +10,7 @@ import {
   App,
 } from 'antd'
 import type { UploadRequestOption } from 'rc-upload/lib/interface'
-import { DeleteOutlined, FileOutlined, UploadOutlined } from '@ant-design/icons'
+import { DeleteOutlined, FileOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { registeredModelsApi } from '@/api/registered-models'
 import type {
   ArtifactUploadResponse,
@@ -26,7 +26,6 @@ export interface SmallModelFormValues {
   model_name: string
   description?: string
   version?: string
-  // artifact 隐藏字段 — 用 Form.Item noStyle + 自定义 store
   __artifact?: ArtifactUploadResponse
   __auditPoints?: string[]
 }
@@ -44,7 +43,7 @@ interface Props {
 /**
  * 小模型添加表单字段（不包含 Name/Kind Radio — 由父组件渲染）。
  * - 必填：模态、审核场景、模型名称、文件
- * - 可选：审核标签配置、版本号、说明
+ * - 可选：模型审核点配置、版本号、说明
  * - artifact 上传结果通过 form.setFieldValue('__artifact', meta) 存到表单
  */
 export default function SmallModelFormFields({
@@ -57,7 +56,6 @@ export default function SmallModelFormFields({
   const [artifact, setArtifact] = useState<ArtifactUploadResponse | null>(
     initialArtifact ?? null,
   )
-  const [auditPoints, setAuditPoints] = useState<string[] | null>(null)
 
   const beforeUpload = (file: File) => {
     const MAX = 512 * 1024 * 1024
@@ -88,26 +86,6 @@ export default function SmallModelFormFields({
   const removeArtifact = () => {
     setArtifact(null)
     form.setFieldValue('__artifact' as keyof SmallModelFormValues, undefined)
-  }
-
-  const handleJsonUpload = (file: File) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const data = JSON.parse(e.target?.result as string)
-        if (Array.isArray(data.points) && data.points.every((p: unknown) => typeof p === 'string')) {
-          setAuditPoints(data.points)
-          form.setFieldValue('__auditPoints' as keyof SmallModelFormValues, data.points)
-          message.success(`已加载 ${data.points.length} 个审核标签`)
-        } else {
-          message.error('JSON 格式错误：需要 { "points": ["标签1", "标签2", ...] }')
-        }
-      } catch {
-        message.error('JSON 解析失败，请检查文件格式')
-      }
-    }
-    reader.readAsText(file)
-    return false
   }
 
   return (
@@ -223,23 +201,36 @@ export default function SmallModelFormFields({
       </Form.Item>
 
       <Form.Item
-        label="审核标签配置"
-        tooltip='JSON 格式：{ "points": ["标签1", "标签2", ...] }'
+        label="模型审核点配置"
+        tooltip="该模型能识别的审核点列表，如：一号领导人、敏感地名"
       >
-        <Upload
-          accept=".json"
-          beforeUpload={handleJsonUpload}
-          showUploadList={false}
-        >
-          <Button icon={<UploadOutlined />}>选择 JSON 配置文件</Button>
-        </Upload>
-        {auditPoints && auditPoints.length > 0 && (
-          <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {auditPoints.map((p, i) => (
-              <Tag key={i}>{p}</Tag>
-            ))}
-          </div>
-        )}
+        <Form.List name="__auditPoints">
+          {(fields, { add, remove }) => (
+            <>
+              {fields.map((field) => (
+                <Space key={field.key} style={{ display: 'flex', marginBottom: 8 }} align="center">
+                  <Form.Item name={field.name} noStyle>
+                    <Input placeholder="输入审核点名称" style={{ width: 320 }} />
+                  </Form.Item>
+                  <Button
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => remove(field.name)}
+                  />
+                </Space>
+              ))}
+              <Button
+                type="dashed"
+                block
+                icon={<PlusOutlined />}
+                onClick={() => add()}
+              >
+                添加审核点
+              </Button>
+            </>
+          )}
+        </Form.List>
       </Form.Item>
 
       <Form.Item label="版本号" name="version" tooltip="语义版本号，如 1.0.0（可选）">
@@ -254,11 +245,7 @@ export default function SmallModelFormFields({
         <Input.TextArea rows={3} placeholder="如：用于文本涉政分类 / 部署在 GPU 节点" />
       </Form.Item>
 
-      {/* artifact 隐藏字段，不在 UI 显示，但参与 form.values 收集 */}
       <Form.Item name="__artifact" hidden noStyle>
-        <Input type="hidden" />
-      </Form.Item>
-      <Form.Item name="__auditPoints" hidden noStyle>
         <Input type="hidden" />
       </Form.Item>
     </>

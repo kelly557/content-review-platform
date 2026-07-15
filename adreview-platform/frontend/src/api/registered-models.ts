@@ -70,6 +70,17 @@ export const registeredModelsApi = {
       )
       .then((r) => r.data)
   },
+  precheck(params: {
+    endpoint_url: string
+    protocol?: string
+    model_name?: string | null
+    api_key?: string | null
+    timeout?: number
+  }) {
+    return api
+      .post<RegisteredModelValidationLog>('/registered-models/precheck', params)
+      .then((r) => r.data)
+  },
   listVersions(id: number) {
     return api
       .get<RegisteredModelVersion[]>(`/registered-models/${id}/versions`)
