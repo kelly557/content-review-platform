@@ -366,6 +366,8 @@ export default function RulesTreeView({
               pointOverrides={pointOverrides}
               onPointMapChange={onPointMapChange}
               onPointOverrideChange={onPointOverrideChange}
+              onRemoveLibrary={handleRemoveLibrary}
+              pendingItems={pendingItems}
               mediaKey={mediaKey}
             />
           ) : (
@@ -399,7 +401,7 @@ function ItemGroup({
   setPopoverOpenForItemId,
   pendingItems,
   handleToggleLibrary,
-  handleRemoveLibrary,
+  handleRemoveLibrary: _handleRemoveLibrary,
   allowLibraryLink,
 }: {
   title: string
@@ -459,7 +461,6 @@ function ItemGroup({
           const picked = enabledPointCountByItem[it.id] > 0
           const active = activeItemId === it.id
           return (
-          <>
             <div
               key={it.id}
               onClick={() => onPick(it.id)}
@@ -594,42 +595,6 @@ function ItemGroup({
                 </Tooltip>
               )}
             </div>
-            {(it.linked_libraries ?? []).length > 0 && (
-              <div
-                style={{
-                  padding: '0 16px 8px 32px',
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 4,
-                  background: active ? '#EFF6FF' : 'transparent',
-                }}
-              >
-                {(it.linked_libraries ?? []).map((l) => {
-                  const removing = pendingItems.has(it.id)
-                  return (
-                    <Tag
-                      key={l.library_id}
-                      color={TYPE_COLOR_BY_LIB[l.library_type] ?? 'default'}
-                      bordered={false}
-                      closeIcon={<CloseOutlined />}
-                      onClose={(e) => {
-                        e.preventDefault()
-                        handleRemoveLibrary(it, l.library_id)
-                      }}
-                      style={{
-                        margin: 0,
-                        fontSize: 11,
-                        padding: '2px 8px',
-                        opacity: removing ? 0.6 : 1,
-                      }}
-                    >
-                      {TYPE_LABEL_BY_LIB[l.library_type] ?? '?'}: {l.name}
-                    </Tag>
-                  )
-                })}
-              </div>
-            )}
-          </>
           )
         })
       )}
@@ -655,11 +620,19 @@ type PointRowRecord = {
   editDisabled: boolean
 }
 
+type LinkedLibraryRef = {
+  library_id: number
+  library_type: string
+  name: string
+}
+
 type SectionHeaderRecord = {
   kind: 'section'
   key: string
   item: AuditItem
   pointCount: number
+  linkedLibraries: LinkedLibraryRef[]
+  pending: boolean
 }
 
 type FlatRowRecord = PointRowRecord | SectionHeaderRecord
@@ -671,6 +644,8 @@ function PointsColumn({
   pointOverrides,
   onPointMapChange,
   onPointOverrideChange,
+  onRemoveLibrary,
+  pendingItems,
   mediaKey,
 }: {
   items: AuditItem[]
@@ -690,6 +665,8 @@ function PointsColumn({
       high_threshold_max?: number | null
     },
   ) => void
+  onRemoveLibrary: (item: AuditItem, libraryId: number) => void
+  pendingItems: Set<number>
   mediaKey: CategoryKey
 }) {
   const dataSource: FlatRowRecord[] = []
@@ -700,6 +677,8 @@ function PointsColumn({
       key: `section-${it.id}`,
       item: it,
       pointCount: ps.length,
+      linkedLibraries: (it.linked_libraries ?? []) as LinkedLibraryRef[],
+      pending: pendingItems.has(it.id),
     })
     const pm = getPointMap(it.id)
     ps.forEach((p) => {
@@ -732,7 +711,36 @@ function PointsColumn({
                 padding: '12px 0 6px',
                 borderBottom: '1px dashed var(--color-border)',
               }}
-            />
+            >
+              {record.linkedLibraries.length > 0 && (
+                <Space
+                  size={4}
+                  wrap
+                  style={{ paddingTop: 4, paddingBottom: 4 }}
+                >
+                  {record.linkedLibraries.map((l) => (
+                    <Tag
+                      key={l.library_id}
+                      color={TYPE_COLOR_BY_LIB[l.library_type] ?? 'default'}
+                      bordered={false}
+                      closeIcon={<CloseOutlined />}
+                      onClose={(e) => {
+                        e.preventDefault()
+                        onRemoveLibrary(record.item, l.library_id)
+                      }}
+                      style={{
+                        margin: 0,
+                        fontSize: 11,
+                        padding: '2px 8px',
+                        opacity: record.pending ? 0.6 : 1,
+                      }}
+                    >
+                      {TYPE_LABEL_BY_LIB[l.library_type] ?? '?'}: {l.name}
+                    </Tag>
+                  ))}
+                </Space>
+              )}
+            </div>
           )
         }
         const pm = getPointMap(record.item.id)
