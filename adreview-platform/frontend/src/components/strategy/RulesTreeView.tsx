@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   App,
   Button,
+  Checkbox,
   Empty,
   Grid,
   InputNumber,
@@ -21,9 +22,12 @@ import {
 } from '@ant-design/icons'
 import { auditItemsApi } from '@/api/auditItems'
 import { auditPointsApi } from '@/api/auditPoints'
+import { librariesApi } from '@/api/libraries'
 import type {
   AuditItem,
   AuditPoint,
+  LibraryListItem,
+  LibraryType,
 } from '@/types/domain'
 import { type CategoryKey } from './constants'
 import {
@@ -81,6 +85,14 @@ const PACKAGE_TO_MEDIA: Record<string, CategoryKey> = {
   video_audit_pro: 'video',
 }
 
+const ALLOWED_LIB_TYPES_BY_MEDIA: Record<CategoryKey, LibraryType[]> = {
+  image: ['word', 'reply'],
+  text: ['word', 'reply'],
+  audio: ['word', 'reply'],
+  doc: ['image', 'word', 'reply'],
+  video: ['image', 'word', 'reply'],
+}
+
 export default function RulesTreeView({
   packageCode,
   enabledItemIds,
@@ -89,7 +101,6 @@ export default function RulesTreeView({
   pointOverrides,
   onPointOverrideChange,
   onPointToggle: _onPointToggle,
-  onItemLibraryLink,
   refreshKey,
 }: Props) {
   const [items, setItems] = useState<AuditItem[]>([])
@@ -150,16 +161,51 @@ export default function RulesTreeView({
 
   const enabledSet = useMemo(() => new Set(enabledItemIds), [enabledItemIds])
 
+  const allowedLibTypes = ALLOWED_LIB_TYPES_BY_MEDIA[mediaKey]
+  const [libsCache, setLibsCache] = useState<LibraryListItem[]>([])
+  const [pickerOpenForItemId, setPickerOpenForItemId] = useState<number | null>(
+    null,
+  )
   const [pendingItems, setPendingItems] = useState<Set<number>>(new Set())
   const { message } = App.useApp()
 
-  const handleRemoveLibrary = async (
+  useEffect(() => {
+    let cancel = false
+    Promise.all(
+      (['image', 'word', 'reply'] as LibraryType[]).map((t) =>
+        librariesApi
+          .list({ type: t, size: 200 })
+          .then((p) => p.items.filter((l) => !l.is_deleted && l.is_active))
+          .catch(() => [] as LibraryListItem[]),
+      ),
+    )
+      .then(([img, word, reply]) => {
+        if (cancel) return
+        setLibsCache([...img, ...word, ...reply])
+      })
+      .catch(() => {
+        if (!cancel) setLibsCache([])
+      })
+    return () => {
+      cancel = true
+    }
+  }, [refreshKey])
+
+  const visibleLibs = useMemo(
+    () => libsCache.filter((l) => allowedLibTypes.includes(l.library_type)),
+    [libsCache, allowedLibTypes],
+  )
+
+  const handleToggleLibrary = async (
     item: AuditItem,
     libraryId: number,
+    checked: boolean,
   ) => {
     if (!packageCode) return
     const currentIds = (item.linked_libraries ?? []).map((l) => l.library_id)
-    const nextIds = currentIds.filter((id) => id !== libraryId)
+    const nextIds = checked
+      ? Array.from(new Set([...currentIds, libraryId]))
+      : currentIds.filter((id) => id !== libraryId)
     setPendingItems((prev) => new Set(prev).add(item.id))
     try {
       const updated = await auditItemsApi.update(packageCode, item.id, {
@@ -171,7 +217,7 @@ export default function RulesTreeView({
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response
         ?.data?.detail
-      message.error(detail ?? (e as Error).message ?? '移除失败')
+      message.error(detail ?? (e as Error).message ?? '操作失败')
     } finally {
       setPendingItems((prev) => {
         const next = new Set(prev)
@@ -179,6 +225,13 @@ export default function RulesTreeView({
         return next
       })
     }
+  }
+
+  const handleRemoveLibrary = async (
+    item: AuditItem,
+    libraryId: number,
+  ) => {
+    await handleToggleLibrary(item, libraryId, false)
   }
 
   // 计算每个 item 下"已选 point 数"用于左栏视觉标记
@@ -293,7 +346,10 @@ export default function RulesTreeView({
               onPointMapChange={onPointMapChange}
               onPointOverrideChange={onPointOverrideChange}
               onRemoveLibrary={handleRemoveLibrary}
-              onAddLibrary={onItemLibraryLink}
+              onToggleLibrary={handleToggleLibrary}
+              availableLibraries={visibleLibs}
+              pickerOpenForItemId={pickerOpenForItemId}
+              setPickerOpenForItemId={setPickerOpenForItemId}
               pendingItems={pendingItems}
               highlightItemId={highlightItemId}
               allowLibraryLink={mediaKey !== 'image'}
@@ -464,7 +520,10 @@ function PointsColumn({
   onPointMapChange,
   onPointOverrideChange,
   onRemoveLibrary,
-  onAddLibrary,
+  onToggleLibrary,
+  availableLibraries,
+  pickerOpenForItemId,
+  setPickerOpenForItemId,
   pendingItems,
   highlightItemId,
   allowLibraryLink,
@@ -488,7 +547,14 @@ function PointsColumn({
     },
   ) => void
   onRemoveLibrary: (item: AuditItem, libraryId: number) => void
-  onAddLibrary?: (item: AuditItem) => void
+  onToggleLibrary: (
+    item: AuditItem,
+    libraryId: number,
+    checked: boolean,
+  ) => void
+  availableLibraries: LibraryListItem[]
+  pickerOpenForItemId: number | null
+  setPickerOpenForItemId: (id: number | null) => void
   pendingItems: Set<number>
   highlightItemId: number | null
   allowLibraryLink: boolean
@@ -531,7 +597,8 @@ function PointsColumn({
       render: (_, record) => {
         if (record.kind === 'section') {
           const hasLibs = record.linkedLibraries.length > 0
-          const showLibCard = allowLibraryLink && (hasLibs || !!onAddLibrary)
+          const pickerOpen =
+            allowLibraryLink && pickerOpenForItemId === record.item.id
           return (
             <div
               style={{
@@ -544,7 +611,7 @@ function PointsColumn({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 12,
-                  marginBottom: hasLibs ? 8 : 0,
+                  marginBottom: allowLibraryLink ? 8 : 0,
                 }}
               >
                 <Text strong style={{ fontSize: 15, color: '#0F172A' }}>
@@ -558,84 +625,178 @@ function PointsColumn({
                     · 关联 {record.linkedLibraries.length} 个自定义库
                   </Text>
                 )}
+                {allowLibraryLink && (
+                  <Button
+                    type={hasLibs ? 'default' : 'primary'}
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={() =>
+                      setPickerOpenForItemId(
+                        pickerOpen ? null : record.item.id,
+                      )
+                    }
+                    aria-label={`为「${record.item.name_cn}」添加自定义库`}
+                    style={hasLibs ? { marginLeft: 'auto' } : {}}
+                  >
+                    添加自定义库
+                  </Button>
+                )}
               </div>
-              {showLibCard && (
+              {allowLibraryLink && (hasLibs || pickerOpen) && (
                 <div
                   style={{
                     background: '#F8FAFC',
                     borderRadius: 6,
-                    padding: '8px 12px',
+                    padding: '10px 12px',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 6,
+                    gap: 8,
+                    marginTop: 8,
                   }}
                 >
-                  {hasLibs && (
-                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                      {record.linkedLibraries.map((l) => {
-                        const typeLabel = TYPE_LABEL_BY_LIB[l.library_type] ?? '?'
-                        return (
-                          <div
-                            key={l.library_id}
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 6,
+                      alignItems: 'center',
+                    }}
+                  >
+                    {record.linkedLibraries.length === 0 && (
+                      <Text
+                        type="secondary"
+                        style={{ fontSize: 12 }}
+                      >
+                        暂无关联自定义库,从下方勾选 →
+                      </Text>
+                    )}
+                    {record.linkedLibraries.map((l) => {
+                      const typeLabel =
+                        TYPE_LABEL_BY_LIB[l.library_type] ?? '?'
+                      return (
+                        <Tag
+                          key={l.library_id}
+                          color={TYPE_COLOR_BY_LIB[l.library_type] ?? 'default'}
+                          bordered={false}
+                          closeIcon={<CloseOutlined />}
+                          onClose={(e) => {
+                            e.preventDefault()
+                            onRemoveLibrary(record.item, l.library_id)
+                          }}
+                          style={{
+                            margin: 0,
+                            fontSize: 12,
+                            padding: '2px 4px 2px 8px',
+                            opacity: record.pending ? 0.6 : 1,
+                          }}
+                        >
+                          <Space size={4} align="center">
+                            <span>{typeLabel}</span>
+                            <span
+                              style={{
+                                color: '#0F172A',
+                                fontWeight: 500,
+                              }}
+                            >
+                              {l.name}
+                            </span>
+                          </Space>
+                        </Tag>
+                      )
+                    })}
+                  </div>
+                  {pickerOpen && (
+                    <div
+                      style={{
+                        background: '#fff',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 4,
+                        padding: '8px 12px',
+                      }}
+                    >
+                      {availableLibraries.length === 0 ? (
+                        <Text
+                          type="secondary"
+                          style={{ fontSize: 12 }}
+                        >
+                          暂无可用的自定义库,请先到「资源库」创建。
+                        </Text>
+                      ) : (
+                        <>
+                          <Text
+                            type="secondary"
                             style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 8,
-                              background: '#fff',
-                              border: '1px solid var(--color-border)',
-                              borderRadius: 4,
-                              padding: '4px 8px',
-                              opacity: record.pending ? 0.6 : 1,
+                              fontSize: 12,
+                              display: 'block',
+                              marginBottom: 6,
                             }}
                           >
-                            <Tag
-                              color={TYPE_COLOR_BY_LIB[l.library_type] ?? 'default'}
-                              bordered={false}
-                              style={{ margin: 0, fontSize: 10 }}
-                            >
-                              {typeLabel}
-                            </Tag>
-                            <Tooltip
-                              title={`已关联到「${record.item.name_cn}」· 类型: ${typeLabel}库 · 点击 × 移除`}
-                            >
-                              <span
-                                style={{
-                                  flex: 1,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  fontSize: 13,
-                                  color: '#0F172A',
-                                }}
-                              >
-                                {l.name}
-                              </span>
-                            </Tooltip>
-                            <Tooltip title="移除该自定义库">
-                              <Button
-                                type="text"
-                                size="small"
-                                icon={<CloseOutlined />}
-                                onClick={() => onRemoveLibrary(record.item, l.library_id)}
-                                aria-label={`移除 ${l.name}`}
-                                style={{ width: 22, height: 22, padding: 0 }}
-                              />
-                            </Tooltip>
-                          </div>
-                        )
-                      })}
-                    </Space>
-                  )}
-                  {onAddLibrary && (
-                    <Button
-                      type="dashed"
-                      size="small"
-                      icon={<PlusOutlined />}
-                      onClick={() => onAddLibrary(record.item)}
-                      style={{ alignSelf: 'flex-start' }}
-                    >
-                      添加自定义库
-                    </Button>
+                            勾选即时生效,可多选
+                          </Text>
+                          <Checkbox.Group
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '4px 12px',
+                              maxHeight: 240,
+                              overflowY: 'auto',
+                            }}
+                            value={record.linkedLibraries.map(
+                              (l) => l.library_id,
+                            )}
+                            disabled={record.pending}
+                            onChange={(allChecked) => {
+                              const target = new Set<number>(
+                                allChecked as number[],
+                              )
+                              const current = new Set(
+                                record.linkedLibraries.map(
+                                  (l) => l.library_id,
+                                ),
+                              )
+                              const toAdd: number[] = []
+                              const toRemove: number[] = []
+                              target.forEach((id) => {
+                                if (!current.has(id)) toAdd.push(id)
+                              })
+                              current.forEach((id) => {
+                                if (!target.has(id)) toRemove.push(id)
+                              })
+                              toAdd.forEach((id) =>
+                                onToggleLibrary(record.item, id, true),
+                              )
+                              toRemove.forEach((id) =>
+                                onToggleLibrary(record.item, id, false),
+                              )
+                            }}
+                          >
+                            {availableLibraries.map((l) => (
+                              <Checkbox key={l.id} value={l.id}>
+                                <Space size={4} align="center">
+                                  <Tag
+                                    color={
+                                      TYPE_COLOR_BY_LIB[l.library_type] ??
+                                      'default'
+                                    }
+                                    bordered={false}
+                                    style={{
+                                      margin: 0,
+                                      fontSize: 10,
+                                      padding: '0 4px',
+                                    }}
+                                  >
+                                    {TYPE_LABEL_BY_LIB[l.library_type] ?? '?'}
+                                  </Tag>
+                                  <span style={{ fontSize: 13 }}>
+                                    {l.name}
+                                  </span>
+                                </Space>
+                              </Checkbox>
+                            ))}
+                          </Checkbox.Group>
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
