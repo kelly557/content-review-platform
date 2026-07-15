@@ -70,8 +70,8 @@ interface NewVersionValues {
   model_name?: string
   description?: string
   version?: string
-  max_output_tokens?: number
   __artifact?: ArtifactUploadResponse
+  __auditPoints?: string[]
   // 大模型分支（endpoint / credential 继承 Provider；此处可调 model_name / 分类）
   version_label?: string
   notes?: string
@@ -179,7 +179,6 @@ export default function ModelDetailPage() {
         name: model.name,
         small_category: model.small_category as never,
         model_name: model.model_name ?? undefined,
-        max_output_tokens: model.max_output_tokens ?? 2048,
       })
     } else {
       createForm.setFieldsValue({
@@ -207,6 +206,7 @@ export default function ModelDetailPage() {
           model_name: v.model_name,
           modality: (v as NewVersionValues & { modality?: SmallModelModality }).modality ?? null,
           artifact: artifact ?? null,
+          config: v.__auditPoints?.length ? { points: v.__auditPoints } : undefined,
         }
         await registeredModelsApi.createVersion(modelId, body)
       } else {
@@ -282,6 +282,9 @@ export default function ModelDetailPage() {
           sha256: model.current_version.artifact_sha256 ?? '',
         }
       : null
+  const auditPoints = isSmall
+    ? (model.current_version?.config as { points?: string[] } | undefined)?.points
+    : undefined
 
   return (
     <div style={{ width: '100%' }}>
@@ -383,28 +386,21 @@ export default function ModelDetailPage() {
               key: 'overview',
               label: '概览',
               children: (
+                <>
                 <Descriptions bordered column={2} size="small">
                   <Descriptions.Item label="类型">{kindOption?.label ?? model.kind}</Descriptions.Item>
-                  <Descriptions.Item label="分类">{categoryLabel ?? '-'}</Descriptions.Item>
+                  <Descriptions.Item label="审核场景">{categoryLabel ?? '-'}</Descriptions.Item>
                   {isSmall ? (
                     <>
-                      <Descriptions.Item label="最大输出 tokens">
-                        {model.max_output_tokens ?? '-'}
-                      </Descriptions.Item>
                       <Descriptions.Item label="模态">
                         {modalityLabel ?? '-'}
                       </Descriptions.Item>
-                      <Descriptions.Item label="当前模型版本">
+                      <Descriptions.Item label="当前版本">
                         {model.current_version_no
                           ? model.current_version_label
                             ? `v${model.current_version_no} · ${model.current_version_label}`
                             : `v${model.current_version_no}`
                           : '-'}
-                      </Descriptions.Item>
-                      <Descriptions.Item label="SHA-256" span={2}>
-                        <Text code style={{ fontSize: 12 }}>
-                          {initialArtifact?.sha256 ?? '-'}
-                        </Text>
                       </Descriptions.Item>
                     </>
                   ) : (
@@ -426,7 +422,7 @@ export default function ModelDetailPage() {
                       </Descriptions.Item>
                       <Descriptions.Item label="Model ID">{model.model_name || '-'}</Descriptions.Item>
                       <Descriptions.Item label="Version">{model.version || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="大模型分类" span={2}>
+                      <Descriptions.Item label="能力类型" span={2}>
                         {model.large_category
                           ? (LARGE_MODEL_CATEGORY_LABEL as Record<string, string>)[model.large_category] ?? model.large_category
                           : '-'}
@@ -437,6 +433,23 @@ export default function ModelDetailPage() {
                     {model.description || '-'}
                   </Descriptions.Item>
                 </Descriptions>
+                {isSmall && (
+                  <div style={{ marginTop: 16 }}>
+                    <Text strong>可审核标签</Text>
+                    {auditPoints && auditPoints.length > 0 ? (
+                      <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {auditPoints.map((p, i) => (
+                          <Tag key={i}>{p}</Tag>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 8 }}>
+                        <Text type="secondary">未上传审核标签配置</Text>
+                      </div>
+                    )}
+                  </div>
+                )}
+                </>
               ),
             },
             {
@@ -692,7 +705,7 @@ export default function ModelDetailPage() {
                 <Input.TextArea rows={3} placeholder="新增 prompt / 调整超时 / 切换到 gpt-4o ..." />
               </Form.Item>
               <Form.Item
-                label="大模型分类"
+                label="能力类型"
                 name="large_category"
                 tooltip="不填则继承当前版本的分类"
               >

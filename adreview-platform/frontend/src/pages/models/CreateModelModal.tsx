@@ -103,7 +103,7 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
           return
         }
         if (!v.small_category) {
-          message.error('请选择小模型分类')
+          message.error('请选择审核场景')
           return
         }
         if (!v.model_name || !v.model_name.trim()) {
@@ -120,7 +120,7 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
           provider_id: null,
           model_name: v.model_name.trim(),
           version: v.version,
-          max_output_tokens: v.max_output_tokens,
+          config: v.__auditPoints?.length ? { points: v.__auditPoints } : undefined,
           registration_method: 'uploaded_file',
           artifact,
         })
@@ -286,11 +286,11 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
                   <Form.Item
                     name={[field.name, 'large_category']}
                     noStyle
-                    rules={[{ required: true, message: '请选择大模型分类' }]}
+                    rules={[{ required: true, message: '请选择能力类型' }]}
                   >
                     <Select
                       style={{ width: '100%' }}
-                      placeholder="大模型分类"
+                      placeholder="能力类型"
                       options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
                         value: o.value,
                         label: o.label,

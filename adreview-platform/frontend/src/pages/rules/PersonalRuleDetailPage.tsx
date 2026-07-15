@@ -1,8 +1,7 @@
 /**
  * 个性化图片/文本审核规则 — 详情页
  *
- * - 关联知识文档(多选)可编辑
- * - 关联库可编辑(复用既有 ReplaceLinkedLibraries modal — 此处暂简化展示)
+ * - 基本信息可编辑
  * - 审核点可编辑阈值 / 启停(不暴露增删)
  */
 import { useEffect, useState } from 'react'
@@ -11,11 +10,9 @@ import {
   Breadcrumb,
   Button,
   Card,
-  Col,
   Empty,
   Input,
   Modal,
-  Row,
   Space,
   Switch,
   Table,
@@ -33,7 +30,6 @@ import type {
   AuditPointUpdate,
   MediaTypeKey,
 } from '@/types/domain'
-import SelectKnowledgeDocumentsModal from './SelectKnowledgeDocumentsModal'
 
 const { Text, Title } = Typography
 
@@ -69,7 +65,6 @@ export default function PersonalRuleDetailPage() {
   const [item, setItem] = useState<AuditItem | null>(null)
   const [points, setPoints] = useState<AuditPoint[]>([])
   const [loading, setLoading] = useState(false)
-  const [selectOpen, setSelectOpen] = useState(false)
   const [editingPoint, setEditingPoint] = useState<AuditPoint | null>(null)
   const [nameInput, setNameInput] = useState('')
   const [descInput, setDescInput] = useState('')
@@ -236,70 +231,39 @@ export default function PersonalRuleDetailPage() {
             </Space>
           </div>
 
-          <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col span={12}>
-              <Card title="基本信息" size="small">
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <div>
-                    <Text type="secondary">名称：</Text>
-                    <Input
-                      value={nameInput}
-                      onChange={(e) => setNameInput(e.target.value)}
-                      maxLength={64}
-                    />
-                  </div>
-                  <div>
-                    <Text type="secondary">描述：</Text>
-                    <Input.TextArea
-                      value={descInput}
-                      onChange={(e) => setDescInput(e.target.value)}
-                      autoSize={{ minRows: 2, maxRows: 4 }}
-                    />
-                  </div>
-                  <div>
-                    <Button
-                      type="primary"
-                      onClick={saveMeta}
-                      loading={savingMeta}
-                      disabled={
-                        nameInput === item.name_cn &&
-                        (descInput ?? '') === (item.description ?? '')
-                      }
-                    >
-                      保存基本信息
-                    </Button>
-                  </div>
-                </Space>
-              </Card>
-            </Col>
-            <Col span={12}>
-              <Card
-                title="关联知识文档 (多选)"
-                size="small"
-                extra={
-                  <Button size="small" onClick={() => setSelectOpen(true)}>
-                    + 添加知识文档
-                  </Button>
-                }
-              >
-                {item.knowledge_document_ids.length === 0 ? (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="未关联知识文档"
-                    style={{ padding: '8px 0' }}
-                  />
-                ) : (
-                  <Space wrap>
-                    {item.knowledge_document_ids.map((id) => (
-                      <Tag key={id} color="cyan">
-                        📚 #{id}
-                      </Tag>
-                    ))}
-                  </Space>
-                )}
-              </Card>
-            </Col>
-          </Row>
+          <Card title="基本信息" size="small" style={{ marginBottom: 16 }}>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <div>
+                <Text type="secondary">名称：</Text>
+                <Input
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  maxLength={64}
+                />
+              </div>
+              <div>
+                <Text type="secondary">描述：</Text>
+                <Input.TextArea
+                  value={descInput}
+                  onChange={(e) => setDescInput(e.target.value)}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                />
+              </div>
+              <div>
+                <Button
+                  type="primary"
+                  onClick={saveMeta}
+                  loading={savingMeta}
+                  disabled={
+                    nameInput === item.name_cn &&
+                    (descInput ?? '') === (item.description ?? '')
+                  }
+                >
+                  保存基本信息
+                </Button>
+              </div>
+            </Space>
+          </Card>
 
           <Card
             title={`审核点 (${points.length})`}
@@ -328,15 +292,6 @@ export default function PersonalRuleDetailPage() {
       ) : (
         <Empty description={loading ? '加载中...' : '未找到该规则'} />
       )}
-
-      <SelectKnowledgeDocumentsModal
-        item={selectOpen ? item : null}
-        onClose={() => setSelectOpen(false)}
-        onSaved={async () => {
-          setSelectOpen(false)
-          await reload()
-        }}
-      />
 
       <Modal
         open={!!editingPoint}

@@ -3,13 +3,11 @@ import {
   Alert,
   Button,
   Input,
-  Popconfirm,
   Select,
   Space,
   Table,
   Tabs,
   Tag,
-  Tooltip,
   Typography,
   App,
 } from 'antd'
@@ -110,16 +108,6 @@ export default function ModelListPage() {
     setCreateOpen(true)
   }
 
-  const handleDelete = async (row: RegisteredModelListItem) => {
-    try {
-      await registeredModelsApi.delete(row.id)
-      message.success('已删除')
-      await fetchList()
-    } catch {
-      // handled
-    }
-  }
-
   const onTabChange = (next: string) => {
     const tab = next as ModelTab
     setActiveTab(tab)
@@ -136,7 +124,7 @@ export default function ModelListPage() {
     () => [
       { title: '名称', dataIndex: 'name', width: '20%' },
       {
-        title: '大模型分类',
+        title: '能力类型',
         dataIndex: 'large_category',
         width: '10%',
         render: (v: LargeModelCategory | null) => {
@@ -160,15 +148,6 @@ export default function ModelListPage() {
       },
       { title: 'Model ID', dataIndex: 'model_name', width: '18%' },
       {
-        title: '状态',
-        dataIndex: 'status',
-        width: '8%',
-        render: (v: RegisteredModelStatus) => {
-          const opt = REGISTERED_MODEL_STATUS_OPTIONS.find((o) => o.value === v)
-          return <Tag color={opt?.color}>{opt?.label ?? v}</Tag>
-        },
-      },
-      {
         title: '更新时间',
         dataIndex: 'updated_at',
         width: '12%',
@@ -179,34 +158,8 @@ export default function ModelListPage() {
             '-'
           ),
       },
-      {
-        title: '操作',
-        width: '12%',
-        render: (_v: unknown, row: RegisteredModelListItem) => (
-          <Space size={4}>
-            <Link to={`/resources/models/${row.id}`}>
-              <Button type="link" size="small" icon={<CloudDownloadOutlined />}>
-                详情
-              </Button>
-            </Link>
-            <Popconfirm
-              title="删除该模型？"
-              okText="删除"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => handleDelete(row)}
-            >
-              <Tooltip title={canWrite ? '' : '仅管理员可删除'}>
-                <Button type="link" size="small" danger disabled={!canWrite}>
-                  删除
-                </Button>
-              </Tooltip>
-            </Popconfirm>
-          </Space>
-        ),
-      },
     ],
-    [canWrite, handleDelete],
+    [],
   )
 
   // 小模型列（无 Provider 概念）
@@ -214,7 +167,7 @@ export default function ModelListPage() {
     () => [
       { title: '名称', dataIndex: 'name', width: '18%' },
       {
-        title: '小模型分类',
+        title: '审核场景',
         dataIndex: 'small_category',
         width: '8%',
         render: (v: SmallModelCategory | null) => {
@@ -234,7 +187,7 @@ export default function ModelListPage() {
         },
       },
       {
-        title: '当前模型版本',
+        title: '当前版本',
         dataIndex: 'current_version_label',
         width: '20%',
         render: (_v: string | null, row: RegisteredModelListItem) => {
@@ -245,64 +198,18 @@ export default function ModelListPage() {
         },
       },
       {
-        title: '大小',
-        dataIndex: 'artifact_size',
-        width: '8%',
-        render: (v: number | null) =>
-          v ? `${(v / 1024 / 1024).toFixed(2)} MB` : '-',
-      },
-      {
-        title: '状态',
-        dataIndex: 'status',
-        width: '7%',
-        render: (v: RegisteredModelStatus) => {
-          const opt = REGISTERED_MODEL_STATUS_OPTIONS.find((o) => o.value === v)
-          return <Tag color={opt?.color}>{opt?.label ?? v}</Tag>
-        },
-      },
-      {
         title: '操作',
         width: '14%',
         render: (_v: unknown, row: RegisteredModelListItem) => (
-          <Space size={4}>
-            <Link to={`/resources/models/${row.id}`}>
-              <Button type="link" size="small" icon={<CloudDownloadOutlined />}>
-                详情
-              </Button>
-            </Link>
-            {row.current_version_id && (
-              <Button
-                type="link"
-                size="small"
-                onClick={() => {
-                  const url = registeredModelsApi.artifactDownloadUrl(
-                    row.id,
-                    row.current_version_id!,
-                  )
-                  window.open(url, '_blank')
-                }}
-              >
-                下载
-              </Button>
-            )}
-            <Popconfirm
-              title="删除该模型？"
-              okText="删除"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => handleDelete(row)}
-            >
-              <Tooltip title={canWrite ? '' : '仅管理员可删除'}>
-                <Button type="link" size="small" danger disabled={!canWrite}>
-                  删除
-                </Button>
-              </Tooltip>
-            </Popconfirm>
-          </Space>
+          <Link to={`/resources/models/${row.id}`}>
+            <Button type="link" size="small" icon={<CloudDownloadOutlined />}>
+              详情
+            </Button>
+          </Link>
         ),
       },
     ],
-    [canWrite, handleDelete],
+    [],
   )
 
   return (
@@ -328,7 +235,7 @@ export default function ModelListPage() {
         {activeTab === 'large' && (
           <Select
             allowClear
-            placeholder="大模型分类"
+            placeholder="能力类型"
             style={{ width: 140 }}
             value={largeCategory ?? undefined}
             onChange={(v) => setLargeCategory((v as LargeModelCategory) ?? null)}
@@ -341,7 +248,7 @@ export default function ModelListPage() {
         {activeTab === 'small' && (
           <Select
             allowClear
-            placeholder="小模型分类"
+            placeholder="审核场景"
             style={{ width: 140 }}
             value={smallCategory ?? undefined}
             onChange={(v) => setSmallCategory(v ?? null)}

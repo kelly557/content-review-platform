@@ -3,7 +3,6 @@ import {
   Button,
   Form,
   Input,
-  InputNumber,
   Select,
   Space,
   Tag,
@@ -27,9 +26,9 @@ export interface SmallModelFormValues {
   model_name: string
   description?: string
   version?: string
-  max_output_tokens: number
   // artifact 隐藏字段 — 用 Form.Item noStyle + 自定义 store
   __artifact?: ArtifactUploadResponse
+  __auditPoints?: string[]
 }
 
 interface Props {
@@ -44,8 +43,8 @@ interface Props {
 
 /**
  * 小模型添加表单字段（不包含 Name/Kind Radio — 由父组件渲染）。
- * - 必填：模态、分类、模型名称、文件、max_output_tokens
- * - 可选：版本号、说明
+ * - 必填：模态、审核场景、模型名称、文件
+ * - 可选：审核标签配置、版本号、说明
  * - artifact 上传结果通过 form.setFieldValue('__artifact', meta) 存到表单
  */
 export default function SmallModelFormFields({
@@ -58,6 +57,7 @@ export default function SmallModelFormFields({
   const [artifact, setArtifact] = useState<ArtifactUploadResponse | null>(
     initialArtifact ?? null,
   )
+  const [auditPoints, setAuditPoints] = useState<string[] | null>(null)
 
   const beforeUpload = (file: File) => {
     const MAX = 512 * 1024 * 1024
@@ -90,6 +90,26 @@ export default function SmallModelFormFields({
     form.setFieldValue('__artifact' as keyof SmallModelFormValues, undefined)
   }
 
+  const handleJsonUpload = (file: File) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target?.result as string)
+        if (Array.isArray(data.points) && data.points.every((p: unknown) => typeof p === 'string')) {
+          setAuditPoints(data.points)
+          form.setFieldValue('__auditPoints' as keyof SmallModelFormValues, data.points)
+          message.success(`已加载 ${data.points.length} 个审核标签`)
+        } else {
+          message.error('JSON 格式错误：需要 { "points": ["标签1", "标签2", ...] }')
+        }
+      } catch {
+        message.error('JSON 解析失败，请检查文件格式')
+      }
+    }
+    reader.readAsText(file)
+    return false
+  }
+
   return (
     <>
       <Form.Item
@@ -113,9 +133,9 @@ export default function SmallModelFormFields({
       </Form.Item>
 
       <Form.Item
-        label="分类"
+        label="审核场景"
         name="small_category"
-        rules={[{ required: true, message: '请选择分类' }]}
+        rules={[{ required: true, message: '请选择审核场景' }]}
       >
         <Select
           options={SMALL_MODEL_CATEGORY_OPTIONS.map((o) => ({
@@ -128,7 +148,7 @@ export default function SmallModelFormFields({
               </span>
             ),
           }))}
-          placeholder="选择小模型分类（必选）"
+          placeholder="选择审核场景（必选）"
         />
       </Form.Item>
 
@@ -203,21 +223,23 @@ export default function SmallModelFormFields({
       </Form.Item>
 
       <Form.Item
-        label="最大输出长度（tokens）"
-        name="max_output_tokens"
-        rules={[
-          { required: true, message: '请填写最大输出长度' },
-          { type: 'integer', min: 1, max: 32768, message: '范围 1 ~ 32768' },
-        ]}
-        tooltip="业务侧推理时控制单次输出的 token 上限"
+        label="审核标签配置"
+        tooltip='JSON 格式：{ "points": ["标签1", "标签2", ...] }'
       >
-        <InputNumber
-          style={{ width: '100%' }}
-          placeholder="2048"
-          min={1}
-          max={32768}
-          step={64}
-        />
+        <Upload
+          accept=".json"
+          beforeUpload={handleJsonUpload}
+          showUploadList={false}
+        >
+          <Button icon={<UploadOutlined />}>选择 JSON 配置文件</Button>
+        </Upload>
+        {auditPoints && auditPoints.length > 0 && (
+          <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {auditPoints.map((p, i) => (
+              <Tag key={i}>{p}</Tag>
+            ))}
+          </div>
+        )}
       </Form.Item>
 
       <Form.Item label="版本号" name="version" tooltip="语义版本号，如 1.0.0（可选）">
@@ -234,6 +256,9 @@ export default function SmallModelFormFields({
 
       {/* artifact 隐藏字段，不在 UI 显示，但参与 form.values 收集 */}
       <Form.Item name="__artifact" hidden noStyle>
+        <Input type="hidden" />
+      </Form.Item>
+      <Form.Item name="__auditPoints" hidden noStyle>
         <Input type="hidden" />
       </Form.Item>
     </>

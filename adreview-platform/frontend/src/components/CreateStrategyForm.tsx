@@ -96,7 +96,7 @@ const CATEGORY_TO_PACKAGE: Record<CategoryKey, string> = {
 }
 
 const ALLOWED_LIB_TYPES_BY_CATEGORY: Record<CategoryKey, LibraryType[]> = {
-  image: ['image', 'word', 'reply'],
+  image: ['word', 'reply'],
   text: ['word', 'reply'],
   audio: ['word', 'reply'],
   doc: ['image', 'word', 'reply'],

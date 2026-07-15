@@ -1,28 +1,37 @@
 /**
  * 个性化图片/文本审核规则 — 列表页
  *
- * 列：规则名 / 大模型（行内 Select，LLM 作为 prompt 执行器）/ 选择知识（行内 Select 多选）/ 启用 / 操作（编辑审核点 + 删除）
- * 不再有 ⋮ 配置下拉，编辑/删除直接暴露。
+ * 列：规则名 / 大模型 / 审核点（上传）/ 启用 / 操作（编辑审核点 + 删除）
+ * 顶部「+ 新增审核 Agent」弹窗创建。
  */
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
   App,
   Breadcrumb,
   Button,
   Empty,
+  Form,
+  Input,
+  Modal,
   Select,
   Space,
   Table,
   Tag,
   Tooltip,
   Typography,
+  Upload,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { InboxOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { auditItemsApi } from '@/api/auditItems'
+import { auditPointsApi } from '@/api/auditPoints'
 import { registeredModelsApi } from '@/api/registered-models'
+import { parseImportFile, rowsToText } from '@/lib/auditPointBatchImport'
 import type {
   AuditItem,
+  AuditPointBatchResult,
   MediaTypeKey,
   RegisteredModelListItem,
 } from '@/types/domain'
@@ -32,10 +41,10 @@ const LARGE_CATEGORY_COLOR: Record<string, string> = LARGE_MODEL_CATEGORY_OPTION
   (acc, o) => ({ ...acc, [o.value]: o.color }),
   {} as Record<string, string>,
 )
-import { KnowledgeSelectInline } from './SelectKnowledgeDocumentsModal'
 import SelectSmallModelModal from './SelectSmallModelModal'
 
 const { Text, Title } = Typography
+const { TextArea } = Input
 
 const MEDIA_LABEL: Record<MediaTypeKey, string> = {
   image: '图片',
@@ -43,6 +52,268 @@ const MEDIA_LABEL: Record<MediaTypeKey, string> = {
   audio: '音频',
   doc: '文档',
   video: '视频',
+}
+
+const PACKAGE_BY_MEDIA: Record<MediaTypeKey, string> = {
+  image: 'image_audit_pro',
+  text: 'text_audit_pro',
+  audio: 'audio_audit_pro',
+  doc: 'document_audit_pro',
+  video: 'video_audit_pro',
+}
+
+const MAX_UPLOAD_POINTS = 100
+
+/* ─────────────── CreateAgentModal ─────────────── */
+
+function CreateAgentModal({
+  open,
+  mediaType,
+  onClose,
+  onCreated,
+}: {
+  open: boolean
+  mediaType: MediaTypeKey
+  onClose: () => void
+  onCreated: () => void | Promise<void>
+}) {
+  const { message } = App.useApp()
+  const [form] = Form.useForm()
+  const [creating, setCreating] = useState(false)
+
+  const pkg = PACKAGE_BY_MEDIA[mediaType]
+
+  const handleOk = async () => {
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
+    setCreating(true)
+    try {
+      await auditItemsApi.create(pkg, {
+        name_cn: values.name_cn,
+        aliases: values.aliases ?? [],
+        description: values.description,
+      })
+      message.success('已创建审核 Agent')
+      form.resetFields()
+      await onCreated()
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '创建失败')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <Modal
+      title="新增审核 Agent"
+      open={open}
+      onCancel={() => {
+        if (creating) return
+        form.resetFields()
+        onClose()
+      }}
+      onOk={handleOk}
+      confirmLoading={creating}
+      okText="创建"
+      cancelText="取消"
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical" initialValues={{ aliases: [] }}>
+        <Form.Item
+          name="name_cn"
+          label="Agent 名称"
+          rules={[{ required: true, message: '请输入名称' }]}
+        >
+          <Input placeholder="例如：涉政检测" maxLength={64} />
+        </Form.Item>
+        <Form.Item name="aliases" label="别名">
+          <Select
+            mode="tags"
+            placeholder="按回车添加别名"
+            tokenSeparators={[',']}
+          />
+        </Form.Item>
+        <Form.Item name="description" label="说明">
+          <TextArea rows={3} placeholder="描述该 Agent 的审核范围" />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+/* ─────────────── UploadAuditPointsModal ─────────────── */
+
+function UploadAuditPointsModal({
+  open,
+  item,
+  mediaType,
+  onClose,
+  onUploaded,
+}: {
+  open: boolean
+  item: AuditItem | null
+  mediaType: MediaTypeKey
+  onClose: () => void
+  onUploaded: () => void | Promise<void>
+}) {
+  const { message } = App.useApp()
+  const [batchText, setBatchText] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+
+  const pkg = PACKAGE_BY_MEDIA[mediaType]
+
+  const parsedRows = useMemo(() => {
+    const lines = batchText.split('\n')
+    const out: { displayIndex: number; label_cn: string; scope_text: string; valid: boolean; error: string | null }[] = []
+    let display = 0
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      display += 1
+      const parts = trimmed.split('|').map((p) => p.trim())
+      const [name, scope] = parts
+      let error: string | null = null
+      if (!name) error = '名称不能为空'
+      else if (name.length > 64) error = '名称超过 64 字符'
+      else if (scope && scope.length > 255) error = '审核内容超过 255 字符'
+      out.push({ displayIndex: display, label_cn: name ?? '', scope_text: scope ?? '', valid: error === null, error })
+    }
+    return out
+  }, [batchText])
+
+  const validCount = parsedRows.filter((r) => r.valid).length
+  const overLimit = validCount > MAX_UPLOAD_POINTS
+
+  const handleFileUpload = async (file: File) => {
+    setImporting(true)
+    try {
+      const { rows, errors } = await parseImportFile(file)
+      if (errors.length > 0 || rows.length === 0) {
+        message.error(errors[0] ?? '文件无有效数据')
+        return false
+      }
+      setBatchText(rowsToText(rows))
+      message.success(`已解析 ${rows.length} 条审核点，请确认后提交`)
+      return false
+    } catch (e) {
+      message.error('解析失败：' + (e as Error).message)
+      return false
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleSubmit = async () => {
+    if (!item || validCount === 0 || overLimit) return
+    const valid = parsedRows.filter((r) => r.valid)
+    setSubmitting(true)
+    try {
+      const res: AuditPointBatchResult = await auditPointsApi.createMany(pkg, {
+        item_id: item.id,
+        points: valid.map((r) => ({
+          item_id: item.id,
+          label_cn: r.label_cn,
+          scope_text: r.scope_text || undefined,
+        })),
+      })
+      if (res.failed > 0) {
+        message.warning(`成功 ${res.succeeded} 条，失败 ${res.failed} 条`)
+      } else {
+        message.success(`已上传 ${res.succeeded} 条审核点`)
+      }
+      setBatchText('')
+      await onUploaded()
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '上传失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal
+      title={item ? `上传审核点 — ${item.name_cn}` : '上传审核点'}
+      open={open}
+      onCancel={() => {
+        if (submitting) return
+        setBatchText('')
+        onClose()
+      }}
+      onOk={handleSubmit}
+      confirmLoading={submitting}
+      okText={validCount > 0 ? `提交 ${validCount} 条` : '提交'}
+      okButtonProps={{ disabled: validCount === 0 || overLimit }}
+      cancelText="取消"
+      width={780}
+      destroyOnClose
+    >
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Alert
+          type="info"
+          showIcon
+          message="上传的文件会被 AI 解析为审核点"
+          description={
+            <span>
+              支持 <code>.txt / .csv / .xlsx</code> 格式。每行格式：<code>审核点 | 审核内容</code>
+              <br />
+              以 <code>#</code> 开头的行作为注释忽略。xlsx 首行表头须包含「审核点」「审核内容」。
+            </span>
+          }
+        />
+        <Upload
+          accept=".txt,.csv,.xlsx,.xls"
+          showUploadList={false}
+          beforeUpload={(file) => {
+            void handleFileUpload(file as File)
+            return false
+          }}
+        >
+          <Button icon={<InboxOutlined />} loading={importing}>
+            选择文件上传
+          </Button>
+        </Upload>
+        {batchText && (
+          <>
+            <Text type="secondary">
+              已识别 {parsedRows.length} 行 / 合法 {validCount} 条
+              {overLimit && (
+                <Tag color="red" style={{ marginInlineStart: 8 }}>
+                  超过 {MAX_UPLOAD_POINTS} 上限
+                </Tag>
+              )}
+            </Text>
+            <Input.TextArea
+              value={batchText}
+              onChange={(e) => setBatchText(e.target.value)}
+              autoSize={{ minRows: 8, maxRows: 16 }}
+              style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace' }}
+            />
+            {parsedRows.some((r) => !r.valid) && (
+              <Alert
+                type="warning"
+                showIcon
+                message="存在不合法行"
+                description={
+                  <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+                    {parsedRows
+                      .filter((r) => !r.valid)
+                      .map((r) => (
+                        <li key={r.displayIndex}>
+                          第 {r.displayIndex} 行：{r.error}
+                        </li>
+                      ))}
+                  </ul>
+                }
+              />
+            )}
+          </>
+        )}
+      </Space>
+    </Modal>
+  )
 }
 
 export default function PersonalRuleListPage({
@@ -61,6 +332,8 @@ export default function PersonalRuleListPage({
   const [models, setModels] = useState<RegisteredModelListItem[]>([])
   const [modelLoading, setModelLoading] = useState(false)
   const [modelItem, setModelItem] = useState<AuditItem | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [uploadItem, setUploadItem] = useState<AuditItem | null>(null)
 
   const reload = async () => {
     setLoading(true)
@@ -223,11 +496,21 @@ export default function PersonalRuleListPage({
         },
       },
       {
-        title: '选择知识',
-        key: 'docs',
+        title: '审核点',
+        key: 'points',
         width: '28%',
         render: (_, row) => (
-          <KnowledgeSelectInline item={row} onSaved={() => void reload()} compact />
+          <Space size={8}>
+            <Text type="secondary">{row.point_count} 个</Text>
+            <Button
+              size="small"
+              type="link"
+              style={{ padding: 0 }}
+              onClick={() => setUploadItem(row)}
+            >
+              上传审核点
+            </Button>
+          </Space>
         ),
       },
       {
@@ -300,16 +583,16 @@ export default function PersonalRuleListPage({
             <Button onClick={() => void reload()}>刷新</Button>
             <Button
               type="primary"
-              onClick={() => navigate(`/rules/personal/${mediaType}/new`)}
+              onClick={() => setCreateOpen(true)}
             >
-              + 新建规则
+              + 新增审核 Agent
             </Button>
           </Space>
         </div>
       )}
       {!embedded && (
         <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-          个性化规则可关联知识库中的知识文档作为审核依据，仅自己可见，影响对应策略。
+          自定义审核 Agent 可上传审核点文件由 AI 解析，仅自己可见，影响对应策略。
         </Text>
       )}
       <Table<AuditItem>
@@ -337,6 +620,27 @@ export default function PersonalRuleListPage({
         onSaved={async () => {
           await reload()
           setModelItem(null)
+        }}
+      />
+
+      <CreateAgentModal
+        open={createOpen}
+        mediaType={mediaType}
+        onClose={() => setCreateOpen(false)}
+        onCreated={async () => {
+          setCreateOpen(false)
+          await reload()
+        }}
+      />
+
+      <UploadAuditPointsModal
+        open={!!uploadItem}
+        item={uploadItem}
+        mediaType={mediaType}
+        onClose={() => setUploadItem(null)}
+        onUploaded={async () => {
+          setUploadItem(null)
+          await reload()
         }}
       />
     </div>

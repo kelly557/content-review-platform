@@ -2221,7 +2221,7 @@ export const REGISTERED_MODEL_STATUS_OPTIONS: {
 }[] = [
   { value: 'draft', label: '草稿', color: 'default' },
   { value: 'validating', label: '校验中', color: 'processing' },
-  { value: 'active', label: '已启用', color: 'green' },
+  { value: 'active', label: '已激活', color: 'green' },
   { value: 'inactive', label: '已停用', color: 'default' },
   { value: 'failed', label: '校验失败', color: 'red' },
   { value: 'archived', label: '已归档', color: 'default' },

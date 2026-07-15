@@ -164,7 +164,7 @@ export default function ProviderDetailPage() {
       return
     }
     if (!v.large_category) {
-      message.error('请选择大模型分类')
+      message.error('请选择能力类型')
       return
     }
     setAppending(true)
@@ -496,9 +496,9 @@ export default function ProviderDetailPage() {
             <Input placeholder="留空则使用 Model ID 作为展示名" />
           </Form.Item>
           <Form.Item
-            label="大模型分类"
+            label="能力类型"
             name="large_category"
-            rules={[{ required: true, message: '请选择大模型分类' }]}
+            rules={[{ required: true, message: '请选择能力类型' }]}
           >
             <Select
               options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
