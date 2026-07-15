@@ -130,7 +130,7 @@ export function LlmReviewCard({ value, onChange }: Props) {
           <Switch checked={value.is_enabled} onChange={onToggle} />
         </Space>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          开启后，策略下所有启用的审核项在机审时都会调用所选大模型补充审核结果。开关不区分素材类型。
+          开启后，策略下所有启用的通用审核规则在机审时都会叠加大模型的审核能力。
         </Text>
 
         {/* 多模态提示：仅在策略启用项覆盖图片/音频/视频/文档且所选模型不覆盖时显示 */}

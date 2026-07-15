@@ -164,9 +164,6 @@ export default function GeneralRuleListPage() {
           <Button onClick={() => void reload()}>刷新</Button>
         </Space>
       </div>
-      <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-        通用规则由平台统一发布，仅支持切换生效小模型版本；不支持新增、删除或编辑阈值。
-      </Text>
       <Table<AuditItem>
         rowKey="id"
         loading={loading}

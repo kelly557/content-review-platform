@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   App,
-  Alert,
-  Button,
   Empty,
   Modal,
   Select,
@@ -11,8 +9,6 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { LinkOutlined } from '@ant-design/icons'
-import { Link } from 'react-router-dom'
 import { auditItemsApi } from '@/api/auditItems'
 import { librariesApi } from '@/api/libraries'
 import type {
@@ -163,8 +159,6 @@ export function ItemLibrariesEditor({
     }
   }
 
-  const currentLibs = item?.linked_libraries ?? []
-
   return (
     <Modal
       open={open}
@@ -196,17 +190,6 @@ export function ItemLibrariesEditor({
       }}
     >
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
-        <Alert
-          type="info"
-          showIcon
-          message={'同一审核项下仅允许关联一种类型的库 (图库 / 词库 / 代答库)'}
-          description={
-            strategyName
-              ? `在此策略【${strategyName}】下为该审核项选用已激活的自定义库。保存即时生效 (全局), 与其它策略共享。`
-              : '为该审核项选用已激活的自定义库。保存即时生效 (item 维度全局), 与其它策略共享。'
-          }
-        />
-
         <div>
           <Text strong>{'选择已激活的自定义库'}</Text>
           <div style={{ marginTop: 6 }}>
@@ -264,68 +247,6 @@ export function ItemLibrariesEditor({
             )}
           </div>
         </div>
-
-        {currentLibs.length > 0 && (
-          <div>
-            <Text strong style={{ display: 'block', marginBottom: 6 }}>
-              {`当前已关联 (${currentLibs.length})`}
-            </Text>
-            <Space wrap>
-              {currentLibs.map((l) => (
-                <Tag
-                  key={l.library_id}
-                  color={TYPE_COLOR[l.library_type as LibraryType]}
-                  style={{ margin: 0 }}
-                >
-                  {l.name}
-                </Tag>
-              ))}
-            </Space>
-          </div>
-        )}
-
-        <div>
-          <Text strong style={{ display: 'block', marginBottom: 6 }}>
-            {'当前已关联明细 (只读)'}
-          </Text>
-          <Space direction="vertical" size={4} style={{ width: '100%' }}>
-            {currentLibs.length === 0 ? (
-              <Text type="secondary">{`该审核项尚未关联任何自定义库`}</Text>
-            ) : (
-              currentLibs.map((l) => (
-                <div
-                  key={l.library_id}
-                  style={{
-                    display: 'flex',
-                    gap: 12,
-                    padding: '6px 10px',
-                    border: '1px solid #E2E8F0',
-                    borderRadius: 4,
-                  }}
-                >
-                  <Tag
-                    color={TYPE_COLOR[l.library_type as LibraryType]}
-                    style={{ margin: 0 }}
-                  >
-                    {TYPE_LABEL[l.library_type as LibraryType]}
-                  </Tag>
-                  <Text strong style={{ minWidth: 200 }}>
-                    {l.name}
-                  </Text>
-                  <Text type="secondary">{l.code}</Text>
-                </div>
-              ))
-            )}
-          </Space>
-        </div>
-
-        <Space wrap>
-          <Link to="/resources/libraries">
-            <Button type="link" icon={<LinkOutlined />}>
-              {'管理词库 / 图库 / 代答库'}
-            </Button>
-          </Link>
-        </Space>
       </Space>
     </Modal>
   )
