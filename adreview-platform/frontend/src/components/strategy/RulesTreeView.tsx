@@ -652,7 +652,6 @@ function PointsColumn({
           const pickerOpen =
             allowLibraryLink && pickerOpenForItemId === record.item.id
           if (!allowLibraryLink) return null
-          if (!hasLibs && !pickerOpen) return null
           return (
             <div
               style={{
