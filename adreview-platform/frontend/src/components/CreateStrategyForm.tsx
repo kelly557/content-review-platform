@@ -219,6 +219,14 @@ export default function CreateStrategyForm({
         patch.medium_threshold = p.medium_threshold
       if (p.high_threshold !== undefined)
         patch.high_threshold = p.high_threshold
+      if (p.medium_threshold_min !== undefined)
+        patch.medium_threshold_min = p.medium_threshold_min
+      if (p.medium_threshold_max !== undefined)
+        patch.medium_threshold_max = p.medium_threshold_max
+      if (p.high_threshold_min !== undefined)
+        patch.high_threshold_min = p.high_threshold_min
+      if (p.high_threshold_max !== undefined)
+        patch.high_threshold_max = p.high_threshold_max
       if (Object.keys(patch).length > 0) {
         if (!overridesFromBackend[mt][p.item_id])
           overridesFromBackend[mt][p.item_id] = {}
@@ -543,6 +551,10 @@ export default function CreateStrategyForm({
                   // 清理 null / empty
                   if (merged.medium_threshold === null) delete merged.medium_threshold
                   if (merged.high_threshold === null) delete merged.high_threshold
+                  if (merged.medium_threshold_min === null) delete merged.medium_threshold_min
+                  if (merged.medium_threshold_max === null) delete merged.medium_threshold_max
+                  if (merged.high_threshold_min === null) delete merged.high_threshold_min
+                  if (merged.high_threshold_max === null) delete merged.high_threshold_max
                   if (Object.keys(merged).length === 0) {
                     delete itemBucket[pointId]
                   } else {

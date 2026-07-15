@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.strategy import StrategyScope
 from app.schemas.common import ORMBase
@@ -185,6 +185,34 @@ class StrategyPointRef(BaseModel):
     # 策略级 override；提交时透传到 strategies.definition.enabled_point_overrides，不写 audit_point
     medium_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
     high_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+    # 区间形态：每个阈值拆成 [下限, 上限]。与单值字段并存；任一组出现即覆盖。
+    medium_threshold_min: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+    medium_threshold_max: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+    high_threshold_min: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+    high_threshold_max: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+
+    @model_validator(mode="after")
+    def _validate_range(self) -> "StrategyPointRef":
+        pairs = [
+            ("medium_threshold_min", "medium_threshold_max"),
+            ("high_threshold_min", "high_threshold_max"),
+        ]
+        for lo, hi in pairs:
+            lo_v = getattr(self, lo)
+            hi_v = getattr(self, hi)
+            if lo_v is not None and hi_v is not None and lo_v >= hi_v:
+                raise ValueError(f"{lo} ({lo_v}) 必须 < {hi} ({hi_v})")
+        # 中区间上限 ≤ 高区间下限（允许边界相等）
+        if (
+            self.medium_threshold_max is not None
+            and self.high_threshold_min is not None
+            and self.medium_threshold_max > self.high_threshold_min
+        ):
+            raise ValueError(
+                f"medium_threshold_max ({self.medium_threshold_max}) 必须 ≤ "
+                f"high_threshold_min ({self.high_threshold_min})"
+            )
+        return self
 
 
 class LlmReviewConfig(BaseModel):

@@ -429,6 +429,10 @@ async def _load_enabled_points(
                 is_enabled=r.is_enabled,
                 medium_threshold=patch.get("medium_threshold"),
                 high_threshold=patch.get("high_threshold"),
+                medium_threshold_min=patch.get("medium_threshold_min"),
+                medium_threshold_max=patch.get("medium_threshold_max"),
+                high_threshold_min=patch.get("high_threshold_min"),
+                high_threshold_max=patch.get("high_threshold_max"),
             )
         )
     return out
@@ -512,6 +516,14 @@ async def _replace_enabled_points(
             patch["medium_threshold"] = ref.medium_threshold
         if ref.high_threshold is not None:
             patch["high_threshold"] = ref.high_threshold
+        if ref.medium_threshold_min is not None:
+            patch["medium_threshold_min"] = ref.medium_threshold_min
+        if ref.medium_threshold_max is not None:
+            patch["medium_threshold_max"] = ref.medium_threshold_max
+        if ref.high_threshold_min is not None:
+            patch["high_threshold_min"] = ref.high_threshold_min
+        if ref.high_threshold_max is not None:
+            patch["high_threshold_max"] = ref.high_threshold_max
         if patch:
             overrides.setdefault(ref.media_type, {})
             overrides[ref.media_type].setdefault(str(ref.item_id), {})

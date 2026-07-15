@@ -591,6 +591,12 @@ export interface StrategyPointRef {
   /** 策略级 override（中/高风险分），范围 50~100 */
   medium_threshold?: number
   high_threshold?: number
+  /** 区间形态：中风险分 = [min, max] */
+  medium_threshold_min?: number
+  medium_threshold_max?: number
+  /** 区间形态：高风险分 = [min, max] */
+  high_threshold_min?: number
+  high_threshold_max?: number
 }
 
 /** 策略级「大模型审核能力」开关（不区分媒体类型）+ 选定的已激活大模型。 */
@@ -1194,8 +1200,8 @@ export interface AuditItem {
   point_count: number
   /** 「关联自定义图库词库」上移至审核项；同 item 下须共享单一 library_type。 */
   linked_libraries: AuditItemLinkedLibrary[]
-  /** 通用规则「生效模型版本」指针 — 仅 is_builtin=true 时可写。 */
-  active_large_model_version_id: number | null
+  /** 通用规则「生效小模型版本」指针 — 仅 is_builtin=true 时可写。 */
+  active_small_model_version_id: number | null
   active_model_version: AuditItemActiveModelVersion | null
   /** 个性化规则「关联知识文档」ID 列表（多选）— 仅 is_builtin=false 时可写。 */
   knowledge_document_ids: number[]
@@ -1233,8 +1239,11 @@ export interface AuditItemUpdate {
   is_enabled?: boolean
   /** PATCH semantics: undefined=不动；[]=清空；[非空]=全量替换 */
   linked_library_ids?: number[]
-  /** 通用规则「切换生效模型版本」; null=清空 */
-  active_large_model_version_id?: number | null
+  /**
+   * 通用规则「切换生效小模型版本」；个性化规则「绑定运行此 prompt 的小模型版本」。
+   * null=清空。
+   */
+  active_small_model_version_id?: number | null
   /** 个性化规则「关联知识文档」(多选); undefined=不动, []=清空, [非空]=替换 */
   knowledge_document_ids?: number[]
 }
@@ -1280,6 +1289,10 @@ export interface AuditPointUpdate {
   description?: string
   medium_threshold?: number
   high_threshold?: number
+  medium_threshold_min?: number
+  medium_threshold_max?: number
+  high_threshold_min?: number
+  high_threshold_max?: number
   scope_text?: string
   risk_level?: AuditPointRisk
   is_enabled?: boolean
@@ -2180,7 +2193,7 @@ export const LARGE_MODEL_CATEGORY_LABEL: Record<LargeModelCategory, string> = LA
     return acc
   },
   {} as Record<LargeModelCategory, string>,
-)
+) as Record<LargeModelCategory, string>
 
 export type RegisteredModelRegistrationMethod = 'remote_api' | 'uploaded_file'
 

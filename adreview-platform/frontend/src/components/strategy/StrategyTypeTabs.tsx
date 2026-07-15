@@ -43,7 +43,15 @@ interface Props {
     media: CategoryKey,
     itemId: number,
     pointId: number,
-    override: { medium_threshold?: number; high_threshold?: number; linked_library_ids?: number[] },
+    override: {
+      medium_threshold?: number | null
+      high_threshold?: number | null
+      medium_threshold_min?: number | null
+      medium_threshold_max?: number | null
+      high_threshold_min?: number | null
+      high_threshold_max?: number | null
+      linked_library_ids?: number[]
+    },
   ) => void
   onPointToggle: (
     media: CategoryKey,

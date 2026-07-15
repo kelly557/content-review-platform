@@ -73,8 +73,12 @@ interface Props {
     itemId: number,
     pointId: number,
     override: {
-      medium_threshold?: number
-      high_threshold?: number
+      medium_threshold?: number | null
+      high_threshold?: number | null
+      medium_threshold_min?: number | null
+      medium_threshold_max?: number | null
+      high_threshold_min?: number | null
+      high_threshold_max?: number | null
     },
   ) => void
   /** point 勾选时通知父级，便于父级维护 enabledItemIds 集合 */
@@ -429,6 +433,10 @@ type PointRowRecord = {
   override: {
     medium_threshold?: number
     high_threshold?: number
+    medium_threshold_min?: number
+    medium_threshold_max?: number
+    high_threshold_min?: number
+    high_threshold_max?: number
   }
   isCustom: boolean
   editDisabled: boolean
@@ -452,8 +460,12 @@ function PointsColumn({
     itemId: number,
     pointId: number,
     override: {
-      medium_threshold?: number
-      high_threshold?: number
+      medium_threshold?: number | null
+      high_threshold?: number | null
+      medium_threshold_min?: number | null
+      medium_threshold_max?: number | null
+      high_threshold_min?: number | null
+      high_threshold_max?: number | null
     },
   ) => void
   mediaKey: CategoryKey
@@ -531,17 +543,23 @@ function PointsColumn({
     {
       title: '中风险分',
       dataIndex: 'mediumThreshold',
-      width: 110,
+      width: 180,
       align: 'left',
       render: (_, record) => (
-        <ThresholdInput
+        <RangeThresholdInput
           disabled={record.editDisabled}
-          value={
-            record.override.medium_threshold ?? record.point.medium_threshold
+          minValue={
+            record.override.medium_threshold_min ??
+            (record.override.medium_threshold ?? undefined)
           }
-          onChange={(v) =>
+          maxValue={
+            record.override.medium_threshold_max ?? record.point.medium_threshold
+          }
+          onChange={(min, max) =>
             onPointOverrideChange(item.id, record.point.id, {
-              medium_threshold: v ?? undefined,
+              medium_threshold_min: min,
+              medium_threshold_max: max,
+              medium_threshold: undefined,
             })
           }
           label="中风险分"
@@ -551,17 +569,22 @@ function PointsColumn({
     {
       title: '高风险分',
       dataIndex: 'highThreshold',
-      width: 110,
+      width: 180,
       align: 'left',
       render: (_, record) => (
-        <ThresholdInput
+        <RangeThresholdInput
           disabled={record.editDisabled}
-          value={
-            record.override.high_threshold ?? record.point.high_threshold
+          minValue={
+            record.override.high_threshold_min ?? record.point.high_threshold
           }
-          onChange={(v) =>
+          maxValue={
+            record.override.high_threshold_max ?? 100
+          }
+          onChange={(min, max) =>
             onPointOverrideChange(item.id, record.point.id, {
-              high_threshold: v ?? undefined,
+              high_threshold_min: min,
+              high_threshold_max: max,
+              high_threshold: undefined,
             })
           }
           label="高风险分"
@@ -593,30 +616,52 @@ function PointsColumn({
   )
 }
 
-function ThresholdInput({
+function RangeThresholdInput({
   disabled,
-  value,
+  minValue,
+  maxValue,
   onChange,
   label,
 }: {
   disabled: boolean
-  value: number
-  onChange: (v: number | null) => void
+  minValue: number | undefined
+  maxValue: number | undefined
+  onChange: (min: number | null, max: number | null) => void
   label: string
 }) {
   return (
-    <Tooltip title={label}>
-      <InputNumber
-        size="small"
-        min={50}
-        max={100}
-        step={0.01}
-        precision={2}
-        value={value}
-        disabled={disabled}
-        onChange={(v) => onChange(typeof v === 'number' ? v : null)}
-        style={{ width: 90 }}
-      />
-    </Tooltip>
+    <Space size={4} align="center">
+      <Tooltip title={`${label} 下限`}>
+        <InputNumber
+          size="small"
+          min={50}
+          max={100}
+          step={0.01}
+          precision={2}
+          value={minValue ?? null}
+          disabled={disabled}
+          onChange={(v) =>
+            onChange(typeof v === 'number' ? v : null, maxValue ?? null)
+          }
+          style={{ width: 76 }}
+        />
+      </Tooltip>
+      <span style={{ color: '#64748B', fontSize: 12 }}>~</span>
+      <Tooltip title={`${label} 上限`}>
+        <InputNumber
+          size="small"
+          min={50}
+          max={100}
+          step={0.01}
+          precision={2}
+          value={maxValue ?? null}
+          disabled={disabled}
+          onChange={(v) =>
+            onChange(minValue ?? null, typeof v === 'number' ? v : null)
+          }
+          style={{ width: 76 }}
+        />
+      </Tooltip>
+    </Space>
   )
 }
