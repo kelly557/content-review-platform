@@ -79,7 +79,6 @@ const NAV_SECTIONS: Array<{
     key: 'strategy',
     label: '策略中心',
     items: [
-      { kind: 'leaf', key: 'keywords', path: '/keywords', label: '自定义词库', icon: <DatabaseOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin', 'mlr', 'superadmin', 'root_admin'] },
       {
         kind: 'group',
         key: 'strategies',
