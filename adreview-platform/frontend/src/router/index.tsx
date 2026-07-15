@@ -160,8 +160,6 @@ export default function AppRoutes() {
               {/* 资源库（原「知识库」） */}
               <Route path="/resources/words" element={<WordLibraryListPage />} />
               <Route path="/resources/words/:id" element={<WordLibraryDetailPage />} />
-              <Route path="/resources/images" element={<ImageLibraryListPage />} />
-              <Route path="/resources/images/:id" element={<ImageLibraryDetailPage />} />
               <Route path="/resources/replies" element={<ReplyLibraryListPage />} />
               <Route path="/resources/replies/:id" element={<ReplyLibraryDetailPage />} />
               <Route path="/resources/models" element={<ModelListPage />} />
@@ -275,6 +273,8 @@ export default function AppRoutes() {
             <Route element={<ProtectedRoute allow={['root_admin']} />}>
               <Route path="/resources/knowledge" element={<KnowledgeDocumentListPage />} />
               <Route path="/resources/knowledge/:id" element={<KnowledgeDocumentDetailPage />} />
+              <Route path="/resources/images" element={<ImageLibraryListPage />} />
+              <Route path="/resources/images/:id" element={<ImageLibraryDetailPage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin', 'root_admin']} />}>

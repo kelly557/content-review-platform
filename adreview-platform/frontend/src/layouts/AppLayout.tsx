@@ -102,7 +102,7 @@ const NAV_SECTIONS: Array<{
         children: [
           { key: 'strategies-words', path: '/resources/words', label: '词库' },
           { key: 'strategies-models', path: '/resources/models', label: '模型库' },
-          { key: 'strategies-images', path: '/resources/images', label: '图片库' },
+          { key: 'strategies-images', path: '/resources/images', label: '图片库', roles: ['root_admin'] },
           { key: 'strategies-replies', path: '/resources/replies', label: '代答库' },
           { key: 'strategies-knowledge', path: '/resources/knowledge', label: '知识库', roles: ['root_admin'] },
         ],
