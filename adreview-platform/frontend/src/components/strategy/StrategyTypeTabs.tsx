@@ -60,6 +60,9 @@ interface Props {
     checked: boolean,
   ) => void
   defaultActiveKey?: CategoryKey
+  /** 受控 activeKey：父级传入时使用，否则回退到内部 state */
+  activeKey?: CategoryKey
+  onActiveKeyChange?: (next: CategoryKey) => void
   // ---- 音频（语音审核专用配置）----
   voiceRuleMode?: VoiceRuleMode
   onVoiceRuleModeChange?: (next: VoiceRuleMode) => void
@@ -102,8 +105,19 @@ export default function StrategyTypeTabs({
   onVideoFrameIntervalChange,
   onItemLibraryLink,
   libraryRefreshTick,
+  activeKey: controlledActiveKey,
+  onActiveKeyChange,
 }: Props) {
-  const [activeCategory, setActiveCategory] = useState<CategoryKey>(defaultActiveKey)
+  const [internalActive, setInternalActive] = useState<CategoryKey>(defaultActiveKey)
+  const isControlled = controlledActiveKey !== undefined
+  const activeCategory = isControlled ? controlledActiveKey : internalActive
+  const setActiveCategory = (k: CategoryKey) => {
+    if (isControlled) {
+      onActiveKeyChange?.(k)
+    } else {
+      setInternalActive(k)
+    }
+  }
 
   const setPointsForItem = (media: CategoryKey, itemId: number, next: PointMap) => {
     onPointMapChange({ ...pointMap, [media]: { ...pointMap[media], [itemId]: next } })
