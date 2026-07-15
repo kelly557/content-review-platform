@@ -640,7 +640,7 @@ function PointsColumn({
                 </Text>
                 {hasLibs && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    · 关联 {record.linkedLibraries.length} 个自定义库
+                     · 关联 {record.linkedLibraries.length} 个自定义词库
                   </Text>
                 )}
               </div>
@@ -678,7 +678,7 @@ function PointsColumn({
                       pickerOpen ? null : record.item.id,
                     )
                   }
-                  aria-label={`为「${record.item.name_cn}」编辑自定义库`}
+                  aria-label={`为「${record.item.name_cn}」编辑自定义词库`}
                   style={{
                     padding: '0 4px',
                     height: 'auto',
@@ -687,14 +687,14 @@ function PointsColumn({
                     color: pickerOpen ? '#2563EB' : '#0F172A',
                   }}
                 >
-                  {`自定义库 ${pickerOpen ? '▲' : '▼'}`}
+                  {`自定义词库 ${pickerOpen ? '▲' : '▼'}`}
                 </Button>
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {hasLibs
                     ? `已关联 ${record.linkedLibraries.length} 个`
                     : pickerOpen
                       ? '勾选即时生效,可多选'
-                      : '暂无关联的自定义库'}
+                      : '暂无关联的自定义词库'}
                 </Text>
               </div>
               {hasLibs && (
@@ -751,7 +751,7 @@ function PointsColumn({
                 >
                   {availableLibraries.length === 0 ? (
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      暂无可用的自定义库,请先到「资源库」创建。
+                      暂无可用的自定义词库,请先到「资源库」创建。
                     </Text>
                   ) : (
                     <>
