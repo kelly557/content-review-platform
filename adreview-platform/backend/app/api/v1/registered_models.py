@@ -1023,7 +1023,7 @@ async def create_version(
             provider=None,
             model_name=model_name,
             endpoint_url=None,
-            config={},
+            config=dict(body.config or {}),
             credential_id=None,
             artifact_storage_key=art_dict["storage_key"],
             artifact_filename=art_dict["filename"],
