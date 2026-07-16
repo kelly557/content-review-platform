@@ -85,14 +85,18 @@ a:hover { text-decoration: underline; }
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--color-border);
+  padding-top: 12px;
+  padding-bottom: 12px;
   font-weight: 500;
-  color: var(--color-muted);
+  font-size: 12px;
+  color: #94A3B8;
+  letter-spacing: 0.3px;
 }
 .rules-tree-table.ant-table .ant-table-tbody > tr > td {
   background: transparent;
   border: none;
-  padding-top: 10px;
-  padding-bottom: 10px;
+  padding-top: 14px;
+  padding-bottom: 14px;
 }
 .rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-divider > td {
   height: 36px;
@@ -100,6 +104,9 @@ a:hover { text-decoration: underline; }
   border: none;
   background: transparent;
   pointer-events: none;
+}
+.rules-tree-table.ant-table .ant-table-tbody > tr:not(.rules-tree-row-section):not(.rules-tree-row-divider):hover > td {
+  background: rgba(37, 99, 235, 0.03);
 }
 .rules-tree-table.ant-table .ant-table-cell-row-hover {
   background: transparent !important;

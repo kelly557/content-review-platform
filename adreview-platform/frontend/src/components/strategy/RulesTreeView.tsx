@@ -234,7 +234,9 @@ export default function RulesTreeView({
             paddingLeft: isStacked ? 0 : 16,
             maxHeight: isStacked ? 'none' : 720,
             minHeight: isStacked ? 'auto' : 540,
+            minWidth: 0,
             overflowY: isStacked ? 'visible' : 'auto',
+            overflowX: isStacked ? 'visible' : 'auto',
           }}
         >
           {items.length > 0 ? (
@@ -498,24 +500,34 @@ function PointsColumn({
           return (
             <div
               style={{
-                padding: '16px 0 8px',
-                borderBottom: '1px dashed var(--color-border)',
+                padding: '20px 0 10px',
               }}
             >
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 12,
+                  gap: 10,
                   flexWrap: 'wrap',
+                  paddingLeft: 10,
+                  borderLeft: '3px solid #2563EB',
                 }}
               >
                 <Text strong style={{ fontSize: 15, color: '#0F172A' }}>
                   {record.item.name_cn}
                 </Text>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {record.pointCount} 个审核点
-                </Text>
+                <span
+                  style={{
+                    fontSize: 11,
+                    padding: '1px 8px',
+                    borderRadius: 10,
+                    background: '#F1F5F9',
+                    color: '#64748B',
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {record.pointCount}
+                </span>
               </div>
             </div>
           )
@@ -564,8 +576,7 @@ function PointsColumn({
         if (record.point.description) {
           return (
             <Text
-              type="secondary"
-              style={{ fontSize: 12, lineHeight: 1.5 }}
+              style={{ fontSize: 12, color: '#475569', lineHeight: 1.6 }}
               ellipsis={{ tooltip: record.point.description }}
             >
               {record.point.description}
@@ -573,18 +584,14 @@ function PointsColumn({
           )
         }
         return (
-          <Space size={6} align="center">
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              暂无审核说明
-            </Text>
-          </Space>
+          <span style={{ color: '#CBD5E1', fontSize: 12 }}>—</span>
         )
       },
     },
     {
       title: '中风险分',
       dataIndex: 'mediumThreshold',
-      width: 180,
+      width: 220,
       align: 'left',
       onCell: (record) =>
         record.kind === 'point' ? {} : { colSpan: 0 },
@@ -600,8 +607,8 @@ function PointsColumn({
         const mediumMaxConstraint =
           typeof highMin === 'number' ? Math.max(0, highMin - 0.01) : 99.99
         return (
-          <Space size={4} direction="vertical" align="start" style={{ width: '100%' }}>
-            <Space size={4} align="center">
+          <Space size={8} direction="vertical" align="start" style={{ width: '100%' }}>
+            <Space size={8} align="center">
               <RangeMinOnlyInput
                 disabled={record.editDisabled}
                 minValue={medMin}
@@ -641,7 +648,7 @@ function PointsColumn({
     {
       title: '高风险分',
       dataIndex: 'highThreshold',
-      width: 180,
+      width: 220,
       align: 'left',
       onCell: (record) =>
         record.kind === 'point' ? {} : { colSpan: 0 },
@@ -653,8 +660,8 @@ function PointsColumn({
         const highMin =
           record.override.high_threshold_min ?? record.point.high_threshold
         return (
-          <Space size={4} direction="vertical" align="start" style={{ width: '100%' }}>
-            <Space size={4} align="center">
+          <Space size={8} direction="vertical" align="start" style={{ width: '100%' }}>
+            <Space size={8} align="center">
               <RangeMinOnlyInput
                 disabled={record.editDisabled}
                 minValue={highMin}
@@ -694,7 +701,7 @@ function PointsColumn({
   ]
 
   return (
-    <div style={{ width: '100%', textAlign: 'left' }}>
+    <div style={{ width: '100%', minWidth: 0, textAlign: 'left' }}>
       <Table<FlatRowRecord>
         className="rules-tree-table"
         columns={columns}
@@ -702,7 +709,7 @@ function PointsColumn({
         pagination={false}
         size="small"
         rowKey="key"
-        scroll={{ x: 720 }}
+        scroll={{ x: 880 }}
         rowClassName={(record) => {
           if (record.kind === 'section') {
             if (highlightItemId != null && record.item.id === highlightItemId) {
@@ -759,7 +766,7 @@ function RangeMinOnlyInput({
 }) {
   const safeMax = maxDisplay
   return (
-    <Space size={4} align="center">
+    <Space size={6} align="center">
       <Tooltip title={`${label} 下限`}>
         <InputNumber
           size="small"
@@ -770,20 +777,20 @@ function RangeMinOnlyInput({
           value={minValue ?? null}
           disabled={disabled}
           onChange={(v) => onMinChange(typeof v === 'number' ? v : null)}
-          style={{ width: 76 }}
+          style={{ width: 80 }}
         />
       </Tooltip>
-      <span style={{ color: '#64748B', fontSize: 12 }}>~</span>
+      <span style={{ color: '#94A3B8', fontSize: 12 }}>~</span>
       <span
         style={{
-          width: 76,
+          width: 80,
           fontSize: 12,
           color: '#64748B',
           padding: '0 11px',
           lineHeight: '24px',
           background: '#F8FAFC',
           border: '1px solid #E2E8F0',
-          borderRadius: 4,
+          borderRadius: 6,
           textAlign: 'center',
         }}
       >
