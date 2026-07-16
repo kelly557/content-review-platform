@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { InputNumber, Space, Switch, Typography, message as antMessage } from 'antd'
+import { InputNumber, Space, Typography, message as antMessage } from 'antd'
 import type { AuditItem } from '@/types/domain'
 import { auditItemsApi } from '@/api/auditItems'
 
@@ -32,7 +32,6 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
       low_threshold_min?: number
       medium_threshold_min?: number
       high_threshold_min?: number
-      is_enabled?: boolean
     },
   ) => {
     if (!packageCode) return
@@ -103,7 +102,6 @@ interface CardProps {
       low_threshold_min?: number
       medium_threshold_min?: number
       high_threshold_min?: number
-      is_enabled?: boolean
     },
   ) => Promise<void>
 }
@@ -129,24 +127,11 @@ function AgentCard({ item, saving, onPatch }: CardProps) {
         transition: 'opacity 200ms',
       }}
     >
-      {/* 标题行:item 名称 + 启用开关 */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
+      {/* 标题行:item 名称 */}
+      <div style={{ marginBottom: 12 }}>
         <Text strong style={{ fontSize: 14, color: '#0F172A' }}>
           {item.name_cn}
         </Text>
-        <Switch
-          checked={item.is_enabled}
-          disabled={saving}
-          onChange={(checked) => onPatch(item, { is_enabled: checked })}
-          aria-label={`启用 ${item.name_cn}`}
-        />
       </div>
 
       {/* 阈值横版并排 */}
