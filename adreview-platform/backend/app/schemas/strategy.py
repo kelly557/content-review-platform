@@ -202,15 +202,16 @@ class StrategyPointRef(BaseModel):
             hi_v = getattr(self, hi)
             if lo_v is not None and hi_v is not None and lo_v >= hi_v:
                 raise ValueError(f"{lo} ({lo_v}) 必须 < {hi} ({hi_v})")
-        # 中区间上限 ≤ 高区间下限（允许边界相等）
+        # 中区间上限 = 高区间下限 - 0.01 (业务规则 2026-07-28)
+        # 中风险分上限由高风险分下限自动反推,差值固定 0.01
         if (
             self.medium_threshold_max is not None
             and self.high_threshold_min is not None
-            and self.medium_threshold_max > self.high_threshold_min
+            and abs(self.medium_threshold_max + 0.01 - self.high_threshold_min) > 1e-6
         ):
             raise ValueError(
-                f"medium_threshold_max ({self.medium_threshold_max}) 必须 ≤ "
-                f"high_threshold_min ({self.high_threshold_min})"
+                f"medium_threshold_max ({self.medium_threshold_max}) 必须等于 "
+                f"high_threshold_min ({self.high_threshold_min}) - 0.01"
             )
         return self
 

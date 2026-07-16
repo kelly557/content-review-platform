@@ -104,13 +104,17 @@ class AuditPointCreate(BaseModel):
             and self.high_threshold_min >= self.high_threshold_max
         ):
             raise ValueError("高风险分下限必须 < 高风险分上限")
-        # 中区间上限 ≤ 高区间下限
+        # 中区间上限 = 高区间下限 - 0.01 (业务规则 2026-07-28)
+        # 中风险分上限由高风险分下限自动反推,差值固定 0.01
         if (
             self.medium_threshold_max is not None
             and self.high_threshold_min is not None
-            and self.medium_threshold_max > self.high_threshold_min
+            and abs(self.medium_threshold_max + 0.01 - self.high_threshold_min) > 1e-6
         ):
-            raise ValueError("中风险分上限必须 ≤ 高风险分下限")
+            raise ValueError(
+                f"中风险分上限 ({self.medium_threshold_max}) 必须等于 "
+                f"高风险分下限 ({self.high_threshold_min}) - 0.01"
+            )
         return self
 
 
@@ -159,13 +163,16 @@ class AuditPointUpdate(BaseModel):
             and self.high_threshold_min >= self.high_threshold_max
         ):
             raise ValueError("高风险分下限必须 < 高风险分上限")
-        # 中区间上限 ≤ 高区间下限
+        # 中区间上限 = 高区间下限 - 0.01 (业务规则 2026-07-28)
         if (
             self.medium_threshold_max is not None
             and self.high_threshold_min is not None
-            and self.medium_threshold_max > self.high_threshold_min
+            and abs(self.medium_threshold_max + 0.01 - self.high_threshold_min) > 1e-6
         ):
-            raise ValueError("中风险分上限必须 ≤ 高风险分下限")
+            raise ValueError(
+                f"中风险分上限 ({self.medium_threshold_max}) 必须等于 "
+                f"高风险分下限 ({self.high_threshold_min}) - 0.01"
+            )
         return self
 
 
