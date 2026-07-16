@@ -28,6 +28,7 @@ import {
   type MediaPointOverrideMap,
   type PointMap,
 } from './pointLevel'
+import AgentCardsColumn from './AgentCardsColumn'
 
 const { Text } = Typography
 
@@ -218,7 +219,7 @@ export default function RulesTreeView({
             emptyText="暂无通用规则"
           />
           <ItemGroup
-            title="自定义"
+            title="审核 Agent"
             icon={<UnlockOutlined style={{ color: '#2563EB' }} />}
             items={customItems}
             enabledSet={enabledSet}
@@ -226,7 +227,7 @@ export default function RulesTreeView({
             activeItemId={selectedItemId}
             onPick={(id) => setSelectedItemId(id)}
             loading={loading}
-            emptyText="暂无自定义规则"
+            emptyText="暂无审核 Agent"
           />
         </div>
 
@@ -243,16 +244,22 @@ export default function RulesTreeView({
           }}
         >
           {items.length > 0 ? (
-            <PointsColumn
-              items={items}
-              pointsByItem={pointsByItem}
-              getPointMap={getPointMap}
-              pointOverrides={pointOverrides}
-              onPointMapChange={onPointMapChange}
-              onPointOverrideChange={onPointOverrideChange}
-              highlightItemId={highlightItemId}
-              mediaKey={mediaKey}
-            />
+            <>
+              <PointsColumn
+                items={builtinItems}
+                pointsByItem={pointsByItem}
+                getPointMap={getPointMap}
+                pointOverrides={pointOverrides}
+                onPointMapChange={onPointMapChange}
+                onPointOverrideChange={onPointOverrideChange}
+                highlightItemId={highlightItemId}
+                mediaKey={mediaKey}
+              />
+              <AgentCardsColumn
+                packageCode={packageCode}
+                items={customItems}
+              />
+            </>
           ) : (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}

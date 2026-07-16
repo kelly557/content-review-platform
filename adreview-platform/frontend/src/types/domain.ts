@@ -1226,6 +1226,10 @@ export interface AuditItem {
   active_large_model: AuditItemActiveLargeModel | null
   /** 个性化规则「关联知识文档」ID 列表（多选）— 仅 is_builtin=false 时可写。 */
   knowledge_document_ids: number[]
+  /** 「审核 Agent」共享阈值 — 仅 is_builtin=false 的自定义 item 可写。 */
+  low_threshold_min: number | null
+  medium_threshold_min: number | null
+  high_threshold_min: number | null
   created_at: string
   updated_at: string | null
 }
@@ -1272,6 +1276,10 @@ export interface AuditItemUpdate {
   active_large_model_id?: number | null
   /** 个性化规则「关联知识文档」(多选); undefined=不动, []=清空, [非空]=替换 */
   knowledge_document_ids?: number[]
+  /** 「审核 Agent」共享阈值(仅 is_builtin=false 可写); 不存 max。 */
+  low_threshold_min?: number
+  medium_threshold_min?: number
+  high_threshold_min?: number
 }
 
 export type AuditPointRisk = '低风险' | '中风险' | '高风险'
