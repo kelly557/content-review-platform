@@ -68,7 +68,8 @@ const NAV_SECTIONS: Array<{
     key: 'workspace',
     label: '工作区',
     items: [
-      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
+      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
+      { kind: 'leaf', key: 'current-review', path: '/current-review', label: '现在审核', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
       { kind: 'leaf', key: 'tasks', path: '/tasks', label: '审核任务', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
       { kind: 'leaf', key: 'triggers', path: '/triggers', label: '自动审核', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
       { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
@@ -130,7 +131,7 @@ const NAV_SECTIONS: Array<{
         path: '/admin/users',
         label: '账号管理',
         icon: <TeamOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['root_admin'],
+        roles: ['admin', 'superadmin', 'root_admin'],
         children: [
           { key: 'admin-users', path: '/admin/users', label: '用户管理' },
           { key: 'admin-roles', path: '/admin/roles', label: '角色管理' },

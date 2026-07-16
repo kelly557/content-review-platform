@@ -36,6 +36,7 @@ const MaterialsListPage = lazy(() => import('@/pages/materials/MaterialsListPage
 const MaterialDetailPage = lazy(() => import('@/pages/materials/MaterialDetailPage'))
 const PackageDetailPage = lazy(() => import('@/pages/packages/PackageDetailPage'))
 const TasksPage = lazy(() => import('@/pages/tasks/TasksPage'))
+const CurrentReviewPage = lazy(() => import('@/pages/tasks/CurrentReviewPage'))
 const TaskDetailPage = lazy(() => import('@/pages/tasks/TaskDetailPage'))
 const CreateTaskPage = lazy(() => import('@/pages/tasks/CreateTaskPage'))
 const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage'))
@@ -100,6 +101,7 @@ export default function AppRoutes() {
           <Route element={<AppLayout />}>
             <Route index element={<Navigate to="/overview" replace />} />
             <Route path="/overview" element={<OverviewPage />} />
+            <Route path="/current-review" element={<CurrentReviewPage />} />
 
             <Route path="/materials" element={<MaterialsListPage />} />
             <Route path="/materials/:id" element={<MaterialDetailPage />} />
