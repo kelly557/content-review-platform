@@ -100,11 +100,11 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
           return
         }
         if (!v.modality) {
-          message.error('请选择模态')
+          message.error('请选择支持的素材类型')
           return
         }
         if (!v.small_category) {
-          message.error('请选择审核场景')
+          message.error('请选择识别风险类型')
           return
         }
         if (!v.model_name || !v.model_name.trim()) {

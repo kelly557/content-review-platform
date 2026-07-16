@@ -476,7 +476,7 @@ export default function ModelListPage() {
         {activeTab === 'small' && (
           <Select
             allowClear
-            placeholder="审核场景"
+            placeholder="识别风险类型"
             style={{ width: 140 }}
             value={smallCategory ?? undefined}
             onChange={(v) => setSmallCategory(v ?? null)}

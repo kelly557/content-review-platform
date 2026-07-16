@@ -433,10 +433,10 @@ export default function ModelDetailPage() {
                 <>
                 <Descriptions bordered column={2} size="small">
                   <Descriptions.Item label="类型">{kindOption?.label ?? model.kind}</Descriptions.Item>
-                  <Descriptions.Item label="审核场景">{categoryLabel ?? '-'}</Descriptions.Item>
+                  <Descriptions.Item label="识别风险类型">{categoryLabel ?? '-'}</Descriptions.Item>
                   {isSmall ? (
                     <>
-                      <Descriptions.Item label="模态">
+                      <Descriptions.Item label="支持的素材类型">
                         {modalityLabel ?? '-'}
                       </Descriptions.Item>
                       <Descriptions.Item label="当前版本">

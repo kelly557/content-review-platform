@@ -140,7 +140,7 @@ export default function SmallModelFormFields({
     if (comboItems.length === 0)
       return {
         type: 'info',
-        text: '首次接入该模态+审核场景组合，请配置审核点',
+        text: '首次接入该支持的素材类型+识别风险类型组合，请配置审核点',
       }
     const samePoints = comboItems.find((m) =>
       pointsEqual(
@@ -155,7 +155,7 @@ export default function SmallModelFormFields({
       }
     return {
       type: 'warning',
-      text: '该模态+审核场景已有模型，检测到审核点存在差异，将作为新版本审核点',
+      text: '该支持的素材类型+识别风险类型组合已有模型，检测到审核点存在差异，将作为新版本审核点',
     }
   })()
 
@@ -252,7 +252,7 @@ export default function SmallModelFormFields({
       return
     }
     if (!watchedModality || !watchedCategory) {
-      message.error('请先选择模态和审核场景')
+      message.error('请先选择支持的素材类型和识别风险类型')
       return
     }
     setChecking(true)
@@ -278,9 +278,9 @@ export default function SmallModelFormFields({
   return (
     <>
       <Form.Item
-        label="模态"
+        label="支持的素材类型"
         name="modality"
-        rules={[{ required: true, message: '请选择模态' }]}
+        rules={[{ required: true, message: '请选择支持的素材类型' }]}
       >
         <Select
           options={SMALL_MODEL_MODALITY_OPTIONS.map((o) => ({
@@ -293,14 +293,14 @@ export default function SmallModelFormFields({
               </span>
             ),
           }))}
-          placeholder="选择模态（文本 / 图片）"
+          placeholder="选择支持的素材类型（文本 / 图片）"
         />
       </Form.Item>
 
       <Form.Item
-        label="审核场景"
+        label="识别风险类型"
         name="small_category"
-        rules={[{ required: true, message: '请选择审核场景' }]}
+        rules={[{ required: true, message: '请选择识别风险类型' }]}
       >
         <Select
           options={SMALL_MODEL_CATEGORY_OPTIONS.map((o) => ({
@@ -313,7 +313,7 @@ export default function SmallModelFormFields({
               </span>
             ),
           }))}
-          placeholder="选择审核场景（必选）"
+          placeholder="选择识别风险类型（必选）"
         />
       </Form.Item>
 
@@ -463,7 +463,7 @@ export default function SmallModelFormFields({
         <Input.TextArea rows={3} placeholder="如：用于文本涉政分类" />
       </Form.Item>
 
-      <Form.Item label="检测模型" tooltip="保存前校验模型文件、JSON 配置与模态一致性">
+      <Form.Item label="检测模型" tooltip="保存前校验模型文件、JSON 配置与支持的素材类型一致性">
         <Space>
           <Button
             icon={<ApiOutlined />}
