@@ -358,6 +358,7 @@ export interface AnomalyCurrent {
   submitted: number
   rejected: number
   high_risk_accounts: number
+  high_risk_content_count: number
 }
 
 export interface AnomalyMetricPoint {
@@ -1970,9 +1971,9 @@ export const QUERY_COLUMNS: QueryColumnDef[] = [
   },
   {
     key: 'content_preview',
-    title: '素材类型',
+    title: '素材内容',
     defaultVisible: true,
-    tooltip: '被审核素材的载体形态：文本/图片/音频/视频',
+    tooltip: '素材内容预览：文本摘要 / 图片缩略图 / 音视频入口，点击查看完整',
   },
   { key: 'request_id', title: 'Request ID', defaultVisible: false },
   { key: 'task_id', title: 'Task ID', defaultVisible: false },

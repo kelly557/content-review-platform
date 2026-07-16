@@ -140,6 +140,7 @@ class AnomalyCurrent(BaseModel):
     submitted: int = 0
     rejected: int = 0
     high_risk_accounts: int = 0  # distinct submitters with ≥1 rejection in this bucket
+    high_risk_content_count: int = 0  # distinct materials with machine_result.risk_level == '高风险' in latest bucket
 
 
 class AnomalyAlertSummary(BaseModel):

@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Badge,
   Button,
   Card,
   Col,
+  DatePicker,
   Empty,
   message,
   Popconfirm,
   Row,
+  Segmented,
   Select,
   Space,
   Statistic,
@@ -18,6 +20,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { SettingOutlined } from '@ant-design/icons'
+import dayjs, { type Dayjs } from 'dayjs'
 import { reportsApi, alertsApi } from '@/api/reports'
 import type { AlertEventOut, AnomalyResponse } from '@/types/domain'
 import { useAnomalyThresholds } from '@/hooks/useAnomalyThresholds'
@@ -30,11 +33,17 @@ import AnomalyThresholdModal from './AnomalyThresholdModal'
 import { MultiMetricLineChart } from '../charts'
 
 const { Text } = Typography
+const { RangePicker } = DatePicker
 
-const WINDOW_OPTIONS = [
+type WindowKey = '1h' | '24h' | 'custom'
+
+const WINDOW_SEGMENTS: { value: Exclude<WindowKey, 'custom'>; label: string }[] = [
   { value: '1h', label: '近 1 小时' },
   { value: '24h', label: '近 24 小时' },
 ]
+
+// Match the backend cap (see app.services.report_metrics.MAX_CUSTOM_WINDOW).
+const MAX_RANGE_DAYS = 90
 
 const STATUS_OPTIONS = [
   { value: 'open', label: '待处理' },
@@ -58,7 +67,8 @@ const RULE_LABEL: Record<string, string> = {
 }
 
 export default function AnomalyTab() {
-  const [window, setWindow] = useState('1h')
+  const [windowKey, setWindowKey] = useState<WindowKey>('1h')
+  const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [status, setStatus] = useState<'open' | 'acknowledged' | 'all'>('open')
   const [anomaly, setAnomaly] = useState<AnomalyResponse | null>(null)
   const [alerts, setAlerts] = useState<AlertEventOut[]>([])
@@ -72,12 +82,22 @@ export default function AnomalyTab() {
   const tContent = thresholds[ANOMALY_RULE_CODES.HIGH_RISK_CONTENT]
   const tAccount = thresholds[ANOMALY_RULE_CODES.HIGH_RISK_ACCOUNT]
 
-  const refresh = async (win: string, st: typeof status) => {
+  const isCustom = windowKey === 'custom'
+  const rangeValid = !!customRange && customRange[1].isAfter(customRange[0])
+
+  const refresh = async (st: typeof status) => {
     setLoading(true)
     setErr(null)
     try {
+      const opts =
+        isCustom && rangeValid && customRange
+          ? {
+              start: customRange[0].startOf('day').toISOString(),
+              end: customRange[1].endOf('day').toISOString(),
+            }
+          : { window: windowKey }
       const [a, l] = await Promise.all([
-        reportsApi.anomaly(win),
+        reportsApi.anomaly(opts),
         alertsApi.list({ status: st, limit: 50 }),
       ])
       setAnomaly(a)
@@ -90,20 +110,37 @@ export default function AnomalyTab() {
   }
 
   useEffect(() => {
-    void refresh(window, status)
-  }, [window, status])
+    void refresh(status)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowKey, status, customRange])
 
   const handleAck = async (id: number, note: string) => {
     setAcking(id)
     try {
       await alertsApi.ack(id, note)
       message.success('已确认')
-      await refresh(window, status)
+      await refresh(status)
     } catch (e: unknown) {
       message.error(e instanceof Error ? e.message : '操作失败')
     } finally {
       setAcking(null)
     }
+  }
+
+  const shortDay = (d: Dayjs): string => d.format('MM.DD')
+
+  const bucketLabel = useMemo(() => {
+    if (isCustom && rangeValid && customRange) {
+      return `${shortDay(customRange[0])} ~ ${shortDay(customRange[1])}`
+    }
+    return WINDOW_SEGMENTS.find((w) => w.value === windowKey)?.label ?? ''
+  }, [isCustom, rangeValid, customRange, windowKey])
+
+  const disabledDate = (current: Dayjs) => {
+    const anchor = customRange?.[0]
+    if (!anchor) return current.isAfter(dayjs().endOf('day'))
+    const span = current.diff(anchor, 'day')
+    return current.isAfter(dayjs().endOf('day')) || span > MAX_RANGE_DAYS
   }
 
   const alertColumns: ColumnsType<AlertEventOut> = [
@@ -205,22 +242,39 @@ export default function AnomalyTab() {
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Card size="small">
-        <Space wrap>
-          <Text type="secondary">监控窗</Text>
-          <Select
-            value={window}
-            onChange={setWindow}
-            options={WINDOW_OPTIONS}
-            style={{ minWidth: 140 }}
+        <Space wrap size="middle" align="center">
+          <Segmented
+            value={isCustom ? '' : windowKey}
+            onChange={(v) => {
+              const next = v as Exclude<WindowKey, 'custom'>
+              setWindowKey(next)
+              setCustomRange(null)
+            }}
+            options={WINDOW_SEGMENTS}
           />
-          <Text type="secondary">报警状态</Text>
-          <Select
-            value={status}
-            onChange={(v) => setStatus(v as 'open' | 'acknowledged' | 'all')}
-            options={STATUS_OPTIONS}
-            style={{ minWidth: 120 }}
+          <RangePicker
+            value={customRange ?? undefined}
+            onChange={(vals) => {
+              const next =
+                vals && vals[0] && vals[1] ? ([vals[0], vals[1]] as [Dayjs, Dayjs]) : null
+              setCustomRange(next)
+              if (next) setWindowKey('custom')
+              else setWindowKey('1h')
+            }}
+            disabledDate={disabledDate}
+            allowClear
+            placeholder={['开始日期', '结束日期']}
           />
-          <Button onClick={() => void refresh(window, status)}>刷新</Button>
+          <Space size="small" align="center">
+            <Text type="secondary">报警状态</Text>
+            <Select
+              value={status}
+              onChange={(v) => setStatus(v as 'open' | 'acknowledged' | 'all')}
+              options={STATUS_OPTIONS}
+              style={{ minWidth: 120 }}
+            />
+          </Space>
+          <Button onClick={() => void refresh(status)}>刷新</Button>
           <Tooltip title="配置预警阈值">
             <Button
               icon={<SettingOutlined />}
@@ -231,7 +285,8 @@ export default function AnomalyTab() {
           </Tooltip>
         </Space>
         <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-          当前阈值: 拒绝率 ≥ {tReject.threshold}%, 高风险内容 ≥ {tContent.threshold} 条, 高风险账号 ≥ {tAccount.threshold} 个。
+          当前阈值: 拒绝率 ≥ {tReject.threshold}%, 高风险内容 ≥ {tContent.threshold} 条, 高风险账号 ≥ {tAccount.threshold} 个;
+          自定义区间最长 {MAX_RANGE_DAYS} 天。
         </Text>
       </Card>
 
@@ -245,7 +300,7 @@ export default function AnomalyTab() {
 
       {err && <Text type="danger">{err}</Text>}
 
-      <Card size="small" title={`实时指标 · ${WINDOW_OPTIONS.find((w) => w.value === window)?.label ?? ''}`}>
+      <Card size="small" title={`实时指标 · ${bucketLabel}`}>
         <Row gutter={[16, 16]}>
           <Col xs={12} md={6}>
             <Statistic
@@ -293,7 +348,7 @@ export default function AnomalyTab() {
           </Col>
           <Col xs={12} md={6}>
             <Statistic
-              title={`高风险账号 (1h, 阈值 ${tAccount.threshold})`}
+              title={`高风险账号 (${bucketLabel}, 阈值 ${tAccount.threshold})`}
               value={anomaly?.current.high_risk_accounts ?? 0}
               suffix={
                 <Text type="secondary" style={{ fontSize: 12 }}>
@@ -322,16 +377,34 @@ export default function AnomalyTab() {
             </Text>
           </Col>
           <Col xs={12} md={6}>
-            <Card size="small" style={{ background: '#FAFAFA' }}>
-              <Statistic
-                title={`高风险内容 (1h, 阈值 ${tContent.threshold})`}
-                value={'—'}
-                valueStyle={{ color: '#94A3B8', fontSize: 22 }}
-              />
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                待后端补 high_risk_content_count 字段
-              </Text>
-            </Card>
+            <Statistic
+              title={`高风险内容 (${bucketLabel}, 阈值 ${tContent.threshold})`}
+              value={anomaly?.current.high_risk_content_count ?? 0}
+              suffix={
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {' '}
+                  条
+                </Text>
+              }
+              valueStyle={{
+                color:
+                  (anomaly?.current.high_risk_content_count ?? 0) >= tContent.threshold
+                    ? '#DC2626'
+                    : '#475569',
+              }}
+            />
+            <Text
+              type={
+                (anomaly?.current.high_risk_content_count ?? 0) >= tContent.threshold
+                  ? 'danger'
+                  : 'secondary'
+              }
+              style={{ fontSize: 11 }}
+            >
+              {(anomaly?.current.high_risk_content_count ?? 0) >= tContent.threshold
+                ? `已超阈值 (${tContent.threshold})`
+                : `正常 (阈值 ${tContent.threshold})`}
+            </Text>
           </Col>
         </Row>
         <div style={{ height: 320, marginTop: 16 }}>

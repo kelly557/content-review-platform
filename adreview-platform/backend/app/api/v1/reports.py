@@ -37,6 +37,7 @@ from app.services.report_metrics import (
     bucket_granularity,
     overview as overview_metric,
     quality as quality_metric,
+    resolve_custom_window,
     resolve_window,
     risk_distribution as risk_distribution_metric,
     risk_trend as risk_trend_metric,
@@ -45,6 +46,29 @@ from app.services.report_metrics import (
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+def _resolve_optional_range(
+    start: Optional[datetime],
+    end: Optional[datetime],
+):
+    """Resolve an optional ``[start, end)`` pair into a ``Window`` or ``None``.
+
+    Returns ``None`` when either side is missing so the caller can fall back
+    to the ``window`` shorthand. Raises ``HTTPException(400)`` if both sides
+    are present but invalid (start >= end, or span > 90 days).
+    """
+    if start is None and end is None:
+        return None
+    if start is None or end is None:
+        raise HTTPException(
+            status_code=400,
+            detail="start and end must be provided together",
+        )
+    try:
+        return resolve_custom_window(start, end)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +81,15 @@ async def overview(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("reviewer", "mlr", "admin")),
     window: str = Query("7d", description="时间窗: today|7d|30d"),
+    start: Optional[datetime] = Query(
+        None, description="自定义窗口起点 (ISO 8601), 与 end 一起使用"
+    ),
+    end: Optional[datetime] = Query(
+        None, description="自定义窗口终点 (ISO 8601), 与 start 一起使用"
+    ),
 ) -> OverviewStats:
-    w = resolve_window(window)
+    custom = _resolve_optional_range(start, end)
+    w = custom or resolve_window(window)
     data = await overview_metric(db, w)
     return OverviewStats(**data)
 
@@ -78,8 +109,15 @@ async def trend(
     ),
     window: str = Query("7d"),
     granularity: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(
+        None, description="自定义窗口起点 (ISO 8601), 与 end 一起使用"
+    ),
+    end: Optional[datetime] = Query(
+        None, description="自定义窗口终点 (ISO 8601), 与 start 一起使用"
+    ),
 ) -> TrendResponse:
-    w = resolve_window(window)
+    custom = _resolve_optional_range(start, end)
+    w = custom or resolve_window(window)
     gran = granularity or bucket_granularity(w)
     data = await trend_metric(db, metric=metric, window=w, granularity=gran)
     return TrendResponse(**data)
@@ -95,11 +133,21 @@ async def anomaly(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("reviewer", "mlr", "admin")),
     window: str = Query("1h", description="监控时间窗, e.g. 1h, 24h"),
+    start: Optional[datetime] = Query(
+        None, description="自定义窗口起点 (ISO 8601), 与 end 一起使用"
+    ),
+    end: Optional[datetime] = Query(
+        None, description="自定义窗口终点 (ISO 8601), 与 start 一起使用"
+    ),
 ) -> AnomalyResponse:
-    if window not in SUPPORTED_WINDOWS:
-        raise HTTPException(status_code=400, detail=f"unsupported window: {window}")
-    w = resolve_window(window)
-    gran = "5min" if window == "1h" else "hour"
+    custom = _resolve_optional_range(start, end)
+    if custom is None:
+        if window not in SUPPORTED_WINDOWS:
+            raise HTTPException(status_code=400, detail=f"unsupported window: {window}")
+        w = resolve_window(window)
+    else:
+        w = custom
+    gran = bucket_granularity(w)
     data = await anomaly_metric(db, window=w, granularity=gran)
     return AnomalyResponse(**data)
 
@@ -184,8 +232,12 @@ async def risk_trend(
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
     days: int = Query(7, ge=1, le=90),
+    material_types: Optional[list[str]] = Query(
+        None,
+        description="素材类型过滤 (text/image/video/pdf), 可重复",
+    ),
 ) -> RiskTrendResponse:
-    data = await risk_trend_metric(db, days=days)
+    data = await risk_trend_metric(db, days=days, material_types=material_types)
     return RiskTrendResponse(**data)
 
 

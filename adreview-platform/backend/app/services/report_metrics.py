@@ -65,6 +65,11 @@ SUPPORTED_WINDOWS: dict[str, timedelta] = {
     "30d": timedelta(days=30),
 }
 
+# Hard cap on a custom-range window. Matches the upper bound used by
+# ``/reports/risk/trend`` (days ≤ 90) so we never run a multi-month
+# aggregation without a deliberate cap.
+MAX_CUSTOM_WINDOW = timedelta(days=90)
+
 
 def resolve_window(window: str, *, now: Optional[datetime] = None) -> Window:
     """Resolve a window shorthand into an absolute (start, end) pair.
@@ -78,6 +83,37 @@ def resolve_window(window: str, *, now: Optional[datetime] = None) -> Window:
         return Window(start=start, end=now)
     delta = SUPPORTED_WINDOWS.get(window, SUPPORTED_WINDOWS["7d"])
     return Window(start=now - delta, end=now)
+
+
+def resolve_custom_window(
+    start: datetime,
+    end: datetime,
+    *,
+    now: Optional[datetime] = None,
+) -> Window:
+    """Validate and return an absolute ``[start, end)`` window.
+
+    Both timestamps must be timezone-aware. ``end`` must be strictly after
+    ``start`` and the span must not exceed ``MAX_CUSTOM_WINDOW`` (90 days).
+    Naive datetimes are treated as UTC.
+    """
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    if end <= start:
+        raise ValueError("end must be strictly after start")
+    if (end - start) > MAX_CUSTOM_WINDOW:
+        raise ValueError(
+            f"custom window exceeds {MAX_CUSTOM_WINDOW.days}-day cap"
+        )
+    current = now or datetime.now(timezone.utc)
+    if end > current:
+        # Snap end to "now" so we never return a window that points into
+        # the future — keeps the response shape consistent with the
+        # shorthand variants, which always end at ``now``.
+        end = current
+    return Window(start=start, end=end)
 
 
 def bucket_granularity(window: Window) -> str:
@@ -606,6 +642,7 @@ async def anomaly(
             "submitted": last["submitted"],
             "rejected": int(round(last["submitted"] * last["reject_rate"] / 100.0)),
             "high_risk_accounts": 0,  # computed separately below
+            "high_risk_content_count": 0,  # computed separately below
         }
     else:
         current = {
@@ -616,6 +653,7 @@ async def anomaly(
             "submitted": 0,
             "rejected": 0,
             "high_risk_accounts": 0,
+            "high_risk_content_count": 0,
         }
 
     # Distinct submitters with at least 1 rejected material in the most-recent
@@ -628,6 +666,19 @@ async def anomaly(
         .where(Material.status.in_(REJECTED_STATUSES))
     )
     current["high_risk_accounts"] = int(await db.scalar(hr_q) or 0)
+
+    # Distinct materials whose latest completed machine review has
+    # risk_level == '高风险' in the most-recent 1h slice. Same time anchor as
+    # high_risk_accounts so the two thresholds describe the same slice.
+    mr = ReviewTask.machine_result
+    hr_content_q = (
+        select(func.count(func.distinct(ReviewTask.material_id)))
+        .where(ReviewTask.machine_status == MachineStatus.COMPLETED)
+        .where(mr["risk_level"].astext == "高风险")
+        .where(ReviewTask.machine_completed_at >= last_hour_start)
+        .where(ReviewTask.machine_completed_at < window.end)
+    )
+    current["high_risk_content_count"] = int(await db.scalar(hr_content_q) or 0)
 
     # Recent alerts (top 20)
     alert_stmt = (
@@ -890,13 +941,31 @@ def _risk_case(machine_result_col) -> case:
     )
 
 
-async def risk_trend(db: AsyncSession, *, days: int) -> dict:
+async def risk_trend(
+    db: AsyncSession,
+    *,
+    days: int,
+    material_types: Optional[Sequence[str]] = None,
+) -> dict:
     """Daily counts of completed machine reviews, split by risk level.
 
     Returns a dict compatible with ``RiskTrendResponse``: ``{days, points}``
     where each point has all-zero counts filled in for missing dates so the
     UI can render a continuous x-axis.
+
+    ``material_types`` (when non-empty) restricts the aggregation to
+    ``Material.material_type IN (...)``; ignored otherwise. The Trend tab UI
+    passes a single combined list to filter both "审核媒体类型" and "素材类型"
+    filters at once since both map to the same enum.
+
+    Implementation note: ``material_types`` is applied via a correlated
+    EXISTS subquery on ``materials`` rather than a ``.join(Material, ...)``
+    — see ``quality`` (line ~715) for the same pattern; this avoids a
+    per-test schema oddity where SQLAlchemy compiles the join target with
+    a stale schema name.
     """
+    from sqlalchemy import exists as _exists
+
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=days)
 
@@ -919,9 +988,14 @@ async def risk_trend(db: AsyncSession, *, days: int) -> dict:
         .where(mr.is_not(None))
         .where(ReviewTask.machine_completed_at >= start)
         .where(ReviewTask.machine_completed_at.is_not(None))
-        .group_by("b")
-        .order_by("b")
     )
+    if material_types:
+        material_match = _exists().where(
+            (Material.id == ReviewTask.material_id)
+            & (Material.material_type.in_(list(material_types)))
+        )
+        stmt = stmt.where(material_match)
+    stmt = stmt.group_by("b").order_by("b")
     rows = (await db.execute(stmt)).all()
 
     bucket_map: dict[str, dict] = {}

@@ -141,8 +141,84 @@ async def test_anomaly_empty(client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["current"]["submitted"] == 0
+    assert body["current"]["high_risk_content_count"] == 0
     assert body["series"] == []
     assert body["alerts"] == []
+
+
+@pytest.mark.asyncio
+async def test_anomaly_high_risk_content_count(client, db_session):
+    """distinct materials with machine_result.risk_level == '高风险' within the most-recent 1h slice."""
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    # Use tz-aware UTC to match the tz-aware cutoffs the service computes via
+    # datetime.now(timezone.utc); otherwise SQLite tests silently skip rows.
+    now = datetime.now(timezone.utc)
+    # 3 高风险 + 1 中风险 + 1 低风险 — only the 3 高风险 should count
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="高风险",
+        completed_at=now,
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="高风险",
+        completed_at=now,
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="高风险",
+        completed_at=now - timedelta(minutes=10),
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="中风险",
+        completed_at=now,
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="低风险",
+        completed_at=now,
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/reports/anomaly?window=1h")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["current"]["high_risk_content_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_anomaly_custom_window_accepted(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=2)
+    resp = await client.get(
+        "/api/v1/reports/anomaly",
+        params={"start": start.isoformat(), "end": end.isoformat()},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "current" in body
+    assert "series" in body
+
+
+@pytest.mark.asyncio
+async def test_anomaly_custom_window_validation(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    now = datetime.now(timezone.utc)
+    later = now + timedelta(hours=1)
+    # end <= start → 400
+    resp = await client.get(
+        "/api/v1/reports/anomaly",
+        params={"start": later.isoformat(), "end": now.isoformat()},
+    )
+    assert resp.status_code == 400, resp.text
 
 
 @pytest.mark.asyncio
@@ -349,3 +425,245 @@ async def test_alerts_list_and_ack(client, db_session):
     body = resp.json()
     assert body["status"] == "acknowledged"
     assert body["ack_note"] == "looking"
+
+
+# ---------------------------------------------------------------------------
+# Custom range (start/end) — added 2026-07-16 for the Trends tab UI rework.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_overview_custom_range(client):
+    """Overview honours an explicit [start, end) range when both are given."""
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    end = datetime(2026, 7, 16, 0, 0, 0, tzinfo=timezone.utc)
+    start = end - timedelta(days=3)
+    resp = await client.get(
+        "/api/v1/reports/overview",
+        params={
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total_materials"] == 0
+    assert body["reject_rate"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_trend_custom_range(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    end = datetime(2026, 7, 16, 0, 0, 0, tzinfo=timezone.utc)
+    start = end - timedelta(days=14)
+    resp = await client.get(
+        "/api/v1/reports/trend",
+        params={
+            "metric": "reject_rate",
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["metric"] == "reject_rate"
+    assert body["granularity"] in {"day", "hour", "5min"}
+
+
+@pytest.mark.asyncio
+async def test_overview_custom_range_requires_pair(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/overview",
+        params={"start": "2026-07-10T00:00:00Z"},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_overview_custom_range_rejects_inverted(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/overview",
+        params={
+            "start": "2026-07-16T00:00:00Z",
+            "end": "2026-07-10T00:00:00Z",
+        },
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_overview_custom_range_rejects_over_90d(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/overview",
+        params={
+            "start": "2025-01-01T00:00:00Z",
+            "end": "2026-07-16T00:00:00Z",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_custom_range_helper_unit():
+    """Sanity check resolve_custom_window without hitting the DB."""
+    from app.services.report_metrics import resolve_custom_window
+
+    start = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    end = datetime(2026, 7, 16, tzinfo=timezone.utc)
+    w = resolve_custom_window(start, end)
+    assert w.start == start
+    assert w.end == end
+
+    with pytest.raises(ValueError):
+        resolve_custom_window(end, start)
+
+
+# ---------------------------------------------------------------------------
+# Risk trend endpoint — split by risk_level, optional material_types filter.
+# Added 2026-07-16 for the Trends tab UI rework.
+# ---------------------------------------------------------------------------
+
+
+async def _make_risk_task(
+    db_session,
+    *,
+    submitter: User,
+    material_type: MaterialType = MaterialType.TEXT,
+    risk_level: str | None = None,
+    completed_at: datetime | None = None,
+) -> tuple[Material, ReviewTask]:
+    """Create a Material + WorkflowInstance + a completed ReviewTask with machine_result.risk_level."""
+    m = Material(
+        title=f"risk {datetime.utcnow().timestamp()}-{id(object())}",
+        material_type=material_type,
+        status=MaterialStatus.APPROVED if risk_level in {"低风险", "无风险"} else MaterialStatus.REJECTED,
+        submitter_id=submitter.id,
+    )
+    db_session.add(m)
+    await db_session.flush()
+    v = MaterialVersion(
+        material_id=m.id,
+        version_no=1,
+        storage_key=f"qa/risk/{m.id}/v1.txt",
+        original_filename="x.txt",
+        mime_type="text/plain",
+        file_size=1,
+        text_body="x",
+        created_by_id=submitter.id,
+    )
+    db_session.add(v)
+    await db_session.flush()
+    m.current_version_id = v.id
+    await db_session.flush()
+
+    tpl = WorkflowTemplate(code=f"risk_tpl_{datetime.utcnow().timestamp()}", name="risk_tpl", definition={})
+    db_session.add(tpl)
+    await db_session.flush()
+    inst = WorkflowInstance(
+        template_id=tpl.id,
+        material_id=m.id,
+        material_version_id=v.id,
+        state="running",
+    )
+    db_session.add(inst)
+    await db_session.flush()
+
+    task = ReviewTask(
+        material_id=m.id,
+        material_version_id=v.id,
+        workflow_instance_id=inst.id,
+        stage_key="machine",
+        title="risk task",
+        review_type=ReviewType.MACHINE,
+        machine_status=MachineStatus.COMPLETED,
+        machine_result={"risk_level": risk_level} if risk_level else None,
+        machine_completed_at=completed_at or datetime.utcnow(),
+    )
+    db_session.add(task)
+    await db_session.flush()
+    return m, task
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_empty(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/reports/risk/trend?days=7")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["days"] == 7
+    assert len(body["points"]) == 7
+    for p in body["points"]:
+        assert p["total"] == 0
+        assert p["high"] == 0
+        assert p["medium"] == 0
+        assert p["low"] == 0
+        assert p["sensitive"] == 0
+        assert p["none"] == 0
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_splits_levels(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(db_session, submitter=sub, risk_level="高风险")
+    await _make_risk_task(db_session, submitter=sub, risk_level="中风险")
+    await _make_risk_task(db_session, submitter=sub, risk_level="低风险")
+    await _make_risk_task(db_session, submitter=sub, risk_level="无风险")
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/reports/risk/trend?days=7")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    totals = {lvl: sum(p[lvl] for p in body["points"]) for lvl in ("high", "medium", "low", "none")}
+    assert totals == {"high": 1, "medium": 1, "low": 1, "none": 1}
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_filter_by_material_type(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    # 2 text (高风险) — should be counted
+    await _make_risk_task(db_session, submitter=sub, material_type=MaterialType.TEXT, risk_level="高风险")
+    await _make_risk_task(db_session, submitter=sub, material_type=MaterialType.TEXT, risk_level="高风险")
+    # 1 image (中风险) — should be filtered out
+    await _make_risk_task(
+        db_session, submitter=sub, material_type=MaterialType.IMAGE, risk_level="中风险"
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params={"days": 7, "material_types": "text"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    high_total = sum(p["high"] for p in body["points"])
+    medium_total = sum(p["medium"] for p in body["points"])
+    assert high_total == 2
+    assert medium_total == 0
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_filter_accepts_multiple_types(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(db_session, submitter=sub, material_type=MaterialType.TEXT, risk_level="高风险")
+    await _make_risk_task(
+        db_session, submitter=sub, material_type=MaterialType.IMAGE, risk_level="高风险"
+    )
+    # pdf excluded
+    await _make_risk_task(
+        db_session, submitter=sub, material_type=MaterialType.PDF, risk_level="高风险"
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[("days", 7), ("material_types", "text"), ("material_types", "image")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    high_total = sum(p["high"] for p in body["points"])
+    assert high_total == 2
