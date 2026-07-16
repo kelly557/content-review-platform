@@ -18,7 +18,7 @@ export function RiskTrendChart({ days = 7 }: Props) {
     setLoading(true)
     setError(null)
     reportsApi
-      .riskTrend(days)
+      .riskTrend({ days })
       .then((res) => {
         if (!alive) return
         setData(res.points)

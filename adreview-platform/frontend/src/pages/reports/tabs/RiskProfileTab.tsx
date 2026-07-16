@@ -110,7 +110,7 @@ export default function RiskProfileTab() {
     setErr(null)
     try {
       const [t, di, tp] = await Promise.all([
-        reportsApi.riskTrend(d),
+        reportsApi.riskTrend({ days: d }),
         reportsApi.riskDistribution(d),
         reportsApi.riskTopLabels(d, 20),
       ])

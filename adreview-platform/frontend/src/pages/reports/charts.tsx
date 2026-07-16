@@ -1,4 +1,4 @@
-import { Card, Empty, Spin } from 'antd'
+import { Card, Empty, Space, Spin } from 'antd'
 import { Line, Column, Pie, Area } from '@ant-design/charts'
 import type {
   ReasonCount,
@@ -12,6 +12,7 @@ const REJECT_COLOR = '#DC2626'
 const REVIEW_COLOR = '#D97706'
 const APPROVE_COLOR = '#16A34A'
 const SUBMIT_COLOR = '#2563EB'
+const PASS_COLOR = '#94A3B8'
 
 interface TrendLineProps {
   points: TrendPoint[]
@@ -323,4 +324,114 @@ export function RiskDistributionBarChart({
       )}
     </Spin>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Risk distribution trend — four lines (已通过 / 低风险 / 中风险 / 高风险)
+// driven by ``/reports/risk/trend``. "已通过" is computed client-side as
+// ``low + none`` per the spec; it does not have its own backend column yet.
+// ---------------------------------------------------------------------------
+
+interface RiskTrendChartProps {
+  points: RiskTimeseriesPoint[]
+  height?: number
+  loading?: boolean
+  error?: string | null
+  emptyText?: string
+}
+
+export function RiskTrendChart({
+  points,
+  height = 320,
+  loading,
+  error,
+  emptyText = '暂无数据',
+}: RiskTrendChartProps) {
+  // 把每个 bucket 的 4 个 level 计数转成"占当天 4 个 level 之和"的百分比。
+  const data = points.flatMap((p) => {
+    const sum = p.high + p.medium + p.low + p.none
+    const safe = sum > 0 ? sum : 1
+    return [
+      { bucket: p.date, level: '已通过', value: ((p.low + p.none) / safe) * 100 },
+      { bucket: p.date, level: '低风险', value: (p.low / safe) * 100 },
+      { bucket: p.date, level: '中风险', value: (p.medium / safe) * 100 },
+      { bucket: p.date, level: '高风险', value: (p.high / safe) * 100 },
+    ]
+  })
+  const hasData = data.some((d) => d.value > 0)
+
+  // 4 条 series 的颜色配置 — 与手动 legend 的色块保持一致。
+  const legendItems: { label: string; color: string }[] = [
+    { label: '已通过', color: PASS_COLOR },
+    { label: '低风险', color: APPROVE_COLOR },
+    { label: '中风险', color: REVIEW_COLOR },
+    { label: '高风险', color: REJECT_COLOR },
+  ]
+
+  const chart = (
+    <Line
+      data={data}
+      xField="bucket"
+      yField="value"
+      seriesField="level"
+      height={height}
+      smooth
+      animate={false}
+      color={({ level }: { level: string }) => {
+        switch (level) {
+          case '已通过':
+            return PASS_COLOR
+          case '低风险':
+            return APPROVE_COLOR
+          case '中风险':
+            return REVIEW_COLOR
+          case '高风险':
+            return REJECT_COLOR
+          default:
+            return '#94A3B8'
+        }
+      }}
+      point={{ shapeField: 'circle', sizeField: 2 }}
+      axis={{
+        x: { labelAutoRotate: false, labelFontSize: 10 },
+        y: {
+          labelFontSize: 10,
+          labelFormatter: (v: number) => `${v.toFixed(0)}%`,
+        },
+      }}
+      style={{ fillOpacity: 0.1 }}
+      legend={false}
+    />
+  )
+
+  const body = (
+    <>
+      {error ? (
+        <Empty description={error} />
+      ) : !hasData ? (
+        <Empty description={emptyText} />
+      ) : (
+        <>
+          {chart}
+          <Space size="middle" wrap style={{ marginTop: 8, justifyContent: 'center', width: '100%' }}>
+            {legendItems.map((it) => (
+              <Space key={it.label} size={6} align="center">
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: 10,
+                    height: 10,
+                    borderRadius: 2,
+                    backgroundColor: it.color,
+                  }}
+                />
+                <span style={{ fontSize: 12, color: '#475569' }}>{it.label}</span>
+              </Space>
+            ))}
+          </Space>
+        </>
+      )}
+    </>
+  )
+  return <Spin spinning={!!loading}>{body}</Spin>
 }
