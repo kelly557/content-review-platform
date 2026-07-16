@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { App, Button, Empty, Space, Table, Tag, type TableColumnsType } from 'antd'
+import { App, Button, Empty, Space, Table, Tag, Tooltip, type TableColumnsType } from 'antd'
 import {
   CloudDownloadOutlined,
   FilterOutlined,
+  QuestionCircleOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 import { queryApi } from '@/api/query'
 import {
   DECISION_LABELS,
-  DEFAULT_VISIBLE_COLUMNS,
+  DETECTION_MODALITIES,
   FEEDBACK_OPTIONS,
   MACHINE_DECISION_OPTIONS,
   QUERY_COLUMNS,
@@ -17,7 +18,7 @@ import {
   type QueryColumnKey,
   type QueryFilters,
 } from '@/types/domain'
-import { useLocalStorageState } from '@/hooks/useLocalStorageState'
+import { loadVisibleColumns, saveVisibleColumns } from '@/lib/queryColumnPrefs'
 import FilterBar from '@/components/query/FilterBar'
 import AdvancedFilters from '@/components/query/AdvancedFilters'
 import ColumnSettingsMenu from '@/components/query/ColumnSettingsMenu'
@@ -28,7 +29,30 @@ const decisionMeta = (v?: string | null) => MACHINE_DECISION_OPTIONS.find((m) =>
 const feedbackMeta = (v?: string | null) =>
   FEEDBACK_OPTIONS.find((f) => f.value === v)?.label
 
-const COL_STORAGE_KEY = 'adreview.query.visibleColumns'
+function ColumnTitle({ text, tip }: { text: string; tip?: string }) {
+  if (!tip) return text
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      {text}
+      <Tooltip title={tip} placement="top">
+        <QuestionCircleOutlined style={{ color: '#94A3B8', fontSize: 12, cursor: 'help' }} />
+      </Tooltip>
+    </span>
+  )
+}
+
+function renderUuidCell(uuid: string | null | undefined, fallback?: string | number | null) {
+  if (uuid) {
+    return (
+      <Tooltip title={uuid}>
+        <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+          {uuid.slice(0, 8)}…
+        </span>
+      </Tooltip>
+    )
+  }
+  return fallback != null ? String(fallback) : '-'
+}
 
 export default function QueryPage() {
   const { message } = App.useApp()
@@ -43,11 +67,14 @@ export default function QueryPage() {
 
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [labelOptions, setLabelOptions] = useState<string[]>([])
-  const [visibleColumns, setVisibleColumns] = useLocalStorageState<QueryColumnKey[]>(
-    COL_STORAGE_KEY,
-    DEFAULT_VISIBLE_COLUMNS,
+  const [visibleColumns, setVisibleColumns] = useState<QueryColumnKey[]>(() =>
+    loadVisibleColumns(),
   )
   const [detailRecord, setDetailRecord] = useState<MachineReviewRecord | null>(null)
+
+  useEffect(() => {
+    saveVisibleColumns(visibleColumns)
+  }, [visibleColumns])
 
   const fetchLabels = useCallback(async () => {
     try {
@@ -126,22 +153,32 @@ export default function QueryPage() {
       render: (_, r) => feedbackMeta(r.final_decision) || r.final_decision || '-',
     },
     {
-      title: '呈现内容',
+      title: <ColumnTitle text="审核类型" tip="审核通道类型：指请求走的是文本/图片/视频/文件哪条审核链路" />,
+      key: 'material_type',
+      width: 110,
+      render: (_, r) => {
+        const meta = DETECTION_MODALITIES.find((m) => m.value === r.material_type)
+        if (!meta) return '-'
+        return <Tag color="geekblue">{meta.label}</Tag>
+      },
+    },
+    {
+      title: <ColumnTitle text="素材类型" tip="被审核素材的载体形态：文本/图片/音频/视频" />,
       key: 'content_preview',
       width: 280,
-      render: (_, r) => <ContentPreviewCell record={r} />,
+      render: (_, r) => <ContentPreviewCell record={r} onPreview={setDetailRecord} />,
     },
     {
       title: 'Request ID',
       key: 'request_id',
       width: 110,
-      render: (_, r) => r.id,
+      render: (_, r) => renderUuidCell(r.public_id, r.id),
     },
     {
       title: 'Task ID',
       key: 'task_id',
       width: 110,
-      render: (_, r) => r.material_version_id ?? '-',
+      render: (_, r) => renderUuidCell(r.material_version_public_id, r.material_version_id),
     },
     {
       title: '命中审核点及置信度',

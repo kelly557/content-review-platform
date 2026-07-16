@@ -1884,6 +1884,7 @@ export interface MachineReviewRecord {
   final_decision?: string | null
   material_id?: number | null
   material_version_id?: number | null
+  material_version_public_id?: string | null
   material_type?: DetectionModality | string | null
   content_media?: ContentMedia | null
   preview_url?: string | null
@@ -1934,6 +1935,7 @@ export type QueryColumnKey =
   | 'strategy_name'
   | 'machine_decision'
   | 'feedback'
+  | 'material_type'
   | 'request_id'
   | 'task_id'
   | 'labels'
@@ -1947,6 +1949,7 @@ export interface QueryColumnDef {
   key: QueryColumnKey
   title: string
   defaultVisible: boolean
+  tooltip?: string
 }
 
 export const QUERY_COLUMNS: QueryColumnDef[] = [
@@ -1954,7 +1957,18 @@ export const QUERY_COLUMNS: QueryColumnDef[] = [
   { key: 'strategy_name', title: '策略名称', defaultVisible: true },
   { key: 'machine_decision', title: '检测结果', defaultVisible: true },
   { key: 'feedback', title: '反馈结果', defaultVisible: true },
-  { key: 'content_preview', title: '呈现内容', defaultVisible: false },
+  {
+    key: 'material_type',
+    title: '审核类型',
+    defaultVisible: true,
+    tooltip: '审核通道类型：指请求走的是文本/图片/视频/文件哪条审核链路',
+  },
+  {
+    key: 'content_preview',
+    title: '素材类型',
+    defaultVisible: true,
+    tooltip: '被审核素材的载体形态：文本/图片/音频/视频',
+  },
   { key: 'request_id', title: 'Request ID', defaultVisible: false },
   { key: 'task_id', title: 'Task ID', defaultVisible: false },
   { key: 'labels', title: '命中审核点及置信度', defaultVisible: false },
@@ -1968,6 +1982,8 @@ export const DEFAULT_VISIBLE_COLUMNS: QueryColumnKey[] = QUERY_COLUMNS.filter(
   (c) => c.defaultVisible,
 ).map((c) => c.key)
 
+export const QUERY_COLUMNS_SCHEMA_VERSION = 2
+
 // ─── 复审队列 (/query/review) — 卡片视图，只读 ────────────────────────────────
 
 export interface ReviewRecord {
@@ -1977,6 +1993,7 @@ export interface ReviewRecord {
   review_type?: string | null
   material_id: number
   material_version_id: number
+  material_version_public_id?: string | null
   material_type?: string | null
   preview_url?: string | null
   mime_type?: string | null

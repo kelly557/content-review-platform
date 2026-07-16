@@ -129,11 +129,13 @@ def _to_record(
 
     return MachineReviewRecordOut(
         id=task.id,
+        public_id=task.public_id,
         title=task.title,
         review_type=_enum_value(task.review_type),
         final_decision=_enum_value(task.final_decision),
         material_id=task.material_id,
         material_version_id=task.material_version_id,
+        material_version_public_id=material_version.public_id if material_version else None,
         material_type=material_type_str,
         content_media=content_media,
         preview_url=preview_url,
@@ -667,10 +669,12 @@ def _to_review_record(
 
     return ReviewRecordOut(
         id=task.id,
+        public_id=task.public_id,
         title=task.title,
         review_type=_enum_value(task.review_type),
         material_id=material.id,
         material_version_id=task.material_version_id,
+        material_version_public_id=latest_version.public_id if latest_version else None,
         material_type=_enum_value(material.material_type),
         preview_url=preview_url,
         mime_type=mime_type,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { DatePicker, Flex, Input, Select } from 'antd'
+import { DatePicker, Flex, Input, Select, Tooltip } from 'antd'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import {
@@ -21,6 +22,32 @@ export interface FilterBarProps {
   value: QueryFilters
   onChange: (next: QueryFilters) => void
   labelOptions: string[]
+}
+
+const labelStyle: React.CSSProperties = {
+  marginBottom: 4,
+  fontSize: 12,
+  color: '#64748B',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+}
+
+const helpIconStyle: React.CSSProperties = {
+  color: '#94A3B8',
+  fontSize: 12,
+  cursor: 'help',
+}
+
+function LabelWithTip({ text, tip }: { text: string; tip: string }) {
+  return (
+    <div style={labelStyle}>
+      <span>{text}</span>
+      <Tooltip title={tip} placement="top">
+        <QuestionCircleOutlined style={helpIconStyle} />
+      </Tooltip>
+    </div>
+  )
 }
 
 function parseCsv(s: string): number[] {
@@ -70,13 +97,13 @@ export default function FilterBar({ value, onChange, labelOptions }: FilterBarPr
       </div>
 
       <div style={{ flex: '1 1 240px', minWidth: 220 }}>
-        <div style={{ marginBottom: 4, fontSize: 12, color: '#64748B' }}>检测模态</div>
+        <LabelWithTip text="审核类型" tip="审核通道类型：指请求走的是文本/图片/视频/文件哪条审核链路" />
         <Select<DetectionModality[]>
           mode="multiple"
           value={value.material_types ?? []}
           onChange={(v) => onChange({ ...value, material_types: v.length ? v : undefined })}
           options={DETECTION_MODALITIES}
-          placeholder="全部模态"
+          placeholder="全部类型"
           allowClear
           maxTagCount="responsive"
           style={{ width: '100%' }}
@@ -84,7 +111,7 @@ export default function FilterBar({ value, onChange, labelOptions }: FilterBarPr
       </div>
 
       <div style={{ flex: '1 1 240px', minWidth: 220 }}>
-        <div style={{ marginBottom: 4, fontSize: 12, color: '#64748B' }}>呈现内容</div>
+        <LabelWithTip text="素材类型" tip="被审核素材的载体形态：文本/图片/音频/视频" />
         <Select<ContentMedia[]>
           mode="multiple"
           value={value.content_medias ?? []}

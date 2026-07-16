@@ -99,12 +99,14 @@ class MachineReviewRecordOut(ORMBase):
     """Flat projection of one ``ReviewTask`` row for the query page."""
 
     id: int
+    public_id: Optional[str] = None
     title: Optional[str] = None
     review_type: Optional[str] = None
     final_decision: Optional[str] = None
 
     material_id: Optional[int] = None
     material_version_id: Optional[int] = None
+    material_version_public_id: Optional[str] = None
     material_type: Optional[str] = None
 
     content_media: Optional[ContentMedia] = None
@@ -149,11 +151,13 @@ class ReviewRecordOut(ORMBase):
     """
 
     id: int
+    public_id: Optional[str] = None
     title: Optional[str] = None
     review_type: Optional[str] = None
 
     material_id: int
     material_version_id: int
+    material_version_public_id: Optional[str] = None
     material_type: Optional[str] = None
     preview_url: Optional[str] = None
     mime_type: Optional[str] = None
