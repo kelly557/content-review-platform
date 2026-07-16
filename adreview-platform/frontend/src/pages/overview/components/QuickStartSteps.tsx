@@ -35,7 +35,7 @@ const STEPS: StepDef[] = [
     title: '提交审核',
     icon: <SendOutlined />,
     description: '选择审核策略，把素材送入审核流程。',
-    ctas: [{ label: '新建审核任务', to: '/tasks/new', primary: true }],
+    ctas: [{ label: '新建审核任务', to: '/online-review', primary: true }],
     visibleTo: ['submitter', 'reviewer', 'mlr', 'admin'],
   },
   {
@@ -44,8 +44,7 @@ const STEPS: StepDef[] = [
     icon: <ThunderboltOutlined />,
     description: '查看待审核任务，执行人工审核或复核机审结果。',
     ctas: [
-      { label: '进入审核任务', to: '/tasks', primary: true },
-      { label: '数据查询', to: '/query' },
+      { label: '数据查询', to: '/query', primary: true },
     ],
     visibleTo: ['reviewer', 'mlr', 'admin'],
   },

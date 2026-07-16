@@ -35,8 +35,6 @@ const OverviewPage = lazy(() => import('@/pages/overview/OverviewPage'))
 const MaterialsListPage = lazy(() => import('@/pages/materials/MaterialsListPage'))
 const MaterialDetailPage = lazy(() => import('@/pages/materials/MaterialDetailPage'))
 const PackageDetailPage = lazy(() => import('@/pages/packages/PackageDetailPage'))
-const TasksPage = lazy(() => import('@/pages/tasks/TasksPage'))
-const CurrentReviewPage = lazy(() => import('@/pages/tasks/CurrentReviewPage'))
 const TaskDetailPage = lazy(() => import('@/pages/tasks/TaskDetailPage'))
 const CreateTaskPage = lazy(() => import('@/pages/tasks/CreateTaskPage'))
 const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage'))
@@ -101,15 +99,18 @@ export default function AppRoutes() {
           <Route element={<AppLayout />}>
             <Route index element={<Navigate to="/overview" replace />} />
             <Route path="/overview" element={<OverviewPage />} />
-            <Route path="/current-review" element={<CurrentReviewPage />} />
 
             <Route path="/materials" element={<MaterialsListPage />} />
             <Route path="/materials/:id" element={<MaterialDetailPage />} />
 
-            <Route path="/tasks" element={<TasksPage />} />
-            <Route path="/tasks/new" element={<CreateTaskPage />} />
+            <Route path="/online-review" element={<CreateTaskPage />} />
             <Route path="/tasks/:id" element={<TaskDetailPage />} />
             <Route path="/tasks/package/:id" element={<PackageDetailPage />} />
+
+            {/* 已下线的列表页与旧创建入口 → 跳到新的"在线审核" */}
+            <Route path="/tasks" element={<Navigate to="/online-review" replace />} />
+            <Route path="/tasks/new" element={<Navigate to="/online-review" replace />} />
+            <Route path="/current-review" element={<Navigate to="/online-review" replace />} />
 
             <Route element={<ProtectedRoute allow={['reviewer', 'mlr', 'admin', 'superadmin', 'root_admin']} />}>
               <Route path="/reports" element={<ReportsPage />} />

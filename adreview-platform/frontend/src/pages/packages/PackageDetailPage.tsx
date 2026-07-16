@@ -101,7 +101,7 @@ export default function PackageDetailPage() {
 
   useEffect(() => {
     if (!packageId) {
-      navigate('/tasks', { replace: true })
+      navigate('/overview', { replace: true })
       return
     }
     fetchPackage(packageId).catch(() => {
@@ -223,7 +223,7 @@ export default function PackageDetailPage() {
     <div style={{ width: '100%' }}>
       <Breadcrumb
         items={[
-          { title: <a onClick={() => navigate('/tasks')}>审核任务</a> },
+          { title: <a onClick={() => navigate('/overview')}>总览</a> },
           { title: pkg.name },
         ]}
         style={{ marginBottom: 16 }}

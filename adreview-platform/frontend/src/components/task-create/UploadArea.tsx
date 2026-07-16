@@ -86,7 +86,7 @@ export default function UploadArea({
               borderRadius: 6,
               padding: '48px 20px',
               textAlign: 'center',
-              background: colors.muted,
+              background: colors.surface,
               color: colors.secondary,
             }}
           >
@@ -152,7 +152,7 @@ export default function UploadArea({
           borderRadius: 6,
           padding: '40px 20px',
           textAlign: 'center',
-          background: colors.muted,
+          background: colors.surface,
         }}
       >
         <input
@@ -200,7 +200,7 @@ export default function UploadArea({
           borderRadius: 6,
           padding: '16px 20px',
           textAlign: 'center',
-          background: colors.muted,
+          background: colors.surface,
           marginBottom: 12,
           position: 'relative',
           cursor: 'pointer',

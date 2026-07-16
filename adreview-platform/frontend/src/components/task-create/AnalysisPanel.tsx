@@ -84,9 +84,6 @@ export default function AnalysisPanel({
         <Text style={{ color: colors.secondary, fontSize: 13, display: 'block' }}>
           {mode === 'upload' ? '上传素材后，结果将出现在此' : '选择素材后，详情将出现在此'}
         </Text>
-        <Text style={{ color: colors.secondary, fontSize: 12, display: 'block', marginTop: 4 }}>
-          实时本地解析 · 不上传服务器
-        </Text>
       </div>
     )
   }

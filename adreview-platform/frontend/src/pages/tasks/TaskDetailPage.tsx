@@ -120,7 +120,7 @@ export default function TaskDetailPage() {
 
   useEffect(() => {
     if (!taskId) {
-      navigate('/tasks', { replace: true })
+      navigate('/overview', { replace: true })
       return
     }
     fetchTask(taskId).catch(() => {
@@ -354,10 +354,10 @@ export default function TaskDetailPage() {
           <Space size={8} wrap>
             <Button
               icon={<ArrowLeftOutlined />}
-              onClick={() => navigate('/tasks')}
+              onClick={() => navigate('/overview')}
               size="small"
             >
-              返回任务列表
+              返回总览
             </Button>
             <Title level={5} style={{ margin: 0 }} ellipsis={{ tooltip: task.title }}>
               {task.title}

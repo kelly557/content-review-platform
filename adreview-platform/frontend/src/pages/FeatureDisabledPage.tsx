@@ -22,8 +22,8 @@ export default function FeatureDisabledPage({
     >
       <div style={{ textAlign: 'center' }}>
         <Empty description={<span style={{ fontSize: 14, color: '#666' }}>{title} · {description}</span>} />
-        <Button type="primary" onClick={() => navigate('/tasks')} style={{ marginTop: 16 }}>
-          返回审核任务
+        <Button type="primary" onClick={() => navigate('/overview')} style={{ marginTop: 16 }}>
+          返回总览
         </Button>
       </div>
     </div>

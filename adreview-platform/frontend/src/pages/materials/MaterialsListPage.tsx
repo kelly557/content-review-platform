@@ -142,7 +142,7 @@ export default function MaterialsListPage() {
               type="link"
               size="small"
               disabled={!['draft', 'rejected'].includes(record.status)}
-              onClick={() => navigate(`/tasks/new?material=${record.id}&type=${record.material_type}`)}
+              onClick={() => navigate(`/online-review?type=${record.material_type}`)}
             >
               提交
             </Button>
