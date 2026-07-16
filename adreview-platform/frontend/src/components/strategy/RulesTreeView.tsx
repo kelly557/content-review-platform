@@ -559,25 +559,32 @@ function PointsColumn({
         record.kind === 'point' ? {} : { colSpan: 0 },
       render: (_, record) => {
         if (record.kind !== 'point') return null
+        const medMin =
+          record.override.medium_threshold_min ??
+          (record.override.medium_threshold ?? record.point.medium_threshold)
+        const highMin =
+          record.override.high_threshold_min ?? record.point.high_threshold
+        const mediumMaxDisplay =
+          typeof highMin === 'number' ? Math.max(0, highMin - 0.01) : null
+        const mediumMaxConstraint =
+          typeof highMin === 'number' ? Math.max(0, highMin - 0.01) : 99.99
         return (
-          <RangeThresholdInput
-            disabled={record.editDisabled}
-            minValue={
-              record.override.medium_threshold_min ??
-              (record.override.medium_threshold ?? undefined)
-            }
-            maxValue={
-              record.override.medium_threshold_max ?? record.point.medium_threshold
-            }
-            onChange={(min, max) =>
-              onPointOverrideChange(record.item.id, record.point.id, {
-                medium_threshold_min: min,
-                medium_threshold_max: max,
-                medium_threshold: undefined,
-              })
-            }
-            label="中风险分"
-          />
+          <Space size={4} align="center">
+            <RangeMinOnlyInput
+              disabled={record.editDisabled}
+              minValue={medMin}
+              maxDisplay={mediumMaxDisplay}
+              maxConstraint={mediumMaxConstraint}
+              onMinChange={(v) =>
+                onPointOverrideChange(record.item.id, record.point.id, {
+                  medium_threshold_min: v,
+                  medium_threshold_max: undefined,
+                  medium_threshold: undefined,
+                })
+              }
+              label="中风险分"
+            />
+          </Space>
         )
       },
     },
@@ -590,24 +597,25 @@ function PointsColumn({
         record.kind === 'point' ? {} : { colSpan: 0 },
       render: (_, record) => {
         if (record.kind !== 'point') return null
+        const highMin =
+          record.override.high_threshold_min ?? record.point.high_threshold
         return (
-          <RangeThresholdInput
-            disabled={record.editDisabled}
-            minValue={
-              record.override.high_threshold_min ?? record.point.high_threshold
-            }
-            maxValue={
-              record.override.high_threshold_max ?? 100
-            }
-            onChange={(min, max) =>
-              onPointOverrideChange(record.item.id, record.point.id, {
-                high_threshold_min: min,
-                high_threshold_max: max,
-                high_threshold: undefined,
-              })
-            }
-            label="高风险分"
-          />
+          <Space size={4} align="center">
+            <RangeMinOnlyInput
+              disabled={record.editDisabled}
+              minValue={highMin}
+              maxDisplay={100}
+              maxConstraint={100}
+              onMinChange={(v) =>
+                onPointOverrideChange(record.item.id, record.point.id, {
+                  high_threshold_min: v,
+                  high_threshold_max: undefined,
+                  high_threshold: undefined,
+                })
+              }
+              label="高风险分"
+            />
+          </Space>
         )
       },
     },
@@ -651,52 +659,64 @@ function PointsColumn({
   )
 }
 
-function RangeThresholdInput({
+/**
+ * 风险分区间约束(2026-07-28):
+ * - 中风险分:  medium_min ~ (high_min - 0.01)
+ * - 高风险分:  high_min ~ 100.00
+ * - 低风险分:  0 ~ (medium_min - 1)   (无 UI, 仅 hint 提示)
+ * - 中风险分上限由 high_min 自动反推,不可手输;高风险分上限固定 100.00。
+ *
+ * RangeMinOnlyInput: 单值 min 输入,max 在 UI 上以只读 hint 形式展示。
+ */
+function RangeMinOnlyInput({
   disabled,
   minValue,
-  maxValue,
-  onChange,
+  maxDisplay,
+  maxConstraint,
+  onMinChange,
   label,
 }: {
   disabled: boolean
   minValue: number | undefined
-  maxValue: number | undefined
-  onChange: (min: number | null, max: number | null) => void
+  /** 只读展示的上限值(由父级算好,可能因边界不存在) */
+  maxDisplay: number | null
+  /** 输入上限(超过该值会被截断到 maxConstraint) */
+  maxConstraint: number | null
+  onMinChange: (v: number | null) => void
   label: string
 }) {
+  const safeMax = maxDisplay
   return (
     <Space size={4} align="center">
       <Tooltip title={`${label} 下限`}>
         <InputNumber
           size="small"
-          min={50}
-          max={100}
+          min={0}
+          max={maxConstraint ?? 100}
           step={0.01}
           precision={2}
           value={minValue ?? null}
           disabled={disabled}
-          onChange={(v) =>
-            onChange(typeof v === 'number' ? v : null, maxValue ?? null)
-          }
+          onChange={(v) => onMinChange(typeof v === 'number' ? v : null)}
           style={{ width: 76 }}
         />
       </Tooltip>
       <span style={{ color: '#64748B', fontSize: 12 }}>~</span>
-      <Tooltip title={`${label} 上限`}>
-        <InputNumber
-          size="small"
-          min={50}
-          max={100}
-          step={0.01}
-          precision={2}
-          value={maxValue ?? null}
-          disabled={disabled}
-          onChange={(v) =>
-            onChange(minValue ?? null, typeof v === 'number' ? v : null)
-          }
-          style={{ width: 76 }}
-        />
-      </Tooltip>
+      <span
+        style={{
+          width: 76,
+          fontSize: 12,
+          color: '#64748B',
+          padding: '0 11px',
+          lineHeight: '24px',
+          background: '#F8FAFC',
+          border: '1px solid #E2E8F0',
+          borderRadius: 4,
+          textAlign: 'center',
+        }}
+      >
+        {safeMax == null ? '—' : safeMax.toFixed(2)}
+      </span>
     </Space>
   )
 }
