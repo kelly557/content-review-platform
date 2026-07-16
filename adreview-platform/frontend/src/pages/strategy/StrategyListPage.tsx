@@ -49,12 +49,28 @@ const SCOPE_OPTIONS: Array<{ value: 'all' | 'default' | 'general'; label: string
   { value: 'default', label: '默认策略' },
 ]
 
-function isCurrentlyActive(s: Strategy, now: Dayjs = dayjs()): boolean {
-  if (!s.is_active) return false
-  if (s.scope === 'default') return true
+function isGeneralActiveNow(s: Strategy, now: Dayjs): boolean {
   if (s.effective_from && now.isBefore(dayjs(s.effective_from))) return false
   if (s.effective_until && !now.isBefore(dayjs(s.effective_until))) return false
   return true
+}
+
+function isCurrentlyActive(
+  s: Strategy,
+  allStrategies: Strategy[],
+  now: Dayjs = dayjs(),
+): boolean {
+  if (!s.is_active) return false
+  if (s.scope === 'default') {
+    return !allStrategies.some(
+      (other) =>
+        other.id !== s.id &&
+        other.scope !== 'default' &&
+        other.is_active &&
+        isGeneralActiveNow(other, now),
+    )
+  }
+  return isGeneralActiveNow(s, now)
 }
 
 function formatRange(s: Strategy): string {
@@ -220,7 +236,7 @@ export default function StrategyListPage() {
         dataIndex: 'is_active',
         width: '8%',
         render: (_: boolean, record) => {
-          const active = isCurrentlyActive(record)
+          const active = isCurrentlyActive(record, items)
           return active ? (
             <Space size={6}>
               <CheckCircleFilled style={{ color: '#0369A1', fontSize: 12 }} />
@@ -314,8 +330,7 @@ export default function StrategyListPage() {
         },
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isAdmin],
+    [isAdmin, items],
   )
 
   return (
