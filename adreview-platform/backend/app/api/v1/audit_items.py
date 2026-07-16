@@ -78,6 +78,8 @@ def _enforce_mutual_exclusion(item: AuditItem, body: AuditItemUpdate) -> None:
       运行此规则 prompt 的小模型版本；通用用于切换生效版本）。
     - is_builtin=True 携带 ``active_large_model_id`` → 422
       （通用规则只能切换生效小模型版本；大模型仅个性化可用）。
+    - is_builtin=True 携带 ``low_threshold_min`` / ``medium_threshold_min`` /
+      ``high_threshold_min`` → 422（共享阈值仅个性化/审核 Agent 使用）。
     """
     fields_set = getattr(body, "model_fields_set", set())
     if item.is_builtin and "knowledge_document_ids" in fields_set:
@@ -89,6 +91,16 @@ def _enforce_mutual_exclusion(item: AuditItem, body: AuditItemUpdate) -> None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="通用审核项不支持绑定大模型",
+        )
+    threshold_fields = {
+        "low_threshold_min",
+        "medium_threshold_min",
+        "high_threshold_min",
+    }
+    if item.is_builtin and threshold_fields & fields_set:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="通用审核项不支持审核 Agent 共享阈值(仅个性化 item 可写)",
         )
 
 
@@ -405,6 +417,9 @@ async def list_items_by_media_type(
                 active_large_model_id=r.active_large_model_id,
                 active_large_model=active_large,
                 knowledge_document_ids=list(r.knowledge_document_ids or []),
+                low_threshold_min=r.low_threshold_min,
+                medium_threshold_min=r.medium_threshold_min,
+                high_threshold_min=r.high_threshold_min,
                 created_at=r.created_at,
                 updated_at=r.updated_at,
             )
@@ -459,6 +474,9 @@ async def list_items(
                 active_large_model_id=r.active_large_model_id,
                 active_large_model=active_large,
                 knowledge_document_ids=list(r.knowledge_document_ids or []),
+                low_threshold_min=r.low_threshold_min,
+                medium_threshold_min=r.medium_threshold_min,
+                high_threshold_min=r.high_threshold_min,
                 created_at=r.created_at,
                 updated_at=r.updated_at,
             )
@@ -527,6 +545,9 @@ code=fresh.code,
         active_large_model_id=None,
         active_large_model=None,
         knowledge_document_ids=list(fresh.knowledge_document_ids or []),
+        low_threshold_min=fresh.low_threshold_min,
+        medium_threshold_min=fresh.medium_threshold_min,
+        high_threshold_min=fresh.high_threshold_min,
         created_at=fresh.created_at,
         updated_at=fresh.updated_at,
     )
@@ -566,6 +587,13 @@ async def update_item(
         item.active_large_model_id = body.active_large_model_id
     if body.knowledge_document_ids is not None:
         item.knowledge_document_ids = list(body.knowledge_document_ids)
+    # 审核 Agent 共享阈值(仅个性化 item;内置已在 _enforce_mutual_exclusion 拦截)
+    if body.low_threshold_min is not None:
+        item.low_threshold_min = body.low_threshold_min
+    if body.medium_threshold_min is not None:
+        item.medium_threshold_min = body.medium_threshold_min
+    if body.high_threshold_min is not None:
+        item.high_threshold_min = body.high_threshold_min
     await db.flush()
     await db.commit()
 
@@ -600,6 +628,9 @@ code=fresh.code,
         active_large_model_id=fresh.active_large_model_id,
         active_large_model=active_large,
         knowledge_document_ids=list(fresh.knowledge_document_ids or []),
+        low_threshold_min=fresh.low_threshold_min,
+        medium_threshold_min=fresh.medium_threshold_min,
+        high_threshold_min=fresh.high_threshold_min,
         created_at=fresh.created_at,
         updated_at=fresh.updated_at,
     )

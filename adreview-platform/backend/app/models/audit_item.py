@@ -15,6 +15,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -80,6 +81,18 @@ class AuditItem(Base):
     # 仅 is_builtin=false 时写入；通用规则不接受该字段。
     knowledge_document_ids: Mapped[Optional[list[int]]] = mapped_column(
         JSONB, nullable=True, default=list
+    )
+    # 「审核 Agent」共享阈值：仅 is_builtin=false 的自定义 item 使用。
+    # 该 item 下所有 audit_point 共用这三档下限(上限自动反推,不入库)。
+    # 内置规则(通用规则)仍走 audit_points 表的单 point 阈值路径,不动这些列。
+    low_threshold_min: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True, default=0.0
+    )
+    medium_threshold_min: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True, default=60.0
+    )
+    high_threshold_min: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True, default=90.0
     )
 
     created_at: Mapped[datetime] = mapped_column(
