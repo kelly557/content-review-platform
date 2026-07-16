@@ -162,13 +162,58 @@ export default function StrategyListPage() {
       {
         title: '策略名称',
         dataIndex: 'name',
-        width: '14%',
+        width: '13%',
         render: (text: string, record) =>
           record.scope === 'default' ? (
             <span style={{ color: '#0369A1', fontWeight: 500 }}>{text}</span>
           ) : (
             <span style={{ color: '#0369A1' }}>{text}</span>
           ),
+      },
+      {
+        title: 'strategy_Id',
+        dataIndex: 'public_id',
+        width: '15%',
+        render: (publicId: string | undefined) => {
+          if (!publicId) {
+            return <span style={{ color: '#CBD5E1', fontSize: 12 }}>—</span>
+          }
+          const short = publicId.slice(0, 8)
+          return (
+            <Tooltip title={publicId} placement="topLeft">
+              <Space size={4} align="center" style={{ cursor: 'default' }}>
+                <span
+                  style={{
+                    fontFamily:
+                      'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    fontSize: 12,
+                    color: '#475569',
+                    letterSpacing: 0.2,
+                  }}
+                >
+                  {short}
+                </span>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CopyOutlined style={{ fontSize: 12 }} />}
+                  style={{ padding: '0 4px', height: 20, color: '#94A3B8' }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    navigator.clipboard
+                      .writeText(publicId)
+                      .then(
+                        () => message.success('已复制到剪贴板'),
+                        () =>
+                          message.warning('复制失败,请手动复制'),
+                      )
+                  }}
+                  aria-label={`复制策略ID ${publicId}`}
+                />
+              </Space>
+            </Tooltip>
+          )
+        },
       },
       {
         title: '生效状态',
