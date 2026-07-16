@@ -8,6 +8,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
   App,
   Button,
   Empty,
@@ -41,21 +42,29 @@ export default function SelectSmallModelModal({
   onClose,
   onSaved,
 }: Props) {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [models, setModels] = useState<RegisteredModelListItem[]>([])
   const [loading, setLoading] = useState(false)
   const [picked, setPicked] = useState<number | null>(null)
+  const [pickedRow, setPickedRow] = useState<RegisteredModelListItem | null>(null)
   const [q, setQ] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!item) return
     setPicked(item.active_small_model_version_id ?? null)
+    setPickedRow(null)
     setLoading(true)
     registeredModelsApi
       // backend caps size at le=100; 100 covers realistic dropdown set
       .list({ size: 100, kind: 'small', status: 'active' })
-      .then((p) => setModels(p.items.filter((m) => m.status === 'active')))
+      .then((p) => {
+        const all = p.items.filter((m) => m.status === 'active')
+        const filtered = item.small_category
+          ? all.filter((m) => !m.small_category || m.small_category === item.small_category)
+          : all
+        setModels(filtered)
+      })
       .catch(() => message.error('加载模型失败'))
       .finally(() => setLoading(false))
   }, [item, message])
@@ -72,24 +81,45 @@ export default function SelectSmallModelModal({
     )
   }, [models, q])
 
+  const mismatch = !!(
+    pickedRow &&
+    item?.small_category &&
+    pickedRow.small_category &&
+    pickedRow.small_category !== item.small_category
+  )
+
   const save = async () => {
     if (!item) return
-    setSaving(true)
-    try {
-      await import('@/api/auditItems').then(({ auditItemsApi }) =>
-        auditItemsApi.setActiveModelVersion(
-          item.package_code,
-          item.id,
-          picked,
-        ),
-      )
-      message.success('已保存模型')
-      await onSaved()
-    } catch (err) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail ?? '保存失败')
-    } finally {
-      setSaving(false)
+    const doSave = async () => {
+      setSaving(true)
+      try {
+        await import('@/api/auditItems').then(({ auditItemsApi }) =>
+          auditItemsApi.setActiveModelVersion(
+            item.package_code,
+            item.id,
+            picked,
+          ),
+        )
+        message.success('已保存模型')
+        await onSaved()
+      } catch (err) {
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        message.error(detail ?? '保存失败')
+      } finally {
+        setSaving(false)
+      }
+    }
+    if (mismatch) {
+      modal.confirm({
+        title: '小模型分类与审核项不匹配',
+        content: `当前选择「${pickedRow?.name}」（分类：${(SMALL_MODEL_CATEGORY_LABEL as Record<string, string>)[pickedRow!.small_category!] ?? pickedRow!.small_category}），但审核项「${item.name_cn}」期望分类「${(SMALL_MODEL_CATEGORY_LABEL as Record<string, string>)[item.small_category!] ?? item.small_category}」。是否仍要切换？`,
+        okText: '仍要切换',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        onOk: doSave,
+      })
+    } else {
+      await doSave()
     }
   }
 
@@ -102,7 +132,10 @@ export default function SelectSmallModelModal({
         <Radio
           checked={picked === (row.current_version_id ?? null)}
           disabled={row.current_version_id == null}
-          onChange={() => setPicked(row.current_version_id ?? null)}
+          onChange={() => {
+            setPicked(row.current_version_id ?? null)
+            setPickedRow(row)
+          }}
         />
       ),
     },
@@ -169,7 +202,20 @@ export default function SelectSmallModelModal({
       <Space direction="vertical" style={{ width: '100%' }} size="small">
         <Text type="secondary">
           选择一个已发布的小模型（kind=small，status=active），作为本规则的运行模型。
+          {item?.small_category && (
+            <Tag color="blue" style={{ marginLeft: 8 }}>
+              期望分类：{(SMALL_MODEL_CATEGORY_LABEL as Record<string, string>)[item.small_category] ?? item.small_category}
+            </Tag>
+          )}
         </Text>
+        {mismatch && (
+          <Alert
+            type="warning"
+            showIcon
+            message="小模型分类不匹配"
+            description={`当前选择「${pickedRow?.name}」分类为「${SMALL_MODEL_CATEGORY_LABEL[pickedRow!.small_category!] ?? pickedRow!.small_category}」，与审核项期望分类不一致。点击「确认」时会再次弹窗确认。`}
+          />
+        )}
         <Input.Search
           placeholder="搜索模型名称 / 标识 / Provider"
           value={q}

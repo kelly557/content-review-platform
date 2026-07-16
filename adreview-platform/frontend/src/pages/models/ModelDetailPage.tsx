@@ -81,7 +81,7 @@ interface NewVersionValues {
 export default function ModelDetailPage() {
   const { id } = useParams<{ id: string }>()
   const modelId = Number(id)
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const { user } = useAuthStore()
   const canWrite = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'root_admin'
 
@@ -193,6 +193,30 @@ export default function ModelDetailPage() {
     if (!model) return
     const v = await createForm.validateFields().catch(() => null)
     if (!v) return
+    if (model.kind === 'small') {
+      const newPoints = (v as NewVersionValues & { __auditPoints?: string[] }).__auditPoints ?? null
+      const oldPoints = auditPoints ?? null
+      const hasDiff = computePointsDiff(oldPoints, newPoints)
+      if (hasDiff) {
+        const ok = await new Promise<boolean>((resolve) => {
+          modal.confirm({
+            title: '审核点变更确认',
+            width: 520,
+            content: (
+              <PointsDiffView
+                oldPoints={oldPoints ?? null}
+                newPoints={newPoints ?? null}
+              />
+            ),
+            okText: '确认发布',
+            cancelText: '取消',
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          })
+        })
+        if (!ok) return
+      }
+    }
     setCreating(true)
     try {
       if (model.kind === 'small') {
@@ -691,6 +715,7 @@ export default function ModelDetailPage() {
               uploading={uploading}
               setUploading={setUploading}
               initialArtifact={initialArtifact}
+              initialPoints={auditPoints}
             />
           ) : (
             <>
@@ -725,6 +750,71 @@ export default function ModelDetailPage() {
           )}
         </Form>
       </Modal>
+    </div>
+  )
+}
+
+function computePointsDiff(
+  oldPoints: string[] | null,
+  newPoints: string[] | null,
+): boolean {
+  const o = oldPoints ?? []
+  const n = newPoints ?? []
+  if (o.length !== n.length) return true
+  const oSet = new Set(o)
+  const nSet = new Set(n)
+  if (o.length !== new Set(o).size || n.length !== new Set(n).size) return true
+  for (const p of oSet) if (!nSet.has(p)) return true
+  for (const p of nSet) if (!oSet.has(p)) return true
+  return false
+}
+
+function PointsDiffView({
+  oldPoints,
+  newPoints,
+}: {
+  oldPoints: string[] | null
+  newPoints: string[] | null
+}) {
+  const o = oldPoints ?? []
+  const n = newPoints ?? []
+  const oSet = new Set(o)
+  const nSet = new Set(n)
+  const added = n.filter((p) => !oSet.has(p))
+  const removed = o.filter((p) => !nSet.has(p))
+  const kept = n.filter((p) => oSet.has(p))
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ marginBottom: 8 }}>
+        <Text type="danger" strong>将删除（{removed.length}）</Text>
+        <div style={{ marginTop: 4 }}>
+          {removed.length === 0 ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>无</Text>
+          ) : removed.map((p, i) => (
+            <Tag key={i} color="red" style={{ marginBottom: 4 }}>{p}</Tag>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginBottom: 8 }}>
+        <Text type="success" strong>将新增（{added.length}）</Text>
+        <div style={{ marginTop: 4 }}>
+          {added.length === 0 ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>无</Text>
+          ) : added.map((p, i) => (
+            <Tag key={i} color="green" style={{ marginBottom: 4 }}>{p}</Tag>
+          ))}
+        </div>
+      </div>
+      <div>
+        <Text type="secondary" strong>保留（{kept.length}）</Text>
+        <div style={{ marginTop: 4 }}>
+          {kept.length === 0 ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>无</Text>
+          ) : kept.map((p, i) => (
+            <Tag key={i} style={{ marginBottom: 4 }}>{p}</Tag>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
+  Empty,
   Input,
   Select,
   Space,
@@ -11,9 +12,8 @@ import {
   Typography,
   App,
 } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import {
-  CaretDownOutlined,
-  CaretRightOutlined,
   PictureOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -40,13 +40,14 @@ import CreateModelModal from './CreateModelModal'
 const { Text } = Typography
 
 type ModelTab = 'large' | 'small'
+type ModalityKey = 'text' | 'image' | 'unknown'
 
 type ModelRow = {
   id: number
   name: string
   versionText: string
   updatedAt: string | null
-  points: string[] | null
+  points: string[]
 }
 
 type CategoryGroup = {
@@ -58,7 +59,7 @@ type CategoryGroup = {
 }
 
 type ModalityGroup = {
-  key: string
+  key: ModalityKey
   label: string
   color: string
   icon: React.ReactNode
@@ -66,10 +67,20 @@ type ModalityGroup = {
   categories: CategoryGroup[]
 }
 
-const MODALITY_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+const MODALITY_META: Record<ModalityKey, { label: string; color: string; icon: React.ReactNode }> = {
   text: { label: '文本', color: 'blue', icon: <TagsOutlined /> },
   image: { label: '图片', color: 'geekblue', icon: <PictureOutlined /> },
   unknown: { label: '未设置', color: 'default', icon: <TagsOutlined /> },
+}
+
+type FlatRow = {
+  flatKey: string
+  modelId: number
+  modelName: string
+  versionText: string
+  updatedAt: string | null
+  point: string
+  rowSpan: number
 }
 
 export default function ModelListPage() {
@@ -90,6 +101,9 @@ export default function ModelListPage() {
 
   const [createOpen, setCreateOpen] = useState(false)
   const [providerOptions, setProviderOptions] = useState<RegisteredProviderOption[]>([])
+
+  const [activeModality, setActiveModality] = useState<ModalityKey>('text')
+  const [activeAnchor, setActiveAnchor] = useState<string | null>(null)
 
   const fetchList = async () => {
     setLoading(true)
@@ -151,7 +165,6 @@ export default function ModelListPage() {
     }
   }
 
-  // 大模型列
   const largeColumns = useMemo(
     () => [
       { title: '名称', dataIndex: 'name', width: '20%' },
@@ -194,10 +207,10 @@ export default function ModelListPage() {
     [],
   )
 
-const smallGroups = useMemo<ModalityGroup[]>(() => {
-    const byModality = new Map<string, Map<string, ModelRow[]>>()
+  const smallGroups = useMemo<ModalityGroup[]>(() => {
+    const byModality = new Map<ModalityKey, Map<string, ModelRow[]>>()
     for (const m of items) {
-      const mod = m.modality ?? 'unknown'
+      const mod = (m.modality ?? 'unknown') as ModalityKey
       const cat = m.small_category ?? 'unknown'
       const versionText = m.current_version_no
         ? m.current_version_label
@@ -205,8 +218,8 @@ const smallGroups = useMemo<ModalityGroup[]>(() => {
           : `v${m.current_version_no}`
         : '-'
       const points = m.current_version_config
-        ? (m.current_version_config as { points?: string[] }).points ?? null
-        : null
+        ? (m.current_version_config as { points?: string[] }).points ?? []
+        : []
       const row: ModelRow = {
         id: m.id,
         name: m.name,
@@ -247,6 +260,82 @@ const smallGroups = useMemo<ModalityGroup[]>(() => {
     }
     return groups
   }, [items])
+
+  const visibleModality = smallGroups.find((g) => g.key === activeModality) ?? smallGroups[0]
+
+  useEffect(() => {
+    if (!visibleModality || visibleModality.categories.length === 0) {
+      setActiveAnchor(null)
+      return
+    }
+    const exists = visibleModality.categories.some((c) => c.key === activeAnchor)
+    if (!exists) {
+      setActiveAnchor(visibleModality.categories[0].key)
+    }
+  }, [visibleModality, activeAnchor])
+
+  useEffect(() => {
+    if (!visibleModality) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+        if (visible.length > 0) {
+          const key = visible[0].target.id.replace('cat-', '')
+          setActiveAnchor(key)
+        }
+      },
+      { rootMargin: '-20% 0px -60% 0px', threshold: 0 },
+    )
+    visibleModality.categories.forEach((cat) => {
+      const el = document.getElementById(`cat-${cat.key}`)
+      if (el) observer.observe(el)
+    })
+    return () => observer.disconnect()
+  }, [visibleModality])
+
+  const columns: ColumnsType<FlatRow> = [
+    {
+      title: '模型名称',
+      key: 'name',
+      width: '20%',
+      render: (_, row) => (
+        <span style={{ fontWeight: row.rowSpan > 0 ? 500 : 400 }}>{row.modelName}</span>
+      ),
+      onCell: (row) => ({ rowSpan: row.rowSpan }),
+    },
+    {
+      title: '版本号',
+      key: 'version',
+      width: '14%',
+      render: (_, row) => (
+        <Text type="secondary" style={{ fontSize: 12 }}>{row.versionText}</Text>
+      ),
+      onCell: (row) => ({ rowSpan: row.rowSpan }),
+    },
+    {
+      title: '更新时间',
+      key: 'updatedAt',
+      width: '16%',
+      render: (_, row) =>
+        row.updatedAt ? (
+          <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(row.updatedAt).format('YYYY-MM-DD HH:mm')}</Text>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
+      onCell: (row) => ({ rowSpan: row.rowSpan }),
+    },
+    {
+      title: '审核点',
+      key: 'point',
+      render: (_, row) => (
+        <span style={{ color: row.point === '未配置审核点' ? '#94a3b8' : '#020617' }}>
+          {row.point}
+        </span>
+      ),
+    },
+  ]
 
   return (
     <div style={{ width: '100%' }}>
@@ -358,9 +447,107 @@ const smallGroups = useMemo<ModalityGroup[]>(() => {
                 {smallGroups.length === 0 ? (
                   <Text type="secondary">暂无小模型，请先添加模型</Text>
                 ) : (
-                  smallGroups.map((mod) => (
-                    <SmallModalityGroup key={mod.key} group={mod} />
-                  ))
+                  <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                    <Tabs
+                      activeKey={activeModality}
+                      onChange={(k) => setActiveModality(k as ModalityKey)}
+                      items={smallGroups
+                        .filter((g) => g.key !== 'unknown')
+                        .map((g) => ({
+                          key: g.key,
+                          label: (
+                            <Space size={6}>
+                              {g.icon}
+                              <span>{g.label}</span>
+                              <Tag color={g.color}>{g.count}</Tag>
+                            </Space>
+                          ),
+                        }))}
+                    />
+                    <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 320 }}>
+                      <div
+                        style={{
+                          minWidth: 180,
+                          flexShrink: 0,
+                          paddingRight: 16,
+                          maxHeight: 600,
+                          overflowY: 'auto',
+                        }}
+                      >
+                        {(visibleModality?.categories ?? []).length === 0 ? (
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description="暂无小模型"
+                            style={{ paddingTop: 40 }}
+                          />
+                        ) : (
+                          (visibleModality?.categories ?? []).map((cat) => {
+                            const active = cat.key === activeAnchor
+                            return (
+                              <div
+                                key={cat.key}
+                                onClick={() => {
+                                  setActiveAnchor(cat.key)
+                                  document
+                                    .getElementById(`cat-${cat.key}`)
+                                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                }}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '6px 8px',
+                                  marginBottom: 2,
+                                  cursor: 'pointer',
+                                  background: active ? '#e0f2fe' : 'transparent',
+                                  transition: 'background 0.15s',
+                                }}
+                              >
+                                <Tag color={cat.color}>{cat.label}</Tag>
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  {cat.count}
+                                </Text>
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          paddingLeft: 16,
+                          borderLeft: '1px solid #e2e8f0',
+                          maxHeight: 600,
+                          overflowY: 'auto',
+                        }}
+                      >
+                        {visibleModality && visibleModality.categories.length > 0 ? (
+                          <>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                color: '#475569',
+                                marginBottom: 12,
+                                fontWeight: 500,
+                              }}
+                            >
+                              {visibleModality.label}（{visibleModality.count} 个模型）
+                            </div>
+                            {visibleModality.categories.map((cat) => (
+                              <CategoryGroup key={cat.key} category={cat} columns={columns} />
+                            ))}
+                          </>
+                        ) : (
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description="暂无小模型"
+                            style={{ padding: '60px 0' }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </Space>
                 )}
                 <div style={{ marginTop: 12 }}>
                   <Text type="secondary">共 {total} 条</Text>
@@ -384,118 +571,56 @@ const smallGroups = useMemo<ModalityGroup[]>(() => {
   )
 }
 
-function SmallModalityGroup({ group }: { group: ModalityGroup }) {
-  const [expanded, setExpanded] = useState(true)
-  return (
-    <div style={{ marginBottom: 20 }}>
-      <div
-        onClick={() => setExpanded((v) => !v)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '8px 4px',
-          background: '#f8fafc',
-          borderRadius: 4,
-          cursor: 'pointer',
-        }}
-      >
-        <span style={{ width: 18, display: 'inline-flex', justifyContent: 'center' }}>
-          {expanded ? (
-            <CaretDownOutlined style={{ fontSize: 11, color: '#64748b' }} />
-          ) : (
-            <CaretRightOutlined style={{ fontSize: 11, color: '#64748b' }} />
-          )}
-        </span>
-        <Space size={8}>
-          <span style={{ color: '#475569' }}>{group.icon}</span>
-          <Tag color={group.color} style={{ fontWeight: 600 }}>
-            {group.label}
-          </Tag>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {group.count} 个模型
-          </Text>
-        </Space>
-      </div>
-      {expanded && (
-        <div style={{ paddingLeft: 18, marginTop: 4 }}>
-          {group.categories.map((cat) => (
-            <SmallCategoryGroup key={cat.key} category={cat} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
+function CategoryGroup({
+  category,
+  columns,
+}: {
+  category: CategoryGroup
+  columns: ColumnsType<FlatRow>
+}) {
+  const flatRows = useMemo<FlatRow[]>(() => {
+    const rows: FlatRow[] = []
+    for (const m of category.models) {
+      const span = Math.max(m.points.length, 1)
+      if (m.points.length === 0) {
+        rows.push({
+          flatKey: `${m.id}-empty`,
+          modelId: m.id,
+          modelName: m.name,
+          versionText: m.versionText,
+          updatedAt: m.updatedAt,
+          point: '未配置审核点',
+          rowSpan: 1,
+        })
+      } else {
+        m.points.forEach((p, i) => {
+          rows.push({
+            flatKey: `${m.id}-${i}`,
+            modelId: m.id,
+            modelName: m.name,
+            versionText: m.versionText,
+            updatedAt: m.updatedAt,
+            point: p,
+            rowSpan: i === 0 ? span : 0,
+          })
+        })
+      }
+    }
+    return rows
+  }, [category])
 
-function SmallCategoryGroup({ category }: { category: CategoryGroup }) {
-  const [expanded, setExpanded] = useState(true)
   return (
-    <div style={{ marginBottom: 8 }}>
-      <div
-        onClick={() => setExpanded((v) => !v)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '4px 8px',
-          cursor: 'pointer',
-        }}
-      >
-        <span style={{ width: 18, display: 'inline-flex', justifyContent: 'center' }}>
-          {expanded ? (
-            <CaretDownOutlined style={{ fontSize: 10, color: '#94a3b8' }} />
-          ) : (
-            <CaretRightOutlined style={{ fontSize: 10, color: '#94a3b8' }} />
-          )}
-        </span>
-        <Space size={6}>
-          <Tag color={category.color}>{category.label}</Tag>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {category.count} 个模型
-          </Text>
-        </Space>
+    <div id={`cat-${category.key}`} style={{ marginBottom: 24 }}>
+      <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8, fontWeight: 500 }}>
+        {category.label}（{category.count} 个模型）
       </div>
-      {expanded && (
-        <div style={{ paddingLeft: 18, marginTop: 4 }}>
-          {category.models.map((m) => (
-            <SmallModelRow key={m.id} row={m} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SmallModelRow({ row }: { row: ModelRow }) {
-  return (
-    <div
-      style={{
-        padding: '8px 12px',
-        marginBottom: 6,
-        background: '#fff',
-        border: '1px solid #e2e8f0',
-        borderRadius: 4,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 500, minWidth: 200 }}>{row.name}</span>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {row.versionText}
-        </Text>
-        <Text type="secondary" style={{ fontSize: 12, marginLeft: 'auto' }}>
-          {row.updatedAt ? dayjs(row.updatedAt).format('YYYY-MM-DD HH:mm') : '-'}
-        </Text>
-      </div>
-      <div style={{ marginTop: 6 }}>
-        {row.points && row.points.length > 0 ? (
-          <Space size={4} wrap>
-            {row.points.map((p, i) => (
-              <Tag key={i}>{p}</Tag>
-            ))}
-          </Space>
-        ) : (
-          <Text type="secondary" style={{ fontSize: 12 }}>未配置审核点</Text>
-        )}
-      </div>
+      <Table<FlatRow>
+        rowKey="flatKey"
+        size="small"
+        pagination={false}
+        columns={columns}
+        dataSource={flatRows}
+      />
     </div>
   )
 }

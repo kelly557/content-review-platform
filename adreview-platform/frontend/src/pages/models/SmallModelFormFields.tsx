@@ -38,6 +38,8 @@ interface Props {
   setUploading?: (b: boolean) => void
   /** 初始 artifact（详情页"新版本"时带入上一版本文件信息） */
   initialArtifact?: ArtifactUploadResponse | null
+  /** 初始审核点（详情页"新版本"时带入当前版本的 points，初始化 JSON 编辑器） */
+  initialPoints?: string[] | null
 }
 
 /**
@@ -51,13 +53,20 @@ export default function SmallModelFormFields({
   uploading,
   setUploading,
   initialArtifact,
+  initialPoints,
 }: Props) {
   const { message } = App.useApp()
   const [artifact, setArtifact] = useState<ArtifactUploadResponse | null>(
     initialArtifact ?? null,
   )
-  const [auditJsonText, setAuditJsonText] = useState('')
-  const [auditPoints, setAuditPoints] = useState<string[] | null>(null)
+  const initialJsonText =
+    initialPoints && initialPoints.length > 0
+      ? JSON.stringify({ points: initialPoints }, null, 2)
+      : ''
+  const [auditJsonText, setAuditJsonText] = useState(initialJsonText)
+  const [auditPoints, setAuditPoints] = useState<string[] | null>(
+    initialPoints ?? null,
+  )
 
   const beforeUpload = (file: File) => {
     const MAX = 512 * 1024 * 1024

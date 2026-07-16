@@ -39,41 +39,6 @@ const MODALITY_BY_MEDIA: Record<string, string> = {
   video: 'image',
 }
 
-const CODE_TO_SMALL_CATEGORY: Record<string, string> = {
-  politics: 'politics',
-  terrorism: 'terrorism',
-  violence: 'terrorism',
-  porn: 'porn',
-  prohibited: 'illicit',
-  ad: 'ad',
-  adlaw: 'ad_law',
-  advertising: 'ad_law',
-  religion: 'religion',
-  abuse: 'abuse',
-  vulgar: 'unhealthy',
-  minor: 'unhealthy',
-  values: 'unhealthy',
-  illegal: 'unhealthy',
-  privacy: 'unhealthy',
-  promptattack: 'unhealthy',
-  bad: 'unhealthy',
-  sensitive: 'unhealthy',
-  voiceprint: 'unhealthy',
-  audioquality: 'unhealthy',
-  image: 'unhealthy',
-  text: 'unhealthy',
-  frame: 'unhealthy',
-  audio: 'unhealthy',
-  subtitle: 'unhealthy',
-}
-
-function extractSmallCategory(itemCode: string): string | null {
-  const parts = itemCode.split('_')
-  if (parts.length < 2) return null
-  const suffix = parts.slice(1).join('_')
-  return CODE_TO_SMALL_CATEGORY[suffix] ?? null
-}
-
 interface ModelGroup {
   id: number
   code: string
@@ -108,7 +73,7 @@ export default function SmallModelChooseModal({
     setPicked(item.active_small_model_version_id ?? null)
     setLoading(true)
 
-    const smallCategory = extractSmallCategory(item.code)
+    const smallCategory = item.small_category ?? undefined
     const modality = MODALITY_BY_MEDIA[mediaType] ?? null
 
     registeredModelsApi
