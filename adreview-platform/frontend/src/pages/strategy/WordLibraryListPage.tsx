@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
-  Alert,
   Button,
   DatePicker,
   Drawer,
@@ -8,7 +7,6 @@ import {
   Input,
   Popconfirm,
   Radio,
-  Select,
   Space,
   Table,
   Tabs,
@@ -16,14 +14,12 @@ import {
   Tooltip,
   Typography,
   App,
-  Upload,
   type TableColumnsType,
 } from 'antd'
 import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  InboxOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
@@ -36,23 +32,18 @@ import type {
   LibraryListItem,
 } from '@/types/domain'
 import { LIBRARY_KIND_OPTIONS } from '@/types/domain'
-import { parseWordsFile } from '@/lib/libraryImport'
 import { deriveEffectiveMeta } from '@/lib/libraryEffective'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
 import PlatformToggle from '@/components/library/PlatformToggle'
+import WordsInputPanel, { MAX_WORDS, type WordsMode } from '@/components/library/WordsInputPanel'
 import { useAuthStore } from '@/store'
 
 const { Title, Text } = Typography
 
-const MAX_WORDS = 1000
-
 interface CreateFormValues {
   name: string
-  kind: LibraryKind
-  description?: string
   durationMode: 'permanent' | 'range'
   effectiveRange?: [Dayjs, Dayjs]
-  wordsText?: string
   is_platform?: boolean
 }
 
@@ -69,8 +60,11 @@ export default function WordLibraryListPage() {
 
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [creatingImport, setImporting] = useState(false)
   const [createForm] = Form.useForm<CreateFormValues>()
+
+  const [wordsMode, setWordsMode] = useState<WordsMode>('batch')
+  const [wordsText, setWordsText] = useState('')
+  const [wordsFile, setWordsFile] = useState<File | null>(null)
 
   const [deleteTarget, setDeleteTarget] = useState<Library | null>(null)
 
@@ -98,14 +92,17 @@ export default function WordLibraryListPage() {
 
   const openCreate = () => {
     createForm.resetFields()
-    createForm.setFieldsValue({ durationMode: 'permanent', kind: '黑名单' })
+    createForm.setFieldsValue({ durationMode: 'permanent' })
+    setWordsMode('batch')
+    setWordsText('')
+    setWordsFile(null)
     setCreateOpen(true)
   }
 
   const submitCreate = async () => {
     const v = await createForm.validateFields().catch(() => null)
     if (!v) return
-    const words = (v.wordsText ?? '')
+    const words = wordsText
       .split(/\r?\n/)
       .map((s) => s.trim())
       .filter(Boolean)
@@ -120,8 +117,7 @@ export default function WordLibraryListPage() {
     const payload: LibraryCreate = {
       name: v.name.trim(),
       library_type: 'word',
-      kind: v.kind,
-      description: v.description,
+      kind: filterKind ?? '黑名单',
       words,
       effective_from: hasRange ? v.effectiveRange![0].toISOString() : null,
       effective_until: hasRange ? v.effectiveRange![1].toISOString() : null,
@@ -141,8 +137,8 @@ export default function WordLibraryListPage() {
     }
   }
 
-  const cols: TableColumnsType<LibraryListItem> = [
-    {
+  const cols: TableColumnsType<LibraryListItem> = useMemo(() => {
+    const nameCol: TableColumnsType<LibraryListItem>[number] = {
       title: '名称',
       dataIndex: 'name',
       width: '20%',
@@ -157,15 +153,8 @@ export default function WordLibraryListPage() {
           {!row.is_active && <Tag>已停用</Tag>}
         </Space>
       ),
-    },
-    {
-      title: '类型',
-      dataIndex: 'kind',
-      width: '8%',
-      render: (v: LibraryKind | null) =>
-        v ? <Tag color={v === '黑名单' ? 'red' : 'green'}>{v}</Tag> : '—',
-    },
-    {
+    }
+    const ownershipCol: TableColumnsType<LibraryListItem>[number] = {
       title: '归属',
       dataIndex: 'is_platform',
       width: '10%',
@@ -175,10 +164,10 @@ export default function WordLibraryListPage() {
             <Tag color="purple" style={{ margin: 0 }}>通用平台</Tag>
           </Tooltip>
         ) : (
-          <Tag style={{ margin: 0 }}>个性化</Tag>
+          <Tag style={{ margin: 0 }}>自定义</Tag>
         ),
-    },
-    {
+    }
+    const effectiveCol: TableColumnsType<LibraryListItem>[number] = {
       title: '有效时间',
       key: 'effective',
       width: '18%',
@@ -199,15 +188,15 @@ export default function WordLibraryListPage() {
           </Space>
         )
       },
-    },
-    {
+    }
+    const countCol: TableColumnsType<LibraryListItem>[number] = {
       title: '词数',
       dataIndex: 'item_count',
       width: '8%',
       align: 'right',
-    },
-    {
-      title: '最近修改',
+    }
+    const updatedCol: TableColumnsType<LibraryListItem>[number] = {
+      title: '更新时间',
       dataIndex: 'updated_at',
       width: '16%',
       render: (v: string | null) => (
@@ -215,16 +204,16 @@ export default function WordLibraryListPage() {
           {v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '—'}
         </span>
       ),
-    },
-    {
+    }
+    const createdCol: TableColumnsType<LibraryListItem>[number] = {
       title: '创建时间',
       dataIndex: 'created_at',
       width: '12%',
       render: (v: string) => (
         <span style={{ color: '#64748B', fontSize: 12 }}>{dayjs(v).format('YYYY-MM-DD')}</span>
       ),
-    },
-    {
+    }
+    const actionCol: TableColumnsType<LibraryListItem>[number] = {
       title: '操作',
       width: '12%',
       render: (_v, row) => {
@@ -265,8 +254,19 @@ export default function WordLibraryListPage() {
           </Space>
         )
       },
-    },
-  ]
+    }
+
+    const base: TableColumnsType<LibraryListItem> = [
+      nameCol,
+      effectiveCol,
+      countCol,
+      updatedCol,
+      createdCol,
+      actionCol,
+    ]
+    if (isSuperadmin) base.splice(1, 0, ownershipCol)
+    return base
+  }, [isSuperadmin])
 
   return (
     <div style={{ width: '100%' }}>
@@ -283,11 +283,41 @@ export default function WordLibraryListPage() {
         <Title level={3} style={{ margin: 0 }}>
           词库
         </Title>
-        <Space wrap>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建词库
-          </Button>
-        </Space>
+      </div>
+
+      <Tabs
+        type="line"
+        activeKey={filterKind ?? '黑名单'}
+        onChange={(k) => {
+          setFilterKind(k as LibraryKind)
+          void fetchLibraries()
+        }}
+        style={{ marginBottom: 12 }}
+        items={LIBRARY_KIND_OPTIONS.map((o) => ({
+          key: o.value,
+          label: o.label,
+        }))}
+      />
+
+      <div
+        style={{
+          background: '#F8FAFC',
+          border: '1px solid #E2E8F0',
+          borderRadius: 6,
+          padding: '12px 16px',
+          marginBottom: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+          创建词库
+        </Button>
+        <Text type="secondary" style={{ fontSize: 13 }}>
+          您可以在策略配置时选择该词库进行过滤
+        </Text>
       </div>
 
       <div
@@ -301,20 +331,6 @@ export default function WordLibraryListPage() {
         }}
       >
         <Space>
-          <Select
-            allowClear
-            placeholder="全部类型"
-            style={{ width: 160 }}
-            options={LIBRARY_KIND_OPTIONS.map((o) => ({
-              value: o.value,
-              label: o.label,
-            }))}
-            value={filterKind ?? undefined}
-            onChange={(v) => {
-              setFilterKind(v ?? null)
-              void fetchLibraries()
-            }}
-          />
           <Tooltip
             title={
               effectiveOnly
@@ -379,21 +395,8 @@ export default function WordLibraryListPage() {
         <Form<CreateFormValues>
           form={createForm}
           layout="vertical"
-          initialValues={{ durationMode: 'permanent', kind: '黑名单' }}
+          initialValues={{ durationMode: 'permanent' }}
         >
-          <Form.Item
-            name="kind"
-            label="类型"
-            rules={[{ required: true, message: '请选择类型' }]}
-          >
-            <Select
-              options={LIBRARY_KIND_OPTIONS.map((o) => ({
-                value: o.value,
-                label: o.label,
-              }))}
-              placeholder="黑名单 / 白名单"
-            />
-          </Form.Item>
           <Form.Item
             name="name"
             label="名称"
@@ -404,11 +407,7 @@ export default function WordLibraryListPage() {
           >
             <Input maxLength={128} showCount placeholder="例如：双十一活动词" />
           </Form.Item>
-          <Form.Item name="description" label="说明">
-            <Input.TextArea rows={2} maxLength={200} />
-          </Form.Item>
-
-          <PlatformToggle />
+          <PlatformToggle uncheckedLabel="自定义" />
 
           <Form.Item
             name="durationMode"
@@ -470,111 +469,26 @@ export default function WordLibraryListPage() {
             }}
           </Form.Item>
 
-          <Form.Item
-            name="wordsText"
-            label="词条（可选,创建时可一并填入）"
-            style={{ marginTop: 12 }}
-          >
-            <Tabs
-              defaultActiveKey="paste"
-              items={[
-                {
-                  key: 'paste',
-                  label: '直接粘贴',
-                  children: (
-                    <Form.Item
-                      name="wordsText"
-                      noStyle
-                      rules={[
-                        {
-                          validator: async () =>
-                            Promise.resolve(),
-                        },
-                      ]}
-                    >
-                      <Input.TextArea
-                        rows={8}
-                        placeholder={'习近平\n领导人\n反动'}
-                        disabled={creatingImport}
-                        onChange={(e) => {
-                          createForm.setFieldValue('wordsText', e.target.value)
-                        }}
-                      />
-                    </Form.Item>
-                  ),
-                },
-                {
-                  key: 'upload',
-                  label: '上传 .txt / .csv',
-                  children: (
-                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                      <Alert
-                        type="info"
-                        showIcon
-                        message="每行一词,.csv 用逗号分隔多个"
-                        description={
-                          <span>
-                            例：<code>习近平,领导人,反动</code> 三个词
-                          </span>
-                        }
-                      />
-                      <Upload
-                        accept=".txt,.csv"
-                        beforeUpload={async (file) => {
-                          setImporting(true)
-                          try {
-                            const { words, errors } = await parseWordsFile(
-                              file as File,
-                            )
-                            if (errors.length > 0 || words.length === 0) {
-                              message.error(
-                                errors[0] ?? '文件无有效数据',
-                              )
-                              return false
-                            }
-                            if (words.length > MAX_WORDS) {
-                              message.error(
-                                `单次最多 ${MAX_WORDS} 个词,检测到 ${words.length}`,
-                              )
-                              return false
-                            }
-                            createForm.setFieldValue(
-                              'wordsText',
-                              words.join('\n'),
-                            )
-                            message.success(
-                              `已导入 ${words.length} 个词,切换到直接粘贴 tab 可继续编辑`,
-                            )
-                            return false
-                          } catch (e) {
-                            message.error(
-                              '解析失败：' + (e as Error).message,
-                            )
-                            return false
-                          } finally {
-                            setImporting(false)
-                          }
-                        }}
-                        showUploadList={false}
-                        maxCount={1}
-                        disabled={creating || creatingImport}
-                      >
-                        <Button
-                          icon={<InboxOutlined />}
-                          loading={creatingImport}
-                        >
-                          选择 .txt / .csv 上传
-                        </Button>
-                      </Upload>
-                      <span style={{ color: '#64748B', fontSize: 12 }}>
-                        文件读取后写入左侧粘贴框,可继续手动修改
-                      </span>
-                    </Space>
-                  ),
-                },
-              ]}
+          <div style={{ marginTop: 12 }}>
+            <div
+              style={{
+                fontSize: 14,
+                color: 'rgba(0,0,0,0.88)',
+                marginBottom: 8,
+              }}
+            >
+              词条（可选,创建时可一并填入）
+            </div>
+            <WordsInputPanel
+              text={wordsText}
+              file={wordsFile}
+              mode={wordsMode}
+              disabled={creating}
+              onModeChange={setWordsMode}
+              onTextChange={setWordsText}
+              onFileChange={setWordsFile}
             />
-          </Form.Item>
+          </div>
         </Form>
       </Drawer>
 
