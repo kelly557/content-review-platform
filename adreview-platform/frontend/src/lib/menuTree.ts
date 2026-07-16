@@ -9,7 +9,7 @@ export const MENU_TREE: MenuNode[] = [
     key: 'strategies',
     label: '审核策略',
     children: [
-      { key: 'strategies-list', label: '策略列表', permissions: ['view', 'edit', 'delete'] },
+      { key: 'strategies-list', label: '策略管理', permissions: ['view', 'edit', 'delete'] },
       {
         key: 'strategies-image-rules',
         label: '图片审核规则',
