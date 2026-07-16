@@ -30,6 +30,23 @@ class ModelPrecheckRequest(BaseModel):
     timeout: int = 30
 
 
+class ModelArtifactPrecheckRequest(BaseModel):
+    """小模型文件保存前连通性测试：校验文件元信息 + JSON 结构 + 模态一致性。
+
+    不实际跑 inference（demo 阶段），仅做：
+    - 文件存在 + SHA256 重算一致
+    - 文件大小 ≤ 上限
+    - 扩展名合法
+    - config_points JSON 结构合法
+    - (modality, small_category) 与现有模型不冲突（首次接入/同组合复用）
+    """
+
+    storage_key: str
+    modality: str
+    small_category: str
+    config_points: Optional[List[dict]] = None
+
+
 class ArtifactUploadResponse(BaseModel):
     """小模型文件上传后返回的元信息；前端把整段 JSON 存进表单隐藏字段。"""
 

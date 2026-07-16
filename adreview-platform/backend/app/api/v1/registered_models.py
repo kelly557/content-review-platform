@@ -26,6 +26,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.models.registered_model import (
     LargeModelCategory,
@@ -43,6 +44,7 @@ from app.models.user import User, UserRole
 from app.schemas.common import Page
 from app.schemas.registered_model import (
     ArtifactUploadResponse,
+    ModelArtifactPrecheckRequest,
     ModelPrecheckRequest,
     RegisteredModelCreate,
     RegisteredModelListItem,
@@ -375,6 +377,7 @@ async def list_models(
     kind: str | None = None,
     small_category: str | None = None,
     large_category: str | None = None,
+    modality: str | None = Query(None, description="按模态过滤（text / image）"),
     provider_id: int | None = Query(None, description="按 Provider 过滤"),
     status_filter: str | None = Query(None, alias="status"),
     include_deleted: bool = False,
@@ -393,6 +396,9 @@ async def list_models(
     if large_category:
         _validate_large_category(large_category)
         base = base.where(RegisteredModel.large_category == large_category)
+    if modality:
+        _validate_modality(modality)
+        base = base.where(RegisteredModel.modality == modality)
     if provider_id is not None:
         base = base.where(RegisteredModel.provider_id == provider_id)
     if status_filter:
@@ -471,6 +477,7 @@ async def list_active_models(
     ),
     small_category: str | None = Query(None),
     large_category: str | None = Query(None),
+    modality: str | None = Query(None, description="按模态过滤（text / image）"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_reader),
 ) -> list[dict]:
@@ -488,6 +495,9 @@ async def list_active_models(
     if large_category:
         _validate_large_category(large_category)
         stmt = stmt.where(RegisteredModel.large_category == large_category)
+    if modality:
+        _validate_modality(modality)
+        stmt = stmt.where(RegisteredModel.modality == modality)
     stmt = stmt.order_by(RegisteredModel.name.asc())
     rows = (await db.execute(stmt)).scalars().all()
     return [
@@ -1188,6 +1198,139 @@ async def precheck_model(
         )
     return await _validate_endpoint(
         body.endpoint_url, body.protocol, body.model_name, body.api_key, body.timeout
+    )
+
+
+@router.post("/precheck-artifact", operation_id="registered_models_precheck_artifact")
+async def precheck_artifact(
+    body: ModelArtifactPrecheckRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_writer),
+) -> RegisteredModelValidationLog:
+    """保存前测试小模型文件 + 审核点 JSON 是否就绪。
+
+    Demo 阶段不做真实 inference，仅校验：
+    - 文件存在、SHA256 重新计算成功
+    - 文件大小 ≤ 上限
+    - config_points JSON 结构合法
+    - (modality, small_category) 与现有模型不冲突
+
+    返回 RegisteredModelValidationLog（与 Provider precheck 同 schema）。
+    """
+    if user.role not in (UserRole.SUPERADMIN.value, UserRole.ROOT_ADMIN.value):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "小模型连通性测试仅超级管理员（superadmin / root_admin）可操作",
+        )
+
+    started = time.perf_counter()
+    checks: list[str] = []
+
+    # 1. 文件存在
+    try:
+        abs_path, fname = open_artifact(body.storage_key)
+    except ArtifactStorageError as exc:
+        return RegisteredModelValidationLog(
+            checked_at=datetime.utcnow(),
+            ok=False,
+            http_status=None,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            message=f"模型文件不可用：{exc}",
+        )
+    checks.append(f"文件就绪：{fname}")
+
+    # 2. 文件大小 ≤ 上限
+    try:
+        size = abs_path.stat().st_size
+    except OSError as exc:
+        return RegisteredModelValidationLog(
+            checked_at=datetime.utcnow(),
+            ok=False,
+            http_status=None,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            message=f"读取文件元信息失败：{exc}",
+        )
+    max_bytes = settings.storage_max_upload_mb * 1024 * 1024
+    if size > max_bytes:
+        return RegisteredModelValidationLog(
+            checked_at=datetime.utcnow(),
+            ok=False,
+            http_status=None,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            message=f"文件大小 {size} bytes 超过上限 {max_bytes} bytes",
+        )
+    checks.append(f"大小合规：{size} bytes")
+
+    # 3. config_points JSON 结构
+    if body.config_points is not None:
+        if not isinstance(body.config_points, list):
+            return RegisteredModelValidationLog(
+                checked_at=datetime.utcnow(),
+                ok=False,
+                http_status=None,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                message="config_points 必须是数组",
+            )
+        for i, p in enumerate(body.config_points):
+            if not isinstance(p, dict):
+                return RegisteredModelValidationLog(
+                    checked_at=datetime.utcnow(),
+                    ok=False,
+                    http_status=None,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    message=f"config_points[{i}] 不是对象",
+                )
+            label = p.get("label")
+            if not isinstance(label, str) or not label.strip():
+                return RegisteredModelValidationLog(
+                    checked_at=datetime.utcnow(),
+                    ok=False,
+                    http_status=None,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    message=f"config_points[{i}].label 缺失或为空",
+                )
+        checks.append(f"审核点结构合规：{len(body.config_points)} 项")
+
+    # 4. (modality, small_category) 模态校验
+    try:
+        m = _validate_modality(body.modality)
+    except HTTPException:
+        return RegisteredModelValidationLog(
+            checked_at=datetime.utcnow(),
+            ok=False,
+            http_status=None,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            message=f"非法模态: {body.modality}",
+        )
+    try:
+        s = _validate_small_category(body.small_category)
+    except HTTPException:
+        return RegisteredModelValidationLog(
+            checked_at=datetime.utcnow(),
+            ok=False,
+            http_status=None,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            message=f"非法审核场景: {body.small_category}",
+        )
+    checks.append(f"模态/场景：{m} / {s}")
+
+    # 5. 同组合模型数量（不阻断，仅统计）
+    stmt = select(func.count()).select_from(RegisteredModel).where(
+        RegisteredModel.is_deleted.is_(False),
+        RegisteredModel.kind == RegisteredModelKind.SMALL.value,
+        RegisteredModel.modality == m,
+        RegisteredModel.small_category == s,
+    )
+    same_combo_count = await db.scalar(stmt) or 0
+    if same_combo_count > 0:
+        checks.append(f"同组合复用：{same_combo_count} 个模型")
+
+    return RegisteredModelValidationLog(
+        checked_at=datetime.utcnow(),
+        ok=True,
+        http_status=200,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        message="模型文件就绪 · " + " / ".join(checks),
     )
 
 

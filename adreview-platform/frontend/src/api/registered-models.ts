@@ -1,6 +1,7 @@
 import { api } from './client'
 import type {
   ArtifactUploadResponse,
+  AuditPointEntry,
   LargeModelCategory,
   Page,
   RegisteredModel,
@@ -28,6 +29,7 @@ export const registeredModelsApi = {
     kind?: 'large' | 'small'
     small_category?: string
     large_category?: LargeModelCategory
+    modality?: string
     provider_id?: number
     status?: string
     include_deleted?: boolean
@@ -79,6 +81,16 @@ export const registeredModelsApi = {
   }) {
     return api
       .post<RegisteredModelValidationLog>('/registered-models/precheck', params)
+      .then((r) => r.data)
+  },
+  precheckArtifact(body: {
+    storage_key: string
+    modality: string
+    small_category: string
+    config_points?: AuditPointEntry[] | null
+  }) {
+    return api
+      .post<RegisteredModelValidationLog>('/registered-models/precheck-artifact', body)
       .then((r) => r.data)
   },
   listVersions(id: number) {

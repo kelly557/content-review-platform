@@ -1,20 +1,32 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
+  Alert,
   Button,
   Form,
   Input,
   Select,
+  Skeleton,
   Space,
   Tag,
   Upload,
   App,
 } from 'antd'
 import type { UploadRequestOption } from 'rc-upload/lib/interface'
-import { DeleteOutlined, FileOutlined, UploadOutlined } from '@ant-design/icons'
+import {
+  ApiOutlined,
+  DeleteOutlined,
+  FileOutlined,
+  UploadOutlined,
+} from '@ant-design/icons'
+import CodeMirror from '@uiw/react-codemirror'
+import { json } from '@codemirror/lang-json'
+import { EditorView } from '@codemirror/view'
 import { registeredModelsApi } from '@/api/registered-models'
 import type {
   ArtifactUploadResponse,
   AuditPointEntry,
+  RegisteredModelListItem,
   SmallModelCategory,
   SmallModelModality,
 } from '@/types/domain'
@@ -32,23 +44,18 @@ export interface SmallModelFormValues {
 }
 
 interface Props {
-  /** Form 实例，由父组件创建并传入 */
   form: ReturnType<typeof Form.useForm<SmallModelFormValues>>[0]
-  /** 上传中的 loading 状态（用于禁用按钮） */
   uploading?: boolean
   setUploading?: (b: boolean) => void
-  /** 初始 artifact（详情页"新版本"时带入上一版本文件信息） */
   initialArtifact?: ArtifactUploadResponse | null
-  /** 初始审核点（详情页"新版本"时带入当前版本的 points，初始化 JSON 编辑器） */
   initialPoints?: AuditPointEntry[] | null
 }
 
-/**
- * 小模型添加表单字段（不包含 Name/Kind Radio — 由父组件渲染）。
- * - 必填：模态、审核场景、模型名称、文件
- * - 可选：模型审核点配置、版本号、说明
- * - artifact 上传结果通过 form.setFieldValue('__artifact', meta) 存到表单
- */
+type HintState =
+  | { type: 'loading' }
+  | { type: 'info' | 'success' | 'warning' | 'error'; text: string }
+  | null
+
 export default function SmallModelFormFields({
   form,
   uploading,
@@ -68,6 +75,72 @@ export default function SmallModelFormFields({
   const [auditPoints, setAuditPoints] = useState<AuditPointEntry[] | null>(
     initialPoints ?? null,
   )
+
+  // 「检测模型」按钮状态
+  const [checking, setChecking] = useState(false)
+  const [checkResult, setCheckResult] = useState<{
+    ok: boolean
+    msg: string
+  } | null>(null)
+
+  // ─── 监听已选组合 + 审核点 ───
+  const watchedModality = Form.useWatch('modality', form) as
+    | SmallModelModality
+    | undefined
+  const watchedCategory = Form.useWatch('small_category', form) as
+    | SmallModelCategory
+    | undefined
+  const watchedPoints = Form.useWatch('__auditPoints', form) as
+    | AuditPointEntry[]
+    | undefined
+
+  // ─── 查询同组合已有模型 ───
+  const comboQuery = useQuery({
+    queryKey: [
+      'small-models',
+      'by-combo',
+      watchedModality,
+      watchedCategory,
+    ],
+    queryFn: () =>
+      registeredModelsApi.list({
+        kind: 'small',
+        modality: watchedModality,
+        small_category: watchedCategory,
+        size: 50,
+      }),
+    enabled: !!watchedModality && !!watchedCategory,
+    staleTime: 30_000,
+  })
+
+  // ─── 动态提示文案 ───
+  const hint: HintState = (() => {
+    if (!watchedModality || !watchedCategory) return null
+    if (comboQuery.isLoading) return { type: 'loading' }
+    if (comboQuery.isError)
+      return { type: 'info', text: '检查同组合模型失败，建议配置审核点' }
+    const items = (comboQuery.data?.items ?? []) as RegisteredModelListItem[]
+    if (items.length === 0)
+      return {
+        type: 'info',
+        text: '首次接入该模态+审核场景组合，请配置审核点',
+      }
+    const samePoints = items.find((m) =>
+      pointsEqual(
+        m.current_version_config?.points as AuditPointEntry[] | null | undefined,
+        watchedPoints,
+      ),
+    )
+    if (samePoints)
+      return {
+        type: 'success',
+        text: `该组合已有 ${items.length} 个模型复用，可不添加审核点配置`,
+      }
+    return {
+      type: 'warning',
+      text: '该模态+审核场景已有模型，检测到审核点存在差异，将作为新版本审核点',
+    }
+  })()
 
   const beforeUpload = (file: File) => {
     const MAX = 512 * 1024 * 1024
@@ -151,6 +224,38 @@ export default function SmallModelFormFields({
     }
     reader.readAsText(file)
     return false
+  }
+
+  const handleCheckArtifact = async () => {
+    const artifactVal = form.getFieldValue('__artifact') as
+      | ArtifactUploadResponse
+      | undefined
+    if (!artifactVal) {
+      message.error('请先上传模型文件')
+      return
+    }
+    if (!watchedModality || !watchedCategory) {
+      message.error('请先选择模态和审核场景')
+      return
+    }
+    setChecking(true)
+    setCheckResult(null)
+    try {
+      const r = await registeredModelsApi.precheckArtifact({
+        storage_key: artifactVal.storage_key,
+        modality: watchedModality,
+        small_category: watchedCategory,
+        config_points: watchedPoints ?? null,
+      })
+      setCheckResult({
+        ok: r.ok,
+        msg: `${r.ok ? '检测通过' : '检测失败'} · HTTP ${r.http_status ?? '-'} · ${r.latency_ms ?? '-'}ms`,
+      })
+    } catch {
+      setCheckResult({ ok: false, msg: '请求失败，请检查网络或服务端' })
+    } finally {
+      setChecking(false)
+    }
   }
 
   return (
@@ -265,6 +370,18 @@ export default function SmallModelFormFields({
         </Space>
       </Form.Item>
 
+      {hint && hint.type === 'loading' && (
+        <Skeleton.Input active size="small" block style={{ marginBottom: 12 }} />
+      )}
+      {hint && hint.type !== 'loading' && (
+        <Alert
+          type={hint.type}
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={hint.text}
+        />
+      )}
+
       <Form.Item
         label="模型审核点配置"
         tooltip='JSON 格式：{ "points": [{"label":"标签", "description":"说明"}] }'
@@ -280,13 +397,30 @@ export default function SmallModelFormFields({
             </Upload>
             <span style={{ fontSize: 12, color: '#64748B' }}>或直接编辑下方 JSON</span>
           </Space>
-          <Input.TextArea
-            rows={6}
-            value={auditJsonText}
-            onChange={(e) => handleJsonTextChange(e.target.value)}
-            placeholder='{"points": [{"label":"一号领导人","description":"检测文本中是否出现一号领导人姓名"},{"label":"敏感地名","description":"检测文本中是否提及敏感政治地点"}]}'
-            style={{ fontFamily: 'monospace', fontSize: 12 }}
-          />
+          <div
+            style={{
+              border: '1px solid #d9d9d9',
+              borderRadius: 6,
+              overflow: 'hidden',
+            }}
+          >
+            <CodeMirror
+              value={auditJsonText}
+              onChange={handleJsonTextChange}
+              placeholder='{"points": [{"label":"一号领导人","description":"检测文本中是否出现一号领导人姓名"}]}'
+              extensions={[json(), EditorView.lineWrapping]}
+              basicSetup={{
+                lineNumbers: true,
+                highlightActiveLine: true,
+                foldGutter: true,
+                autocompletion: true,
+                bracketMatching: true,
+              }}
+              height="180px"
+              theme="light"
+              style={{ fontSize: 12 }}
+            />
+          </div>
           {auditPoints && auditPoints.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {auditPoints.map((p, i) => (
@@ -309,7 +443,22 @@ export default function SmallModelFormFields({
         name="description"
         tooltip="用途 / 注意事项"
       >
-        <Input.TextArea rows={3} placeholder="如：用于文本涉政分类 / 部署在 GPU 节点" />
+        <Input.TextArea rows={3} placeholder="如：用于文本涉政分类" />
+      </Form.Item>
+
+      <Form.Item label="检测模型" tooltip="保存前校验模型文件、JSON 配置与模态一致性">
+        <Space>
+          <Button
+            icon={<ApiOutlined />}
+            loading={checking}
+            onClick={handleCheckArtifact}
+          >
+            检测模型
+          </Button>
+          {checkResult && (
+            <Tag color={checkResult.ok ? 'green' : 'red'}>{checkResult.msg}</Tag>
+          )}
+        </Space>
       </Form.Item>
 
       <Form.Item name="__artifact" hidden noStyle>
@@ -317,4 +466,19 @@ export default function SmallModelFormFields({
       </Form.Item>
     </>
   )
+}
+
+function pointsEqual(
+  a: AuditPointEntry[] | null | undefined,
+  b: AuditPointEntry[] | null | undefined,
+): boolean {
+  const norm = (v: AuditPointEntry[] | null | undefined) =>
+    (v ?? [])
+      .map((p) => ({ label: p.label.trim(), description: (p.description ?? '').trim() }))
+      .sort((x, y) =>
+        x.label === y.label ? x.description.localeCompare(y.description) : x.label.localeCompare(y.label),
+      )
+  const ja = JSON.stringify(norm(a))
+  const jb = JSON.stringify(norm(b))
+  return ja === jb
 }
