@@ -84,6 +84,19 @@ type FlatRow = {
   rowSpan: number
 }
 
+type GroupTitleRow = {
+  flatKey: string
+  catKey: string
+  catLabel: string
+  catCount: number
+}
+
+type UnionRow = FlatRow | GroupTitleRow
+
+function isGroupRow(row: UnionRow): row is GroupTitleRow {
+  return (row as GroupTitleRow).catKey !== undefined
+}
+
 export default function ModelListPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
@@ -284,6 +297,46 @@ export default function ModelListPage() {
 
   const visibleModality = smallGroups.find((g) => g.key === activeModality) ?? smallGroups[0]
 
+  const unionRows = useMemo<UnionRow[]>(() => {
+    if (!visibleModality) return []
+    const rows: UnionRow[] = []
+    for (const cat of visibleModality.categories) {
+      rows.push({
+        flatKey: `group-${cat.key}`,
+        catKey: cat.key,
+        catLabel: cat.label,
+        catCount: cat.count,
+      })
+      for (const m of cat.models) {
+        const span = Math.max(m.points.length, 1)
+        if (m.points.length === 0) {
+          rows.push({
+            flatKey: `${m.id}-empty`,
+            modelId: m.id,
+            modelName: m.name,
+            versionText: m.versionText,
+            updatedAt: m.updatedAt,
+            point: null,
+            rowSpan: 1,
+          })
+        } else {
+          m.points.forEach((p, i) => {
+            rows.push({
+              flatKey: `${m.id}-${i}`,
+              modelId: m.id,
+              modelName: m.name,
+              versionText: m.versionText,
+              updatedAt: m.updatedAt,
+              point: p,
+              rowSpan: i === 0 ? span : 0,
+            })
+          })
+        }
+      }
+    }
+    return rows
+  }, [visibleModality])
+
   useEffect(() => {
     if (!visibleModality || visibleModality.categories.length === 0) {
       setActiveAnchor(null)
@@ -316,57 +369,74 @@ export default function ModelListPage() {
     return () => observer.disconnect()
   }, [visibleModality])
 
-  const columns: ColumnsType<FlatRow> = [
+  const columns: ColumnsType<UnionRow> = [
     {
       title: '模型名称',
       key: 'name',
       width: '20%',
-      render: (_, row) => (
-        <span style={{ fontWeight: row.rowSpan > 0 ? 500 : 400 }}>{row.modelName}</span>
-      ),
-      onCell: (row) => ({ rowSpan: row.rowSpan }),
+      render: (_, row) =>
+        isGroupRow(row) ? (
+          <span style={{ fontWeight: 500 }}>{row.catLabel}（{row.catCount} 个模型）</span>
+        ) : (
+          <span style={{ fontWeight: row.rowSpan > 0 ? 500 : 400 }}>{row.modelName}</span>
+        ),
+      onCell: (row) => {
+        if (isGroupRow(row)) {
+          return { colSpan: 5, id: `cat-${row.catKey}` }
+        }
+        return { rowSpan: row.rowSpan }
+      },
     },
     {
       title: '版本号',
       key: 'version',
       width: '14%',
-      render: (_, row) => (
-        <Text type="secondary" style={{ fontSize: 12 }}>{row.versionText}</Text>
-      ),
-      onCell: (row) => ({ rowSpan: row.rowSpan }),
+      render: (_, row) =>
+        isGroupRow(row) ? null : (
+          <Text type="secondary" style={{ fontSize: 12 }}>{row.versionText}</Text>
+        ),
+      onCell: (row) => {
+        if (isGroupRow(row)) return { colSpan: 0 }
+        return { rowSpan: row.rowSpan }
+      },
     },
     {
       title: '更新时间',
       key: 'updatedAt',
       width: '16%',
       render: (_, row) =>
-        row.updatedAt ? (
+        isGroupRow(row) ? null : row.updatedAt ? (
           <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(row.updatedAt).format('YYYY-MM-DD HH:mm')}</Text>
         ) : (
           <Text type="secondary">-</Text>
         ),
-      onCell: (row) => ({ rowSpan: row.rowSpan }),
+      onCell: (row) => {
+        if (isGroupRow(row)) return { colSpan: 0 }
+        return { rowSpan: row.rowSpan }
+      },
     },
     {
       title: '审核点',
       key: 'point',
       width: '20%',
       render: (_, row) =>
-        row.point ? (
+        isGroupRow(row) ? null : row.point ? (
           <span style={{ color: '#020617' }}>{row.point.label}</span>
         ) : (
           <span style={{ color: '#94a3b8' }}>未配置审核点</span>
         ),
+      onCell: (row) => (isGroupRow(row) ? { colSpan: 0 } : {}),
     },
     {
       title: '审核说明',
       key: 'description',
       render: (_, row) =>
-        row.point?.description ? (
+        isGroupRow(row) ? null : row.point?.description ? (
           <span style={{ color: '#64748b', fontSize: 12 }}>{row.point.description}</span>
         ) : (
           <span style={{ color: '#cbd5e1', fontSize: 12 }}>—</span>
         ),
+      onCell: (row) => (isGroupRow(row) ? { colSpan: 0 } : {}),
     },
   ]
 
@@ -567,9 +637,13 @@ export default function ModelListPage() {
                             >
                               {visibleModality.label}（{visibleModality.count} 个模型）
                             </div>
-                            {visibleModality.categories.map((cat) => (
-                              <CategoryGroup key={cat.key} category={cat} columns={columns} />
-                            ))}
+                            <Table<UnionRow>
+                              rowKey="flatKey"
+                              size="small"
+                              pagination={false}
+                              columns={columns}
+                              dataSource={unionRows}
+                            />
                           </>
                         ) : (
                           <Empty
@@ -599,60 +673,6 @@ export default function ModelListPage() {
           void fetchProviders()
           void fetchList()
         }}
-      />
-    </div>
-  )
-}
-
-function CategoryGroup({
-  category,
-  columns,
-}: {
-  category: CategoryGroup
-  columns: ColumnsType<FlatRow>
-}) {
-  const flatRows = useMemo<FlatRow[]>(() => {
-    const rows: FlatRow[] = []
-    for (const m of category.models) {
-      const span = Math.max(m.points.length, 1)
-      if (m.points.length === 0) {
-        rows.push({
-          flatKey: `${m.id}-empty`,
-          modelId: m.id,
-          modelName: m.name,
-          versionText: m.versionText,
-          updatedAt: m.updatedAt,
-          point: null,
-          rowSpan: 1,
-        })
-      } else {
-        m.points.forEach((p, i) => {
-          rows.push({
-            flatKey: `${m.id}-${i}`,
-            modelId: m.id,
-            modelName: m.name,
-            versionText: m.versionText,
-            updatedAt: m.updatedAt,
-            point: p,
-            rowSpan: i === 0 ? span : 0,
-          })
-        })
-      }
-    }
-    return rows
-  }, [category])
-
-  return (
-    <div id={`cat-${category.key}`} style={{ marginBottom: 24 }}>
-      <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8, fontWeight: 500 }}>
-        {category.label}（{category.count} 个模型）
-      </div>
-      <Table<FlatRow>
-        rowKey="flatKey"
-        size="small"
-        pagination={false}
-        columns={columns}
-        dataSource={flatRows}
       />
     </div>
   )

@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
@@ -95,37 +94,55 @@ export default function SmallModelFormFields({
     | undefined
 
   // ─── 查询同组合已有模型 ───
-  const comboQuery = useQuery({
-    queryKey: [
-      'small-models',
-      'by-combo',
-      watchedModality,
-      watchedCategory,
-    ],
-    queryFn: () =>
-      registeredModelsApi.list({
+  const [comboItems, setComboItems] = useState<RegisteredModelListItem[]>([])
+  const [comboLoading, setComboLoading] = useState(false)
+  const [comboError, setComboError] = useState(false)
+  useEffect(() => {
+    if (!watchedModality || !watchedCategory) {
+      setComboItems([])
+      setComboLoading(false)
+      setComboError(false)
+      return
+    }
+    let cancelled = false
+    setComboLoading(true)
+    setComboError(false)
+    registeredModelsApi
+      .list({
         kind: 'small',
         modality: watchedModality,
         small_category: watchedCategory,
         size: 50,
-      }),
-    enabled: !!watchedModality && !!watchedCategory,
-    staleTime: 30_000,
-  })
+      })
+      .then((data) => {
+        if (cancelled) return
+        setComboItems((data?.items ?? []) as RegisteredModelListItem[])
+      })
+      .catch(() => {
+        if (cancelled) return
+        setComboError(true)
+        setComboItems([])
+      })
+      .finally(() => {
+        if (!cancelled) setComboLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [watchedModality, watchedCategory])
 
   // ─── 动态提示文案 ───
   const hint: HintState = (() => {
     if (!watchedModality || !watchedCategory) return null
-    if (comboQuery.isLoading) return { type: 'loading' }
-    if (comboQuery.isError)
+    if (comboLoading) return { type: 'loading' }
+    if (comboError)
       return { type: 'info', text: '检查同组合模型失败，建议配置审核点' }
-    const items = (comboQuery.data?.items ?? []) as RegisteredModelListItem[]
-    if (items.length === 0)
+    if (comboItems.length === 0)
       return {
         type: 'info',
         text: '首次接入该模态+审核场景组合，请配置审核点',
       }
-    const samePoints = items.find((m) =>
+    const samePoints = comboItems.find((m) =>
       pointsEqual(
         m.current_version_config?.points as AuditPointEntry[] | null | undefined,
         watchedPoints,
@@ -134,7 +151,7 @@ export default function SmallModelFormFields({
     if (samePoints)
       return {
         type: 'success',
-        text: `该组合已有 ${items.length} 个模型复用，可不添加审核点配置`,
+        text: `该组合已有 ${comboItems.length} 个模型复用，可不添加审核点配置`,
       }
     return {
       type: 'warning',
