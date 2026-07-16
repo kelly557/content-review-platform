@@ -46,6 +46,11 @@ class AuditItem(Base):
     )
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name_cn: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 审核项对应的小模型分类（与小模型 small_category 枚举对齐）。
+    # NULL = 该 item 不需要小模型（如专项/水印/引流）。
+    small_category: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True, index=True
+    )
     aliases: Mapped[list[Any]] = mapped_column(
         JSONB(astext_type=Text()),
         nullable=False,

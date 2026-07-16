@@ -394,60 +394,60 @@ async def _upsert_detection_rules(db: AsyncSession) -> None:
 # screenshot: `<item>_<sub>` (main) and `<item>_<sub>_lib` (custom).
 
 # Each tuple: (item_code, name_cn, aliases)
-DEFAULT_AUDIT_ITEMS: dict[str, dict[str, tuple[str, list[str]]]] = {
+DEFAULT_AUDIT_ITEMS: dict[str, dict[str, tuple[str, list[str], str | None]]] = {
     "ad_compliance_detection_pro": {
-        "pt_water_mark": ("水印", ["水印", "logo", "watermark"]),
-        "pt_qr_code":    ("二维码", ["二维码", "qrcode", "QR码", "小程序码"]),
-        "pt_drainage":   ("引流", ["引流", "联系方式", "兼职招聘", "办证", "投资理财"]),
+        "pt_water_mark": ("水印", ["水印", "logo", "watermark"], None),
+        "pt_qr_code":    ("二维码", ["二维码", "qrcode", "QR码", "小程序码"], None),
+        "pt_drainage":   ("引流", ["引流", "联系方式", "兼职招聘", "办证", "投资理财"], None),
     },
     "image_audit_pro": {
-        "img_politics":   ("涉政",   ["涉政", "政治敏感", "politics"]),
-        "img_porn":       ("涉黄",   ["涉黄", "色情", "porn", "低俗"]),
-        "img_violence":   ("涉暴",   ["涉暴", "暴力", "血腥", "violence"]),
-        "img_prohibited": ("违禁",   ["违禁", "毒品", "赌博", "prohibited"]),
-        "img_terrorism":  ("暴恐",   ["暴恐", "恐怖", "terrorism"]),
-        "img_ad":         ("广告",   ["广告", "advertisement"]),
-        "img_adlaw":      ("广告法", ["广告法", "极限用语", "adlaw"]),
-        "img_religion":   ("宗教",   ["宗教", "religion"]),
-        "img_special":    ("专项",   ["专项", "special"]),
+        "img_politics":   ("涉政",   ["涉政", "政治敏感", "politics"], "politics"),
+        "img_porn":       ("涉黄",   ["涉黄", "色情", "porn", "低俗"], "porn"),
+        "img_violence":   ("涉暴",   ["涉暴", "暴力", "血腥", "violence"], "terrorism"),
+        "img_prohibited": ("违禁",   ["违禁", "毒品", "赌博", "prohibited"], "illicit"),
+        "img_terrorism":  ("暴恐",   ["暴恐", "恐怖", "terrorism"], "terrorism"),
+        "img_ad":         ("广告",   ["广告", "advertisement"], "ad"),
+        "img_adlaw":      ("广告法", ["广告法", "极限用语", "adlaw"], "ad_law"),
+        "img_religion":   ("宗教",   ["宗教", "religion"], "religion"),
+        "img_special":    ("专项",   ["专项", "special"], None),
     },
     "text_audit_pro": {
-        "tx_politics":         ("涉政",       ["涉政", "政治敏感", "politics"]),
-        "tx_terrorism":        ("暴恐",       ["暴恐", "恐怖", "terrorism"]),
-        "tx_porn":             ("色情",       ["色情", "低俗", "porn"]),
-        "tx_advertising":      ("广告法",     ["广告法", "极限用语"]),
-        "tx_abuse":            ("辱骂",       ["辱骂", "谩骂", "abuse"]),
-        "tx_vulgar":           ("低俗",       ["低俗", "vulgar"]),
-        "tx_minor_protection": ("未成年保护", ["未成年", "minor"]),
-        "tx_values":           ("价值观",     ["价值观", "values"]),
-        "tx_illegal":          ("违法违规",   ["违法", "illegal"]),
-        "tx_privacy":          ("隐私信息",   ["隐私", "个人信息", "privacy"]),
-        "tx_promptattack":     ("prompt攻击", ["prompt", "jailbreak"]),
+        "tx_politics":         ("涉政",       ["涉政", "政治敏感", "politics"], "politics"),
+        "tx_terrorism":        ("暴恐",       ["暴恐", "恐怖", "terrorism"], "terrorism"),
+        "tx_porn":             ("色情",       ["色情", "低俗", "porn"], "porn"),
+        "tx_advertising":      ("广告法",     ["广告法", "极限用语"], "ad_law"),
+        "tx_abuse":            ("辱骂",       ["辱骂", "谩骂", "abuse"], "abuse"),
+        "tx_vulgar":           ("低俗",       ["低俗", "vulgar"], "unhealthy"),
+        "tx_minor_protection": ("未成年保护", ["未成年", "minor"], "unhealthy"),
+        "tx_values":           ("价值观",     ["价值观", "values"], "unhealthy"),
+        "tx_illegal":          ("违法违规",   ["违法", "illegal"], "illicit"),
+        "tx_privacy":          ("隐私信息",   ["隐私", "个人信息", "privacy"], "unhealthy"),
+        "tx_promptattack":     ("prompt攻击", ["prompt", "jailbreak"], "unhealthy"),
         # ---- 不良内容审核（聚合 1 个 item，7 个细分点作为 audit_point） ----
-        "bad":                  ("不良",              ["不良内容", "未成年不适", "偏见歧视", "不良价值观", "攻击辱骂", "低俗口头语", "封建迷信", "灌水", "spam"]),
+        "bad":                  ("不良",              ["不良内容", "未成年不适", "偏见歧视", "不良价值观", "攻击辱骂", "低俗口头语", "封建迷信", "灌水", "spam"], "unhealthy"),
     },
     "audio_audit_pro": {
-        "au_politics":      ("涉政",     ["涉政", "politics"]),
-        "au_porn":          ("色情",     ["色情", "porn"]),
-        "au_violence":      ("暴恐",     ["暴恐", "terrorism"]),
-        "au_adlaw":         ("广告法",   ["广告法", "adlaw"]),
-        "au_abuse":         ("辱骂",     ["辱骂", "abuse"]),
-        "au_minor":         ("未成年保护", ["未成年", "minor"]),
-        "au_illegal":       ("违法违规", ["违法", "illegal"]),
-        "au_voiceprint":    ("声纹检测", ["声纹", "voiceprint"]),
-        "au_audiopquality": ("音频质量", ["音频质量", "audio_quality"]),
+        "au_politics":      ("涉政",     ["涉政", "politics"], "politics"),
+        "au_porn":          ("色情",     ["色情", "porn"], "porn"),
+        "au_violence":      ("暴恐",     ["暴恐", "terrorism"], "terrorism"),
+        "au_adlaw":         ("广告法",   ["广告法", "adlaw"], "ad_law"),
+        "au_abuse":         ("辱骂",     ["辱骂", "abuse"], "abuse"),
+        "au_minor":         ("未成年保护", ["未成年", "minor"], "unhealthy"),
+        "au_illegal":       ("违法违规", ["违法", "illegal"], "illicit"),
+        "au_voiceprint":    ("声纹检测", ["声纹", "voiceprint"], None),
+        "au_audiopquality": ("音频质量", ["音频质量", "audio_quality"], None),
     },
     "document_audit_pro": {
-        "doc_image":     ("图片内容",   ["图片内容", "图片审核"]),
-        "doc_text":      ("文本内容",   ["文本内容", "文本审核"]),
-        "doc_sensitive": ("敏感信息",   ["敏感", "sensitive"]),
-        "doc_illegal":   ("违法违规",   ["违法", "illegal"]),
+        "doc_image":     ("图片内容",   ["图片内容", "图片审核"], "unhealthy"),
+        "doc_text":      ("文本内容",   ["文本内容", "文本审核"], "unhealthy"),
+        "doc_sensitive": ("敏感信息",   ["敏感", "sensitive"], "unhealthy"),
+        "doc_illegal":   ("违法违规",   ["违法", "illegal"], "illicit"),
     },
     "video_audit_pro": {
-        "vid_frame":     ("画面内容",   ["画面内容", "图片审核"]),
-        "vid_audio":     ("音轨内容",   ["音轨内容", "语音审核"]),
-        "vid_subtitle":  ("字幕内容",   ["字幕内容", "文本审核"]),
-        "vid_illegal":   ("违法违规",   ["违法", "illegal"]),
+        "vid_frame":     ("画面内容",   ["画面内容", "图片审核"], "unhealthy"),
+        "vid_audio":     ("音轨内容",   ["音轨内容", "语音审核"], "unhealthy"),
+        "vid_subtitle":  ("字幕内容",   ["字幕内容", "文本审核"], "unhealthy"),
+        "vid_illegal":   ("违法违规",   ["违法", "illegal"], "illicit"),
     },
 }
 
@@ -616,7 +616,7 @@ async def _upsert_audit_items(db: AsyncSession) -> int:
     """Upsert DEFAULT_AUDIT_ITEMS into audit_items. Idempotent."""
     created = 0
     for package_code, items in DEFAULT_AUDIT_ITEMS.items():
-        for item_code, (name_cn, aliases) in items.items():
+        for item_code, (name_cn, aliases, small_category) in items.items():
             description = DEFAULT_ITEM_DESCRIPTIONS.get((package_code, item_code))
             existing = await db.execute(
                 select(AuditItem).where(
@@ -630,6 +630,7 @@ async def _upsert_audit_items(db: AsyncSession) -> int:
                 row.aliases = aliases
                 row.is_enabled = True
                 row.is_builtin = True
+                row.small_category = small_category
                 if description is not None:
                     row.description = description
             else:
@@ -639,6 +640,7 @@ async def _upsert_audit_items(db: AsyncSession) -> int:
                         code=item_code,
                         name_cn=name_cn,
                         aliases=aliases,
+                        small_category=small_category,
                         description=description,
                         sort_order=0,
                         is_enabled=True,

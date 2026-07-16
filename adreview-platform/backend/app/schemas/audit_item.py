@@ -43,6 +43,7 @@ class AuditItemOut(ORMBase):
     package_code: str
     code: str
     name_cn: str
+    small_category: Optional[str] = None
     aliases: list[Any] = Field(default_factory=list)
     description: Optional[str] = None
     sort_order: int = 0

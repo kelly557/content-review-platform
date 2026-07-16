@@ -1199,6 +1199,8 @@ export interface AuditItem {
   package_code: string
   code: string
   name_cn: string
+  /** 审核项对应的小模型分类（与小模型 small_category 枚举对齐）。NULL=无匹配小模型。 */
+  small_category: string | null
   aliases: string[]
   description: string | null
   sort_order: number
