@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
+  Button,
   Empty,
   Grid,
   InputNumber,
@@ -497,6 +498,10 @@ function PointsColumn({
       },
       render: (_, record) => {
         if (record.kind === 'section') {
+          const pm = getPointMap(record.item.id)
+          const points = pointsByItem[record.item.id] ?? []
+          const selected = points.filter((p) => pm[p.id] === true).length
+          const allSelected = points.length > 0 && selected === points.length
           return (
             <div
               style={{
@@ -528,6 +533,22 @@ function PointsColumn({
                 >
                   {record.pointCount}
                 </span>
+                <Button
+                  type="link"
+                  size="small"
+                  disabled={points.length === 0}
+                  style={{ padding: '0 6px', height: 22, fontSize: 12 }}
+                  onClick={() => {
+                    const nextAll = !allSelected
+                    const nextMap: PointMap = {}
+                    points.forEach((p) => {
+                      nextMap[p.id] = nextAll
+                    })
+                    onPointMapChange(record.item.id, nextMap)
+                  }}
+                >
+                  {allSelected ? '取消选中' : '全选'}
+                </Button>
               </div>
             </div>
           )
