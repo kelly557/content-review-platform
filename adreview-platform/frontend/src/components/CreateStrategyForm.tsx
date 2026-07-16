@@ -13,7 +13,7 @@ import {
 } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { strategiesApi } from '@/api/strategies'
 import {
   type CategoryKey,
@@ -69,14 +69,6 @@ interface Props {
   initial?: Strategy
   initialStep?: 0 | 1
   onCancel?: () => void
-}
-
-const MEDIA_TYPE_LABEL_MAP: Record<CategoryKey, string> = {
-  image: '图片',
-  text: '文本',
-  audio: '语音',
-  doc: '文档',
-  video: '视频',
 }
 
 const EMPTY_ENABLED: Record<CategoryKey, number[]> = {
@@ -700,20 +692,6 @@ export default function CreateStrategyForm({
         onOk={onFinishSave}
         footer={(_, { OkBtn, CancelBtn }) => (
           <Space wrap>
-            {saveResult.strategyId && (
-              <>
-                {(['image', 'text', 'audio', 'doc', 'video'] as CategoryKey[]).map((k) => (
-                  <Link
-                    key={k}
-                    to={`/rules/personal/${k}?strategy=${saveResult.strategyId}`}
-                  >
-                    <Button>
-                      按类型管理：{MEDIA_TYPE_LABEL_MAP[k]}
-                    </Button>
-                  </Link>
-                ))}
-              </>
-            )}
             <CancelBtn />
             <OkBtn />
           </Space>
@@ -721,11 +699,6 @@ export default function CreateStrategyForm({
       >
         <p>
           策略「{saveResult.name ?? ''}」已保存成功。你可以继续编辑策略内容，或点击完成返回策略列表。
-        </p>
-        <p>
-          <Text type="secondary">
-            可点击对应按钮前往该策略的检测规则配置，或按审核类型管理已选规则。
-          </Text>
         </p>
       </Modal>
     </div>
