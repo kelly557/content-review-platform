@@ -594,28 +594,6 @@ function PointsColumn({
       },
     },
     {
-      title: '审核说明',
-      dataIndex: 'description',
-      onCell: (record) =>
-        record.kind === 'point' ? {} : { colSpan: 0 },
-      render: (_, record) => {
-        if (record.kind !== 'point') return null
-        if (record.point.description) {
-          return (
-            <Text
-              style={{ fontSize: 12, color: '#475569', lineHeight: 1.6 }}
-              ellipsis={{ tooltip: record.point.description }}
-            >
-              {record.point.description}
-            </Text>
-          )
-        }
-        return (
-          <span style={{ color: '#CBD5E1', fontSize: 12 }}>—</span>
-        )
-      },
-    },
-    {
       title: '低风险分',
       dataIndex: 'lowThreshold',
       width: 220,
@@ -762,6 +740,29 @@ function PointsColumn({
         )
       },
     },
+    {
+      title: '审核说明',
+      dataIndex: 'description',
+      width: 240,
+      onCell: (record) =>
+        record.kind === 'point' ? {} : { colSpan: 0 },
+      render: (_, record) => {
+        if (record.kind !== 'point') return null
+        if (record.point.description) {
+          return (
+            <Text
+              style={{ fontSize: 12, color: '#475569', lineHeight: 1.6 }}
+              ellipsis={{ tooltip: record.point.description }}
+            >
+              {record.point.description}
+            </Text>
+          )
+        }
+        return (
+          <span style={{ color: '#CBD5E1', fontSize: 12 }}>—</span>
+        )
+      },
+    },
   ]
 
   return (
@@ -773,7 +774,7 @@ function PointsColumn({
         pagination={false}
         size="small"
         rowKey="key"
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1200 }}
         rowClassName={(record) => {
           if (record.kind === 'section') {
             if (highlightItemId != null && record.item.id === highlightItemId) {
