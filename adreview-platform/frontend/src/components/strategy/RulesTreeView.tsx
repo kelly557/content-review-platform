@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Alert,
   Empty,
   Grid,
   InputNumber,
@@ -369,6 +370,36 @@ function ItemGroup({
   )
 }
 
+/**
+ * 风险分区间一致性检查(2026-07-28 业务规则):
+ *   - 中风险分 max = 高风险分 min - 0.01 (abs 容差 1e-6)
+ *   - 中风险分 min ≤ 中风险分 max
+ *   - 高风险分 min ≤ 100.00 (上限固定)
+ *
+ * 返回 null = 一致;否则返回警告文案。
+ */
+function checkThresholdConsistency(
+  medMin: number | null | undefined,
+  medMax: number | null | undefined,
+  highMin: number | null | undefined,
+  highMax: number | null | undefined,
+): string | null {
+  const mm = typeof medMin === 'number' ? medMin : null
+  const mM = typeof medMax === 'number' ? medMax : null
+  const hm = typeof highMin === 'number' ? highMin : null
+  const hM = typeof highMax === 'number' ? highMax : null
+  if (mM != null && hm != null && Math.abs(mM + 0.01 - hm) > 1e-6) {
+    return `中风险分上限 (${mM.toFixed(2)}) 与高风险分下限 (${hm.toFixed(2)}) 相差 ${(mM + 0.01 - hm).toFixed(2)},需调整使差值 = 0.01`
+  }
+  if (mm != null && mM != null && mm >= mM) {
+    return `中风险分下限 (${mm.toFixed(2)}) ≥ 上限 (${mM.toFixed(2)})`
+  }
+  if (hm != null && hM != null && hm >= hM) {
+    return `高风险分下限 (${hm.toFixed(2)}) ≥ 上限 (${hM.toFixed(2)})`
+  }
+  return null
+}
+
 type PointRowRecord = {
   kind: 'point'
   key: string
@@ -569,21 +600,40 @@ function PointsColumn({
         const mediumMaxConstraint =
           typeof highMin === 'number' ? Math.max(0, highMin - 0.01) : 99.99
         return (
-          <Space size={4} align="center">
-            <RangeMinOnlyInput
-              disabled={record.editDisabled}
-              minValue={medMin}
-              maxDisplay={mediumMaxDisplay}
-              maxConstraint={mediumMaxConstraint}
-              onMinChange={(v) =>
-                onPointOverrideChange(record.item.id, record.point.id, {
-                  medium_threshold_min: v,
-                  medium_threshold_max: undefined,
-                  medium_threshold: undefined,
-                })
-              }
-              label="中风险分"
-            />
+          <Space size={4} direction="vertical" align="start" style={{ width: '100%' }}>
+            <Space size={4} align="center">
+              <RangeMinOnlyInput
+                disabled={record.editDisabled}
+                minValue={medMin}
+                maxDisplay={mediumMaxDisplay}
+                maxConstraint={mediumMaxConstraint}
+                onMinChange={(v) =>
+                  onPointOverrideChange(record.item.id, record.point.id, {
+                    medium_threshold_min: v,
+                    medium_threshold_max: undefined,
+                    medium_threshold: undefined,
+                  })
+                }
+                label="中风险分"
+              />
+            </Space>
+            {(() => {
+              const warning = checkThresholdConsistency(
+                medMin,
+                record.override.medium_threshold_max,
+                highMin,
+                record.override.high_threshold_max,
+              )
+              if (!warning) return null
+              return (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={warning}
+                  style={{ padding: '2px 8px', fontSize: 11 }}
+                />
+              )
+            })()}
           </Space>
         )
       },
@@ -597,24 +647,46 @@ function PointsColumn({
         record.kind === 'point' ? {} : { colSpan: 0 },
       render: (_, record) => {
         if (record.kind !== 'point') return null
+        const medMin =
+          record.override.medium_threshold_min ??
+          (record.override.medium_threshold ?? record.point.medium_threshold)
         const highMin =
           record.override.high_threshold_min ?? record.point.high_threshold
         return (
-          <Space size={4} align="center">
-            <RangeMinOnlyInput
-              disabled={record.editDisabled}
-              minValue={highMin}
-              maxDisplay={100}
-              maxConstraint={100}
-              onMinChange={(v) =>
-                onPointOverrideChange(record.item.id, record.point.id, {
-                  high_threshold_min: v,
-                  high_threshold_max: undefined,
-                  high_threshold: undefined,
-                })
-              }
-              label="高风险分"
-            />
+          <Space size={4} direction="vertical" align="start" style={{ width: '100%' }}>
+            <Space size={4} align="center">
+              <RangeMinOnlyInput
+                disabled={record.editDisabled}
+                minValue={highMin}
+                maxDisplay={100}
+                maxConstraint={100}
+                onMinChange={(v) =>
+                  onPointOverrideChange(record.item.id, record.point.id, {
+                    high_threshold_min: v,
+                    high_threshold_max: undefined,
+                    high_threshold: undefined,
+                  })
+                }
+                label="高风险分"
+              />
+            </Space>
+            {(() => {
+              const warning = checkThresholdConsistency(
+                medMin,
+                record.override.medium_threshold_max,
+                highMin,
+                record.override.high_threshold_max,
+              )
+              if (!warning) return null
+              return (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={warning}
+                  style={{ padding: '2px 8px', fontSize: 11 }}
+                />
+              )
+            })()}
           </Space>
         )
       },
