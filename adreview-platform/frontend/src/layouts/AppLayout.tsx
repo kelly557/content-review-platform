@@ -88,8 +88,8 @@ const NAV_SECTIONS: Array<{
         roles: ['admin', 'mlr', 'superadmin', 'root_admin'],
         children: [
           { key: 'strategies-list', path: '/strategies', label: '策略管理' },
-          { key: 'strategies-image-rules', path: '/rules/audit/image', label: '图片审核规则' },
-          { key: 'strategies-text-rules', path: '/rules/audit/text', label: '文本审核规则' },
+          { key: 'strategies-image-rules', path: '/rules/audit/image', label: '图片规则管理' },
+          { key: 'strategies-text-rules', path: '/rules/audit/text', label: '文本规则管理' },
         ],
       },
       {
@@ -100,11 +100,11 @@ const NAV_SECTIONS: Array<{
         icon: <DatabaseOutlined style={{ fontSize: ICON_SIZE }} />,
         roles: ['admin', 'mlr', 'superadmin', 'root_admin'],
         children: [
-          { key: 'strategies-words', path: '/resources/words', label: '词库' },
-          { key: 'strategies-models', path: '/resources/models', label: '模型库' },
-          { key: 'strategies-images', path: '/resources/images', label: '图片库', roles: ['root_admin'] },
-          { key: 'strategies-replies', path: '/resources/replies', label: '代答库' },
-          { key: 'strategies-knowledge', path: '/resources/knowledge', label: '知识库', roles: ['root_admin'] },
+          { key: 'strategies-words', path: '/resources/words', label: '词库管理' },
+          { key: 'strategies-models', path: '/resources/models', label: '模型库管理' },
+          { key: 'strategies-images', path: '/resources/images', label: '图片库管理', roles: ['root_admin'] },
+          { key: 'strategies-replies', path: '/resources/replies', label: '代答库管理' },
+          { key: 'strategies-knowledge', path: '/resources/knowledge', label: '知识库管理', roles: ['root_admin'] },
         ],
       },
       { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },

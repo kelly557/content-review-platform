@@ -1,8 +1,8 @@
 /**
  * 统一图片/文本审核规则 Tab 容器。
  *
- * - 一个页面承载两个 Tab：系统规则 / 自定义 Agent
- * - 超级管理员可见两个 Tab；其他用户仅可见「自定义 Agent」Tab
+ * - 一个页面承载两个 Tab：系统规则 / 自定义规则 Agent
+ * - 超级管理员可见两个 Tab；其他用户仅可见「自定义规则 Agent」Tab
  * - 仅一个 Tab 时不渲染 Tab 头部
  * - 当前 Tab 通过 ?tab= 同步到 URL，便于刷新/分享
  *
@@ -102,7 +102,7 @@ export default function AuditRulesPage() {
     () =>
       allowed.map((k) => ({
         key: k,
-        label: k === 'system' ? '系统规则' : '自定义 Agent',
+        label: k === 'system' ? '系统规则' : '自定义规则 Agent',
       })),
     [allowed],
   )
@@ -116,7 +116,7 @@ export default function AuditRulesPage() {
         items={[
           { title: <Link to="/strategies">策略中心</Link> },
           { title: '审核策略' },
-          { title: `${mediaLabel}审核规则` },
+          { title: mediaLabel },
         ]}
       />
       <div
@@ -129,10 +129,10 @@ export default function AuditRulesPage() {
       >
         <Space>
           <Title level={4} style={{ margin: 0 }}>
-            {mediaLabel}审核规则
+            {mediaLabel}
           </Title>
           <Tag color={activeTab === 'system' ? 'blue' : 'green'}>
-            {activeTab === 'system' ? '系统规则' : '自定义 Agent'}
+            {activeTab === 'system' ? '系统规则' : '自定义规则 Agent'}
           </Tag>
         </Space>
         {activeTab === 'agent' && (
