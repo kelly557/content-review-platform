@@ -32,6 +32,7 @@ import dayjs from 'dayjs'
 import { registeredModelsApi } from '@/api/registered-models'
 import type {
   ArtifactUploadResponse,
+  AuditPointEntry,
   LargeModelCategory,
   RegisteredModel,
   RegisteredModelRegistrationMethod,
@@ -71,7 +72,7 @@ interface NewVersionValues {
   description?: string
   version?: string
   __artifact?: ArtifactUploadResponse
-  __auditPoints?: string[]
+  __auditPoints?: AuditPointEntry[]
   // 大模型分支（endpoint / credential 继承 Provider；此处可调 model_name / 分类）
   version_label?: string
   notes?: string
@@ -83,7 +84,7 @@ export default function ModelDetailPage() {
   const modelId = Number(id)
   const { message, modal } = App.useApp()
   const { user } = useAuthStore()
-  const canWrite = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'root_admin'
+  const canWrite = user?.role === 'superadmin' || user?.role === 'root_admin'
 
   const [model, setModel] = useState<RegisteredModel | null>(null)
   const [versions, setVersions] = useState<RegisteredModelVersion[]>([])
@@ -194,7 +195,7 @@ export default function ModelDetailPage() {
     const v = await createForm.validateFields().catch(() => null)
     if (!v) return
     if (model.kind === 'small') {
-      const newPoints = (v as NewVersionValues & { __auditPoints?: string[] }).__auditPoints ?? null
+      const newPoints = (v as NewVersionValues & { __auditPoints?: AuditPointEntry[] }).__auditPoints ?? null
       const oldPoints = auditPoints ?? null
       const hasDiff = computePointsDiff(oldPoints, newPoints)
       if (hasDiff) {
@@ -306,9 +307,28 @@ export default function ModelDetailPage() {
           sha256: model.current_version.artifact_sha256 ?? '',
         }
       : null
-  const auditPoints = isSmall
-    ? (model.current_version?.config as { points?: string[] } | undefined)?.points
-    : undefined
+  const auditPoints: AuditPointEntry[] | undefined = (() => {
+    if (!isSmall) return undefined
+    const raw = model.current_version?.config as { points?: unknown[] } | undefined
+    if (!raw || !Array.isArray(raw.points)) return undefined
+    const out: AuditPointEntry[] = []
+    for (const p of raw.points) {
+      if (typeof p === 'string') {
+        out.push({ label: p, description: '' })
+      } else if (
+        p != null &&
+        typeof p === 'object' &&
+        typeof (p as { label?: unknown }).label === 'string'
+      ) {
+        const obj = p as { label: string; description?: unknown }
+        out.push({
+          label: obj.label,
+          description: typeof obj.description === 'string' ? obj.description : '',
+        })
+      }
+    }
+    return out
+  })()
 
   return (
     <div style={{ width: '100%' }}>
@@ -461,9 +481,16 @@ export default function ModelDetailPage() {
                   <div style={{ marginTop: 16 }}>
                     <Text strong>可审核标签</Text>
                     {auditPoints && auditPoints.length > 0 ? (
-                      <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {auditPoints.map((p, i) => (
-                          <Tag key={i}>{p}</Tag>
+                          <div key={i}>
+                            <Tag>{p.label}</Tag>
+                            {p.description && (
+                              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                                {p.description}
+                              </Text>
+                            )}
+                          </div>
                         ))}
                       </div>
                     ) : (
@@ -755,17 +782,17 @@ export default function ModelDetailPage() {
 }
 
 function computePointsDiff(
-  oldPoints: string[] | null,
-  newPoints: string[] | null,
+  oldPoints: AuditPointEntry[] | null,
+  newPoints: AuditPointEntry[] | null,
 ): boolean {
   const o = oldPoints ?? []
   const n = newPoints ?? []
   if (o.length !== n.length) return true
-  const oSet = new Set(o)
-  const nSet = new Set(n)
-  if (o.length !== new Set(o).size || n.length !== new Set(n).size) return true
-  for (const p of oSet) if (!nSet.has(p)) return true
-  for (const p of nSet) if (!oSet.has(p)) return true
+  const oLabels = new Set(o.map((p) => p.label))
+  const nLabels = new Set(n.map((p) => p.label))
+  if (o.length !== new Set(oLabels).size || n.length !== new Set(nLabels).size) return true
+  for (const label of oLabels) if (!nLabels.has(label)) return true
+  for (const label of nLabels) if (!oLabels.has(label)) return true
   return false
 }
 
@@ -773,16 +800,16 @@ function PointsDiffView({
   oldPoints,
   newPoints,
 }: {
-  oldPoints: string[] | null
-  newPoints: string[] | null
+  oldPoints: AuditPointEntry[] | null
+  newPoints: AuditPointEntry[] | null
 }) {
   const o = oldPoints ?? []
   const n = newPoints ?? []
-  const oSet = new Set(o)
-  const nSet = new Set(n)
-  const added = n.filter((p) => !oSet.has(p))
-  const removed = o.filter((p) => !nSet.has(p))
-  const kept = n.filter((p) => oSet.has(p))
+  const oLabels = new Set(o.map((p) => p.label))
+  const nLabels = new Set(n.map((p) => p.label))
+  const added = n.filter((p) => !oLabels.has(p.label))
+  const removed = o.filter((p) => !nLabels.has(p.label))
+  const kept = n.filter((p) => oLabels.has(p.label))
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ marginBottom: 8 }}>
@@ -791,7 +818,12 @@ function PointsDiffView({
           {removed.length === 0 ? (
             <Text type="secondary" style={{ fontSize: 12 }}>无</Text>
           ) : removed.map((p, i) => (
-            <Tag key={i} color="red" style={{ marginBottom: 4 }}>{p}</Tag>
+            <div key={i} style={{ marginBottom: 4 }}>
+              <Tag color="red">{p.label}</Tag>
+              {p.description && (
+                <Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>{p.description}</Text>
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -801,7 +833,12 @@ function PointsDiffView({
           {added.length === 0 ? (
             <Text type="secondary" style={{ fontSize: 12 }}>无</Text>
           ) : added.map((p, i) => (
-            <Tag key={i} color="green" style={{ marginBottom: 4 }}>{p}</Tag>
+            <div key={i} style={{ marginBottom: 4 }}>
+              <Tag color="green">{p.label}</Tag>
+              {p.description && (
+                <Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>{p.description}</Text>
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -811,7 +848,12 @@ function PointsDiffView({
           {kept.length === 0 ? (
             <Text type="secondary" style={{ fontSize: 12 }}>无</Text>
           ) : kept.map((p, i) => (
-            <Tag key={i} style={{ marginBottom: 4 }}>{p}</Tag>
+            <div key={i} style={{ marginBottom: 4 }}>
+              <Tag>{p.label}</Tag>
+              {p.description && (
+                <Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>{p.description}</Text>
+              )}
+            </div>
           ))}
         </div>
       </div>

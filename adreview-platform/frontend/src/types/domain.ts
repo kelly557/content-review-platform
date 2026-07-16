@@ -16,6 +16,11 @@ export interface Page<T> {
   size: number
 }
 
+export interface AuditPointEntry {
+  label: string
+  description?: string
+}
+
 export interface MaterialVersion {
   id: number
   public_id?: string

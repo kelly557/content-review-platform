@@ -39,7 +39,7 @@ from app.models.registered_model import (
     ResourceCredential,
     SmallModelCategory,
 )
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.common import Page
 from app.schemas.registered_model import (
     ArtifactUploadResponse,
@@ -137,6 +137,18 @@ def _validate_kind(s: str) -> str:
             f"非法 kind: {s}（期望 large / small）",
         )
     return s
+
+
+def _require_super_admin_for_small(kind: str, user: User) -> None:
+    """小模型（kind=small）只能由超级管理员（superadmin / root_admin）配置。"""
+    if kind == RegisteredModelKind.SMALL.value and user.role not in (
+        UserRole.SUPERADMIN.value,
+        UserRole.ROOT_ADMIN.value,
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "小模型仅超级管理员（superadmin / root_admin）可配置",
+        )
 
 
 def _validate_small_category(s: str | None) -> str | None:
@@ -502,6 +514,7 @@ async def create_model(
     user=Depends(require_writer),
 ) -> RegisteredModelOut:
     kind = _validate_kind(body.kind or RegisteredModelKind.LARGE.value)
+    _require_super_admin_for_small(kind, user)
     small_category = _validate_small_category(body.small_category)
     modality = _validate_modality(body.modality)
     large_category = _validate_large_category(body.large_category)
@@ -851,6 +864,7 @@ async def update_model(
     )
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    _require_super_admin_for_small(model.kind, user)
 
     data = body.model_dump(exclude_unset=True)
     if "small_category" in data and data["small_category"] is not None:
@@ -910,6 +924,7 @@ async def delete_model(
     model = await db.scalar(select(RegisteredModel).where(RegisteredModel.id == model_id))
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    _require_super_admin_for_small(model.kind, user)
     model.is_deleted = True
     model.deleted_at = datetime.utcnow()
     model.updated_by_id = user.id
@@ -967,6 +982,7 @@ async def create_version(
     )
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    _require_super_admin_for_small(model.kind, user)
 
     method = model.registration_method
     model_name = (body.model_name or model.model_name or "").strip()
@@ -1129,6 +1145,7 @@ async def activate_version(
     model = await db.scalar(select(RegisteredModel).where(RegisteredModel.id == model_id))
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    _require_super_admin_for_small(model.kind, user)
     ver = await db.scalar(
         select(RegisteredModelVersion).where(
             and_(
@@ -1164,6 +1181,11 @@ async def precheck_model(
     user=Depends(require_writer),
 ) -> RegisteredModelValidationLog:
     """保存前测试模型连通性，复用 _validate_endpoint 纯函数。"""
+    if user.role not in (UserRole.SUPERADMIN.value, UserRole.ROOT_ADMIN.value):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "模型连通性测试仅超级管理员（superadmin / root_admin）可操作",
+        )
     return await _validate_endpoint(
         body.endpoint_url, body.protocol, body.model_name, body.api_key, body.timeout
     )
@@ -1186,6 +1208,11 @@ async def upload_artifact(
     - 当前实现是本地存储（backend/storage/models/...）；后续如要换 S3 只需改 model_artifact_storage.save_artifact
     - 文件大小上限取 settings.storage_max_upload_mb（默认 512MB）
     """
+    if user.role not in (UserRole.SUPERADMIN.value, UserRole.ROOT_ADMIN.value):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "小模型文件仅超级管理员（superadmin / root_admin）可上传",
+        )
     if not file.filename:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "filename 必填")
     try:
@@ -1272,6 +1299,7 @@ async def validate_model(
     )
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    _require_super_admin_for_small(model.kind, user)
     if model.registration_method == RegisteredModelRegistrationMethod.UPLOADED_FILE.value:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -1381,6 +1409,7 @@ async def _set_status(
     )
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    _require_super_admin_for_small(model.kind, user)
     prev = model.status
     model.status = new_status
     model.updated_by_id = user.id

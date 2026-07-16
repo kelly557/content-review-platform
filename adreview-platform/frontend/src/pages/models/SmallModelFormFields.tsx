@@ -14,6 +14,7 @@ import { DeleteOutlined, FileOutlined, UploadOutlined } from '@ant-design/icons'
 import { registeredModelsApi } from '@/api/registered-models'
 import type {
   ArtifactUploadResponse,
+  AuditPointEntry,
   SmallModelCategory,
   SmallModelModality,
 } from '@/types/domain'
@@ -27,7 +28,7 @@ export interface SmallModelFormValues {
   description?: string
   version?: string
   __artifact?: ArtifactUploadResponse
-  __auditPoints?: string[]
+  __auditPoints?: AuditPointEntry[]
 }
 
 interface Props {
@@ -39,7 +40,7 @@ interface Props {
   /** 初始 artifact（详情页"新版本"时带入上一版本文件信息） */
   initialArtifact?: ArtifactUploadResponse | null
   /** 初始审核点（详情页"新版本"时带入当前版本的 points，初始化 JSON 编辑器） */
-  initialPoints?: string[] | null
+  initialPoints?: AuditPointEntry[] | null
 }
 
 /**
@@ -64,7 +65,7 @@ export default function SmallModelFormFields({
       ? JSON.stringify({ points: initialPoints }, null, 2)
       : ''
   const [auditJsonText, setAuditJsonText] = useState(initialJsonText)
-  const [auditPoints, setAuditPoints] = useState<string[] | null>(
+  const [auditPoints, setAuditPoints] = useState<AuditPointEntry[] | null>(
     initialPoints ?? null,
   )
 
@@ -99,14 +100,32 @@ export default function SmallModelFormFields({
     form.setFieldValue('__artifact' as keyof SmallModelFormValues, undefined)
   }
 
-  const parseJson = (text: string): string[] | null => {
+  const parseJson = (text: string): AuditPointEntry[] | null => {
     try {
       const data = JSON.parse(text)
-      if (Array.isArray(data.points) && data.points.every((p: unknown) => typeof p === 'string')) {
-        return data.points
+      if (!Array.isArray(data.points)) return null
+      const out: AuditPointEntry[] = []
+      for (const p of data.points) {
+        if (typeof p === 'string') {
+          out.push({ label: p, description: '' })
+        } else if (
+          p != null &&
+          typeof p === 'object' &&
+          typeof (p as { label?: unknown }).label === 'string'
+        ) {
+          const obj = p as { label: string; description?: unknown }
+          out.push({
+            label: obj.label,
+            description: typeof obj.description === 'string' ? obj.description : '',
+          })
+        } else {
+          return null
+        }
       }
-    } catch {}
-    return null
+      return out
+    } catch {
+      return null
+    }
   }
 
   const handleJsonTextChange = (text: string) => {
@@ -127,7 +146,7 @@ export default function SmallModelFormFields({
         form.setFieldValue('__auditPoints' as keyof SmallModelFormValues, points)
         message.success(`已加载 ${points.length} 个审核标签`)
       } else {
-        message.error('JSON 格式错误：需要 { "points": ["标签1", "标签2", ...] }')
+        message.error('JSON 格式错误：需要 { "points": [{ "label": "标签", "description": "说明" }] }')
       }
     }
     reader.readAsText(file)
@@ -248,7 +267,7 @@ export default function SmallModelFormFields({
 
       <Form.Item
         label="模型审核点配置"
-        tooltip='JSON 格式：{ "points": ["标签1", "标签2", ...] }'
+        tooltip='JSON 格式：{ "points": [{"label":"标签", "description":"说明"}] }'
       >
         <Space direction="vertical" style={{ width: '100%' }}>
           <Space>
@@ -265,13 +284,20 @@ export default function SmallModelFormFields({
             rows={6}
             value={auditJsonText}
             onChange={(e) => handleJsonTextChange(e.target.value)}
-            placeholder='{"points": ["一号领导人", "敏感地名"]}'
+            placeholder='{"points": [{"label":"一号领导人","description":"检测文本中是否出现一号领导人姓名"},{"label":"敏感地名","description":"检测文本中是否提及敏感政治地点"}]}'
             style={{ fontFamily: 'monospace', fontSize: 12 }}
           />
           {auditPoints && auditPoints.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {auditPoints.map((p, i) => (
-                <Tag key={i}>{p}</Tag>
+                <div key={i}>
+                  <Tag>{p.label}</Tag>
+                  {p.description && (
+                    <span style={{ fontSize: 12, color: '#64748b', marginLeft: 8 }}>
+                      {p.description}
+                    </span>
+                  )}
+                </div>
               ))}
             </div>
           )}

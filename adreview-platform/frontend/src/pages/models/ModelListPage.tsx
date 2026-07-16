@@ -23,6 +23,7 @@ import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { registeredModelsApi, providersApi } from '@/api/registered-models'
 import type {
+  AuditPointEntry,
   LargeModelCategory,
   RegisteredModelListItem,
   RegisteredModelStatus,
@@ -47,7 +48,7 @@ type ModelRow = {
   name: string
   versionText: string
   updatedAt: string | null
-  points: string[]
+  points: AuditPointEntry[]
 }
 
 type CategoryGroup = {
@@ -79,14 +80,14 @@ type FlatRow = {
   modelName: string
   versionText: string
   updatedAt: string | null
-  point: string
+  point: AuditPointEntry | null
   rowSpan: number
 }
 
 export default function ModelListPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
-  const canWrite = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'root_admin'
+  const canWrite = user?.role === 'superadmin' || user?.role === 'root_admin'
 
   const [activeTab, setActiveTab] = useState<ModelTab>('large')
   const [q, setQ] = useState('')
@@ -217,9 +218,29 @@ export default function ModelListPage() {
           ? `v${m.current_version_no} · ${m.current_version_label}`
           : `v${m.current_version_no}`
         : '-'
-      const points = m.current_version_config
-        ? (m.current_version_config as { points?: string[] }).points ?? []
-        : []
+      const points: AuditPointEntry[] = (() => {
+        const raw = m.current_version_config
+        if (!raw) return []
+        const rawPoints = (raw as { points?: unknown[] }).points
+        if (!Array.isArray(rawPoints)) return []
+        const out: AuditPointEntry[] = []
+        for (const p of rawPoints) {
+          if (typeof p === 'string') {
+            out.push({ label: p, description: '' })
+          } else if (
+            p != null &&
+            typeof p === 'object' &&
+            typeof (p as { label?: unknown }).label === 'string'
+          ) {
+            const obj = p as { label: string; description?: unknown }
+            out.push({
+              label: obj.label,
+              description: typeof obj.description === 'string' ? obj.description : '',
+            })
+          }
+        }
+        return out
+      })()
       const row: ModelRow = {
         id: m.id,
         name: m.name,
@@ -329,11 +350,23 @@ export default function ModelListPage() {
     {
       title: '审核点',
       key: 'point',
-      render: (_, row) => (
-        <span style={{ color: row.point === '未配置审核点' ? '#94a3b8' : '#020617' }}>
-          {row.point}
-        </span>
-      ),
+      width: '20%',
+      render: (_, row) =>
+        row.point ? (
+          <span style={{ color: '#020617' }}>{row.point.label}</span>
+        ) : (
+          <span style={{ color: '#94a3b8' }}>未配置审核点</span>
+        ),
+    },
+    {
+      title: '审核说明',
+      key: 'description',
+      render: (_, row) =>
+        row.point?.description ? (
+          <span style={{ color: '#64748b', fontSize: 12 }}>{row.point.description}</span>
+        ) : (
+          <span style={{ color: '#cbd5e1', fontSize: 12 }}>—</span>
+        ),
     },
   ]
 
@@ -589,7 +622,7 @@ function CategoryGroup({
           modelName: m.name,
           versionText: m.versionText,
           updatedAt: m.updatedAt,
-          point: '未配置审核点',
+          point: null,
           rowSpan: 1,
         })
       } else {
