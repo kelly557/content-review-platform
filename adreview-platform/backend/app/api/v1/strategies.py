@@ -429,6 +429,8 @@ async def _load_enabled_points(
                 is_enabled=r.is_enabled,
                 medium_threshold=patch.get("medium_threshold"),
                 high_threshold=patch.get("high_threshold"),
+                low_threshold_min=patch.get("low_threshold_min"),
+                low_threshold_max=patch.get("low_threshold_max"),
                 medium_threshold_min=patch.get("medium_threshold_min"),
                 medium_threshold_max=patch.get("medium_threshold_max"),
                 high_threshold_min=patch.get("high_threshold_min"),
@@ -509,13 +511,17 @@ async def _replace_enabled_points(
                 )
             )
 
-        # 收集 override（中/高风险分）到 strategies.definition
+        # 收集 override（低/中/高风险分）到 strategies.definition
         # 「关联自定义图库词库」已上移至审核项；策略级不再存 linked_library_ids override。
         patch: dict[str, Any] = {}
         if ref.medium_threshold is not None:
             patch["medium_threshold"] = ref.medium_threshold
         if ref.high_threshold is not None:
             patch["high_threshold"] = ref.high_threshold
+        if ref.low_threshold_min is not None:
+            patch["low_threshold_min"] = ref.low_threshold_min
+        if ref.low_threshold_max is not None:
+            patch["low_threshold_max"] = ref.low_threshold_max
         if ref.medium_threshold_min is not None:
             patch["medium_threshold_min"] = ref.medium_threshold_min
         if ref.medium_threshold_max is not None:

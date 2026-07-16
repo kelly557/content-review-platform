@@ -74,12 +74,14 @@ class AuditPointCreate(BaseModel):
     label_cn: str = Field(min_length=1, max_length=64)
     description: Optional[str] = None
     medium_threshold: float = Field(default=60.0, ge=50.0, le=100.0)
-    high_threshold: float = Field(default=90.0, ge=50.0, le=100.0)
+    high_threshold: float = Field(default=90.0, ge=0.0, le=100.0)
     # 区间形态：每个阈值拆成 [下限, 上限]。与单值并存；任一组出现即覆盖。
-    medium_threshold_min: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    medium_threshold_max: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    high_threshold_min: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    high_threshold_max: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+    low_threshold_min: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    low_threshold_max: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    medium_threshold_min: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    medium_threshold_max: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    high_threshold_min: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    high_threshold_max: Optional[float] = Field(default=None, ge=0.0, le=100.0)
     scope_text: Optional[str] = Field(default=None, max_length=255)
     risk_level: AuditPointRisk = AuditPointRisk.MEDIUM
     is_enabled: bool = False
@@ -92,6 +94,12 @@ class AuditPointCreate(BaseModel):
         if self.medium_threshold >= self.high_threshold:
             raise ValueError("中风险分必须 < 高风险分")
         # 区间：min < max
+        if (
+            self.low_threshold_min is not None
+            and self.low_threshold_max is not None
+            and self.low_threshold_min >= self.low_threshold_max
+        ):
+            raise ValueError("低风险分下限必须 < 低风险分上限")
         if (
             self.medium_threshold_min is not None
             and self.medium_threshold_max is not None
@@ -115,6 +123,16 @@ class AuditPointCreate(BaseModel):
                 f"中风险分上限 ({self.medium_threshold_max}) 必须等于 "
                 f"高风险分下限 ({self.high_threshold_min}) - 0.01"
             )
+        # 低区间上限 = 中区间下限 - 0.01 (业务规则 2026-07-29)
+        if (
+            self.low_threshold_max is not None
+            and self.medium_threshold_min is not None
+            and abs(self.low_threshold_max + 0.01 - self.medium_threshold_min) > 1e-6
+        ):
+            raise ValueError(
+                f"低风险分上限 ({self.low_threshold_max}) 必须等于 "
+                f"中风险分下限 ({self.medium_threshold_min}) - 0.01"
+            )
         return self
 
 
@@ -131,10 +149,12 @@ class AuditPointUpdate(BaseModel):
     description: Optional[str] = None
     medium_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
     high_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    medium_threshold_min: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    medium_threshold_max: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    high_threshold_min: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    high_threshold_max: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+    low_threshold_min: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    low_threshold_max: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    medium_threshold_min: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    medium_threshold_max: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    high_threshold_min: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    high_threshold_max: Optional[float] = Field(default=None, ge=0.0, le=100.0)
     scope_text: Optional[str] = Field(default=None, max_length=255)
     risk_level: Optional[AuditPointRisk] = None
     is_enabled: Optional[bool] = None
@@ -151,6 +171,12 @@ class AuditPointUpdate(BaseModel):
         ):
             raise ValueError("中风险分必须 < 高风险分")
         # 区间：min < max
+        if (
+            self.low_threshold_min is not None
+            and self.low_threshold_max is not None
+            and self.low_threshold_min >= self.low_threshold_max
+        ):
+            raise ValueError("低风险分下限必须 < 低风险分上限")
         if (
             self.medium_threshold_min is not None
             and self.medium_threshold_max is not None
@@ -172,6 +198,16 @@ class AuditPointUpdate(BaseModel):
             raise ValueError(
                 f"中风险分上限 ({self.medium_threshold_max}) 必须等于 "
                 f"高风险分下限 ({self.high_threshold_min}) - 0.01"
+            )
+        # 低区间上限 = 中区间下限 - 0.01 (业务规则 2026-07-29)
+        if (
+            self.low_threshold_max is not None
+            and self.medium_threshold_min is not None
+            and abs(self.low_threshold_max + 0.01 - self.medium_threshold_min) > 1e-6
+        ):
+            raise ValueError(
+                f"低风险分上限 ({self.low_threshold_max}) 必须等于 "
+                f"中风险分下限 ({self.medium_threshold_min}) - 0.01"
             )
         return self
 

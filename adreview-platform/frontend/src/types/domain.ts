@@ -597,6 +597,9 @@ export interface StrategyPointRef {
   /** 策略级 override（中/高风险分），范围 50~100 */
   medium_threshold?: number
   high_threshold?: number
+  /** 区间形态：低风险分 = [min, max]（下限 0~上限，上限 = 中 min - 0.01） */
+  low_threshold_min?: number
+  low_threshold_max?: number
   /** 区间形态：中风险分 = [min, max] */
   medium_threshold_min?: number
   medium_threshold_max?: number
@@ -1311,6 +1314,8 @@ export interface AuditPointUpdate {
   description?: string
   medium_threshold?: number
   high_threshold?: number
+  low_threshold_min?: number
+  low_threshold_max?: number
   medium_threshold_min?: number
   medium_threshold_max?: number
   high_threshold_min?: number

@@ -43,6 +43,8 @@ interface Props {
     override: {
       medium_threshold?: number | null
       high_threshold?: number | null
+      low_threshold_min?: number | null
+      low_threshold_max?: number | null
       medium_threshold_min?: number | null
       medium_threshold_max?: number | null
       high_threshold_min?: number | null
@@ -412,6 +414,8 @@ type PointRowRecord = {
   override: {
     medium_threshold?: number
     high_threshold?: number
+    low_threshold_min?: number
+    low_threshold_max?: number
     medium_threshold_min?: number
     medium_threshold_max?: number
     high_threshold_min?: number
@@ -453,6 +457,8 @@ function PointsColumn({
     override: {
       medium_threshold?: number | null
       high_threshold?: number | null
+      low_threshold_min?: number | null
+      low_threshold_max?: number | null
       medium_threshold_min?: number | null
       medium_threshold_max?: number | null
       high_threshold_min?: number | null
@@ -486,7 +492,7 @@ function PointsColumn({
     })
   })
 
-  const COL_TOTAL = 5
+  const COL_TOTAL = 6
   const columns: TableColumnsType<FlatRowRecord> = [
     {
       title: '',
@@ -606,6 +612,43 @@ function PointsColumn({
         }
         return (
           <span style={{ color: '#CBD5E1', fontSize: 12 }}>—</span>
+        )
+      },
+    },
+    {
+      title: '低风险分',
+      dataIndex: 'lowThreshold',
+      width: 220,
+      align: 'left',
+      onCell: (record) =>
+        record.kind === 'point' ? {} : { colSpan: 0 },
+      render: (_, record) => {
+        if (record.kind !== 'point') return null
+        const lowMin = record.override.low_threshold_min ?? 0
+        const medMin =
+          record.override.medium_threshold_min ??
+          (record.override.medium_threshold ?? record.point.medium_threshold)
+        const lowMaxDisplay =
+          typeof medMin === 'number' ? Math.max(0, medMin - 0.01) : null
+        const lowMaxConstraint = lowMaxDisplay ?? 99.99
+        return (
+          <Space size={8} direction="vertical" align="start" style={{ width: '100%' }}>
+            <Space size={8} align="center">
+              <RangeMinOnlyInput
+                disabled={record.editDisabled}
+                minValue={lowMin}
+                maxDisplay={lowMaxDisplay}
+                maxConstraint={lowMaxConstraint}
+                onMinChange={(v) =>
+                  onPointOverrideChange(record.item.id, record.point.id, {
+                    low_threshold_min: v,
+                    low_threshold_max: undefined,
+                  })
+                }
+                label="低风险分"
+              />
+            </Space>
+          </Space>
         )
       },
     },
@@ -730,7 +773,7 @@ function PointsColumn({
         pagination={false}
         size="small"
         rowKey="key"
-        scroll={{ x: 880 }}
+        scroll={{ x: 1100 }}
         rowClassName={(record) => {
           if (record.kind === 'section') {
             if (highlightItemId != null && record.item.id === highlightItemId) {
@@ -760,11 +803,11 @@ function PointsColumn({
 }
 
 /**
- * 风险分区间约束(2026-07-28):
+ * 风险分区间约束(2026-07-28 / 2026-07-29 新增低风险分):
+ * - 低风险分:  low_min ~ (medium_min - 0.01)
  * - 中风险分:  medium_min ~ (high_min - 0.01)
  * - 高风险分:  high_min ~ 100.00
- * - 低风险分:  0 ~ (medium_min - 1)   (无 UI, 仅 hint 提示)
- * - 中风险分上限由 high_min 自动反推,不可手输;高风险分上限固定 100.00。
+ * - 低/中/中/高 的 max 由相邻 min 自动反推,差值固定 0.01;高 max 固定 100.00。
  *
  * RangeMinOnlyInput: 单值 min 输入,max 在 UI 上以只读 hint 形式展示。
  */

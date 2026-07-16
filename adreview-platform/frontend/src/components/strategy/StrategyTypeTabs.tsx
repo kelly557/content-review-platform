@@ -47,6 +47,8 @@ interface Props {
     override: {
       medium_threshold?: number | null
       high_threshold?: number | null
+      low_threshold_min?: number | null
+      low_threshold_max?: number | null
       medium_threshold_min?: number | null
       medium_threshold_max?: number | null
       high_threshold_min?: number | null

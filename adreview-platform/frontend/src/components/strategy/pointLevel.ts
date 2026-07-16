@@ -5,12 +5,15 @@ export type PointMap = Record<number, boolean>
 export type ItemPointMap = Record<number, PointMap>
 export type MediaPointMap = Record<CategoryKey, ItemPointMap>
 
-/** 单个 point 的策略级 override（中/高风险分）。
+/** 单个 point 的策略级 override（低/中/高风险分）。
  * 关联自定义图库词库已上移至审核项；策略级不再持有 linked_library_ids override。 */
 export interface PointOverride {
   /** 单值（兼容旧数据）。优先使用区间字段。 */
   medium_threshold?: number
   high_threshold?: number
+  /** 区间形态：低风险分 = [min, max]（上限 = 中 min - 0.01） */
+  low_threshold_min?: number
+  low_threshold_max?: number
   /** 区间形态：中风险分 = [min, max] */
   medium_threshold_min?: number
   medium_threshold_max?: number
@@ -120,6 +123,10 @@ export function flattenEnabledPointsWithOverride(
             ref.medium_threshold = ov.medium_threshold
           if (ov.high_threshold !== undefined)
             ref.high_threshold = ov.high_threshold
+          if (ov.low_threshold_min !== undefined)
+            ref.low_threshold_min = ov.low_threshold_min
+          if (ov.low_threshold_max !== undefined)
+            ref.low_threshold_max = ov.low_threshold_max
           if (ov.medium_threshold_min !== undefined)
             ref.medium_threshold_min = ov.medium_threshold_min
           if (ov.medium_threshold_max !== undefined)

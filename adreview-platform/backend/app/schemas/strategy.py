@@ -186,14 +186,17 @@ class StrategyPointRef(BaseModel):
     medium_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
     high_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
     # 区间形态：每个阈值拆成 [下限, 上限]。与单值字段并存；任一组出现即覆盖。
-    medium_threshold_min: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    medium_threshold_max: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    high_threshold_min: Optional[float] = Field(default=None, ge=50.0, le=100.0)
-    high_threshold_max: Optional[float] = Field(default=None, ge=50.0, le=100.0)
+    low_threshold_min: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    low_threshold_max: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    medium_threshold_min: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    medium_threshold_max: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    high_threshold_min: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    high_threshold_max: Optional[float] = Field(default=None, ge=0.0, le=100.0)
 
     @model_validator(mode="after")
     def _validate_range(self) -> "StrategyPointRef":
         pairs = [
+            ("low_threshold_min", "low_threshold_max"),
             ("medium_threshold_min", "medium_threshold_max"),
             ("high_threshold_min", "high_threshold_max"),
         ]
@@ -212,6 +215,16 @@ class StrategyPointRef(BaseModel):
             raise ValueError(
                 f"medium_threshold_max ({self.medium_threshold_max}) 必须等于 "
                 f"high_threshold_min ({self.high_threshold_min}) - 0.01"
+            )
+        # 低区间上限 = 中区间下限 - 0.01 (业务规则 2026-07-29)
+        if (
+            self.low_threshold_max is not None
+            and self.medium_threshold_min is not None
+            and abs(self.low_threshold_max + 0.01 - self.medium_threshold_min) > 1e-6
+        ):
+            raise ValueError(
+                f"low_threshold_max ({self.low_threshold_max}) 必须等于 "
+                f"medium_threshold_min ({self.medium_threshold_min}) - 0.01"
             )
         return self
 
