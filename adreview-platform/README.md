@@ -158,6 +158,31 @@ npm run dev                       # http://localhost:5173
 
 开发态通过 Vite proxy 把 `/api/*` 转发到 `http://localhost:8000`。
 
+### 3.5 部署到 Cloudflare Pages
+
+前端可以直接部署到 Cloudflare Pages；当前仓库已包含 SPA 路由回退规则 `[frontend/public/_redirects](/Users/kelly/Documents/test/adreview-platform/frontend/public/_redirects)`，避免刷新子路由时返回 404。
+
+推荐配置：
+
+| 项 | 值 |
+|---|---|
+| Framework preset | `Vite` |
+| Root directory | `adreview-platform/frontend` |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Node.js | 20 |
+
+环境变量：
+
+- 如前端和后端同域代理，保留默认值即可，前端会请求 `/api/v1`
+- 如后端部署在独立域名，设置 `VITE_API_BASE_URL=https://your-api.example.com/api/v1`
+
+注意：
+
+- Cloudflare Pages 只托管前端静态站点，不会自动部署 FastAPI 后端
+- 如果直接使用 Pages 默认域名，且后端不在同域，你需要额外处理 CORS 或反向代理
+- 每次推送到 GitHub 后，Pages 可自动触发重新构建
+
 ## 4. 核心领域模型
 
 ```
