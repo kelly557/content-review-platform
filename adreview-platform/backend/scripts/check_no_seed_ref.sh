@@ -30,6 +30,8 @@ cd "$ROOT" || exit 2
 #   - backend/scripts/seed_*.py siblings (intentionally similar names)
 #   - backend/tests/test_no_seed_invocation.py (the test that *checks* the rule)
 #   - backend/scripts/init_db.py: paired destructive op; guarded by dual env vars
+#   - backend/scripts/bootstrap_seed_once.py / render_start.sh:
+#       Render-only empty-DB bootstrap wrapper; seeds only when core tables are empty
 case "$(uname -s)" in
   Darwin) SED_E='-E'; FIND_NULL='/dev/null' ;;
   *)      SED_E='-r'; FIND_NULL='/dev/null' ;;
@@ -40,7 +42,10 @@ allow_match() {
     backend/scripts/seed.py) return 0 ;;
     backend/scripts/seed_tags.py) return 0 ;;
     backend/scripts/seed_analytics_demo.py) return 0 ;;
+    backend/scripts/seed_mock_small_models.py) return 0 ;;
     backend/scripts/seed_test_materials.py) return 0 ;;
+    backend/scripts/bootstrap_seed_once.py) return 0 ;;
+    backend/scripts/render_start.sh) return 0 ;;
     backend/scripts/check_no_seed_ref.sh) return 0 ;;
     backend/tests/test_no_seed_invocation.py) return 0 ;;
     backend/scripts/init_db.py) return 0 ;;
