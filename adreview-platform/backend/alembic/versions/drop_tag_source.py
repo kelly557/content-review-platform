@@ -22,7 +22,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_tags_source")
-    op.drop_column("tags", "source")
+    op.execute("ALTER TABLE IF EXISTS tags DROP COLUMN IF EXISTS source")
     op.execute("DROP TYPE IF EXISTS tagsource")
 
 
