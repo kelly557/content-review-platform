@@ -27,9 +27,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_table("tag_hits")
-    op.drop_table("tag_negative_samples")
-    op.drop_table("tag_hit_rules")
+    op.execute("DROP TABLE IF EXISTS tag_hits")
+    op.execute("DROP TABLE IF EXISTS tag_negative_samples")
+    op.execute("DROP TABLE IF EXISTS tag_hit_rules")
 
 
 def downgrade() -> None:
