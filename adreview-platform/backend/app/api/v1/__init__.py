@@ -26,6 +26,7 @@ from app.api.v1 import (
     strategies,
     tags,
     triggers,
+    uploaded_documents,
     users,
     webhooks,
     workflows,
@@ -60,3 +61,4 @@ api_router.include_router(knowledge_documents.router)
 api_router.include_router(registered_models.router)
 api_router.include_router(registered_models.credentials_router)
 api_router.include_router(registered_providers.router)
+api_router.include_router(uploaded_documents.router)

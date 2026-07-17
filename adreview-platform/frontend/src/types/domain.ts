@@ -1330,6 +1330,12 @@ export interface AuditPoint {
   is_builtin: boolean
   custom_wordset_id: number | null
   sort_order: number
+  /** 来源文件 ID（仅由「自定义规则 Agent」上传文件解析时写入） */
+  source_document_id: number | null
+  /** 原文片段（LLM 解析时记录） */
+  source_quote: string | null
+  /** 结构化文件行号 */
+  source_line_no: number | null
   created_at: string
   updated_at: string | null
 }
@@ -2544,4 +2550,42 @@ export interface ResourceCredentialCreate {
   provider?: string | null
   token: string
   metadata?: Record<string, unknown>
+}
+
+// ─── 上传源文件 (自定义规则 Agent) ───
+
+export type UploadedDocKind = 'structured' | 'llm'
+
+export type UploadedDocStatus = 'pending' | 'parsing' | 'parsed' | 'failed'
+
+export interface UploadedDocument {
+  id: number
+  item_id: number
+  package_code: string
+  original_filename: string
+  kind: UploadedDocKind
+  storage_key: string
+  size_bytes: number
+  sha256: string | null
+  mime_type: string | null
+  status: UploadedDocStatus
+  parsed_point_count: number
+  error_message: string | null
+  parsed_at: string | null
+  prompt_markdown: string | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface UploadedDocumentListResponse {
+  item_id: number
+  documents: UploadedDocument[]
+  total_count: number
+  parsed_count: number
+  failed_count: number
+  pending_count: number
+}
+
+export interface UploadedDocumentUpdate {
+  prompt_markdown?: string | null
 }
