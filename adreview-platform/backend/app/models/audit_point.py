@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Enum,
@@ -81,6 +82,18 @@ class AuditPoint(Base):
         Integer, ForeignKey("libraries.id"), nullable=True
     )
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 解析来源 — 由用户上传的源文件产生的审核点（仅 kind=llm 或 kind=structured 解析时写入）
+    # 删除源文件时 SET NULL（保留审核点）。NULL 表示人工新建或历史遗留数据。
+    source_document_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("uploaded_documents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # 源文件中引用的原文片段（仅 kind=llm 解析时有意义；structured 导入时为 NULL）
+    source_quote: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 来源行号（结构化文件导入时记录 Excel/CSV 行号，便于追溯）
+    source_line_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), nullable=False

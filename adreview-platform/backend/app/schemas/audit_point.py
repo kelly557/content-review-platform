@@ -34,6 +34,9 @@ def serialize_audit_point(point: "AuditPoint") -> dict:
         "is_builtin": point.is_builtin,
         "custom_wordset_id": point.custom_wordset_id,
         "sort_order": point.sort_order,
+        "source_document_id": getattr(point, "source_document_id", None),
+        "source_quote": getattr(point, "source_quote", None),
+        "source_line_no": getattr(point, "source_line_no", None),
         "created_at": point.created_at,
         "updated_at": point.updated_at,
     }
@@ -58,6 +61,10 @@ class AuditPointOut(ORMBase):
     sort_order: int = 0
     # 「关联自定义图库词库」已从审核点上移至审核项 (LinkedLibrary 现挂在 AuditItemOut)。
     # 旧 audit_point_libraries 表保留只读，不再由 API 写入。
+    # 解析来源追溯 (2026-07-20)：仅由「自定义规则 Agent」上传文件解析时写入。
+    source_document_id: Optional[int] = None
+    source_quote: Optional[str] = None
+    source_line_no: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

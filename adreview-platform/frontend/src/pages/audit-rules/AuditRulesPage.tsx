@@ -147,7 +147,7 @@ export default function AuditRulesPage() {
           activeKey={activeTab}
           onChange={(k) => setActiveTab(k as TabKey)}
           items={tabItems.map((it) => ({ key: it.key, label: it.label }))}
-          destroyInactiveTabPane={false}
+          destroyOnHidden={false}
         />
       )}
 
@@ -172,7 +172,7 @@ export default function AuditRulesPage() {
         confirmLoading={creating}
         okText="创建"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" initialValues={{ aliases: [] }}>
           <Form.Item
