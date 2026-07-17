@@ -21,10 +21,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_column("tags", "false_positive_count")
-    op.drop_column("tags", "hit_count_30d")
-    op.drop_column("tags", "action")
-    op.drop_column("tags", "risk_level")
+    op.execute("ALTER TABLE IF EXISTS tags DROP COLUMN IF EXISTS false_positive_count")
+    op.execute("ALTER TABLE IF EXISTS tags DROP COLUMN IF EXISTS hit_count_30d")
+    op.execute("ALTER TABLE IF EXISTS tags DROP COLUMN IF EXISTS action")
+    op.execute("ALTER TABLE IF EXISTS tags DROP COLUMN IF EXISTS risk_level")
     op.execute("DROP INDEX IF EXISTS ix_tag_status_risk")
     op.execute("DROP TYPE IF EXISTS tagrisklevel")
     op.execute("DROP TYPE IF EXISTS tagaction")
