@@ -56,7 +56,7 @@ PYTHONPATH=. python3 scripts/seed.py      # 默认数据（先清空 users/strat
 ```
 
 用户邮箱必须 `.example.com`（pydantic[email] 拒绝 `.local`）。
-admin 密码 = `APP_SECRET + "-admin"`（当前 `change-me-in-production-please-admin`）。
+admin 密码 = `admin123`，superadmin = `superadmin123`，root_admin = `rootadmin123`。
 JWT access token 有效期 = **7 天免登录**（`JWT_ACCESS_TTL_MIN=10080`）。前端 `tokenStore` 用 `adreview.token_expires_at` 存过期时间戳（`LOGIN_TTL_DAYS=7`）；刷新/打开页面时 `fetchMe` 先校验是否过期，过期或 401 都自动清 token 跳 login。
 
 ## 布局与样式约定（关键 — 已踩坑）

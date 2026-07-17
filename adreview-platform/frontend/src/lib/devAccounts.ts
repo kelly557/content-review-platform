@@ -4,8 +4,11 @@
  * 仅供 dev 构建使用 — 生产构建由 `import.meta.env.DEV === false` gate
  * 剔除 UI（参考 AppLayout.tsx 的 dropdownItems）。
  *
- * 密码来源：backend/scripts/seed.py:868-872。
- * 这些账号和密码本身已在 seed.py 中以明文存在，并非额外泄露。
+ * 默认管理员密码使用固定配置：
+ *   - admin       => `admin123`
+ *   - superadmin  => `superadmin123`
+ *   - root_admin  => `rootadmin123`
+ * reviewer / mlr / submitter 使用 seed.py 中的固定测试密码。
  */
 import type { UserRole } from '@/types/auth'
 
@@ -19,17 +22,17 @@ export const DEV_ACCOUNTS: DevAccount[] = [
   {
     role: 'root_admin',
     email: 'rootadmin@adreview.example.com',
-    password: 'change-me-in-production-please-rootadmin',
+    password: 'rootadmin123',
   },
   {
     role: 'superadmin',
     email: 'superadmin@adreview.example.com',
-    password: 'change-me-in-production-please-superadmin',
+    password: 'superadmin123',
   },
   {
     role: 'admin',
     email: 'admin@adreview.example.com',
-    password: 'change-me-in-production-please-admin',
+    password: 'admin123',
   },
   {
     role: 'mlr',

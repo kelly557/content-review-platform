@@ -138,12 +138,12 @@ PYTHONPATH=. python scripts/seed.py
 
 | 角色 | 邮箱 | 密码 |
 |---|---|---|
-| 管理员 | `admin@adreview.example.com` | `<APP_SECRET>-admin` |
+| 管理员 | `admin@adreview.example.com` | `admin123` |
 | 审核员 | `reviewer@adreview.example.com` | `reviewer123` |
 | MLR 专家 | `mlr@adreview.example.com` | `mlr12345` |
 | 提交者 | `submitter@adreview.example.com` | `submitter123` |
 
-> 注：种子脚本里 `admin` 密码使用了 `settings.app_secret + "-admin"`，与 `.env` 中的 `APP_SECRET` 联动。**生产请改为强密码并禁用明文密码日志**。
+> 注：默认管理员密码现在是固定测试密码：`admin123 / superadmin123 / rootadmin123`。如果这是面向外网的实例，这个设置本身不安全，应尽快改成你自己的值。
 
 ### 3.4 前端
 

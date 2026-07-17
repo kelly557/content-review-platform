@@ -19,7 +19,7 @@
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@adreview.example.com","password":"change-me-in-production-please-admin"}' \
+  -d '{"email":"admin@adreview.example.com","password":"admin123"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
 ```
 
