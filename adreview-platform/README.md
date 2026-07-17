@@ -160,7 +160,7 @@ npm run dev                       # http://localhost:5173
 
 ### 3.5 部署到 Cloudflare Pages
 
-前端可以直接部署到 Cloudflare Pages；当前仓库已包含 SPA 路由回退规则 `[frontend/public/_redirects](/Users/kelly/Documents/test/adreview-platform/frontend/public/_redirects)`，避免刷新子路由时返回 404。
+前端可以直接部署到 Cloudflare Pages；当前仓库已通过 `[frontend/wrangler.jsonc](/Users/kelly/Documents/test/adreview-platform/frontend/wrangler.jsonc)` 配置 `assets.not_found_handling = "single-page-application"`，用于 SPA 路由回退，避免刷新子路由时返回 404。
 
 推荐配置：
 

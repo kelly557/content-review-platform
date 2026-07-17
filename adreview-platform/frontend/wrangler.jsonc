@@ -1,0 +1,8 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "content-review-platform",
+  "compatibility_date": "2026-07-17",
+  "assets": {
+    "not_found_handling": "single-page-application"
+  }
+}
