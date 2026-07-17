@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -159,7 +159,7 @@ async def update_tag(
     return _to_out(tag)
 
 
-@router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_tag(
     tag_id: str,
     db: AsyncSession = Depends(get_db),
@@ -170,6 +170,7 @@ async def delete_tag(
         raise HTTPException(status_code=404, detail="标签不存在")
     await tag_service.delete_tag(db, tag)
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{tag_id}/activate", response_model=TagOut)

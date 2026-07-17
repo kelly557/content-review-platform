@@ -26,6 +26,7 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Response,
     UploadFile,
     status,
 )
@@ -913,7 +914,7 @@ async def update_item(
 
 
 @router.delete(
-    "/{library_id}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/{library_id}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response
 )
 async def delete_item(
     library_id: int,
@@ -931,6 +932,7 @@ async def delete_item(
     it.deleted_at = datetime.utcnow()
     await db.flush()
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

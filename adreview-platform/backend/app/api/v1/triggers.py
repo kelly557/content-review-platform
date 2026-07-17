@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -230,7 +230,7 @@ async def update_trigger(
 
 
 # ── delete ─────────────────────────────────────────────────────
-@router.delete("/{trigger_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{trigger_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_trigger(
     trigger_id: int,
     db: AsyncSession = Depends(get_db),
@@ -242,6 +242,7 @@ async def delete_trigger(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="trigger not found")
     await db.delete(trigger)
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ── manual run ─────────────────────────────────────────────────

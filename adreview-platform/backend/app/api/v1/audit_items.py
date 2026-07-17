@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import delete, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -636,7 +636,7 @@ code=fresh.code,
     )
 
 
-@router.delete("/{code}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{code}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_item(
     code: str,
     item_id: int,
@@ -662,6 +662,7 @@ async def delete_item(
         )
     await db.delete(item)
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{code}/items/suggest", response_model=SuggestResponse)

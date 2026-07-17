@@ -3,7 +3,7 @@ import re
 import time
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -123,7 +123,7 @@ async def update_service(
     return svc
 
 
-@router.delete("/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{service_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_service(
     service_id: int,
     db: AsyncSession = Depends(get_db),
@@ -137,3 +137,4 @@ async def delete_service(
     await db.delete(svc)
     await db.flush()
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

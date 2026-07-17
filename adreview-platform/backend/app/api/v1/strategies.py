@@ -13,7 +13,7 @@ Phase B：
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -914,7 +914,7 @@ async def update_strategy(
     return await _serialize_strategy(db, strategy)
 
 
-@router.delete("/{strategy_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{strategy_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_strategy(
     strategy_id: int,
     db: AsyncSession = Depends(get_db),
@@ -933,6 +933,7 @@ async def delete_strategy(
         payload={"code": strategy.code},
     )
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{strategy_id}/duplicate", response_model=StrategyOut, status_code=status.HTTP_201_CREATED)

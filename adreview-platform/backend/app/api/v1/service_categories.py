@@ -2,7 +2,7 @@
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -134,7 +134,7 @@ async def update_category(
     return cat
 
 
-@router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_category(
     category_id: int,
     db: AsyncSession = Depends(get_db),
@@ -156,3 +156,4 @@ async def delete_category(
     await db.delete(cat)
     await db.flush()
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

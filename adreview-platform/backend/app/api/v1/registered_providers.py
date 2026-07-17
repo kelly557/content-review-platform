@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -607,7 +607,7 @@ async def archive_provider(
     return await _provider_to_out(db, p, await _load_model_count(db, p.id))
 
 
-@router.delete("/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{provider_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_provider(
     provider_id: int,
     db: AsyncSession = Depends(get_db),
@@ -637,4 +637,4 @@ async def delete_provider(
     )
     await db.delete(p)
     await db.commit()
-    return None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

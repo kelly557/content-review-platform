@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -334,7 +334,7 @@ async def update_rule_set(
 
 
 # ── delete ──────────────────────────────────────────────────────
-@router.delete("/{rule_set_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{rule_set_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_rule_set(
     rule_set_id: int,
     db: AsyncSession = Depends(get_db),
@@ -368,6 +368,7 @@ async def delete_rule_set(
             entity_id=rule_set_id,
         )
         await db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     except IntegrityError as ex:
         await db.rollback()
         raise HTTPException(

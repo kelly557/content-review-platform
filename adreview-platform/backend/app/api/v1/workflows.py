@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -130,7 +130,7 @@ async def update_template(
     return _to_out(tpl)
 
 
-@router.delete("/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_template(
     template_id: int,
     db: AsyncSession = Depends(get_db),
@@ -151,6 +151,7 @@ async def delete_template(
         )
     await db.delete(tpl)
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/instances/{instance_id}", response_model=WorkflowInstanceOut)

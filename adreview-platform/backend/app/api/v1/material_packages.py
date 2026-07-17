@@ -1,7 +1,7 @@
 """MaterialPackage router: CRUD, submit for review."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -203,7 +203,7 @@ async def update_package(
     return _package_to_out(pkg)
 
 
-@router.delete("/{package_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{package_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_package(
     package_id: int,
     db: AsyncSession = Depends(get_db),
@@ -225,6 +225,7 @@ async def delete_package(
 
     await db.delete(pkg)
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{package_id}/submit", response_model=MaterialPackageOut)

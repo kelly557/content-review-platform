@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -247,7 +247,7 @@ async def update_point(
     return AuditPointOut.model_validate(serialize_audit_point(point))
 
 
-@router.delete("/{code}/points/{point_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{code}/points/{point_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_point(
     code: str,
     point_id: int,
@@ -265,6 +265,7 @@ async def delete_point(
         )
     await db.delete(point)
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{code}/points/reset", response_model=AuditPointResetResult)
