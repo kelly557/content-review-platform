@@ -183,6 +183,32 @@ npm run dev                       # http://localhost:5173
 - 如果直接使用 Pages 默认域名，且后端不在同域，你需要额外处理 CORS 或反向代理
 - 每次推送到 GitHub 后，Pages 可自动触发重新构建
 
+### 3.6 部署后端到 Render
+
+仓库已提供 `[render.yaml](/Users/kelly/Documents/test/adreview-platform/render.yaml)`，可直接用 Render Blueprint 创建后端 Web Service 和 PostgreSQL。
+
+推荐步骤：
+
+1. 在 Render 里选择 `New` -> `Blueprint`
+2. 连接 GitHub 仓库 `kelly557/content-review-platform`
+3. 让 Render 读取仓库根目录的 `render.yaml`
+4. 创建完成后，进入 `content-review-platform-api` 服务，补两个环境变量：
+   - `APP_BASE_URL=https://你的-render-后端域名`
+   - `CORS_ORIGINS=["https://content-review-platform.kelly-d.workers.dev"]`
+5. 等待 PostgreSQL 和 Web Service 都变成 `Live`
+
+说明：
+
+- `DATABASE_URL` / `DATABASE_URL_SYNC` 已在 `render.yaml` 里绑定到 Render PostgreSQL
+- 代码已兼容 Render 原生的 `postgres://...` 连接串，无需手动改成 SQLAlchemy 方言
+- `ALERT_SCANNER_ENABLED` 和 `MQ_CONSUMER_ENABLED` 默认关闭，先保证基础 API 可用
+
+前端回填：
+
+- 回到 Cloudflare 前端项目，新增环境变量：
+  `VITE_API_BASE_URL=https://你的-render-后端域名/api/v1`
+- 重新部署前端后，登录请求就不会再打到 `workers.dev/api/v1`
+
 ## 4. 核心领域模型
 
 ```

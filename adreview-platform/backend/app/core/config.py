@@ -65,6 +65,38 @@ class Settings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_async_database_url(cls, value):
+        if not isinstance(value, str):
+            return value
+        if value.startswith("postgresql+asyncpg://"):
+            return value
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+asyncpg://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return value
+
+    @field_validator("database_url_sync", mode="before")
+    @classmethod
+    def _normalize_sync_database_url(cls, value, info):
+        if isinstance(value, str) and value:
+            if value.startswith("postgresql+psycopg2://"):
+                return value
+            if value.startswith("postgres://"):
+                return value.replace("postgres://", "postgresql+psycopg2://", 1)
+            if value.startswith("postgresql://"):
+                return value.replace("postgresql://", "postgresql+psycopg2://", 1)
+            if value.startswith("postgresql+asyncpg://"):
+                return value.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+            return value
+        data = info.data
+        async_url = data.get("database_url")
+        if isinstance(async_url, str) and async_url.startswith("postgresql+asyncpg://"):
+            return async_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+        return value
+
     jwt_secret: str = "change-me-jwt"
     jwt_algorithm: str = "HS256"
     jwt_access_ttl_min: int = 60 * 24 * 7
