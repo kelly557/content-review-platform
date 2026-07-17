@@ -5,7 +5,7 @@ set -euo pipefail
 
 BASE="${BASE:-http://127.0.0.1:8000}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@adreview.example.com}"
-ADMIN_PASS="${ADMIN_PASS:-change-me-in-production-please-admin}"
+ADMIN_PASS="${ADMIN_PASS:-admin123}"
 
 pass() { printf "\033[32m✓ %s\033[0m\n" "$1"; }
 fail() { printf "\033[31m✗ %s\033[0m\n" "$1"; exit 1; }

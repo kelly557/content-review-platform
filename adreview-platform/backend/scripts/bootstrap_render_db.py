@@ -76,6 +76,16 @@ async def main() -> int:
     else:
         _run(["alembic", "upgrade", "head"])
 
+    _run(
+        [
+            sys.executable,
+            "scripts/repair_default_admins.py",
+            "--apply",
+            "--reason",
+            "render bootstrap ensure default admin accounts",
+        ]
+    )
+
     return 0
 
 

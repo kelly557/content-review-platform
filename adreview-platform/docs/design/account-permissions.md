@@ -286,7 +286,7 @@
 - ❌ 未改文案"审核员→审核人员"、"MLR 专家→质检人员"(推迟到 Phase 5)
 
 **Phase 2 完结标志**:
-- [x] superadmin 已有种子账户可登录(`superadmin@adreview.example.com / <APP_SECRET>-superadmin`)
+- [x] superadmin 已有种子账户可登录(`superadmin@adreview.example.com / superadmin123`)
 - [x] superadmin 与 admin 共享同一套前端路由组(临时态,Phase 4 前置)
 - [x] superadmin 已暴露给 LoginPage hint
 - [x] DB reset + seed 重灌成功

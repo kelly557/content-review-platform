@@ -137,9 +137,7 @@ async def client(db_session_factory):
             User(
                 email="admin@adreview.example.com",
                 full_name="Admin",
-                hashed_password=hash_password(
-                    "change-me-in-production-please-admin"
-                ),
+                hashed_password=hash_password("admin123"),
                 role=UserRole.ADMIN,
                 is_active=True,
             ),

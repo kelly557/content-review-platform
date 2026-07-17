@@ -95,7 +95,7 @@ export default function LoginPage() {
 
           <div style={{ textAlign: 'center' }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              默认账号: rootadmin@adreview.example.com / superadmin@adreview.example.com / admin@adreview.example.com / reviewer@adreview.example.com / submitter@adreview.example.com
+              默认账号: admin / superadmin / rootadmin / reviewer / mlr / submitter。管理员默认密码分别为 admin123 / superadmin123 / rootadmin123。
             </Text>
           </div>
         </Space>

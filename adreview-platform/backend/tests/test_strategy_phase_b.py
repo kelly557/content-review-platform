@@ -34,7 +34,7 @@ async def _ensure_admin(db_session) -> int:
         public_id=new_public_id(),
         email="admin@adreview.example.com",
         full_name="Admin",
-        hashed_password=hash_password("change-me-in-production-please-admin"),
+        hashed_password=hash_password("admin123"),
         role=UserRole.ADMIN,
         is_active=True,
     )

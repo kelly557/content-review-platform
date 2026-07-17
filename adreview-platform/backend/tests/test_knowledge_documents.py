@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 ADMIN_PAYLOAD = {
     "email": "admin@adreview.example.com",
-    "password": "change-me-in-production-please-admin",
+    "password": "admin123",
 }
 
 

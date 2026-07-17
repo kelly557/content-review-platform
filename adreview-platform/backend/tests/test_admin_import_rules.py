@@ -171,7 +171,7 @@ async def test_admin_import_e2e_create_then_update(
 ):
     from app.models.service import Service, ServiceScope
 
-    await _login(client, "admin@adreview.example.com", "change-me-in-production-please-admin")
+    await _login(client, "admin@adreview.example.com", "admin123")
 
     async with db_session_factory() as s:
         s.add(
@@ -245,7 +245,7 @@ async def test_admin_import_e2e_create_then_update(
 
 @pytest.mark.asyncio
 async def test_admin_import_unknown_package_rejected(client):
-    await _login(client, "admin@adreview.example.com", "change-me-in-production-please-admin")
+    await _login(client, "admin@adreview.example.com", "admin123")
     r = await client.post(
         "/api/v1/admin/import-rules/import",
         json={
@@ -265,7 +265,7 @@ async def test_admin_import_invalid_threshold_pair_rejected(
 ):
     from app.models.service import Service, ServiceScope
 
-    await _login(client, "admin@adreview.example.com", "change-me-in-production-please-admin")
+    await _login(client, "admin@adreview.example.com", "admin123")
 
     async with db_session_factory() as s:
         s.add(
@@ -301,7 +301,7 @@ async def test_admin_preview_does_not_write(client, db_session_factory):
     from app.models.audit_point import AuditPoint
     from sqlalchemy import select
 
-    await _login(client, "admin@adreview.example.com", "change-me-in-production-please-admin")
+    await _login(client, "admin@adreview.example.com", "admin123")
 
     async with db_session_factory() as s:
         s.add(
@@ -337,7 +337,7 @@ async def test_admin_preview_does_not_write(client, db_session_factory):
 
 @pytest.mark.asyncio
 async def test_admin_parser_error_returns_422(client):
-    await _login(client, "admin@adreview.example.com", "change-me-in-production-please-admin")
+    await _login(client, "admin@adreview.example.com", "admin123")
     r = await client.post(
         "/api/v1/admin/import-rules/import",
         json={
@@ -359,7 +359,7 @@ async def test_kind_personal_writes_is_builtin_false(
     from app.models.service import Service, ServiceScope
     from sqlalchemy import select
 
-    await _login(client, "admin@adreview.example.com", "change-me-in-production-please-admin")
+    await _login(client, "admin@adreview.example.com", "admin123")
     async with db_session_factory() as s:
         s.add(
             Service(
@@ -398,7 +398,7 @@ async def test_kind_builtin_writes_is_builtin_true(
     from app.models.service import Service, ServiceScope
     from sqlalchemy import select
 
-    await _login(client, "admin@adreview.example.com", "change-me-in-production-please-admin")
+    await _login(client, "admin@adreview.example.com", "admin123")
     async with db_session_factory() as s:
         s.add(
             Service(
@@ -439,7 +439,7 @@ async def test_kind_builtin_can_extend_existing_builtin_item(
     schema)."""
     from app.models.service import Service, ServiceScope
 
-    await _login(client, "admin@adreview.example.com", "change-me-in-production-please-admin")
+    await _login(client, "admin@adreview.example.com", "admin123")
     async with db_session_factory() as s:
         s.add(
             Service(
@@ -484,7 +484,7 @@ async def test_kind_downgrade_without_confirm_is_422(
     for personal → 422 unless confirm_downgrade=true."""
     from app.models.service import Service, ServiceScope
 
-    await _login(client, "admin@adreview.example.com", "change-me-in-production-please-admin")
+    await _login(client, "admin@adreview.example.com", "admin123")
     async with db_session_factory() as s:
         s.add(
             Service(
@@ -522,7 +522,7 @@ async def test_kind_downgrade_with_confirm_succeeds_and_warns(
 ):
     from app.models.service import Service, ServiceScope
 
-    await _login(client, "admin@adreview.example.com", "change-me-in-production-please-admin")
+    await _login(client, "admin@adreview.example.com", "admin123")
     async with db_session_factory() as s:
         s.add(
             Service(

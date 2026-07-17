@@ -8,7 +8,7 @@ fail() { printf "\033[31m✗ %s\033[0m\n" "$1"; exit 1; }
 
 TOKEN=$(curl -fsS -X POST "$BASE/api/v1/auth/login" \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@adreview.example.com","password":"change-me-in-production-please-admin"}' | jq -r '.access_token')
+  -d "{\"email\":\"admin@adreview.example.com\",\"password\":\"${ADMIN_PASS:-admin123}\"}" | jq -r '.access_token')
 H="Authorization: Bearer $TOKEN"
 
 # 1. create with group=敏感词 + action=黑名单
