@@ -1,9 +1,9 @@
 import { useNavigate } from 'react-router-dom'
 import { Steps, Card, Button, Space, Typography } from 'antd'
 import {
-  UploadOutlined,
-  SendOutlined,
   SettingOutlined,
+  ExperimentOutlined,
+  ApiOutlined,
   EyeOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
@@ -23,48 +23,34 @@ interface StepDef {
 
 const STEPS: StepDef[] = [
   {
-    key: 'upload',
-    title: '上传素材',
-    icon: <UploadOutlined />,
-    description: '将待审核的素材（图片/视频/文本/PDF）提交到平台。',
-    ctas: [{ label: '新建素材', to: '/materials', primary: true }],
+    key: 'config-strategy',
+    title: '配置策略',
+    icon: <SettingOutlined />,
+    description: '进入策略中心，按业务场景选择机审服务并组装审核策略。',
+    ctas: [{ label: '审核策略', to: '/strategies', primary: true }],
     visibleTo: 'all',
   },
   {
-    key: 'submit',
-    title: '提交审核',
-    icon: <SendOutlined />,
-    description: '选择审核策略，把素材送入审核流程。',
-    ctas: [{ label: '新建审核任务', to: '/online-review', primary: true }],
-    visibleTo: ['submitter', 'reviewer', 'mlr', 'admin'],
+    key: 'test-strategy',
+    title: '测试策略',
+    icon: <ExperimentOutlined />,
+    description: '在在线审核页提交一段测试素材，验证策略命中是否符合预期。',
+    ctas: [{ label: '在线审核', to: '/online-review', primary: true }],
+    visibleTo: 'all',
   },
   {
-    key: 'review',
-    title: '审核内容',
-    icon: <ThunderboltOutlined />,
-    description: '查看待审核任务，执行人工审核或复核机审结果。',
-    ctas: [
-      { label: '数据查询', to: '/query', primary: true },
-    ],
-    visibleTo: ['reviewer', 'mlr', 'admin'],
+    key: 'integrate',
+    title: '完成接口调用',
+    icon: <ApiOutlined />,
+    description: '参考 API 文档将审核能力集成到业务系统，平台会异步返回审核结果。',
+    ctas: [],
+    visibleTo: 'all',
   },
   {
-    key: 'config',
-    title: '配置策略 / 规则',
-    icon: <SettingOutlined />,
-    description: '配置审核策略、规则、词库 / 图片库 / 代答库、人工审核策略。',
-    ctas: [
-      { label: '审核策略', to: '/strategies', primary: true },
-      { label: '资源库', to: '/resources/words' },
-      { label: '人工审核策略', to: '/human-review-rules' },
-    ],
-    visibleTo: ['admin', 'mlr'],
-  },
-  {
-    key: 'view',
-    title: '查看结果',
+    key: 'view-result',
+    title: '查看审核结果',
     icon: <EyeOutlined />,
-    description: '查询审核结果明细，下载审计 / 质量报告。',
+    description: '在数据查询中查看每条审核明细，或在数据报表查看汇总统计。',
     ctas: [
       { label: '数据查询', to: '/query', primary: true },
       { label: '数据报表', to: '/reports' },
@@ -87,9 +73,9 @@ export function QuickStartSteps() {
       title={
         <Space>
           <ThunderboltOutlined />
-          <span>快速开始</span>
+          <span>产品介绍 · 使用流程</span>
           <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
-            按推荐顺序使用平台的每个功能
+            平台核心流程与角色对应功能一览
           </Text>
         </Space>
       }
@@ -107,20 +93,22 @@ export function QuickStartSteps() {
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {s.description}
               </Text>
-              <div style={{ marginTop: 12 }}>
-                <Space size="small" wrap>
-                  {s.ctas.map((c) => (
-                    <Button
-                      key={c.label}
-                      type={c.primary ? 'primary' : 'default'}
-                      size="small"
-                      onClick={() => navigate(c.to)}
-                    >
-                      {c.label}
-                    </Button>
-                  ))}
-                </Space>
-              </div>
+              {s.ctas.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <Space size="small" wrap>
+                    {s.ctas.map((c) => (
+                      <Button
+                        key={c.label}
+                        type={c.primary ? 'primary' : 'default'}
+                        size="small"
+                        onClick={() => navigate(c.to)}
+                      >
+                        {c.label}
+                      </Button>
+                    ))}
+                  </Space>
+                </div>
+              )}
             </div>
           ),
           icon: s.icon,

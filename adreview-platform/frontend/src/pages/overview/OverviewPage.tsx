@@ -1,14 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Row, Col, Space, Typography } from 'antd'
+import { Space, Typography } from 'antd'
 import { useAuthStore } from '@/store'
 import { QuickStartSteps } from './components/QuickStartSteps'
-import { RiskTrendChart } from './components/RiskTrendChart'
-import { RiskDistributionChart } from './components/RiskDistributionChart'
-import { TopRiskList } from './components/TopRiskList'
+import { QuickEntryGrid } from './components/QuickEntryGrid'
 
 const { Title, Text } = Typography
-
-const DAYS = 7
 
 export default function OverviewPage() {
   const { user } = useAuthStore()
@@ -33,17 +29,7 @@ export default function OverviewPage() {
 
       <QuickStartSteps />
 
-      <Row gutter={[24, 24]}>
-        <Col xs={24} lg={14}>
-          <RiskTrendChart days={DAYS} />
-          <div style={{ marginTop: 24 }}>
-            <RiskDistributionChart days={DAYS} />
-          </div>
-        </Col>
-        <Col xs={24} lg={10}>
-          <TopRiskList days={DAYS} limit={5} />
-        </Col>
-      </Row>
+      <QuickEntryGrid />
     </Space>
   )
 }
