@@ -496,6 +496,35 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   root_admin: '根管理员',
 }
 
+export type MergedRoleKey = 'staff' | 'admin' | 'superadmin' | 'root_admin'
+
+export const STAFF_SUBROLES: ReadonlyArray<UserRole> = ['submitter', 'reviewer', 'mlr']
+
+export const MERGED_ROLE_LABELS: Record<MergedRoleKey, string> = {
+  staff: '业务员',
+  admin: '管理员',
+  superadmin: '超级管理员',
+  root_admin: '根管理员',
+}
+
+export const MERGED_ROLE_OPTIONS: ReadonlyArray<{ value: MergedRoleKey; label: string }> = [
+  { value: 'staff', label: MERGED_ROLE_LABELS.staff },
+  { value: 'admin', label: MERGED_ROLE_LABELS.admin },
+  { value: 'superadmin', label: MERGED_ROLE_LABELS.superadmin },
+  { value: 'root_admin', label: MERGED_ROLE_LABELS.root_admin },
+]
+
+export function toMergedRoleKey(role: UserRole): MergedRoleKey {
+  if (role === 'submitter' || role === 'reviewer' || role === 'mlr') return 'staff'
+  if (role === 'admin') return 'admin'
+  if (role === 'superadmin') return 'superadmin'
+  return 'root_admin'
+}
+
+export function pickPrimaryStaffSubrole(): UserRole {
+  return 'submitter'
+}
+
 export const STATUS_LABELS: Record<MaterialStatus, string> = {
   draft: '草稿',
   submitted: '已提交',

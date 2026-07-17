@@ -17,11 +17,17 @@ import {
   type PermissionKey,
   type RolePermissions,
 } from '@/types/role'
-import { ROLE_LABELS, type UserRole } from '@/types/domain'
+import {
+  MERGED_ROLE_LABELS,
+  STAFF_SUBROLES,
+  type MergedRoleKey,
+  type UserRole,
+} from '@/types/domain'
 
 const { Title } = Typography
 
-const EDITABLE_ROLES: UserRole[] = ['root_admin', 'superadmin', 'admin', 'mlr', 'reviewer', 'submitter']
+const EDITABLE_MERGED_ROLES: MergedRoleKey[] = ['root_admin', 'superadmin', 'admin', 'staff']
+const EDITABLE_ROLES: UserRole[] = [...STAFF_SUBROLES, 'admin', 'superadmin', 'root_admin']
 
 function buildMockPermissions(): RolePermissions {
   const rows = flattenMenuForTable()
@@ -52,18 +58,23 @@ const LEVEL1_LABEL: Record<string, string> = Object.fromEntries(
 
 export default function RolesAdminPage() {
   const { message } = App.useApp()
-  const [activeRole, setActiveRole] = useState<UserRole>('admin')
+  const [activeRole, setActiveRole] = useState<MergedRoleKey>('admin')
   const [perms, setPerms] = useState<RolePermissions>(() => buildMockPermissions())
   const rows = useMemo(() => flattenMenuForTable(), [])
 
   const togglePerm = (menuKey: string, perm: PermissionKey, checked: boolean) => {
-    setPerms((prev) => ({
-      ...prev,
-      [activeRole]: {
-        ...prev[activeRole],
-        [menuKey]: { ...prev[activeRole]?.[menuKey], [perm]: checked },
-      },
-    }))
+    const targetRoles: UserRole[] =
+      activeRole === 'staff' ? [...STAFF_SUBROLES] : [activeRole]
+    setPerms((prev) => {
+      const next = { ...prev }
+      for (const role of targetRoles) {
+        next[role] = {
+          ...next[role],
+          [menuKey]: { ...next[role]?.[menuKey], [perm]: checked },
+        }
+      }
+      return next
+    })
   }
 
   const rowKey = (r: MenuPermissionRow) => `${r.level1}-${r.level2}`
@@ -99,10 +110,12 @@ export default function RolesAdminPage() {
       render: (_v, row) => {
         const node = row.menuNode
         const available = node.permissions ?? []
+        const sampleRole: UserRole =
+          activeRole === 'staff' ? STAFF_SUBROLES[0] : activeRole
         return (
           <Space size="large">
             {PERMISSION_KEYS.map((p) => {
-              const checked = !!perms[activeRole]?.[node.key]?.[p]
+              const checked = !!perms[sampleRole]?.[node.key]?.[p]
               const disabled = !available.includes(p)
               return (
                 <Checkbox
@@ -128,20 +141,20 @@ export default function RolesAdminPage() {
         extra={
           <Space size="middle" wrap>
             <Space.Compact>
-              {EDITABLE_ROLES.map((r) => (
+              {EDITABLE_MERGED_ROLES.map((r) => (
                 <Button
                   key={r}
                   type={activeRole === r ? 'primary' : 'default'}
                   onClick={() => setActiveRole(r)}
                 >
-                  {ROLE_LABELS[r]}
+                  {MERGED_ROLE_LABELS[r]}
                 </Button>
               ))}
             </Space.Compact>
             <Button
               type="primary"
               onClick={() =>
-                message.success(`已保存 ${ROLE_LABELS[activeRole]} 的权限（仅本地）`)
+                message.success(`已保存 ${MERGED_ROLE_LABELS[activeRole]} 的权限（仅本地）`)
               }
             >
               保存

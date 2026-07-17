@@ -39,6 +39,13 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, index=True
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     materials: Mapped[List["Material"]] = relationship(  # type: ignore[name-defined]
         back_populates="submitter", foreign_keys="Material.submitter_id"
     )

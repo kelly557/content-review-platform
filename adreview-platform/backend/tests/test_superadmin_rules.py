@@ -112,6 +112,56 @@ def test_users_endpoint_open_to_admin_and_superadmin():
     assert 'require_roles("admin", "superadmin")' in text
 
 
+def test_users_delete_endpoint_registered():
+    """DELETE /users/{user_id} must be defined as a soft-delete route."""
+    src_path = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "api"
+        / "v1"
+        / "users.py"
+    )
+    text = src_path.read_text(encoding="utf-8")
+    assert '@router.delete("/' in text and 'delete_user' in text, (
+        "expected a DELETE /users/{user_id} endpoint soft-deleting is_deleted"
+    )
+    # Soft-delete semantics are required
+    assert "is_deleted = True" in text, "delete must soft-delete via is_deleted flag"
+    # Self-delete must be rejected
+    assert "cannot delete current logged-in user" in text, (
+        "delete must reject self-delete"
+    )
+
+
+def test_users_list_filters_soft_deleted():
+    """GET /users must omit soft-deleted rows."""
+    src_path = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "api"
+        / "v1"
+        / "users.py"
+    )
+    text = src_path.read_text(encoding="utf-8")
+    assert "User.is_deleted == False" in text, (
+        "list_users must filter is_deleted == False"
+    )
+
+
+def test_deps_block_deleted_user_login():
+    """get_current_user must also reject soft-deleted users."""
+    src_path = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "core"
+        / "deps.py"
+    )
+    text = src_path.read_text(encoding="utf-8")
+    assert "user.is_deleted" in text, (
+        "get_current_user must treat is_deleted=True as 401"
+    )
+
+
 def test_audit_routes_still_registered():
     schema = app.openapi()
     paths = schema["paths"]
