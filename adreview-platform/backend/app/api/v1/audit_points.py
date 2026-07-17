@@ -253,7 +253,7 @@ async def delete_point(
     point_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles("admin", "superadmin")),
-) -> None:
+) -> Response:
     await _ensure_package(db, code)
     point = await db.get(AuditPoint, point_id)
     if not point or point.package_code != code:

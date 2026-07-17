@@ -164,7 +164,7 @@ async def delete_tag(
     tag_id: str,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
-):
+) -> Response:
     tag = await tag_service.get_tag(db, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="标签不存在")

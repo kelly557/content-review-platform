@@ -339,7 +339,7 @@ async def delete_rule_set(
     rule_set_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> None:
+) -> Response:
     _require_admin(user)
     rs = await db.get(RuleSet, rule_set_id)
     if rs is None:

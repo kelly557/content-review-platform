@@ -208,7 +208,7 @@ async def delete_package(
     package_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> None:
+) -> Response:
     stmt = (
         select(MaterialPackage)
         .where(MaterialPackage.id == package_id)

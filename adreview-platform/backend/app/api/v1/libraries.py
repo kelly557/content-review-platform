@@ -921,7 +921,7 @@ async def delete_item(
     item_id: int,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> None:
+) -> Response:
     lib = await db.get(Library, library_id)
     if not lib or lib.is_deleted:
         raise HTTPException(status_code=404, detail="库不存在")

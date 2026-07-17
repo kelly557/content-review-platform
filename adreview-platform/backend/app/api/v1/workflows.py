@@ -135,7 +135,7 @@ async def delete_template(
     template_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles("admin", "mlr")),
-) -> None:
+) -> Response:
     tpl = await db.get(WorkflowTemplate, template_id)
     if not tpl:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审核规则不存在")

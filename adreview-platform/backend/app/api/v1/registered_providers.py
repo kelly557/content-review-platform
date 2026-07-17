@@ -612,7 +612,7 @@ async def delete_provider(
     provider_id: int,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_writer),
-) -> None:
+) -> Response:
     p = await db.scalar(
         select(RegisteredProvider).where(RegisteredProvider.id == provider_id)
     )

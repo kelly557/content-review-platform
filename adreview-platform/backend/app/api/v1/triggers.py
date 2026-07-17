@@ -235,7 +235,7 @@ async def delete_trigger(
     trigger_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> None:
+) -> Response:
     _require_admin(user)
     trigger = await db.get(Trigger, trigger_id)
     if trigger is None:

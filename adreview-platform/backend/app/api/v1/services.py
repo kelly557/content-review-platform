@@ -128,7 +128,7 @@ async def delete_service(
     service_id: int,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("admin")),
-) -> None:
+) -> Response:
     svc = await db.get(Service, service_id)
     if not svc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="服务不存在")

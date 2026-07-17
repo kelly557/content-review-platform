@@ -239,7 +239,7 @@ async def delete_disposition(
     disposition_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> None:
+) -> Response:
     _require_admin(user)
     d = await db.get(DispositionRule, disposition_id)
     if d is None:

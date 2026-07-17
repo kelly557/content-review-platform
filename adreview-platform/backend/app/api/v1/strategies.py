@@ -919,7 +919,7 @@ async def delete_strategy(
     strategy_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles("admin")),
-) -> None:
+) -> Response:
     strategy = await db.get(Strategy, strategy_id)
     if not strategy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="策略不存在")

@@ -139,7 +139,7 @@ async def delete_category(
     category_id: int,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("admin")),
-) -> None:
+) -> Response:
     cat = await db.get(ServiceCategory, category_id)
     if not cat:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分类不存在")

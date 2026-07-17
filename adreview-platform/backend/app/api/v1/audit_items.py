@@ -642,7 +642,7 @@ async def delete_item(
     item_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles("admin", "superadmin")),
-) -> None:
+) -> Response:
     await _ensure_package(db, code)
     item = await db.get(AuditItem, item_id)
     if not item or item.package_code != code:
