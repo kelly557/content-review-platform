@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { InputNumber, Space, Typography, message as antMessage } from 'antd'
+import { InputNumber, Space, Switch, Tooltip, Typography, message as antMessage } from 'antd'
+import { RobotOutlined } from '@ant-design/icons'
 import type { AuditItem } from '@/types/domain'
 import { auditItemsApi } from '@/api/auditItems'
 
@@ -11,15 +12,13 @@ interface Props {
 }
 
 /**
- * 审核 Agent 卡片列。
+ * 审核 Agent 卡片列(2026-07-29 视觉强化版)。
  *
- * - 每张卡片对应一个自定义 item(is_builtin=false)
- * - 卡片横版布局:标题 + 启用 + 3 档阈值(低/中/高 min, max 自动反推)
- * - 不展开具体审核点(item 级共享阈值,适用上千条 point)
- * - 不展示「共用阈值」提示文案(用户决策 2026-07-29)
- * - 「审核内容」展示 item.description;为空时显示「—」
- *
- * 阈值变化触发 PATCH /audit_items/{id} 单点更新。
+ * - 顶部深色横幅(icon + 大字 + 计数),与上方 PointsColumn table 视觉强区分
+ * - 每张卡片左侧 4px 蓝色色块锚点
+ * - 卡片字段(item 名 + 启用 Switch + 3 档阈值 + 审核内容)横版并排 4 列
+ * - 不展示「共用阈值」提示文案
+ * - 「审核内容」从 audit_item.description 读;空时显示「—」
  */
 export default function AgentCardsColumn({ packageCode, items }: Props) {
   const [savingByItemId, setSavingByItemId] = useState<Record<number, boolean>>({})
@@ -32,6 +31,7 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
       low_threshold_min?: number
       medium_threshold_min?: number
       high_threshold_min?: number
+      is_enabled?: boolean
     },
   ) => {
     if (!packageCode) return
@@ -48,32 +48,45 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
   }
 
   return (
-    <div style={{ marginTop: 32 }}>
+    <div style={{ marginTop: 40 }}>
+      {/* 顶部横幅:深色背景 + icon + 大字 + 计数 */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          paddingBottom: 10,
-          borderBottom: '1px solid var(--color-border)',
+          gap: 12,
+          padding: '14px 18px',
           marginBottom: 16,
+          background: 'linear-gradient(135deg, #1E293B 0%, #334155 100%)',
+          borderRadius: 8,
+          color: '#F8FAFC',
         }}
       >
-        <Text strong style={{ fontSize: 14, color: '#0F172A' }}>
+        <RobotOutlined style={{ fontSize: 22, color: '#60A5FA' }} />
+        <Text style={{ fontSize: 16, fontWeight: 600, color: '#F8FAFC' }}>
           审核 Agent
         </Text>
         <span
           style={{
             fontSize: 11,
-            padding: '1px 8px',
+            padding: '2px 10px',
             borderRadius: 10,
-            background: '#F1F5F9',
-            color: '#64748B',
+            background: 'rgba(255, 255, 255, 0.12)',
+            color: '#E2E8F0',
             lineHeight: 1.6,
           }}
         >
           {items.length}
         </span>
+        <Text
+          style={{
+            marginLeft: 'auto',
+            fontSize: 12,
+            color: '#94A3B8',
+          }}
+        >
+          在此直接定义 Agent 共享阈值(适用于上千条审核点)
+        </Text>
       </div>
 
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -102,6 +115,7 @@ interface CardProps {
       low_threshold_min?: number
       medium_threshold_min?: number
       high_threshold_min?: number
+      is_enabled?: boolean
     },
   ) => Promise<void>
 }
@@ -121,25 +135,40 @@ function AgentCard({ item, saving, onPatch }: CardProps) {
       style={{
         background: '#FFFFFF',
         border: '1px solid var(--color-border)',
+        borderLeft: '4px solid #2563EB',
         borderRadius: 8,
         padding: '14px 16px',
         opacity: saving ? 0.7 : 1,
         transition: 'opacity 200ms',
       }}
     >
-      {/* 标题行:item 名称 */}
-      <div style={{ marginBottom: 12 }}>
-        <Text strong style={{ fontSize: 14, color: '#0F172A' }}>
+      {/* 标题行:item 名称 + 启用开关 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 14,
+        }}
+      >
+        <Text strong style={{ fontSize: 15, color: '#0F172A' }}>
           {item.name_cn}
         </Text>
+        <Switch
+          checked={item.is_enabled}
+          disabled={saving}
+          onChange={(checked) => onPatch(item, { is_enabled: checked })}
+          aria-label={`启用 ${item.name_cn}`}
+        />
       </div>
 
-      {/* 阈值横版并排 */}
+      {/* 4 列横版:低/中/高阈值 + 审核内容 */}
       <div
         style={{
           display: 'flex',
           gap: 20,
           flexWrap: 'wrap',
+          alignItems: 'flex-start',
         }}
       >
         <ThresholdField
@@ -166,19 +195,7 @@ function AgentCard({ item, saving, onPatch }: CardProps) {
           disabled={saving}
           onChange={(v) => onPatch(item, { high_threshold_min: v ?? 90 })}
         />
-      </div>
-
-      {/* 审核内容(item.description) */}
-      <div style={{ marginTop: 12 }}>
-        {item.description ? (
-          <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.6 }}>
-            审核内容:{item.description}
-          </Text>
-        ) : (
-          <Text type="secondary" style={{ fontSize: 12, color: '#CBD5E1' }}>
-            审核内容:—
-          </Text>
-        )}
+        <DescriptionField description={item.description} />
       </div>
     </div>
   )
@@ -237,6 +254,37 @@ function ThresholdField({
           {maxDisplay.toFixed(2)}
         </div>
       </Space>
+    </div>
+  )
+}
+
+function DescriptionField({ description }: { description: string | null }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 200 }}>
+      <Text type="secondary" style={{ fontSize: 12 }}>
+        审核内容
+      </Text>
+      {description ? (
+        <Tooltip title={description} placement="topLeft">
+          <Text
+            style={{
+              fontSize: 12,
+              color: '#475569',
+              lineHeight: 1.6,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              maxWidth: '100%',
+            }}
+          >
+            {description}
+          </Text>
+        </Tooltip>
+      ) : (
+        <Text style={{ fontSize: 12, color: '#CBD5E1', lineHeight: 1.6 }}>—</Text>
+      )}
     </div>
   )
 }
