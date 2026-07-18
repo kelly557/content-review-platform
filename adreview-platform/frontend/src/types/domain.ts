@@ -1925,6 +1925,19 @@ export interface MachineHit {
   quote?: string | null
 }
 
+export type MachineReviewFeedbackKind = 'false_positive' | 'false_negative'
+
+export interface MachineReviewFeedback {
+  id: number
+  public_id?: string | null
+  task_id: number
+  kind: MachineReviewFeedbackKind
+  note?: string | null
+  created_by_id?: number | null
+  created_by_name?: string | null
+  created_at: string
+}
+
 export interface MachineReviewRecord {
   id: number
   public_id?: string
@@ -1955,6 +1968,7 @@ export interface MachineReviewRecord {
   summary?: string | null
   requested_at?: string | null
   finished_at?: string | null
+  last_feedback?: MachineReviewFeedback | null
 }
 
 export interface AdvancedCondition {
@@ -2065,6 +2079,7 @@ export interface ReviewRecord {
   account_id?: string | null
   bailian_request_id?: string | null
   data_id?: string | null
+  last_feedback?: MachineReviewFeedback | null
 }
 
 export interface ReviewFilters {

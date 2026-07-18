@@ -38,6 +38,11 @@ export default function ColumnSettingsMenu({ visible, onChange }: Props) {
                 </Checkbox>
               </div>
             ))}
+            <div style={{ padding: '4px 0' }}>
+              <Checkbox checked disabled>
+                操作
+              </Checkbox>
+            </div>
             <Divider style={{ margin: '8px 0' }} />
             <div style={{ display: 'flex', gap: 8 }}>
               <Button

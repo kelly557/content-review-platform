@@ -133,6 +133,8 @@ class MachineReviewRecordOut(ORMBase):
     violation_tags: List[Dict[str, Any]] = Field(default_factory=list)
     summary: Optional[str] = None
 
+    last_feedback: Optional["MachineReviewFeedbackOut"] = None
+
     requested_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
@@ -186,6 +188,24 @@ class ReviewRecordOut(ORMBase):
     account_id: Optional[str] = None
     bailian_request_id: Optional[str] = None
     data_id: Optional[str] = None
+
+    last_feedback: Optional["MachineReviewFeedbackOut"] = None
+
+
+class MachineReviewFeedbackIn(BaseModel):
+    kind: Literal["false_positive", "false_negative"] = Field(description="false_positive=未违规误报，false_negative=违规漏过")
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class MachineReviewFeedbackOut(ORMBase):
+    id: int
+    public_id: Optional[str] = None
+    task_id: int
+    kind: str
+    note: Optional[str] = None
+    created_by_id: Optional[int] = None
+    created_by_name: Optional[str] = None
+    created_at: datetime
 
 
 QueryPage = Page[MachineReviewRecordOut]
