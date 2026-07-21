@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import {
   Alert,
   App,
@@ -37,6 +37,15 @@ export interface CreateAgentPayload {
   rows: AgentPromptRow[]
 }
 
+export interface CreateAgentFormRef {
+  getState: () => {
+    name: string
+    modelId: string
+    rows: AgentPromptRow[]
+    isValid: boolean
+  }
+}
+
 export interface CreateAgentFormProps {
   submitting?: boolean
   onCancel: () => void
@@ -51,6 +60,7 @@ export interface CreateAgentFormProps {
   draftSavedAt?: string | null
   showTopBar?: boolean
   canPublish?: boolean
+  historyDisabled?: boolean
   onHistory?: () => void
   onTest?: () => void
   onPublish?: () => void
@@ -88,7 +98,7 @@ function genId() {
   return `row-${Math.random().toString(36).slice(2, 9)}`
 }
 
-export default function CreateAgentForm({
+const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(function CreateAgentForm({
   submitting,
   onCancel,
   onSubmit,
@@ -102,10 +112,11 @@ export default function CreateAgentForm({
   draftSavedAt,
   showTopBar,
   canPublish,
+  historyDisabled,
   onHistory,
   onTest,
   onPublish,
-}: CreateAgentFormProps) {
+}, ref) {
   const { message } = App.useApp()
   const filteredLargeModels = LARGE_MODEL_OPTIONS.filter((o) =>
     o.modality.includes(initialModality ?? '图文'),
@@ -115,6 +126,25 @@ export default function CreateAgentForm({
   const [editingName, setEditingName] = useState(false)
   const [largeModel, setLargeModel] = useState<string>(initialLargeModel ?? defaultLargeModel)
   const [rows, setRows] = useState<AgentPromptRow[]>(initialRows ?? DEFAULT_ROWS)
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getState: () => {
+        const validRows = rows.filter((r) => r.label.trim() && r.desc.trim())
+        return {
+          name: name.trim(),
+          modelId: largeModel,
+          rows,
+          isValid:
+            !!name.trim() &&
+            !!largeModel &&
+            validRows.length > 0,
+        }
+      },
+    }),
+    [name, largeModel, rows],
+  )
 
   useEffect(() => {
     setName(initialName || '未命名审核智能体')
@@ -209,9 +239,11 @@ export default function CreateAgentForm({
             </Text>
           </Space>
           <Space size={8}>
-            <Button onClick={onHistory} disabled={!onHistory}>
-              历史版本
-            </Button>
+            <Tooltip title={historyDisabled ? '保存草稿后可查看历史版本' : ''}>
+              <Button onClick={onHistory} disabled={!onHistory || historyDisabled}>
+                历史版本
+              </Button>
+            </Tooltip>
             <Button onClick={onTest} disabled={!onTest}>
               测试
             </Button>
@@ -394,7 +426,9 @@ export default function CreateAgentForm({
       />
     </div>
   )
-}
+})
+
+export default CreateAgentForm
 
 function FragmentRow({
   row,

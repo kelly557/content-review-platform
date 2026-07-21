@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   App,
@@ -26,6 +26,7 @@ import {
 import { Link } from 'react-router-dom'
 import CreateAgentForm, {
   type AgentPromptRow,
+  type CreateAgentFormRef,
   type CreateAgentPayload,
 } from './CreateAgentModal'
 import CreateAgentStep1Modal, {
@@ -141,9 +142,15 @@ export default function ReviewAgentsPage() {
   const [historyOpen, setHistoryOpen] = useState(false)
   // 效果测试
   const [testOpen, setTestOpen] = useState(false)
+  // 测试抽屉的实时表单 points（新建态也可用）
+  const [testPoints, setTestPoints] = useState<{ id: string; label: string }[]>([])
+  const [testAgentName, setTestAgentName] = useState<string>('')
+  const [testModality, setTestModality] = useState<'文本' | '图像' | '图文'>('文本')
   // 发布 / 下线
   const [publishOpen, setPublishOpen] = useState(false)
   const [unpublishOpen, setUnpublishOpen] = useState(false)
+  // 表单 ref（用于发布时拿到最新 state）
+  const formRef = useRef<CreateAgentFormRef>(null)
 
   const anyDrawerOpen =
     step1Open || step2Open || aiDrawerOpen || historyOpen || testOpen || publishOpen || unpublishOpen
@@ -242,47 +249,100 @@ export default function ReviewAgentsPage() {
     return true
   }
 
-  const handlePublish = (agent: AgentRow | null) => {
-    if (!agent) {
-      // 当前编辑中的 agent
-      if (!editingAgent) return
-      agent = editingAgent
-    }
+  const handlePublish = () => {
     setPublishOpen(true)
   }
 
   const handleConfirmPublish = () => {
-    const current = editingAgent
-    if (!current) {
+    const state = formRef.current?.getState()
+    if (!state || !state.isValid) {
       setPublishOpen(false)
+      message.warning('请先完成配置：智能体名称、大模型和至少一条审核点')
       return
     }
-    const snapshot: AgentVersionSnapshot = {
-      modality: (['文本', '图像', '图文'].includes(current.modality)
-        ? current.modality
-        : '图文') as AgentVersionSnapshot['modality'],
-      name: current.name,
-      modelId: current.modelId,
-      points: current.points,
-    }
-    const v = publishVersion(current.appId, snapshot)
+
     const ts = timestamp()
+    const validRows = state.rows.filter((r) => r.label.trim() && r.desc.trim())
+    const modality = (step1Payload?.modality ??
+      (editingAgent && ['文本', '图像', '图文'].includes(editingAgent.modality)
+        ? editingAgent.modality
+        : '图文')) as AgentVersionSnapshot['modality']
+
+    let targetAppId: string
+    let isNew = false
+
+    if (editingAgent) {
+      targetAppId = editingAgent.appId
+      // 先把表单最新 state 落到编辑中的 agent
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.appId === editingAgent.appId
+            ? {
+                ...a,
+                name: state.name,
+                modelId: state.modelId,
+                points: validRows,
+                modality: modality as AgentModality,
+                updatedAt: ts,
+                draftSavedAt: ts,
+              }
+            : a,
+        ),
+      )
+    } else {
+      // 新建态：先落表
+      const sequence = String(agents.length + 1).padStart(2, '0')
+      const modalityPrefix =
+        modality === '文本' ? 'txt' : modality === '图像' ? 'img' : 'mm'
+      targetAppId = `${modalityPrefix}_check_agent_${sequence}`
+      isNew = true
+      const next: AgentRow = {
+        appId: targetAppId,
+        name: state.name,
+        status: '未发布',
+        modality: modality as AgentModality,
+        onlineAt: '-',
+        updatedAt: ts,
+        version: null,
+        publishedAt: null,
+        draftSavedAt: ts,
+        modelId: state.modelId,
+        points: validRows,
+      }
+      setAgents((prev) => [next, ...prev])
+    }
+
+    const snapshot: AgentVersionSnapshot = {
+      modality,
+      name: state.name,
+      modelId: state.modelId,
+      points: validRows,
+    }
+    const v = publishVersion(targetAppId, snapshot)
+
     setAgents((prev) =>
       prev.map((a) =>
-        a.appId === current.appId
+        a.appId === targetAppId
           ? {
               ...a,
               status: '已发布',
               version: v.version,
               publishedAt: v.publishedAt,
               onlineAt: v.publishedAt,
-              updatedAt: ts,
+              updatedAt: timestamp(),
             }
           : a,
       ),
     )
     setPublishOpen(false)
-    message.success(`已发布，版本 ${v.version}`)
+    if (isNew) {
+      closeStep2()
+    }
+    message.success(
+      isNew
+        ? `已创建并发布，版本 ${v.version}`
+        : `已发布，版本 ${v.version}`,
+    )
   }
 
   const handleUnpublish = (agent: AgentRow) => {
@@ -339,14 +399,17 @@ export default function ReviewAgentsPage() {
     handleCreateOrUpdate(payload)
   }
 
-  const activeAgent = editingAgent
-
-  const canPublish = !!(
-    activeAgent &&
-    activeAgent.name.trim() &&
-    activeAgent.modelId &&
-    activeAgent.points.some((p) => p.label.trim() && p.desc.trim())
-  )
+  // canPublish 实时同步自 formRef；表单 useImperativeHandle 已提供 getState().isValid
+  const [canPublish, setCanPublish] = useState(false)
+  useEffect(() => {
+    const sync = () => {
+      const s = formRef.current?.getState()
+      setCanPublish(!!s?.isValid)
+    }
+    sync()
+    const interval = window.setInterval(sync, 400)
+    return () => window.clearInterval(interval)
+  }, [step2Open])
 
   const columns = useMemo(
     () => [
@@ -572,6 +635,7 @@ export default function ReviewAgentsPage() {
         title={editingAgent ? '配置审核智能体' : '创建审核智能体'}
       >
         <CreateAgentForm
+          ref={formRef}
           submitting={creating}
           onCancel={closeStep2}
           onSubmit={handleSaveDraft}
@@ -596,11 +660,25 @@ export default function ReviewAgentsPage() {
           initialLargeModel={editingAgent?.modelId}
           initialRows={editingAgent?.points}
           draftSavedAt={editingAgent?.draftSavedAt ?? null}
-          showTopBar={!!editingAgent}
+          showTopBar={true}
           canPublish={canPublish}
+          historyDisabled={!editingAgent}
           onHistory={() => setHistoryOpen(true)}
-          onTest={() => setTestOpen(true)}
-          onPublish={() => handlePublish(editingAgent)}
+          onTest={() => {
+            const state = formRef.current?.getState()
+            if (state) {
+              setTestPoints(
+                state.rows
+                  .filter((r) => r.label.trim() || r.desc.trim())
+                  .map((r) => ({ id: r.id, label: r.label || '(未命名)' })),
+              )
+              setTestAgentName(state.name)
+              const m = step1Payload?.modality ?? editingAgent?.modality ?? '图文'
+              setTestModality((['文本', '图像', '图文'].includes(m) ? m : '图文') as '文本' | '图像' | '图文')
+            }
+            setTestOpen(true)
+          }}
+          onPublish={() => handlePublish()}
         />
       </Drawer>
 
@@ -615,20 +693,14 @@ export default function ReviewAgentsPage() {
       )}
 
       {/* 效果测试抽屉 */}
-      {editingAgent && (
-        <AgentTestRunDrawer
-          open={testOpen}
-          onClose={() => setTestOpen(false)}
-          modality={
-            (['文本', '图像', '图文'].includes(editingAgent.modality)
-              ? editingAgent.modality
-              : '图文') as '文本' | '图像' | '图文'
-          }
-          agentName={editingAgent.name}
-          points={editingAgent.points.map((p) => ({ id: p.id, label: p.label }))}
+      <AgentTestRunDrawer
+        open={testOpen}
+        onClose={() => setTestOpen(false)}
+        modality={testModality}
+        agentName={testAgentName}
+        points={testPoints}
           ready={canPublish}
         />
-      )}
 
       {/* 发布提示弹窗 */}
       <PublishAgentModal
