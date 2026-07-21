@@ -20,6 +20,11 @@ export const MENU_TREE: MenuNode[] = [
         label: '文本规则管理',
         permissions: ['view', 'edit', 'delete'],
       },
+      {
+        key: 'strategies-agents',
+        label: '审核智能体',
+        permissions: ['view', 'edit', 'delete'],
+      },
     ],
   },
   {

@@ -129,3 +129,23 @@ a:hover { text-decoration: underline; }
 .rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-flash > td {
   animation: rules-section-flash 1.5s ease-out;
 }
+
+/* Right-side drawer backdrop: dims Sider + Header + Content while drawer is open */
+.app-layout-dimmed {
+  pointer-events: none;
+  user-select: none;
+}
+
+.app-dim-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 999;
+  pointer-events: none;
+  animation: appDimFadeIn 200ms ease;
+}
+
+@keyframes appDimFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { App, Button, Empty, Space, Table, Tag, Tooltip, type TableColumnsType } from 'antd'
+import {
+  Alert,
+  App,
+  Button,
+  Dropdown,
+  Empty,
+  Space,
+  Table,
+  Tag,
+  Tooltip,
+  type MenuProps,
+  type TableColumnsType,
+} from 'antd'
 import {
   CloudDownloadOutlined,
+  DownOutlined,
   FilterOutlined,
   QuestionCircleOutlined,
   ReloadOutlined,
@@ -163,7 +176,7 @@ export default function QueryPage() {
       },
     },
     {
-      title: <ColumnTitle text="素材类型" tip="被审核素材的载体形态：文本/图片/音频/视频" />,
+      title: <ColumnTitle text="素材内容" tip="素材内容预览：文本摘要 / 图片缩略图 / 音视频入口，点击查看完整" />,
       key: 'content_preview',
       width: 280,
       render: (_, r) => <ContentPreviewCell record={r} onPreview={setDetailRecord} />,
@@ -215,18 +228,77 @@ export default function QueryPage() {
     {
       title: '操作',
       key: 'op',
-      width: 80,
+      width: 200,
       fixed: 'right',
-      render: (_, r) => (
-        <Button type="link" size="small" onClick={() => setDetailRecord(r)}>
-          详情
-        </Button>
-      ),
+      render: (_, r) => {
+        const last = r.last_feedback
+        const feedbackItems: MenuProps['items'] = [
+          { key: 'false_positive', label: '未违规误报' },
+          { key: 'false_negative', label: '违规漏过' },
+        ]
+        const onFeedbackClick: MenuProps['onClick'] = async ({ key }) => {
+          if (!r.public_id) {
+            message.error('该记录缺少 Request ID，无法反馈')
+            return
+          }
+          const kind = key as 'false_positive' | 'false_negative'
+          try {
+            await queryApi.submitFeedback(r.public_id, kind)
+            message.success(
+              kind === 'false_positive' ? '已记录：未违规误报' : '已记录：违规漏过',
+            )
+            fetchResults()
+          } catch {
+            message.error('反馈提交失败')
+          }
+        }
+        return (
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => setDetailRecord(r)}>
+              详情
+            </Button>
+            <span style={{ color: '#CBD5E1' }}>|</span>
+            <Dropdown
+              menu={{ items: feedbackItems, onClick: onFeedbackClick }}
+              trigger={['click']}
+              disabled={!r.public_id}
+            >
+              <Button
+                type="link"
+                size="small"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}
+              >
+                反馈 <DownOutlined style={{ fontSize: 10 }} />
+              </Button>
+            </Dropdown>
+            {last && (
+              <Tooltip
+                title={
+                  (last.created_by_name
+                    ? `由 ${last.created_by_name} 标记为 ${last.kind === 'false_positive' ? '未违规误报' : '违规漏过'}`
+                    : `已标记为 ${last.kind === 'false_positive' ? '未违规误报' : '违规漏过'}`)
+                    + ` · ${new Date(last.created_at).toLocaleString('zh-CN')}`
+                }
+              >
+                <Tag
+                  color={last.kind === 'false_positive' ? 'orange' : 'purple'}
+                  style={{ marginInlineEnd: 0, fontSize: 11 }}
+                >
+                  {last.kind === 'false_positive' ? '误报' : '漏过'}
+                </Tag>
+              </Tooltip>
+            )}
+          </Space>
+        )
+      },
     },
   ]
 
   const columns = useMemo(
-    () => columnsAll.filter((c) => !c.key || visibleSet.has(c.key as QueryColumnKey)),
+    () =>
+      columnsAll.filter(
+        (c) => !c.key || c.key === 'op' || visibleSet.has(c.key as QueryColumnKey),
+      ),
     [columnsAll, visibleSet],
   )
 
@@ -247,6 +319,13 @@ export default function QueryPage() {
       >
         <div style={{ fontSize: 20, fontWeight: 600 }}>数据查询</div>
       </div>
+
+      <Alert
+        type="warning"
+        showIcon
+        message="数据查询仅支持近 90 天，超出范围的结果将被清理，请尽快导出。"
+        style={{ marginBottom: 12 }}
+      />
 
       <div style={{ marginBottom: 12 }}>
         <FilterBar value={filters} onChange={setFilters} labelOptions={labelOptions} />

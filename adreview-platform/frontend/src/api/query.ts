@@ -1,5 +1,7 @@
 import { api } from './client'
 import type {
+  MachineReviewFeedback,
+  MachineReviewFeedbackKind,
   MachineReviewRecord,
   QueryFilters,
   ReviewFilters,
@@ -83,6 +85,18 @@ export const queryApi = {
     if (filters.size) params.size = filters.size
     return api
       .get<QueryPage<ReviewRecord>>('/query/review', { params })
+      .then((r) => r.data)
+  },
+  submitFeedback(
+    taskPublicId: string,
+    kind: MachineReviewFeedbackKind,
+    note?: string,
+  ) {
+    return api
+      .post<MachineReviewFeedback>(
+        `/query/results/${encodeURIComponent(taskPublicId)}/feedback`,
+        { kind, note },
+      )
       .then((r) => r.data)
   },
 }

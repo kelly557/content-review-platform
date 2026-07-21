@@ -49,6 +49,7 @@ const PersonalRuleListPage = lazy(() => import('@/pages/rules/PersonalRuleListPa
 const PersonalRuleDetailPage = lazy(() => import('@/pages/rules/PersonalRuleDetailPage'))
 const PersonalRulePointsPage = lazy(() => import('@/pages/rules/PersonalRulePointsPage'))
 const AuditRulesPage = lazy(() => import('@/pages/audit-rules/AuditRulesPage'))
+const ReviewAgentsPage = lazy(() => import('@/pages/audit-agents/ReviewAgentsPage'))
 const WordLibraryListPage = lazy(() => import('@/pages/strategy/WordLibraryListPage'))
 const ImageLibraryListPage = lazy(() => import('@/pages/strategy/ImageLibraryListPage'))
 const WordLibraryDetailPage = lazy(() => import('@/pages/strategy/WordLibraryDetailPage'))
@@ -271,6 +272,7 @@ export default function AppRoutes() {
 
             <Route element={<ProtectedRoute allow={['superadmin', 'root_admin']} />}>
               <Route path="/admin/roles" element={<RolesAdminPage />} />
+              <Route path="/strategies/agents" element={<ReviewAgentsPage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['root_admin']} />}>

@@ -15,6 +15,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.deps import require_roles
 from app.db.session import get_db
+from app.models.machine_review_feedback import MachineReviewFeedback
 from app.models.material import Material, MaterialType, MaterialVersion
 from app.models.review import (
     ReviewAssignment,
@@ -30,6 +31,8 @@ from app.schemas.query import (
     ContentMedia,
     DECISION_LABELS,
     MachineHitOut,
+    MachineReviewFeedbackIn,
+    MachineReviewFeedbackOut,
     MachineReviewRecordOut,
     QueryLabelsOut,
     QueryPage,
@@ -38,6 +41,7 @@ from app.schemas.query import (
     RISK_TO_DECISION,
     derive_content_media,
 )
+from app.services import audit as audit_service
 
 router = APIRouter(prefix="/query", tags=["query"])
 
@@ -61,6 +65,7 @@ def _to_record(
     assignee: Optional[User],
     tag_snapshots: List[Dict[str, Any]],
     strategy_orm: Optional[Strategy] = None,
+    last_feedback: Optional[MachineReviewFeedbackOut] = None,
 ) -> MachineReviewRecordOut:
     mr: Dict[str, Any] = dict(task.machine_result or {})
     strategy_snapshot = mr.get("strategy") or {}
@@ -157,6 +162,7 @@ def _to_record(
         summary=mr.get("summary"),
         requested_at=requested_at,
         finished_at=task.machine_completed_at,
+        last_feedback=last_feedback,
     )
 
 
@@ -363,6 +369,29 @@ async def _run_query(
     for tag_id, snap, task_id in tag_rows:
         tags_by_task.setdefault(task_id, []).append({"id": tag_id, "snapshot": snap})
 
+    feedback_rows = (
+        await db.execute(
+            select(MachineReviewFeedback, User)
+            .join(User, User.id == MachineReviewFeedback.created_by_id, isouter=True)
+            .where(MachineReviewFeedback.task_id.in_(task_ids_out))
+            .order_by(MachineReviewFeedback.created_at.desc())
+        )
+    ).all()
+    feedback_by_task: Dict[int, MachineReviewFeedbackOut] = {}
+    for fb, user in feedback_rows:
+        if fb.task_id in feedback_by_task:
+            continue
+        feedback_by_task[fb.task_id] = MachineReviewFeedbackOut(
+            id=fb.id,
+            public_id=getattr(fb, "public_id", None),
+            task_id=fb.task_id,
+            kind=fb.kind,
+            note=fb.note,
+            created_by_id=fb.created_by_id,
+            created_by_name=user.full_name if user else None,
+            created_at=fb.created_at,
+        )
+
     out: List[MachineReviewRecordOut] = []
     for task, material, submitter, assignee, strategy_orm, material_version in rows:
         out.append(
@@ -374,6 +403,7 @@ async def _run_query(
                 assignee,
                 tags_by_task.get(task.id, []),
                 strategy_orm=strategy_orm,
+                last_feedback=feedback_by_task.get(task.id),
             )
         )
     return out
@@ -624,6 +654,7 @@ def _to_review_record(
     submitter: Optional[User],
     assignee: Optional[User],
     tag_snapshots: List[Dict[str, Any]],
+    last_feedback: Optional[MachineReviewFeedbackOut] = None,
 ) -> ReviewRecordOut:
     mr: Dict[str, Any] = dict(task.machine_result or {})
     strategy = mr.get("strategy") or {}
@@ -697,6 +728,7 @@ def _to_review_record(
         account_id=metadata.get("account_id"),
         bailian_request_id=machine_request_id,
         data_id=data_id,
+        last_feedback=last_feedback,
     )
 
 
@@ -815,6 +847,29 @@ async def list_review(
     for tag_id, snap, task_id in tag_rows:
         tags_by_task.setdefault(task_id, []).append({"id": tag_id, "snapshot": snap})
 
+    feedback_rows = (
+        await db.execute(
+            select(MachineReviewFeedback, User)
+            .join(User, User.id == MachineReviewFeedback.created_by_id, isouter=True)
+            .where(MachineReviewFeedback.task_id.in_(task_ids_out))
+            .order_by(MachineReviewFeedback.created_at.desc())
+        )
+    ).all()
+    feedback_by_task: Dict[int, MachineReviewFeedbackOut] = {}
+    for fb, user in feedback_rows:
+        if fb.task_id in feedback_by_task:
+            continue
+        feedback_by_task[fb.task_id] = MachineReviewFeedbackOut(
+            id=fb.id,
+            public_id=getattr(fb, "public_id", None),
+            task_id=fb.task_id,
+            kind=fb.kind,
+            note=fb.note,
+            created_by_id=fb.created_by_id,
+            created_by_name=user.full_name if user else None,
+            created_at=fb.created_at,
+        )
+
     items: List[ReviewRecordOut] = []
     for task, material, submitter, assignee in rows:
         items.append(
@@ -825,6 +880,66 @@ async def list_review(
                 submitter,
                 assignee,
                 tags_by_task.get(task.id, []),
+                last_feedback=feedback_by_task.get(task.id),
             )
         )
     return ReviewPage(items=items, total=total, page=page, size=size)
+
+@router.post(
+    "/results/{task_public_id}/feedback",
+    response_model=MachineReviewFeedbackOut,
+    status_code=201,
+)
+async def submit_machine_review_feedback(
+    task_public_id: str,
+    body: MachineReviewFeedbackIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles("reviewer", "admin")),
+) -> MachineReviewFeedbackOut:
+    """Record reviewer/admin disagreement with a machine-review verdict.
+
+    Body ``kind``:
+      - ``false_positive``: 未违规误报 (machine flagged but reviewer thinks compliant)
+      - ``false_negative``: 违规漏过 (machine passed but reviewer thinks should flag)
+
+    Persists a ``machine_review_feedback`` row and a matching audit event.
+    """
+    task = (
+        await db.execute(
+            select(ReviewTask).where(ReviewTask.public_id == task_public_id)
+        )
+    ).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=404, detail="review task not found")
+
+    fb = MachineReviewFeedback(
+        task_id=task.id,
+        kind=body.kind,
+        note=body.note,
+        created_by_id=user.id,
+    )
+    db.add(fb)
+    await audit_service.write_audit(
+        db,
+        actor=user,
+        action=f"machine_review.feedback.{body.kind}",
+        entity_type="review_task",
+        entity_id=task.id,
+        payload={
+            "task_public_id": task.public_id,
+            "note": body.note,
+        },
+    )
+    await db.commit()
+    await db.refresh(fb)
+
+    return MachineReviewFeedbackOut(
+        id=fb.id,
+        public_id=getattr(fb, "public_id", None),
+        task_id=fb.task_id,
+        kind=fb.kind,
+        note=fb.note,
+        created_by_id=fb.created_by_id,
+        created_by_name=user.full_name,
+        created_at=fb.created_at,
+    )

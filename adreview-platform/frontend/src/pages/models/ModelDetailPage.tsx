@@ -440,11 +440,11 @@ export default function ModelDetailPage() {
                         {modalityLabel ?? '-'}
                       </Descriptions.Item>
                       <Descriptions.Item label="当前版本">
-                        {model.current_version_no
+                        {model.current_version_label
                           ? model.current_version_label
-                            ? `v${model.current_version_no} · ${model.current_version_label}`
-                            : `v${model.current_version_no}`
-                          : '-'}
+                          : model.current_version_no != null
+                            ? `${model.current_version_no}`
+                            : '-'}
                       </Descriptions.Item>
                     </>
                   ) : (
@@ -533,7 +533,7 @@ export default function ModelDetailPage() {
                               title: '版本',
                               dataIndex: 'version_label',
                               width: 110,
-                              render: (v: string | null, row) => v || `v${row.version_no}`,
+                              render: (v: string | null, row) => v || `${row.version_no}`,
                             },
                             {
                               title: '状态',
@@ -616,7 +616,7 @@ export default function ModelDetailPage() {
                               title: '版本',
                               dataIndex: 'version_label',
                               width: 110,
-                              render: (v: string | null, row) => v || `v${row.version_no}`,
+                              render: (v: string | null, row) => v || `${row.version_no}`,
                             },
                             {
                               title: '状态',
