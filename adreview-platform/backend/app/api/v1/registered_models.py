@@ -1565,7 +1565,11 @@ async def _set_status(
     _validate_status(new_status)
     model = await db.scalar(
         select(RegisteredModel)
-        .options(selectinload(RegisteredModel.current_version), selectinload(RegisteredModel.credential))
+        .options(
+            selectinload(RegisteredModel.current_version),
+            selectinload(RegisteredModel.credential),
+            selectinload(RegisteredModel.provider),
+        )
         .where(RegisteredModel.id == model_id)
     )
     if model is None or model.is_deleted:
