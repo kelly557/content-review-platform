@@ -1568,7 +1568,7 @@ async def _set_status(
         .options(
             selectinload(RegisteredModel.current_version),
             selectinload(RegisteredModel.credential),
-            selectinload(RegisteredModel.provider),
+            selectinload(RegisteredModel.provider).selectinload(RegisteredProvider.credential),
         )
         .where(RegisteredModel.id == model_id)
     )
