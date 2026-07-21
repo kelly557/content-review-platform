@@ -77,7 +77,6 @@ const DEFAULT_ROWS: AgentPromptRow[] = [
 const ROW_TEXT_AREA_ROWS = 3
 const LABEL_MAX = 50
 const DESC_MAX = 1000
-const MAX_TOTAL_LEN = 30
 
 const CONFIG_HELP_LINES = [
   '根据您具体的业务检测需求,配置对应的检测规则。',
@@ -128,7 +127,6 @@ export default function CreateAgentForm({
     (sum, r) => sum + r.label.length + r.desc.length,
     0,
   )
-  const overLimit = totalCharLen > MAX_TOTAL_LEN
 
   const handleAddRow = () => {
     setRows((prev) => [...prev, { id: genId(), label: '', desc: '' }])
@@ -178,10 +176,6 @@ export default function CreateAgentForm({
     const validRows = rows.filter((r) => r.label.trim() && r.desc.trim())
     if (validRows.length === 0) {
       message.warning('请至少填写一行审核点与审核描述')
-      return
-    }
-    if (overLimit) {
-      message.warning(`总字符数 ${totalCharLen} 已超过 ${MAX_TOTAL_LEN}`)
       return
     }
     onSubmit({

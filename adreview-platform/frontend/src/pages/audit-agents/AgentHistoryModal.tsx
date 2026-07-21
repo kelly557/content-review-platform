@@ -1,9 +1,10 @@
 import { useMemo } from 'react'
-import { Button, Card, Descriptions, Modal, Popconfirm, Space, Tag, Timeline, Typography } from 'antd'
+import { Button, Card, Descriptions, Drawer, Grid, Popconfirm, Space, Tag, Timeline, Typography } from 'antd'
 import { RollbackOutlined } from '@ant-design/icons'
 import { listVersions, type AgentVersion, type AgentVersionSnapshot } from '@/api/agentVersions'
 
 const { Text } = Typography
+const { useBreakpoint } = Grid
 
 export interface AgentHistoryModalProps {
   open: boolean
@@ -73,16 +74,18 @@ export default function AgentHistoryModal({
   onRollback,
 }: AgentHistoryModalProps) {
   const versions = useMemo(() => (open ? listVersions(agentId) : []), [open, agentId])
+  const screens = useBreakpoint()
+  const width = screens.md ? 520 : '100vw'
 
   return (
-    <Modal
+    <Drawer
       title="历史版本"
+      placement="right"
+      width={width}
       open={open}
-      onCancel={onClose}
-      footer={null}
-      width={520}
+      onClose={onClose}
+      mask={false}
       destroyOnHidden
-      maskClosable
     >
       {versions.length === 0 ? (
         <div style={{ textAlign: 'center', color: '#94A3B8', padding: '40px 0' }}>
@@ -108,6 +111,6 @@ export default function AgentHistoryModal({
           }))}
         />
       )}
-    </Modal>
+    </Drawer>
   )
 }
