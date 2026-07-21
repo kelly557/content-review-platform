@@ -90,6 +90,7 @@ const NAV_SECTIONS: Array<{
           { key: 'strategies-list', path: '/strategies', label: '策略管理' },
           { key: 'strategies-image-rules', path: '/rules/audit/image', label: '图片规则管理' },
           { key: 'strategies-text-rules', path: '/rules/audit/text', label: '文本规则管理' },
+          { key: 'strategies-agents', path: '/strategies/agents', label: '审核智能体', roles: ['superadmin', 'root_admin'] },
         ],
       },
       {
@@ -146,7 +147,7 @@ export default function AppLayout() {
   const location = useLocation()
   const { message } = App.useApp()
   const { user, login, logout } = useAuthStore()
-  const { sidebarCollapsed, toggleSidebar } = useUiStore()
+  const { sidebarCollapsed, toggleSidebar, appDimmed } = useUiStore()
   const [isMobile, setIsMobile] = useState(false)
 
   const switchTo = async (acc: DevAccount) => {
@@ -320,7 +321,10 @@ export default function AppLayout() {
   ]
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout
+      className={appDimmed ? 'app-layout-dimmed' : undefined}
+      style={{ minHeight: '100vh' }}
+    >
       <Sider
         theme="dark"
         collapsible
@@ -399,6 +403,7 @@ export default function AppLayout() {
           <Outlet />
         </Content>
       </Layout>
+      <div className="app-dim-mask" hidden={!appDimmed} aria-hidden />
     </Layout>
   )
 }
