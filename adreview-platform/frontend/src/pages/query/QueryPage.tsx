@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
   App,
   Button,
   Dropdown,
@@ -318,6 +319,13 @@ export default function QueryPage() {
       >
         <div style={{ fontSize: 20, fontWeight: 600 }}>数据查询</div>
       </div>
+
+      <Alert
+        type="warning"
+        showIcon
+        message="数据查询仅支持近 90 天，超出范围的结果将被清理，请尽快导出。"
+        style={{ marginBottom: 12 }}
+      />
 
       <div style={{ marginBottom: 12 }}>
         <FilterBar value={filters} onChange={setFilters} labelOptions={labelOptions} />
