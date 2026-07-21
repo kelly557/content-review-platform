@@ -1538,6 +1538,24 @@ async def deactivate_model(
     return await _set_status(model_id, RegisteredModelStatus.INACTIVE.value, db, user)
 
 
+@router.post("/{model_id}/activate", response_model=RegisteredModelOut)
+async def activate_model(
+    model_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_writer),
+) -> RegisteredModelOut:
+    model = await db.scalar(
+        select(RegisteredModel).where(RegisteredModel.id == model_id)
+    )
+    if model is None or model.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    if model.status == RegisteredModelStatus.ARCHIVED.value:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "已归档的模型不可启用，请先取消归档")
+    if not model.current_version_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "模型尚未发布版本，无法启用")
+    return await _set_status(model_id, RegisteredModelStatus.ACTIVE.value, db, user)
+
+
 async def _set_status(
     model_id: int,
     new_status: str,

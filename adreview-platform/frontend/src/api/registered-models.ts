@@ -64,6 +64,11 @@ export const registeredModelsApi = {
       .post<RegisteredModel>(`/registered-models/${id}/deactivate`, {})
       .then((r) => r.data)
   },
+  activate(id: number) {
+    return api
+      .post<RegisteredModel>(`/registered-models/${id}/activate`, {})
+      .then((r) => r.data)
+  },
   validate(id: number) {
     return api
       .post<{ ok: boolean; log: RegisteredModelValidationLog; status: RegisteredModelStatus }>(

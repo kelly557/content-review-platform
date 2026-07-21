@@ -6,9 +6,11 @@ import {
   Input,
   Select,
   Space,
+  Switch,
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   App,
 } from 'antd'
@@ -49,6 +51,7 @@ type ModelRow = {
   versionText: string
   updatedAt: string | null
   points: AuditPointEntry[]
+  status: RegisteredModelStatus
 }
 
 type CategoryGroup = {
@@ -82,6 +85,7 @@ type FlatRow = {
   updatedAt: string | null
   point: AuditPointEntry | null
   rowSpan: number
+  status: RegisteredModelStatus
 }
 
 type GroupTitleRow = {
@@ -168,6 +172,54 @@ export default function ModelListPage() {
     setCreateOpen(true)
   }
 
+  const onToggleEnabled = async (
+    row: { id: number; name: string },
+    next: boolean,
+  ) => {
+    if (!canWrite) {
+      message.warning('仅管理员可启用/停用模型')
+      return
+    }
+    try {
+      if (next) {
+        await registeredModelsApi.activate(row.id)
+        message.success(`「${row.name}」已启用`)
+      } else {
+        await registeredModelsApi.deactivate(row.id)
+        message.success(`「${row.name}」已停用`)
+      }
+      void fetchList()
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || '操作失败')
+    }
+  }
+
+  const renderEnableSwitch = (
+    status: RegisteredModelStatus,
+    row: { id: number; name: string },
+  ) => {
+    const enabled = status === 'active'
+    const toggleable = status === 'active' || status === 'inactive'
+    const reason = !toggleable
+      ? status === 'archived'
+        ? '已归档的模型不可启用'
+        : `当前状态为 ${
+            REGISTERED_MODEL_STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status
+          }，不可直接启用`
+      : ''
+    const sw = (
+      <Switch
+        size="small"
+        checked={enabled}
+        disabled={!canWrite || !toggleable}
+        onChange={(next) => onToggleEnabled(row, next)}
+        aria-label={`${row.name} 启用状态`}
+      />
+    )
+    return reason ? <Tooltip title={reason}>{sw}</Tooltip> : sw
+  }
+
   const onTabChange = (next: string) => {
     const tab = next as ModelTab
     setActiveTab(tab)
@@ -181,7 +233,7 @@ export default function ModelListPage() {
 
   const largeColumns = useMemo(
     () => [
-      { title: '名称', dataIndex: 'name', width: '20%' },
+      { title: '名称', dataIndex: 'name', width: '18%' },
       {
         title: '能力类型',
         dataIndex: 'large_category',
@@ -195,7 +247,7 @@ export default function ModelListPage() {
       {
         title: 'Provider',
         dataIndex: 'provider_label',
-        width: '16%',
+        width: '14%',
         render: (v: string | null, row: RegisteredModelListItem) =>
           row.provider_id ? (
             <Link to={`/resources/providers/${row.provider_id}`}>
@@ -205,7 +257,14 @@ export default function ModelListPage() {
             <Text type="secondary">未挂载</Text>
           ),
       },
-      { title: 'Model ID', dataIndex: 'model_name', width: '18%' },
+      { title: 'Model ID', dataIndex: 'model_name', width: '16%' },
+      {
+        title: '启用',
+        dataIndex: 'status',
+        width: '8%',
+        render: (v: RegisteredModelStatus, row: RegisteredModelListItem) =>
+          renderEnableSwitch(v, row),
+      },
       {
         title: '更新时间',
         dataIndex: 'updated_at',
@@ -218,7 +277,8 @@ export default function ModelListPage() {
           ),
       },
     ],
-    [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [canWrite],
   )
 
   const smallGroups = useMemo<ModalityGroup[]>(() => {
@@ -260,6 +320,7 @@ export default function ModelListPage() {
         versionText,
         updatedAt: m.updated_at,
         points,
+        status: m.status,
       }
       if (!byModality.has(mod)) byModality.set(mod, new Map())
       const byCat = byModality.get(mod)!
@@ -318,6 +379,7 @@ export default function ModelListPage() {
             updatedAt: m.updatedAt,
             point: null,
             rowSpan: 1,
+            status: m.status,
           })
         } else {
           m.points.forEach((p, i) => {
@@ -329,6 +391,7 @@ export default function ModelListPage() {
               updatedAt: m.updatedAt,
               point: p,
               rowSpan: i === 0 ? span : 0,
+              status: m.status,
             })
           })
         }
@@ -373,7 +436,7 @@ export default function ModelListPage() {
     {
       title: '模型名称',
       key: 'name',
-      width: '20%',
+      width: '18%',
       render: (_, row) =>
         isGroupRow(row) ? (
           <span style={{ fontWeight: 500 }}>{row.catLabel}（{row.catCount} 个模型）</span>
@@ -382,10 +445,20 @@ export default function ModelListPage() {
         ),
       onCell: (row) => {
         if (isGroupRow(row)) {
-          return { colSpan: 5, id: `cat-${row.catKey}` }
+          return { colSpan: 6, id: `cat-${row.catKey}` }
         }
         return { rowSpan: row.rowSpan }
       },
+    },
+    {
+      title: '启用',
+      key: 'enabled',
+      width: '8%',
+      render: (_, row) =>
+        isGroupRow(row)
+          ? null
+          : renderEnableSwitch(row.status, { id: row.modelId, name: row.modelName }),
+      onCell: (row) => (isGroupRow(row) ? { colSpan: 0 } : { rowSpan: row.rowSpan }),
     },
     {
       title: '版本号',
@@ -403,7 +476,7 @@ export default function ModelListPage() {
     {
       title: '更新时间',
       key: 'updatedAt',
-      width: '16%',
+      width: '14%',
       render: (_, row) =>
         isGroupRow(row) ? null : row.updatedAt ? (
           <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(row.updatedAt).format('YYYY-MM-DD HH:mm')}</Text>
@@ -418,7 +491,7 @@ export default function ModelListPage() {
     {
       title: '审核点',
       key: 'point',
-      width: '20%',
+      width: '18%',
       render: (_, row) =>
         isGroupRow(row) ? null : row.point ? (
           <span style={{ color: '#020617' }}>{row.point.label}</span>
