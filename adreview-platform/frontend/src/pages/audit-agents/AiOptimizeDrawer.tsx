@@ -10,7 +10,6 @@ import {
   Radio,
   Space,
   Table,
-  Tag,
   Tooltip,
   Typography,
 } from 'antd'
@@ -346,10 +345,6 @@ export default function AiOptimizeDrawer({
           <Title level={5} style={{ margin: 0 }}>
             AI优化提示词
           </Title>
-          <Tag color="purple">公测</Tag>
-          <Tooltip title="名称（仅展示）">
-            <Button size="small" type="text" icon={<ThunderboltOutlined />} aria-label="名称" />
-          </Tooltip>
         </Space>
 
         <Alert
@@ -387,6 +382,20 @@ export default function AiOptimizeDrawer({
               label: '补充审核规则(可选)',
               children: (
                 <div>
+                  <div
+                    style={{
+                      color: '#94A3B8',
+                      fontSize: 12,
+                      lineHeight: 1.7,
+                      marginBottom: 12,
+                    }}
+                  >
+                    上传或编辑规则知识后将被解析为审核规则，
+                    例如广告法、食安法、隐私规范等。
+                    当前支持 txt / word / excel 文件，单文件不超过 20MB，
+                    仅提取纯文本内容，最大支持 1 万字符，
+                    若超出将自动截取前 1 万字符处理。
+                  </div>
                   <Radio.Group
                     value={ruleSource}
                     onChange={(e) => setRuleSource(e.target.value)}

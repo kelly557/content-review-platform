@@ -10,9 +10,7 @@ import {
   RedoOutlined,
 } from '@ant-design/icons'
 import {
-  ACCEPT_EXT_LABEL,
   ACCEPT_MIME,
-  MAX_FILE_BYTES,
   formatBytes,
   type AgentParseDocument,
   type AgentParseStatus,
@@ -70,10 +68,6 @@ export default function AgentParsePanel({
         </p>
         <p>上传文件</p>
       </Upload.Dragger>
-
-      <Text type="secondary" style={{ fontSize: 12 }}>
-        支持文件格式为:{ACCEPT_EXT_LABEL},大小限制为:{formatBytes(MAX_FILE_BYTES)},仅解析提取其中纯文本内容,最大支持长度1万字符,若超出将截取前1万字符处理。
-      </Text>
 
       {documents.length > 0 && (
         <>
