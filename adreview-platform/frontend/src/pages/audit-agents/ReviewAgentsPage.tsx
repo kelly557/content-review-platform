@@ -24,11 +24,23 @@ import {
   StarOutlined,
 } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
-import CreateAgentForm, { type CreateAgentPayload } from './CreateAgentModal'
+import CreateAgentForm, {
+  type AgentPromptRow,
+  type CreateAgentPayload,
+} from './CreateAgentModal'
 import CreateAgentStep1Modal, {
   type CreateAgentStep1Payload,
   type Step1Modality,
 } from './CreateAgentStep1Modal'
+import AgentHistoryModal from './AgentHistoryModal'
+import AgentTestRunDrawer from './AgentTestRunDrawer'
+import PublishAgentModal from './PublishAgentModal'
+import UnpublishAgentModal from './UnpublishAgentModal'
+import {
+  publishVersion,
+  unpublishCurrent,
+  type AgentVersionSnapshot,
+} from '@/api/agentVersions'
 import { useUiStore } from '@/store'
 
 const { Title, Text } = Typography
@@ -43,6 +55,11 @@ interface AgentRow {
   modality: AgentModality
   onlineAt: string
   updatedAt: string
+  version: string | null
+  publishedAt: string | null
+  draftSavedAt: string | null
+  modelId: string
+  points: AgentPromptRow[]
 }
 
 const INITIAL_AGENTS: AgentRow[] = [
@@ -53,6 +70,17 @@ const INITIAL_AGENTS: AgentRow[] = [
     modality: '文本',
     onlineAt: '2026-07-20 10:59:36',
     updatedAt: '2026-07-20 10:59:36',
+    version: '1784516376946',
+    publishedAt: '2026-07-20 10:59:36',
+    draftSavedAt: '2026-07-20 18:05:45',
+    modelId: 'text_audit_llm',
+    points: [
+      {
+        id: 'row-1',
+        label: '医药专项',
+        desc: 'OTC药物发布需要绑定claims和evidence',
+      },
+    ],
   },
 ]
 
@@ -75,14 +103,13 @@ const STEPS = [
     title: '2.配置智能体',
     icon: <SettingOutlined />,
     description:
-      '添加审核智能体，并逐步配置完善智能体：包含大模型选择、场景模版选择、提示词配置等。配置后可输入样本进行效果测试，直至满足业务需要。',
+      '添加审核智能体，并逐步配置完善智能体：包含大模型选择、模型配置、提示词配置等。配置后可输入样本进行效果测试，直至满足业务需要。',
   },
   {
     key: 'online',
     title: '3.上线应用',
     icon: <StarOutlined />,
-    description:
-      '将配置好的智能体发布上线，可通过API接口实现调用，业务可根据接口返回结果自行决策。',
+    description: '将配置好的智能体发布上线，然后在策略管理进行应用。',
   },
 ]
 
@@ -110,8 +137,16 @@ export default function ReviewAgentsPage() {
   const [creating, setCreating] = useState(false)
   // AI 优化提示词抽屉
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false)
+  // 历史版本
+  const [historyOpen, setHistoryOpen] = useState(false)
+  // 效果测试
+  const [testOpen, setTestOpen] = useState(false)
+  // 发布 / 下线
+  const [publishOpen, setPublishOpen] = useState(false)
+  const [unpublishOpen, setUnpublishOpen] = useState(false)
 
-  const anyDrawerOpen = step1Open || step2Open || aiDrawerOpen
+  const anyDrawerOpen =
+    step1Open || step2Open || aiDrawerOpen || historyOpen || testOpen || publishOpen || unpublishOpen
 
   useEffect(() => {
     setAppDimmed(anyDrawerOpen)
@@ -149,6 +184,7 @@ export default function ReviewAgentsPage() {
 
   const handleCreateOrUpdate = (payload: CreateAgentPayload) => {
     setCreating(true)
+    const ts = timestamp()
     if (editingAgent) {
       setAgents((prev) =>
         prev.map((a) =>
@@ -157,14 +193,16 @@ export default function ReviewAgentsPage() {
                 ...a,
                 name: payload.name,
                 modality: payload.modality as AgentModality,
-                updatedAt: timestamp(),
+                modelId: payload.largeModel,
+                points: payload.rows,
+                updatedAt: ts,
+                draftSavedAt: ts,
               }
             : a,
         ),
       )
       message.success('已更新审核智能体')
     } else {
-      const ts = timestamp()
       const sequence = String(agents.length + 1).padStart(2, '0')
       const modalityPrefix =
         payload.modality === '文本' ? 'txt' : payload.modality === '图像' ? 'img' : 'mm'
@@ -176,6 +214,11 @@ export default function ReviewAgentsPage() {
         modality: payload.modality as AgentModality,
         onlineAt: '-',
         updatedAt: ts,
+        version: null,
+        publishedAt: null,
+        draftSavedAt: ts,
+        modelId: payload.largeModel,
+        points: payload.rows,
       }
       setAgents((prev) => [next, ...prev])
       message.success('已创建审核智能体')
@@ -199,12 +242,118 @@ export default function ReviewAgentsPage() {
     return true
   }
 
+  const handlePublish = (agent: AgentRow | null) => {
+    if (!agent) {
+      // 当前编辑中的 agent
+      if (!editingAgent) return
+      agent = editingAgent
+    }
+    setPublishOpen(true)
+  }
+
+  const handleConfirmPublish = () => {
+    const current = editingAgent
+    if (!current) {
+      setPublishOpen(false)
+      return
+    }
+    const snapshot: AgentVersionSnapshot = {
+      modality: (['文本', '图像', '图文'].includes(current.modality)
+        ? current.modality
+        : '图文') as AgentVersionSnapshot['modality'],
+      name: current.name,
+      modelId: current.modelId,
+      points: current.points,
+    }
+    const v = publishVersion(current.appId, snapshot)
+    const ts = timestamp()
+    setAgents((prev) =>
+      prev.map((a) =>
+        a.appId === current.appId
+          ? {
+              ...a,
+              status: '已发布',
+              version: v.version,
+              publishedAt: v.publishedAt,
+              onlineAt: v.publishedAt,
+              updatedAt: ts,
+            }
+          : a,
+      ),
+    )
+    setPublishOpen(false)
+    message.success(`已发布，版本 ${v.version}`)
+  }
+
+  const handleUnpublish = (agent: AgentRow) => {
+    setEditingAgent(agent)
+    setUnpublishOpen(true)
+  }
+
+  const handleConfirmUnpublish = () => {
+    if (!editingAgent) {
+      setUnpublishOpen(false)
+      return
+    }
+    unpublishCurrent(editingAgent.appId)
+    const ts = timestamp()
+    setAgents((prev) =>
+      prev.map((a) =>
+        a.appId === editingAgent.appId
+          ? {
+              ...a,
+              status: '未发布',
+              version: null,
+              publishedAt: null,
+              onlineAt: '-',
+              updatedAt: ts,
+            }
+          : a,
+      ),
+    )
+    setUnpublishOpen(false)
+    message.success('已下线')
+  }
+
+  const handleRollback = (snapshot: AgentVersionSnapshot) => {
+    if (!editingAgent) return
+    setAgents((prev) =>
+      prev.map((a) =>
+        a.appId === editingAgent.appId
+          ? {
+              ...a,
+              modality: snapshot.modality as AgentModality,
+              name: snapshot.name,
+              modelId: snapshot.modelId,
+              points: snapshot.points,
+              draftSavedAt: null,
+              updatedAt: timestamp(),
+            }
+          : a,
+      ),
+    )
+    message.success('已恢复到此版本配置，请检查后保存或发布')
+  }
+
+  const handleSaveDraft = (payload: CreateAgentPayload) => {
+    handleCreateOrUpdate(payload)
+  }
+
+  const activeAgent = editingAgent
+
+  const canPublish = !!(
+    activeAgent &&
+    activeAgent.name.trim() &&
+    activeAgent.modelId &&
+    activeAgent.points.some((p) => p.label.trim() && p.desc.trim())
+  )
+
   const columns = useMemo(
     () => [
       {
         title: 'AppId',
         dataIndex: 'appId',
-        width: '16%',
+        width: '14%',
         render: (v: string) => (
           <Space size={6}>
             <Text style={{ fontFamily: 'monospace' }}>{v}</Text>
@@ -223,7 +372,7 @@ export default function ReviewAgentsPage() {
       {
         title: '智能体名称',
         dataIndex: 'name',
-        width: '18%',
+        width: '14%',
         render: (v: string, row: AgentRow) => (
           <Popover
             trigger="click"
@@ -271,13 +420,24 @@ export default function ReviewAgentsPage() {
           </Space>
         ),
       },
-      { title: '模态', dataIndex: 'modality', width: '10%' },
-      { title: '上线时间', dataIndex: 'onlineAt', width: '18%' },
-      { title: '更新时间', dataIndex: 'updatedAt', width: '18%' },
+      { title: '模态', dataIndex: 'modality', width: '8%' },
+      { title: '上线时间', dataIndex: 'onlineAt', width: '14%' },
+      {
+        title: '版本',
+        dataIndex: 'version',
+        width: '14%',
+        render: (v: string | null) =>
+          v ? (
+            <Text style={{ fontFamily: 'monospace' }}>{v}</Text>
+          ) : (
+            <Tag>未发布</Tag>
+          ),
+      },
+      { title: '更新时间', dataIndex: 'updatedAt', width: '14%' },
       {
         title: '操作',
         dataIndex: 'appId',
-        width: '10%',
+        width: '12%',
         render: (_: string, row: AgentRow) => (
           <Space size={4}>
             <Button type="link" size="small" onClick={() => handleOpenConfig(row)}>
@@ -286,6 +446,11 @@ export default function ReviewAgentsPage() {
             <Button type="link" size="small" onClick={() => onCopy(row.appId)}>
               复制
             </Button>
+            {row.version && (
+              <Button type="link" size="small" onClick={() => handleUnpublish(row)}>
+                下线
+              </Button>
+            )}
           </Space>
         ),
       },
@@ -409,7 +574,7 @@ export default function ReviewAgentsPage() {
         <CreateAgentForm
           submitting={creating}
           onCancel={closeStep2}
-          onSubmit={handleCreateOrUpdate}
+          onSubmit={handleSaveDraft}
           aiDrawerOpen={aiDrawerOpen}
           onAiDrawerOpenChange={setAiDrawerOpen}
           initialName={
@@ -428,8 +593,58 @@ export default function ReviewAgentsPage() {
                 ? step1Payload.modality
                 : undefined
           }
+          initialLargeModel={editingAgent?.modelId}
+          initialRows={editingAgent?.points}
+          draftSavedAt={editingAgent?.draftSavedAt ?? null}
+          showTopBar={!!editingAgent}
+          canPublish={canPublish}
+          onHistory={() => setHistoryOpen(true)}
+          onTest={() => setTestOpen(true)}
+          onPublish={() => handlePublish(editingAgent)}
         />
       </Drawer>
+
+      {/* 历史版本弹窗 */}
+      {editingAgent && (
+        <AgentHistoryModal
+          open={historyOpen}
+          agentId={editingAgent.appId}
+          onClose={() => setHistoryOpen(false)}
+          onRollback={handleRollback}
+        />
+      )}
+
+      {/* 效果测试抽屉 */}
+      {editingAgent && (
+        <AgentTestRunDrawer
+          open={testOpen}
+          onClose={() => setTestOpen(false)}
+          modality={
+            (['文本', '图像', '图文'].includes(editingAgent.modality)
+              ? editingAgent.modality
+              : '图文') as '文本' | '图像' | '图文'
+          }
+          agentName={editingAgent.name}
+          points={editingAgent.points.map((p) => ({ id: p.id, label: p.label }))}
+          ready={canPublish}
+        />
+      )}
+
+      {/* 发布提示弹窗 */}
+      <PublishAgentModal
+        open={publishOpen}
+        agentName={editingAgent?.name ?? ''}
+        onCancel={() => setPublishOpen(false)}
+        onConfirm={handleConfirmPublish}
+      />
+
+      {/* 下线提示弹窗 */}
+      <UnpublishAgentModal
+        open={unpublishOpen}
+        agentName={editingAgent?.name ?? ''}
+        onCancel={() => setUnpublishOpen(false)}
+        onConfirm={handleConfirmUnpublish}
+      />
     </div>
   )
 }
@@ -457,11 +672,7 @@ function RenamePopoverContent({
         onPressEnter={() => onConfirm(val)}
       />
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-        <Button
-          size="small"
-          type="primary"
-          onClick={() => onConfirm(val)}
-        >
+        <Button size="small" type="primary" onClick={() => onConfirm(val)}>
           确定
         </Button>
       </div>

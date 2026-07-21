@@ -46,6 +46,14 @@ export interface CreateAgentFormProps {
   onAddOptimizedConfig?: (cfg: { label: string; desc: string }) => void
   initialName?: string
   initialModality?: '文本' | '图像' | '图文'
+  initialLargeModel?: string
+  initialRows?: AgentPromptRow[]
+  draftSavedAt?: string | null
+  showTopBar?: boolean
+  canPublish?: boolean
+  onHistory?: () => void
+  onTest?: () => void
+  onPublish?: () => void
 }
 
 const LARGE_MODEL_OPTIONS: {
@@ -90,6 +98,14 @@ export default function CreateAgentForm({
   onAddOptimizedConfig,
   initialName,
   initialModality,
+  initialLargeModel,
+  initialRows,
+  draftSavedAt,
+  showTopBar,
+  canPublish,
+  onHistory,
+  onTest,
+  onPublish,
 }: CreateAgentFormProps) {
   const { message } = App.useApp()
   const filteredLargeModels = LARGE_MODEL_OPTIONS.filter((o) =>
@@ -98,15 +114,15 @@ export default function CreateAgentForm({
   const defaultLargeModel = filteredLargeModels[0]?.value ?? LARGE_MODEL_OPTIONS[0].value
   const [name, setName] = useState(initialName || '未命名审核智能体')
   const [editingName, setEditingName] = useState(false)
-  const [largeModel, setLargeModel] = useState<string>(defaultLargeModel)
-  const [rows, setRows] = useState<AgentPromptRow[]>(DEFAULT_ROWS)
+  const [largeModel, setLargeModel] = useState<string>(initialLargeModel ?? defaultLargeModel)
+  const [rows, setRows] = useState<AgentPromptRow[]>(initialRows ?? DEFAULT_ROWS)
 
   useEffect(() => {
     setName(initialName || '未命名审核智能体')
     setEditingName(false)
-    setLargeModel(filteredLargeModels[0]?.value ?? LARGE_MODEL_OPTIONS[0].value)
-    setRows(DEFAULT_ROWS)
-  }, [initialName, initialModality])
+    setLargeModel(initialLargeModel ?? (filteredLargeModels[0]?.value ?? LARGE_MODEL_OPTIONS[0].value))
+    setRows(initialRows ?? DEFAULT_ROWS)
+  }, [initialName, initialModality, initialLargeModel, initialRows])
 
   const totalCharLen = rows.reduce(
     (sum, r) => sum + r.label.length + r.desc.length,
@@ -178,6 +194,39 @@ export default function CreateAgentForm({
 
   return (
     <div style={{ padding: '4px 4px 8px' }}>
+      {showTopBar && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 12,
+            padding: '8px 12px',
+            background: '#F5F7FA',
+            borderRadius: 6,
+          }}
+        >
+          <Space size={6}>
+            <InfoCircleOutlined style={{ color: '#1677FF' }} />
+            <Text type="secondary">
+              {draftSavedAt
+                ? `草稿保存于：${draftSavedAt}`
+                : '尚未保存草稿，编辑后请点击保存草稿'}
+            </Text>
+          </Space>
+          <Space size={8}>
+            <Button onClick={onHistory} disabled={!onHistory}>
+              历史版本
+            </Button>
+            <Button onClick={onTest} disabled={!onTest}>
+              测试
+            </Button>
+            <Button type="primary" onClick={onPublish} disabled={!onPublish || !canPublish}>
+              发布
+            </Button>
+          </Space>
+        </div>
+      )}
       <div style={{ marginBottom: 12 }}>
         {editingName ? (
           <Input
