@@ -235,7 +235,7 @@ export default function ModelListPage() {
     () => [
       { title: '名称', dataIndex: 'name', width: '18%' },
       {
-        title: '能力类型',
+        title: '模态',
         dataIndex: 'large_category',
         width: '10%',
         render: (v: LargeModelCategory | null) => {
@@ -536,7 +536,7 @@ export default function ModelListPage() {
         {activeTab === 'large' && (
           <Select
             allowClear
-            placeholder="能力类型"
+            placeholder="模态"
             style={{ width: 140 }}
             value={largeCategory ?? undefined}
             onChange={(v) => setLargeCategory((v as LargeModelCategory) ?? null)}

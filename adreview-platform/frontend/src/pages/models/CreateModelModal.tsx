@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import {
-  Alert,
   Button,
   Drawer,
   Form,
@@ -74,7 +73,6 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
           model_name: m.model_name.trim(),
           large_category: m.large_category as LargeModelCategory,
           description: m.description?.trim() || undefined,
-          version: m.version?.trim() || undefined,
         }))
         const created = await providersApi.create({
           display_name: v.display_name.trim(),
@@ -229,7 +227,7 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
           endpoint_url:
             REGISTERED_MODEL_PROVIDER_PRESETS.find((p) => p.value === 'openai')
               ?.defaultEndpoint ?? '',
-          initial_models: [],
+          initial_models: [{}],
         }}
       >
         <Form.Item
@@ -291,16 +289,6 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
         </Form.Item>
 
         <div style={{ marginTop: 8, marginBottom: 8, fontWeight: 500 }}>模型列表</div>
-        <Alert
-          type={currentPreset ? 'success' : 'info'}
-          showIcon
-          style={{ marginBottom: 12 }}
-          message={
-            currentPreset === 'self-hosted' || currentPreset === 'custom'
-              ? '自建 / 自定义 Provider：Base URL 与 API Key 必须手动填写'
-              : `已自动预填 ${currentPreset ?? ''} 的默认 Base URL，可按需调整`
-          }
-        />
         <Form.List name="initial_models">
           {(fields, { add, remove }) => (
             <>
@@ -352,19 +340,13 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
                       }))}
                     />
                   </Form.Item>
-                  <Form.Item name={[field.name, 'version']} noStyle>
-                    <Input
-                      style={{ marginTop: 8, width: '100%' }}
-                      placeholder="起始版本号（可选）：1.0.0"
-                    />
-                  </Form.Item>
                 </div>
               ))}
               <Button
                 type="dashed"
                 block
                 icon={<PlusOutlined />}
-                onClick={() => add({ large_category: 'text' })}
+                onClick={() => add({})}
               >
                 添加模型
               </Button>
