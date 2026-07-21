@@ -4,6 +4,7 @@ import {
   Button,
   Form,
   Input,
+  Modal,
   Select,
   Skeleton,
   Space,
@@ -50,9 +51,39 @@ interface Props {
   initialPoints?: AuditPointEntry[] | null
 }
 
+type DiffEntry = { label: string; description: string }
+type ModifiedEntry = { label: string; oldDescription: string; newDescription: string }
+
+type DiffResult = {
+  onlyInExisting: DiffEntry[]
+  modified: ModifiedEntry[]
+  onlyInIncoming: DiffEntry[]
+}
+
 type HintState =
   | { type: 'loading' }
-  | { type: 'info' | 'success' | 'warning' | 'error'; text: string }
+  | { type: 'info'; text: string }
+  | {
+      type: 'success'
+      text: string
+      referenceModelId: number
+      referenceModelName: string
+      diff: DiffResult
+    }
+  | {
+      type: 'info-added'
+      text: string
+      referenceModelId: number
+      referenceModelName: string
+      diff: DiffResult
+    }
+  | {
+      type: 'error-severe'
+      text: string
+      referenceModelId: number
+      referenceModelName: string
+      diff: DiffResult
+    }
   | null
 
 export default function SmallModelFormFields({
@@ -81,6 +112,51 @@ export default function SmallModelFormFields({
     ok: boolean
     msg: string
   } | null>(null)
+
+  // ─── case 1：查看 / 下载 ───
+  const [viewConfigOpen, setViewConfigOpen] = useState(false)
+  const [viewConfigText, setViewConfigText] = useState('')
+  const [viewConfigLoading, setViewConfigLoading] = useState(false)
+
+  // ─── case 3：严重警告 ───
+  const [severeModalOpen, setSevereModalOpen] = useState(false)
+  const [severeConfirmed, setSevereConfirmed] = useState(false)
+
+  const onViewReferenceConfig = async (modelId: number) => {
+    setViewConfigLoading(true)
+    try {
+      const cfg = await registeredModelsApi.getCurrentVersionConfig(modelId)
+      const text = JSON.stringify(cfg, null, 2)
+      setViewConfigText(text)
+      setViewConfigOpen(true)
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || '查看配置失败')
+    } finally {
+      setViewConfigLoading(false)
+    }
+  }
+
+  const onDownloadReferenceConfig = async (modelId: number, name: string) => {
+    try {
+      const cfg = await registeredModelsApi.getCurrentVersionConfig(modelId)
+      const blob = new Blob([JSON.stringify(cfg, null, 2)], {
+        type: 'application/json',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${name}-audit-points.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      message.success('已下载配置文件')
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || '下载失败')
+    }
+  }
 
   // ─── 监听已选组合 + 审核点 ───
   const watchedModality = Form.useWatch('modality', form) as
@@ -142,22 +218,65 @@ export default function SmallModelFormFields({
         type: 'info',
         text: '首次接入该支持的素材类型+识别风险类型组合，请配置审核点',
       }
-    const samePoints = comboItems.find((m) =>
-      pointsEqual(
-        m.current_version_config?.points as AuditPointEntry[] | null | undefined,
-        watchedPoints,
-      ),
-    )
-    if (samePoints)
+
+    const reference = pickReference(comboItems)
+    if (!reference) {
+      return {
+        type: 'info',
+        text: '该组合已有模型，但暂无可比对配置；请配置审核点',
+      }
+    }
+    const existingPoints = pointsFromConfig(reference.current_version_config)
+    const incomingPoints = (watchedPoints ?? []) as AuditPointEntry[]
+    const diff = diffAuditPoints(existingPoints, incomingPoints)
+
+    const noDiff =
+      diff.onlyInExisting.length === 0 &&
+      diff.modified.length === 0 &&
+      diff.onlyInIncoming.length === 0
+    if (noDiff) {
       return {
         type: 'success',
-        text: `该组合已有 ${comboItems.length} 个模型复用，可不添加审核点配置`,
+        text: `该组合已有 ${comboItems.length} 个模型复用，无需上传配置文件`,
+        referenceModelId: reference.id,
+        referenceModelName: reference.name,
+        diff,
       }
+    }
+    const onlyAdded =
+      diff.onlyInExisting.length === 0 && diff.modified.length === 0
+    if (onlyAdded) {
+      return {
+        type: 'info-added',
+        text: `检测到 ${diff.onlyInIncoming.length} 个新增审核点，将作为新版本审核点`,
+        referenceModelId: reference.id,
+        referenceModelName: reference.name,
+        diff,
+      }
+    }
     return {
-      type: 'warning',
-      text: '该支持的素材类型+识别风险类型组合已有模型，检测到审核点存在差异，将作为新版本审核点',
+      type: 'error-severe',
+      text: '检测到删除或修改审核点，请创建新的风险类型',
+      referenceModelId: reference.id,
+      referenceModelName: reference.name,
+      diff,
     }
   })()
+
+  // 当 hint 进入 error-severe 且尚未确认 → 弹 Modal
+  // 当 hint 退出 error-severe（例如用户修正了 JSON）→ 重置确认标记
+  const hintCase = hint?.type ?? null
+  useEffect(() => {
+    if (hintCase === 'error-severe' && !severeConfirmed) {
+      setSevereModalOpen(true)
+    } else if (hintCase !== 'error-severe') {
+      // 退出 error-severe 状态 → 重置确认标记（修正 JSON 后允许重新弹 Modal）
+      setSevereConfirmed(false)
+      setSevereModalOpen(false)
+    }
+    // 仅依赖 hintCase，避免 severeConfirmed 变化触发循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hintCase])
 
   const beforeUpload = (file: File) => {
     const MAX = 512 * 1024 * 1024
@@ -392,10 +511,55 @@ export default function SmallModelFormFields({
       )}
       {hint && hint.type !== 'loading' && (
         <Alert
-          type={hint.type}
+          type={
+            hint.type === 'info-added'
+              ? 'info'
+              : hint.type === 'error-severe'
+                ? 'error'
+                : hint.type
+          }
           showIcon
           style={{ marginBottom: 12 }}
-          message={hint.text}
+          message={
+            <Space wrap>
+              <span>{hint.text}</span>
+              {hint.type === 'success' && (
+                <Space size={4}>
+                  <Button
+                    size="small"
+                    type="link"
+                    style={{ padding: 0 }}
+                    loading={viewConfigLoading}
+                    onClick={() => onViewReferenceConfig(hint.referenceModelId)}
+                  >
+                    查看
+                  </Button>
+                  <Button
+                    size="small"
+                    type="link"
+                    style={{ padding: 0 }}
+                    onClick={() =>
+                      onDownloadReferenceConfig(hint.referenceModelId, hint.referenceModelName)
+                    }
+                  >
+                    下载
+                  </Button>
+                </Space>
+              )}
+              {hint.type === 'info-added' && (
+                <Space size={4} wrap>
+                  {hint.diff.onlyInIncoming.map((p) => (
+                    <Tag color="green" key={`add-${p.label}`}>
+                      + {p.label}
+                    </Tag>
+                  ))}
+                </Space>
+              )}
+              {hint.type === 'error-severe' && (
+                <Tag color="red">严重 · 请创建新风险类型</Tag>
+              )}
+            </Space>
+          }
         />
       )}
 
@@ -481,21 +645,206 @@ export default function SmallModelFormFields({
       <Form.Item name="__artifact" hidden noStyle>
         <Input type="hidden" />
       </Form.Item>
+
+      {/* case 1：查看同组参考配置 */}
+      <Modal
+        open={viewConfigOpen}
+        title="查看同组模型审核点配置"
+        onCancel={() => setViewConfigOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setViewConfigOpen(false)}>
+            关闭
+          </Button>,
+        ]}
+        width={640}
+      >
+        <pre
+          style={{
+            background: '#fafafa',
+            border: '1px solid #e5e7eb',
+            borderRadius: 4,
+            padding: 12,
+            maxHeight: 400,
+            overflow: 'auto',
+            fontSize: 12,
+            lineHeight: 1.6,
+            margin: 0,
+          }}
+        >
+          {viewConfigText}
+        </pre>
+      </Modal>
+
+      {/* case 3：严重警告 Modal（强制弹窗，不可关闭背后） */}
+      <Modal
+        open={severeModalOpen}
+        title="严重警告：检测到删除或修改审核点"
+        onCancel={() => undefined}
+        maskClosable={false}
+        closable={false}
+        keyboard={false}
+        width={600}
+        footer={[
+          <Button
+            key="cancel"
+            onClick={() => {
+              setSevereConfirmed(false)
+              setSevereModalOpen(false)
+              form.setFieldValue('__auditPoints' as keyof SmallModelFormValues, undefined)
+              setAuditJsonText('')
+              setAuditPoints(null)
+            }}
+          >
+            取消修改
+          </Button>,
+          <Button
+            key="confirm"
+            type="primary"
+            danger
+            onClick={() => {
+              setSevereConfirmed(true)
+              setSevereModalOpen(false)
+            }}
+          >
+            我已知晓，仍要提交
+          </Button>,
+        ]}
+      >
+        {hint && hint.type === 'error-severe' && (
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <Alert
+              type="error"
+              showIcon
+              message={
+                <span>
+                  参考模型：<strong>「{hint.referenceModelName}」</strong>（id: {hint.referenceModelId}）
+                </span>
+              }
+              description="该组合已有模型正在使用上述审核点。删除或修改已存在的审核点将影响现有线上策略，请考虑为本次新增创建一个新的风险类型。"
+            />
+            {hint.diff.onlyInExisting.length > 0 && (
+              <div>
+                <div style={{ fontWeight: 500, marginBottom: 6 }}>将被删除的审核点：</div>
+                <Space wrap>
+                  {hint.diff.onlyInExisting.map((p) => (
+                    <Tag color="red" key={`del-${p.label}`}>
+                      − {p.label}
+                      {p.description ? ` · ${p.description}` : ''}
+                    </Tag>
+                  ))}
+                </Space>
+              </div>
+            )}
+            {hint.diff.modified.length > 0 && (
+              <div>
+                <div style={{ fontWeight: 500, marginBottom: 6 }}>将被修改的审核点：</div>
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  {hint.diff.modified.map((p) => (
+                    <div key={`mod-${p.label}`} style={{ fontSize: 13 }}>
+                      <Tag color="orange">{p.label}</Tag>
+                      <span style={{ color: '#94a3b8', textDecoration: 'line-through', marginLeft: 4 }}>
+                        {p.oldDescription || '(无说明)'}
+                      </span>
+                      <span style={{ margin: '0 6px' }}>→</span>
+                      <span style={{ color: '#020617' }}>{p.newDescription || '(无说明)'}</span>
+                    </div>
+                  ))}
+                </Space>
+              </div>
+            )}
+            {hint.diff.onlyInIncoming.length > 0 && (
+              <div>
+                <div style={{ fontWeight: 500, marginBottom: 6 }}>新增的审核点：</div>
+                <Space wrap>
+                  {hint.diff.onlyInIncoming.map((p) => (
+                    <Tag color="green" key={`add-${p.label}`}>
+                      + {p.label}
+                    </Tag>
+                  ))}
+                </Space>
+              </div>
+            )}
+          </Space>
+        )}
+      </Modal>
     </>
   )
 }
 
-function pointsEqual(
-  a: AuditPointEntry[] | null | undefined,
-  b: AuditPointEntry[] | null | undefined,
-): boolean {
-  const norm = (v: AuditPointEntry[] | null | undefined) =>
-    (v ?? [])
-      .map((p) => ({ label: p.label.trim(), description: (p.description ?? '').trim() }))
-      .sort((x, y) =>
-        x.label === y.label ? x.description.localeCompare(y.description) : x.label.localeCompare(y.label),
-      )
-  const ja = JSON.stringify(norm(a))
-  const jb = JSON.stringify(norm(b))
-  return ja === jb
+function pickReference(
+  items: RegisteredModelListItem[],
+): RegisteredModelListItem | undefined {
+  if (items.length === 0) return undefined
+  const active = items.find((m) => m.status === 'active')
+  if (active) return active
+  const withConfig = items.find((m) => m.current_version_config)
+  if (withConfig) return withConfig
+  return items[0]
+}
+
+function pointsFromConfig(
+  raw: Record<string, unknown> | null | undefined,
+): AuditPointEntry[] {
+  if (!raw) return []
+  const rawPoints = (raw as { points?: unknown[] }).points
+  if (!Array.isArray(rawPoints)) return []
+  const out: AuditPointEntry[] = []
+  for (const p of rawPoints) {
+    if (typeof p === 'string') {
+      out.push({ label: p, description: '' })
+    } else if (
+      p != null &&
+      typeof p === 'object' &&
+      typeof (p as { label?: unknown }).label === 'string'
+    ) {
+      const obj = p as { label: string; description?: unknown }
+      out.push({
+        label: obj.label,
+        description: typeof obj.description === 'string' ? obj.description : '',
+      })
+    }
+  }
+  return out
+}
+
+function diffAuditPoints(
+  existing: AuditPointEntry[],
+  incoming: AuditPointEntry[],
+): DiffResult {
+  const norm = (p: AuditPointEntry) => ({
+    label: p.label.trim(),
+    description: (p.description ?? '').trim(),
+  })
+  const mapExisting = new Map<string, string>()
+  for (const p of existing) {
+    const n = norm(p)
+    if (!mapExisting.has(n.label)) mapExisting.set(n.label, n.description)
+  }
+  const mapIncoming = new Map<string, string>()
+  for (const p of incoming) {
+    const n = norm(p)
+    if (!mapIncoming.has(n.label)) mapIncoming.set(n.label, n.description)
+  }
+
+  const onlyInExisting: DiffEntry[] = []
+  const modified: ModifiedEntry[] = []
+  const onlyInIncoming: DiffEntry[] = []
+
+  for (const [label, desc] of mapExisting) {
+    if (!mapIncoming.has(label)) {
+      onlyInExisting.push({ label, description: desc })
+    } else if (mapIncoming.get(label) !== desc) {
+      modified.push({
+        label,
+        oldDescription: desc,
+        newDescription: mapIncoming.get(label) ?? '',
+      })
+    }
+  }
+  for (const [label, desc] of mapIncoming) {
+    if (!mapExisting.has(label)) {
+      onlyInIncoming.push({ label, description: desc })
+    }
+  }
+  return { onlyInExisting, modified, onlyInIncoming }
 }
