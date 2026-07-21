@@ -69,6 +69,13 @@ export const registeredModelsApi = {
       .post<RegisteredModel>(`/registered-models/${id}/activate`, {})
       .then((r) => r.data)
   },
+  listActiveSiblings(id: number): Promise<Array<{ id: number; name: string; version_label: string | null }>> {
+    return api
+      .get<{ siblings: Array<{ id: number; name: string; version_label: string | null }> }>(
+        `/registered-models/${id}/active-siblings`,
+      )
+      .then((r) => r.data.siblings)
+  },
   validate(id: number) {
     return api
       .post<{ ok: boolean; log: RegisteredModelValidationLog; status: RegisteredModelStatus }>(
@@ -137,6 +144,13 @@ export const registeredModelsApi = {
   artifactDownloadUrl(modelId: number, versionId: number): string {
     const base = (api.defaults.baseURL ?? '/api/v1').replace(/\/$/, '')
     return `${base}/registered-models/${modelId}/versions/${versionId}/artifact`
+  },
+  getCurrentVersionConfig(id: number): Promise<Record<string, unknown>> {
+    return api
+      .get<{ config: Record<string, unknown> }>(
+        `/registered-models/${id}/current-version-config`,
+      )
+      .then((r) => r.data.config)
   },
 }
 

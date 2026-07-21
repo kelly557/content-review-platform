@@ -39,6 +39,7 @@ import {
 } from '@/types/domain'
 import { useAuthStore } from '@/store'
 import CreateModelModal from './CreateModelModal'
+import ConfirmCascadeActivateModal from './ConfirmCascadeActivateModal'
 
 const { Text } = Typography
 
@@ -52,6 +53,9 @@ type ModelRow = {
   updatedAt: string | null
   points: AuditPointEntry[]
   status: RegisteredModelStatus
+  kind: 'large' | 'small'
+  modality: string | null
+  small_category: string | null
 }
 
 type CategoryGroup = {
@@ -86,6 +90,9 @@ type FlatRow = {
   point: AuditPointEntry | null
   rowSpan: number
   status: RegisteredModelStatus
+  kind: 'large' | 'small'
+  modality: string | null
+  small_category: string | null
 }
 
 type GroupTitleRow = {
@@ -122,6 +129,13 @@ export default function ModelListPage() {
 
   const [activeModality, setActiveModality] = useState<ModalityKey>('text')
   const [activeAnchor, setActiveAnchor] = useState<string | null>(null)
+
+  const [cascadeOpen, setCascadeOpen] = useState(false)
+  const [cascadeConfirming, setCascadeConfirming] = useState(false)
+  const [cascadeTarget, setCascadeTarget] = useState<RegisteredModelListItem | null>(null)
+  const [cascadeSiblings, setCascadeSiblings] = useState<
+    Array<{ id: number; name: string; version_label: string | null }>
+  >([])
 
   const fetchList = async () => {
     setLoading(true)
@@ -172,22 +186,10 @@ export default function ModelListPage() {
     setCreateOpen(true)
   }
 
-  const onToggleEnabled = async (
-    row: { id: number; name: string },
-    next: boolean,
-  ) => {
-    if (!canWrite) {
-      message.warning('仅管理员可启用/停用模型')
-      return
-    }
+  const performActivate = async (row: RegisteredModelListItem) => {
     try {
-      if (next) {
-        await registeredModelsApi.activate(row.id)
-        message.success(`「${row.name}」已启用`)
-      } else {
-        await registeredModelsApi.deactivate(row.id)
-        message.success(`「${row.name}」已停用`)
-      }
+      await registeredModelsApi.activate(row.id)
+      message.success(`「${row.name}」已启用`)
       void fetchList()
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -195,9 +197,66 @@ export default function ModelListPage() {
     }
   }
 
+  const onToggleEnabled = async (
+    row: RegisteredModelListItem,
+    next: boolean,
+  ) => {
+    if (!canWrite) {
+      message.warning('仅管理员可启用/停用模型')
+      return
+    }
+    if (!next) {
+      try {
+        await registeredModelsApi.deactivate(row.id)
+        message.success(`「${row.name}」已停用`)
+        void fetchList()
+      } catch (e: unknown) {
+        const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        message.error(detail || '操作失败')
+      }
+      return
+    }
+    if (row.kind === 'small') {
+      try {
+        const siblings = await registeredModelsApi.listActiveSiblings(row.id)
+        if (siblings.length > 0) {
+          setCascadeTarget(row)
+          setCascadeSiblings(siblings)
+          setCascadeOpen(true)
+          return
+        }
+      } catch (e: unknown) {
+        const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        message.error(detail || '检查同组模型失败')
+        return
+      }
+    }
+    await performActivate(row)
+  }
+
+  const onCascadeConfirm = async () => {
+    if (!cascadeTarget) return
+    setCascadeConfirming(true)
+    try {
+      await performActivate(cascadeTarget)
+      setCascadeOpen(false)
+      setCascadeTarget(null)
+      setCascadeSiblings([])
+    } finally {
+      setCascadeConfirming(false)
+    }
+  }
+
+  const onCascadeCancel = () => {
+    if (cascadeConfirming) return
+    setCascadeOpen(false)
+    setCascadeTarget(null)
+    setCascadeSiblings([])
+  }
+
   const renderEnableSwitch = (
     status: RegisteredModelStatus,
-    row: { id: number; name: string },
+    row: RegisteredModelListItem,
   ) => {
     const enabled = status === 'active'
     const toggleable = status === 'active' || status === 'inactive'
@@ -286,11 +345,11 @@ export default function ModelListPage() {
     for (const m of items) {
       const mod = (m.modality ?? 'unknown') as ModalityKey
       const cat = m.small_category ?? 'unknown'
-      const versionText = m.current_version_no
+      const versionText = m.current_version_label
         ? m.current_version_label
-          ? `v${m.current_version_no} · ${m.current_version_label}`
-          : `v${m.current_version_no}`
-        : '-'
+        : m.current_version_no != null
+          ? `${m.current_version_no}`
+          : '-'
       const points: AuditPointEntry[] = (() => {
         const raw = m.current_version_config
         if (!raw) return []
@@ -321,6 +380,9 @@ export default function ModelListPage() {
         updatedAt: m.updated_at,
         points,
         status: m.status,
+        kind: m.kind,
+        modality: m.modality,
+        small_category: m.small_category,
       }
       if (!byModality.has(mod)) byModality.set(mod, new Map())
       const byCat = byModality.get(mod)!
@@ -380,6 +442,9 @@ export default function ModelListPage() {
             point: null,
             rowSpan: 1,
             status: m.status,
+            kind: m.kind,
+            modality: m.modality,
+            small_category: m.small_category,
           })
         } else {
           m.points.forEach((p, i) => {
@@ -392,6 +457,9 @@ export default function ModelListPage() {
               point: p,
               rowSpan: i === 0 ? span : 0,
               status: m.status,
+              kind: m.kind,
+              modality: m.modality,
+              small_category: m.small_category,
             })
           })
         }
@@ -439,7 +507,19 @@ export default function ModelListPage() {
       width: '18%',
       render: (_, row) =>
         isGroupRow(row) ? (
-          <span style={{ fontWeight: 500 }}>{row.catLabel}（{row.catCount} 个模型）</span>
+          <div
+            style={{
+              borderTop: '2px solid #020617',
+              paddingTop: 10,
+              marginTop: 4,
+              fontWeight: 600,
+              fontSize: 15,
+              color: '#020617',
+              letterSpacing: 0.2,
+            }}
+          >
+            {row.catLabel}（{row.catCount} 个模型）
+          </div>
         ) : (
           <span style={{ fontWeight: row.rowSpan > 0 ? 500 : 400 }}>{row.modelName}</span>
         ),
@@ -457,7 +537,24 @@ export default function ModelListPage() {
       render: (_, row) =>
         isGroupRow(row)
           ? null
-          : renderEnableSwitch(row.status, { id: row.modelId, name: row.modelName }),
+          : renderEnableSwitch(row.status, {
+            id: row.modelId,
+            name: row.modelName,
+            kind: row.kind,
+            modality: row.modality,
+            small_category: row.small_category,
+            large_category: null,
+            status: row.status,
+            provider_id: null,
+            provider_label: null,
+            model_name: '',
+            current_version_no: null,
+            current_version_label: null,
+            current_version_config: null,
+            artifact_filename: null,
+            artifact_size: null,
+            updated_at: row.updatedAt,
+          } as RegisteredModelListItem),
       onCell: (row) => (isGroupRow(row) ? { colSpan: 0 } : { rowSpan: row.rowSpan }),
     },
     {
@@ -746,6 +843,15 @@ export default function ModelListPage() {
           void fetchProviders()
           void fetchList()
         }}
+      />
+
+      <ConfirmCascadeActivateModal
+        open={cascadeOpen}
+        newModelName={cascadeTarget?.name ?? ''}
+        siblings={cascadeSiblings}
+        confirming={cascadeConfirming}
+        onConfirm={onCascadeConfirm}
+        onCancel={onCascadeCancel}
       />
     </div>
   )

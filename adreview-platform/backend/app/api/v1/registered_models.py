@@ -22,7 +22,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1538,6 +1538,53 @@ async def deactivate_model(
     return await _set_status(model_id, RegisteredModelStatus.INACTIVE.value, db, user)
 
 
+@router.get("/{model_id}/current-version-config")
+async def get_current_version_config(
+    model_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_reader),
+) -> dict:
+    """返回指定模型当前版本的完整 config（含审核点列表）。供前端下载 / 查看。"""
+    model = await db.scalar(
+        select(RegisteredModel)
+        .options(selectinload(RegisteredModel.current_version))
+        .where(RegisteredModel.id == model_id)
+    )
+    if model is None or model.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    if model.current_version is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "模型尚未发布版本")
+    return {"config": model.current_version.config or {}}
+
+
+@router.get("/{model_id}/active-siblings")
+async def list_active_siblings(
+    model_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_reader),
+) -> dict:
+    """列出同 (modality, small_category) 组合下、状态为 active 的其他小模型。
+    仅 kind=small 才可能返回非空；大模型返回空数组。供前端启用前弹警告使用。
+    """
+    model = await db.scalar(
+        select(RegisteredModel).where(RegisteredModel.id == model_id)
+    )
+    if model is None or model.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    siblings = await _find_active_sibling_models(db, model)
+    items: list[dict] = []
+    for s in siblings:
+        version_label: Optional[str] = None
+        if s.current_version:
+            version_label = s.current_version.version_label or f"v{s.current_version.version_no}"
+        items.append({
+            "id": s.id,
+            "name": s.name,
+            "version_label": version_label,
+        })
+    return {"siblings": items}
+
+
 @router.post("/{model_id}/activate", response_model=RegisteredModelOut)
 async def activate_model(
     model_id: int,
@@ -1553,7 +1600,33 @@ async def activate_model(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "已归档的模型不可启用，请先取消归档")
     if not model.current_version_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "模型尚未发布版本，无法启用")
-    return await _set_status(model_id, RegisteredModelStatus.ACTIVE.value, db, user)
+    return await _set_status(model_id, RegisteredModelStatus.ACTIVE.value, db, user, cascading_activate=True)
+
+
+async def _find_active_sibling_models(
+    db: AsyncSession,
+    model: RegisteredModel,
+) -> list[RegisteredModel]:
+    """同 (modality, small_category) 组合下、状态为 active 的其他小模型（不含自己）。"""
+    if model.kind != RegisteredModelKind.SMALL.value:
+        return []
+    if not model.modality or not model.small_category:
+        return []
+    rows = (
+        await db.execute(
+            select(RegisteredModel)
+            .options(selectinload(RegisteredModel.current_version))
+            .where(
+                RegisteredModel.id != model.id,
+                RegisteredModel.is_deleted.is_(False),
+                RegisteredModel.kind == RegisteredModelKind.SMALL.value,
+                RegisteredModel.modality == model.modality,
+                RegisteredModel.small_category == model.small_category,
+                RegisteredModel.status == RegisteredModelStatus.ACTIVE.value,
+            )
+        )
+    ).scalars().all()
+    return list(rows)
 
 
 async def _set_status(
@@ -1561,6 +1634,7 @@ async def _set_status(
     new_status: str,
     db: AsyncSession,
     user: User,
+    cascading_activate: bool = False,
 ) -> RegisteredModelOut:
     _validate_status(new_status)
     model = await db.scalar(
@@ -1576,6 +1650,24 @@ async def _set_status(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
     _require_super_admin_for_small(model.kind, user)
     prev = model.status
+    cascaded_ids: list[int] = []
+    if (
+        cascading_activate
+        and new_status == RegisteredModelStatus.ACTIVE.value
+        and prev != RegisteredModelStatus.ACTIVE.value
+    ):
+        siblings = await _find_active_sibling_models(db, model)
+        if siblings:
+            cascaded_ids = [s.id for s in siblings]
+            sibling_ids = cascaded_ids
+            await db.execute(
+                update(RegisteredModel)
+                .where(RegisteredModel.id.in_(sibling_ids))
+                .values(status=RegisteredModelStatus.INACTIVE.value)
+            )
+            for s in siblings:
+                if s.current_version:
+                    s.current_version.status = RegisteredModelStatus.INACTIVE.value
     model.status = new_status
     model.updated_by_id = user.id
     if model.current_version:
@@ -1586,8 +1678,17 @@ async def _set_status(
         action=f"registered_model.{new_status}",
         entity_type="registered_model",
         entity_id=model.id,
-        payload={"prev": prev, "next": new_status},
+        payload={"prev": prev, "next": new_status, "cascaded_ids": cascaded_ids},
     )
+    if cascaded_ids:
+        await write_audit(
+            db,
+            actor=user,
+            action="registered_model.cascaded_inactive",
+            entity_type="registered_model",
+            entity_id=model.id,
+            payload={"reason": "cascaded_by_activate", "cascaded_ids": cascaded_ids},
+        )
     await db.commit()
     await db.refresh(model, attribute_names=["updated_at"])
     return _to_out(model)

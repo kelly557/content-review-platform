@@ -369,10 +369,7 @@ function SmallForm({ form, uploading, setUploading }: SmallFormProps) {
     <Form<CreateFormValues>
       form={form}
       layout="vertical"
-      initialValues={{
-        modality: 'text',
-        small_category: 'politics' as SmallModelCategory,
-      }}
+      initialValues={{}}
     >
       <SmallModelFormFields
         form={form as never}
