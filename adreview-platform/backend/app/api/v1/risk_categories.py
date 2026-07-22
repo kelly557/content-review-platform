@@ -15,6 +15,7 @@ from app.models.registered_model import RegisteredModel, RegisteredModelKind
 from app.models.risk_category import RiskCategory
 from app.models.user import User, UserRole
 from app.schemas.risk_category import RiskCategoryCreate, RiskCategoryOut
+from app.api.v1.registered_models import invalidate_risk_category_cache
 
 router = APIRouter(prefix="/risk-categories", tags=["risk-categories"])
 
@@ -120,6 +121,7 @@ async def create_risk_category(
     db.add(obj)
     try:
         await db.commit()
+        invalidate_risk_category_cache()
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
@@ -160,6 +162,7 @@ async def update_risk_category(
         )
     obj.label = new_label
     await db.commit()
+    invalidate_risk_category_cache()
     await db.refresh(obj)
     return obj
 
@@ -204,4 +207,5 @@ async def delete_risk_category(
 
     await db.delete(obj)
     await db.commit()
+    invalidate_risk_category_cache()
     return None

@@ -61,6 +61,20 @@ async def lifespan(app: FastAPI):
     # Make sure analytics tables exist (alert_events) without dropping data.
     await _ensure_analytics_tables()
 
+    # Preload risk_categories.code cache so first list request doesn't pay
+    # the synchronous DB roundtrip in _validate_small_category().
+    try:
+        from app.api.v1.registered_models import (
+            _ensure_risk_category_codes_loaded,
+        )
+        from app.db.session import SessionLocal as _SessionLocal
+
+        async with _SessionLocal() as _db:
+            await _ensure_risk_category_codes_loaded(_db)
+        log.info("startup: risk_categories cache loaded")
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"startup: risk_categories cache preload failed: {exc!r}")
+
     # Anomaly scanner: best-effort; if it crashes we keep serving API.
     scanner_stop = asyncio.Event()
     scanner_task: asyncio.Task | None = None

@@ -40,6 +40,7 @@ from app.models.registered_model import (
     ResourceCredential,
     SmallModelCategory,
 )
+from app.models.risk_category import RiskCategory
 from app.models.user import User, UserRole
 from app.schemas.common import Page
 from app.schemas.registered_model import (
@@ -79,6 +80,14 @@ ALLOWED_KIND = {k.value for k in RegisteredModelKind}
 ALLOWED_SMALL_CATEGORY = {c.value for c in SmallModelCategory}
 ALLOWED_PROTOCOLS = {"openai-compatible", "anthropic-messages", "custom"}
 ALLOWED_VERSION_STATUS = {s.value for s in RegisteredModelVersionStatus}
+
+# ── risk_category code 内存缓存 ──
+# 数据库 risk_categories.code 同步到 set[str]，给 _validate_small_category 查询用，
+# 避免每次 list 都打 DB。CRUD（POST/DELETE）后失效缓存。
+#
+# 历史 SmallModelCategory enum value（如 'politics' / 'porn'）即使没有 seed
+# 也通过 ALLOWED_SMALL_CATEGORY 兜底放行——不破坏 audit_items 已写的引用。
+_RISK_CATEGORY_CODES_CACHE: set[str] | None = None
 
 PROVIDER_PRESETS: Dict[str, Dict[str, Any]] = {
     "openai": {
@@ -153,15 +162,48 @@ def _require_super_admin_for_small(kind: str, user: User) -> None:
         )
 
 
-def _validate_small_category(s: str | None) -> str | None:
+async def _validate_small_category(
+    s: str | None, db: AsyncSession
+) -> str | None:
+    """校验 small_category 字符串是否合法。
+
+    放行 = (SmallModelCategory enum value) ∪ (risk_categories.code) ——
+    历史 enum 引用永远放过；新建风险类型后写 DB 的 code 通过内存缓存命中。
+    """
     if s is None:
         return None
-    if s not in ALLOWED_SMALL_CATEGORY:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"非法 small_category: {s}",
-        )
-    return s
+    if s in ALLOWED_SMALL_CATEGORY:
+        return s
+    codes = _RISK_CATEGORY_CODES_CACHE
+    if codes is None:
+        # 首次进入：从 DB 加载填充缓存（同时用于本次校验）。
+        await _ensure_risk_category_codes_loaded(db)
+        codes = _RISK_CATEGORY_CODES_CACHE or set()
+    if s in codes:
+        return s
+    raise HTTPException(
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        f"非法 small_category: {s}（不是已知风险类型）",
+    )
+
+
+async def _ensure_risk_category_codes_loaded(db: AsyncSession) -> None:
+    """从 DB 加载 risk_categories.code 到模块级缓存。
+
+    每个 list/create/update endpoint 入口调用一次；缓存命中后只是 set 检查。
+    POST/DELETE 风险类型后由 invalidate_risk_category_cache() 失效。
+    """
+    global _RISK_CATEGORY_CODES_CACHE
+    rows = (
+        await db.execute(select(RiskCategory.code))
+    ).scalars().all()
+    _RISK_CATEGORY_CODES_CACHE = set(rows)
+
+
+def invalidate_risk_category_cache() -> None:
+    """CRUD（POST/DELETE）后调用，让下次 query 重新读 DB。"""
+    global _RISK_CATEGORY_CODES_CACHE
+    _RISK_CATEGORY_CODES_CACHE = None
 
 
 ALLOWED_MODALITY = {"text", "image"}
@@ -391,7 +433,7 @@ async def list_models(
         _validate_kind(kind)
         base = base.where(RegisteredModel.kind == kind)
     if small_category:
-        _validate_small_category(small_category)
+        await _validate_small_category(small_category, db)
         base = base.where(RegisteredModel.small_category == small_category)
     if large_category:
         _validate_large_category(large_category)
@@ -490,7 +532,7 @@ async def list_active_models(
         _validate_kind(kind)
         stmt = stmt.where(RegisteredModel.kind == kind)
     if small_category:
-        _validate_small_category(small_category)
+        await _validate_small_category(small_category, db)
         stmt = stmt.where(RegisteredModel.small_category == small_category)
     if large_category:
         _validate_large_category(large_category)
@@ -525,7 +567,7 @@ async def create_model(
 ) -> RegisteredModelOut:
     kind = _validate_kind(body.kind or RegisteredModelKind.LARGE.value)
     _require_super_admin_for_small(kind, user)
-    small_category = _validate_small_category(body.small_category)
+    small_category = await _validate_small_category(body.small_category, db)
     modality = _validate_modality(body.modality)
     large_category = _validate_large_category(body.large_category)
     if kind == RegisteredModelKind.SMALL.value and not small_category:
@@ -878,7 +920,7 @@ async def update_model(
 
     data = body.model_dump(exclude_unset=True)
     if "small_category" in data and data["small_category"] is not None:
-        data["small_category"] = _validate_small_category(data["small_category"])
+        data["small_category"] = await _validate_small_category(data["small_category"], db)
     if model.kind == RegisteredModelKind.LARGE.value and "small_category" in data:
         data["small_category"] = None
     if "modality" in data and data["modality"] is not None:
@@ -1303,7 +1345,7 @@ async def precheck_artifact(
             message=f"非法模态: {body.modality}",
         )
     try:
-        s = _validate_small_category(body.small_category)
+        s = await _validate_small_category(body.small_category, db)
     except HTTPException:
         return RegisteredModelValidationLog(
             checked_at=datetime.utcnow(),
