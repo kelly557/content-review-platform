@@ -190,61 +190,66 @@ export default function RulesTreeView({
 
   return (
     <div style={{ width: '100%' }}>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: leftColTemplate,
-          gap: 0,
-          alignItems: 'start',
-        }}
-      >
-        {/* 左栏：分组 item 列表(无 box 包裹,通过右侧边框划分左右栏) */}
-        <div
-          style={{
-            paddingRight: isStacked ? 0 : 16,
-            borderRight: isStacked ? 'none' : '1px solid var(--color-border)',
-            maxHeight: isStacked ? 'none' : 540,
-            overflowY: isStacked ? 'visible' : 'auto',
-          }}
-        >
-          <ItemGroup
-            title="平台内置"
-            icon={<LockOutlined style={{ color: '#D97706' }} />}
-            items={builtinItems}
-            enabledSet={enabledSet}
-            enabledPointCountByItem={enabledPointCountByItem}
-            activeItemId={selectedItemId}
-            onPick={(id) => setSelectedItemId(id)}
-            loading={loading}
-            emptyText="暂无通用规则"
-          />
-          <ItemGroup
-            title="审核 Agent"
-            icon={<UnlockOutlined style={{ color: '#2563EB' }} />}
-            items={customItems}
-            enabledSet={enabledSet}
-            enabledPointCountByItem={enabledPointCountByItem}
-            activeItemId={selectedItemId}
-            onPick={(id) => setSelectedItemId(id)}
-            loading={loading}
-            emptyText="暂无审核 Agent"
-          />
+      {/* Box A: 内置规则(中栏 + 右栏表格整体一个 box,2026-07-29) */}
+      <div className="module-box">
+        <div className="module-section-title">
+          <span>平台内置规则</span>
+          <span className="module-section-title-count">{builtinItems.length}</span>
         </div>
-
-        {/* 右栏：所有 item 的审核点摊平 + 共用一个滚动容器 */}
         <div
-          ref={rightPaneRef}
           style={{
-            paddingLeft: isStacked ? 0 : 16,
-            maxHeight: isStacked ? 'none' : 720,
-            minHeight: isStacked ? 'auto' : 540,
-            minWidth: 0,
-            overflowY: isStacked ? 'visible' : 'auto',
-            overflowX: isStacked ? 'visible' : 'auto',
+            display: 'grid',
+            gridTemplateColumns: leftColTemplate,
+            gap: 0,
+            alignItems: 'start',
           }}
         >
-          {items.length > 0 ? (
-            <>
+          {/* 左栏：分组 item 列表(无 box 包裹,通过右侧边框划分左右栏) */}
+          <div
+            style={{
+              paddingRight: isStacked ? 0 : 16,
+              borderRight: isStacked ? 'none' : '1px solid var(--color-border)',
+              maxHeight: isStacked ? 'none' : 540,
+              overflowY: isStacked ? 'visible' : 'auto',
+            }}
+          >
+            <ItemGroup
+              title="平台内置"
+              icon={<LockOutlined style={{ color: '#D97706' }} />}
+              items={builtinItems}
+              enabledSet={enabledSet}
+              enabledPointCountByItem={enabledPointCountByItem}
+              activeItemId={selectedItemId}
+              onPick={(id) => setSelectedItemId(id)}
+              loading={loading}
+              emptyText="暂无通用规则"
+            />
+            <ItemGroup
+              title="审核 Agent"
+              icon={<UnlockOutlined style={{ color: '#2563EB' }} />}
+              items={customItems}
+              enabledSet={enabledSet}
+              enabledPointCountByItem={enabledPointCountByItem}
+              activeItemId={selectedItemId}
+              onPick={(id) => setSelectedItemId(id)}
+              loading={loading}
+              emptyText="暂无审核 Agent"
+            />
+          </div>
+
+          {/* 右栏：所有内置 item 的审核点摊平 + 共用一个滚动容器 */}
+          <div
+            ref={rightPaneRef}
+            style={{
+              paddingLeft: isStacked ? 0 : 16,
+              maxHeight: isStacked ? 'none' : 720,
+              minHeight: isStacked ? 'auto' : 540,
+              minWidth: 0,
+              overflowY: isStacked ? 'visible' : 'auto',
+              overflowX: isStacked ? 'visible' : 'auto',
+            }}
+          >
+            {items.length > 0 ? (
               <PointsColumn
                 items={builtinItems}
                 pointsByItem={pointsByItem}
@@ -255,22 +260,31 @@ export default function RulesTreeView({
                 highlightItemId={highlightItemId}
                 mediaKey={mediaKey}
               />
-              <AgentCardsColumn
-                packageCode={packageCode}
-                items={customItems}
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  <Text type="secondary">该审核类型暂无审核项</Text>
+                }
+                style={{ padding: '80px 0' }}
               />
-            </>
-          ) : (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={
-                <Text type="secondary">该审核类型暂无审核项</Text>
-              }
-              style={{ padding: '80px 0' }}
-            />
-          )}
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Box B: 审核 Agent(独立 box,32px gap,2026-07-29) */}
+      {customItems.length > 0 && (
+        <>
+          <div className="module-gap" />
+          <div className="module-box">
+            <AgentCardsColumn
+              packageCode={packageCode}
+              items={customItems}
+            />
+          </div>
+        </>
+      )}
     </div>
   )
 }

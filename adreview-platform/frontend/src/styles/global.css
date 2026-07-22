@@ -21,9 +21,11 @@
   --color-warning-soft: #FFFBEB;
   --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 1px 3px 0 rgba(15, 23, 42, 0.06);
   --shadow-hover: 0 4px 12px -2px rgba(15, 23, 42, 0.12);
+  --shadow-module: 0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.04);
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
+  --radius-xl: 12px;
 }
 
 * {
@@ -61,6 +63,40 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
+}
+
+/* Module box: a higher-elevation container used to separate major
+ * functional blocks (2026-07-29). White surface, no border, soft shadow,
+ * 12px radius. Designed to be stacked vertically with .module-gap between. */
+.module-box {
+  background: var(--color-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-module);
+  padding: 24px;
+}
+
+.module-gap {
+  height: 32px;
+}
+
+.module-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.module-section-title-count {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--color-divider);
+  color: var(--color-muted);
+  line-height: 1.6;
 }
 
 .text-muted { color: var(--color-muted); }
