@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Button,
   Drawer,
@@ -45,9 +45,20 @@ interface Props {
   mode: 'large' | 'small'
   onClose: () => void
   onCreated?: (info: { providerId?: number; modelId?: number }) => void
+  /** mode=small 时：Drawer 打开时预填"识别风险类型"（用于 [+添加风险类型] 流程回跳） */
+  initialSmallCategory?: string | null
+  /** 清除 initialSmallCategory（成功预填一次后清空，避免下次打开仍残留） */
+  onInitialSmallCategoryConsumed?: () => void
 }
 
-export default function CreateModelModal({ open, mode, onClose, onCreated }: Props) {
+export default function CreateModelModal({
+  open,
+  mode,
+  onClose,
+  onCreated,
+  initialSmallCategory,
+  onInitialSmallCategoryConsumed,
+}: Props) {
   const { message } = App.useApp()
   const [form] = Form.useForm<CreateFormValues>()
   const [submitting, setSubmitting] = useState(false)
@@ -58,6 +69,17 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
   const severeAckedRef = useRef(false)
   // 指向子组件的 imperative handle，用于在提交时拿到 resolved 审核点
   const smallFormRef = useRef<SmallFormHandle>(null)
+
+  // 通过 [+添加风险类型] 跳入 Drawer 时，把新建的 risk_category 预填到 small_category 字段
+  useEffect(() => {
+    if (open && mode === 'small' && initialSmallCategory) {
+      form.setFieldValue('small_category' as keyof CreateFormValues, initialSmallCategory)
+      onInitialSmallCategoryConsumed?.()
+    }
+    // 仅在 open 切换瞬间设一次，关闭后清空
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialSmallCategory])
+
   const currentPreset = Form.useWatch('provider_preset', form) as
     | RegisteredModelProvider
     | undefined

@@ -25,7 +25,7 @@ import {
   ReloadOutlined,
   TagsOutlined,
 } from '@ant-design/icons'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { registeredModelsApi, providersApi } from '@/api/registered-models'
 import type {
@@ -275,7 +275,7 @@ export default function ModelListPage() {
   const [q, setQ] = useState('')
   const [smallCategory, setSmallCategory] = useState<string | null>(null)
   const [riskCreateOpen, setRiskCreateOpen] = useState(false)
-  const navigate = useNavigate()
+  const [initialSmallCategory, setInitialSmallCategory] = useState<string | null>(null)
   const ensureRiskLoaded = useRiskCategoryStore((s) => s.ensureLoaded)
   const riskItems = useRiskCategoryStore((s) => s.items)
   const [largeCategory, setLargeCategory] = useState<LargeModelCategory | null>(null)
@@ -351,7 +351,7 @@ export default function ModelListPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
-  /** 兼容保留：直接弹 CreateModelModal（不跳路由）。小模型入口现已切到独立路由，但大模型仍走 Drawer。 */
+  /** 直接弹 CreateModelModal Drawer（不跳路由）。大/小模型共用同一 Drawer，由 mode 区分。 */
   const openCreate = () => {
     if (!canWrite) {
       message.warning('仅管理员可添加模型')
@@ -359,7 +359,6 @@ export default function ModelListPage() {
     }
     setCreateOpen(true)
   }
-  void openCreate
 
   const performActivate = async (row: RegisteredModelListItem) => {
     try {
@@ -989,17 +988,7 @@ export default function ModelListPage() {
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          onClick={() => {
-            if (!canWrite) {
-              message.warning('仅管理员可添加模型')
-              return
-            }
-            if (activeTab === 'small') {
-              navigate('/resources/models/small/new')
-            } else {
-              setCreateOpen(true)
-            }
-          }}
+          onClick={openCreate}
           disabled={!canWrite}
         >
           添加模型
@@ -1177,9 +1166,12 @@ export default function ModelListPage() {
         mode={activeTab === 'large' ? 'large' : 'small'}
         onClose={() => setCreateOpen(false)}
         onCreated={() => {
+          setInitialSmallCategory(null)
           void fetchProviders()
           void fetchList()
         }}
+        initialSmallCategory={initialSmallCategory}
+        onInitialSmallCategoryConsumed={() => setInitialSmallCategory(null)}
       />
 
       <CreateRiskCategoryModal
@@ -1187,7 +1179,9 @@ export default function ModelListPage() {
         onClose={() => setRiskCreateOpen(false)}
         onCreated={(item) => {
           setSmallCategory(item.code)
-          navigate(`/resources/models/small/new?risk_category=${encodeURIComponent(item.code)}`)
+          setInitialSmallCategory(item.code)
+          setRiskCreateOpen(false)
+          setCreateOpen(true)
         }}
       />
 
