@@ -72,6 +72,13 @@ type HintState =
   | { type: 'loading' }
   | { type: 'info'; text: string }
   | {
+      /** 用户未填写审核点 + 同组兄弟有 config 时：提示默认行为是复用兄弟版本 */
+      type: 'info-unfilled'
+      text: string
+      referenceModelId: number
+      referenceModelName: string
+    }
+  | {
       type: 'success'
       text: string
       referenceModelId: number
@@ -241,8 +248,22 @@ export default forwardRef<SmallFormHandle, Props>(function SmallModelFormFields(
     const existingPoints = pointsFromConfig(reference.current_version_config)
     const incomingPoints = (watchedPoints ?? []) as AuditPointEntry[]
 
-    // 用户未配置审核点：默认与 reference 当前版本一致，不显示提示
-    if (incomingPoints.length === 0) return null
+    // 用户未配置审核点：默认与 reference 当前版本一致 — 提示用户该默认行为
+    if (incomingPoints.length === 0) {
+      if (existingPoints.length > 0) {
+        return {
+          type: 'info-unfilled',
+          text: `未填写审核点，将与「${reference.name}」保持一致（共 ${existingPoints.length} 个标签）。如需独立版本，请上传或编辑 JSON。`,
+          referenceModelId: reference.id,
+          referenceModelName: reference.name,
+        }
+      }
+      // reference 自身没配置（首次接入该兄弟或兄弟尚未填点）
+      return {
+        type: 'info',
+        text: '该兄弟暂无审核点，请配置审核点',
+      }
+    }
 
     const diff = diffAuditPoints(existingPoints, incomingPoints)
 
@@ -518,7 +539,7 @@ export default forwardRef<SmallFormHandle, Props>(function SmallModelFormFields(
       {hint && hint.type !== 'loading' && (
         <Alert
           type={
-            hint.type === 'info-added'
+            hint.type === 'info-added' || hint.type === 'info-unfilled'
               ? 'info'
               : hint.type === 'error-severe'
                 ? 'error'
@@ -551,6 +572,17 @@ export default forwardRef<SmallFormHandle, Props>(function SmallModelFormFields(
                     下载
                   </Button>
                 </Space>
+              )}
+              {hint.type === 'info-unfilled' && (
+                <Button
+                  size="small"
+                  type="link"
+                  style={{ padding: 0 }}
+                  loading={viewConfigLoading}
+                  onClick={() => onViewReferenceConfig(hint.referenceModelId)}
+                >
+                  查看兄弟审核点
+                </Button>
               )}
               {hint.type === 'info-added' && (
                 <Space size={4} wrap>
