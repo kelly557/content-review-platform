@@ -19,6 +19,7 @@ from app.api.v1 import (
     registered_models,
     registered_providers,
     reports,
+    risk_categories,
     reviews,
     rule_sets,
     service_categories,
@@ -62,3 +63,4 @@ api_router.include_router(registered_models.router)
 api_router.include_router(registered_models.credentials_router)
 api_router.include_router(registered_providers.router)
 api_router.include_router(uploaded_documents.router)
+api_router.include_router(risk_categories.router)

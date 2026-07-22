@@ -38,6 +38,7 @@ from app.models.machine_review_feedback import MachineReviewFeedback, FeedbackKi
 from app.models.trigger import Trigger, TriggerRun, TriggerType, TriggerRunSource, TriggerRunStatus  # noqa: F401
 from app.models.knowledge_document import KnowledgeDocument, KnowledgeDocumentVersion  # noqa: F401
 from app.models.registered_model import RegisteredModel, RegisteredModelVersion, ResourceCredential  # noqa: F401
+from app.models.risk_category import RiskCategory  # noqa: F401
 from app.models.uploaded_document import (  # noqa: F401
     UploadedDocument,
     UploadedDocKind,
