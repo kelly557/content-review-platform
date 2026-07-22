@@ -86,11 +86,6 @@ export default function CreateRiskCategoryModal({ open, onClose, onCreated }: Pr
         >
           <Input placeholder="如：XSS 类风险" maxLength={30} allowClear autoFocus />
         </Form.Item>
-        <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6 }}>
-          系统将自动生成内部标识（code）和颜色，并在下一步带入「添加小模型」页面。
-          <br />
-          风险类型一旦创建无法改名，仅可由超管在后台调整。
-        </div>
       </Form>
     </Modal>
   )

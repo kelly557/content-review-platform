@@ -1009,20 +1009,22 @@ export default function ModelListPage() {
         activeKey={activeTab}
         onChange={onTabChange}
         tabBarExtraContent={
-          canWrite ? (
-            <Button
-              icon={<PlusOutlined />}
-              onClick={() => setRiskCreateOpen(true)}
-            >
-              添加风险类型
-            </Button>
-          ) : (
-            <Tooltip title="仅超级管理员 / 根管理员可添加风险类型">
-              <Button icon={<PlusOutlined />} disabled>
-                添加风险类型
-              </Button>
-            </Tooltip>
-          )
+          activeTab !== 'small'
+            ? null
+            : canWrite ? (
+                <Button
+                  icon={<PlusOutlined />}
+                  onClick={() => setRiskCreateOpen(true)}
+                >
+                  添加风险类型
+                </Button>
+              ) : (
+                <Tooltip title="仅超级管理员 / 根管理员可添加风险类型">
+                  <Button icon={<PlusOutlined />} disabled>
+                    添加风险类型
+                  </Button>
+                </Tooltip>
+              )
         }
         items={[
           {
