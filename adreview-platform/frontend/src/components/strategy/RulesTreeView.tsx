@@ -15,7 +15,6 @@ import type { TableColumnsType } from 'antd'
 import {
   CheckOutlined,
   LockOutlined,
-  UnlockOutlined,
 } from '@ant-design/icons'
 import { auditItemsApi } from '@/api/auditItems'
 import { auditPointsApi } from '@/api/auditPoints'
@@ -204,7 +203,9 @@ export default function RulesTreeView({
             alignItems: 'start',
           }}
         >
-          {/* 左栏：分组 item 列表(无 box 包裹,通过右侧边框划分左右栏) */}
+          {/* 左栏：分组 item 列表(无 box 包裹,通过右侧边框划分左右栏)
+              2026-07-29 删除「审核 Agent」分组:Box B 已独占 Agent 配置入口,
+              左栏冗余。customItems 仍用作 Box B 的 items,保留计算与传参。 */}
           <div
             style={{
               paddingRight: isStacked ? 0 : 16,
@@ -223,17 +224,6 @@ export default function RulesTreeView({
               onPick={(id) => setSelectedItemId(id)}
               loading={loading}
               emptyText="暂无通用规则"
-            />
-            <ItemGroup
-              title="审核 Agent"
-              icon={<UnlockOutlined style={{ color: '#2563EB' }} />}
-              items={customItems}
-              enabledSet={enabledSet}
-              enabledPointCountByItem={enabledPointCountByItem}
-              activeItemId={selectedItemId}
-              onPick={(id) => setSelectedItemId(id)}
-              loading={loading}
-              emptyText="暂无审核 Agent"
             />
           </div>
 
