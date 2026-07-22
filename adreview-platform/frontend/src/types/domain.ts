@@ -2285,8 +2285,8 @@ export const LARGE_MODEL_CATEGORY_OPTIONS: {
   label: string
   color: string
 }[] = [
-  { value: 'text', label: '文本模型', color: 'blue' },
-  { value: 'multimodal', label: '多模态模型', color: 'purple' },
+  { value: 'text', label: '文本大模型', color: 'blue' },
+  { value: 'multimodal', label: '图文多模态', color: 'purple' },
   { value: 'other', label: '其他模型', color: 'default' },
 ]
 
