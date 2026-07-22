@@ -480,8 +480,9 @@ async def test_create_small_model_missing_artifact_rejected(client):
 
 
 @pytest.mark.asyncio
-async def test_create_small_model_missing_max_tokens_rejected(client):
-    await _login(client)
+async def test_create_small_model_missing_max_tokens_accepted(client):
+    """小模型 max_output_tokens 不再强制；缺省仍能创建。"""
+    await _login(client, _SUPERADMIN)
     art = await _upload_small_model_file(client)
     pid = await _create_provider(client, display_name="selfhost-notok", preset="self-hosted")
     r = await client.post(
@@ -495,13 +496,13 @@ async def test_create_small_model_missing_max_tokens_rejected(client):
             "artifact": art,
         },
     )
-    assert r.status_code == 422
-    assert "max_output_tokens" in r.text
+    assert r.status_code == 201, r.text
+    assert r.json()["max_output_tokens"] is None
 
 
 @pytest.mark.asyncio
 async def test_create_small_model_max_tokens_out_of_range(client):
-    await _login(client)
+    await _login(client, _SUPERADMIN)
     art = await _upload_small_model_file(client)
     pid = await _create_provider(client, display_name="selfhost-oob", preset="self-hosted")
     r = await client.post(

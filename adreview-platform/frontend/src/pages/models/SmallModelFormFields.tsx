@@ -14,7 +14,6 @@ import {
 } from 'antd'
 import type { UploadRequestOption } from 'rc-upload/lib/interface'
 import {
-  ApiOutlined,
   DeleteOutlined,
   FileOutlined,
   UploadOutlined,
@@ -125,13 +124,6 @@ export default forwardRef<SmallFormHandle, Props>(function SmallModelFormFields(
   const [auditPoints, setAuditPoints] = useState<AuditPointEntry[] | null>(
     initialPoints ?? null,
   )
-
-  // 「检测模型」按钮状态
-  const [checking, setChecking] = useState(false)
-  const [checkResult, setCheckResult] = useState<{
-    ok: boolean
-    msg: string
-  } | null>(null)
 
   // ─── case 1：查看 / 下载 ───
   const [viewConfigOpen, setViewConfigOpen] = useState(false)
@@ -395,38 +387,6 @@ export default forwardRef<SmallFormHandle, Props>(function SmallModelFormFields(
     return false
   }
 
-  const handleCheckArtifact = async () => {
-    const artifactVal = form.getFieldValue('__artifact') as
-      | ArtifactUploadResponse
-      | undefined
-    if (!artifactVal) {
-      message.error('请先上传模型文件')
-      return
-    }
-    if (!watchedModality || !watchedCategory) {
-      message.error('请先选择支持的素材类型和识别风险类型')
-      return
-    }
-    setChecking(true)
-    setCheckResult(null)
-    try {
-      const r = await registeredModelsApi.precheckArtifact({
-        storage_key: artifactVal.storage_key,
-        modality: watchedModality,
-        small_category: watchedCategory,
-        config_points: watchedPoints ?? null,
-      })
-      setCheckResult({
-        ok: r.ok,
-        msg: `${r.ok ? '检测通过' : '检测失败'} · HTTP ${r.http_status ?? '-'} · ${r.latency_ms ?? '-'}ms`,
-      })
-    } catch {
-      setCheckResult({ ok: false, msg: '请求失败，请检查网络或服务端' })
-    } finally {
-      setChecking(false)
-    }
-  }
-
   return (
     <>
       <Form.Item
@@ -661,29 +621,6 @@ export default forwardRef<SmallFormHandle, Props>(function SmallModelFormFields(
                 </div>
               ))}
             </div>
-          )}
-        </Space>
-      </Form.Item>
-
-      <Form.Item
-        label="模型说明"
-        name="description"
-        tooltip="用途 / 注意事项"
-      >
-        <Input.TextArea rows={3} placeholder="如：用于文本涉政分类" />
-      </Form.Item>
-
-      <Form.Item label="检测模型" tooltip="保存前校验模型文件、JSON 配置与支持的素材类型一致性">
-        <Space>
-          <Button
-            icon={<ApiOutlined />}
-            loading={checking}
-            onClick={handleCheckArtifact}
-          >
-            检测模型
-          </Button>
-          {checkResult && (
-            <Tag color={checkResult.ok ? 'green' : 'red'}>{checkResult.msg}</Tag>
           )}
         </Space>
       </Form.Item>

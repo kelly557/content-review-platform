@@ -645,16 +645,14 @@ async def create_model(
         )
 
     if registration_method == RegisteredModelRegistrationMethod.UPLOADED_FILE.value:
-        if body.max_output_tokens is None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "小模型必须填写 max_output_tokens",
-            )
-        if body.max_output_tokens < 1 or body.max_output_tokens > 32768:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "max_output_tokens 必须在 1 ~ 32768 之间",
-            )
+        # max_output_tokens 不强制（与 kind 业务语义匹配：小模型是分类器，token
+        # 数无意义）。填了就校验范围在 1 ~ 32768 之间，缺省留 NULL。
+        if body.max_output_tokens is not None:
+            if body.max_output_tokens < 1 or body.max_output_tokens > 32768:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    "max_output_tokens 必须在 1 ~ 32768 之间",
+                )
         if not body.artifact or not body.artifact.storage_key:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
