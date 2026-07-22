@@ -87,7 +87,7 @@ const NAV_SECTIONS: Array<{
         icon: <SettingOutlined style={{ fontSize: ICON_SIZE }} />,
         roles: ['admin', 'mlr', 'superadmin', 'root_admin'],
         children: [
-{ key: 'strategies-list', path: '/strategies', label: '策略管理' },
+          { key: 'strategies-list', path: '/strategies', label: '策略管理' },
         ],
       },
       {

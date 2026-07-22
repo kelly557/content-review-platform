@@ -1009,6 +1009,7 @@ export default function ModelListPage() {
                 loading={loading}
                 columns={largeColumns}
                 dataSource={items}
+                rootClassName="model-list-table"
                 pagination={{
                   total,
                   pageSize: 50,
@@ -1122,6 +1123,7 @@ export default function ModelListPage() {
                               pagination={false}
                               columns={columns}
                               dataSource={unionRows}
+                              rootClassName="model-list-table"
                             />
                           </>
                         ) : (

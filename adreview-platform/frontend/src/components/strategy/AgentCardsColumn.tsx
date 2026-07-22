@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { InputNumber, Space, Switch, Tooltip, Typography, message as antMessage } from 'antd'
+import { InputNumber, Space, Switch, Typography, message as antMessage } from 'antd'
 import { RobotOutlined } from '@ant-design/icons'
 import type { AuditItem } from '@/types/domain'
 import { auditItemsApi } from '@/api/auditItems'
@@ -12,13 +12,12 @@ interface Props {
 }
 
 /**
- * 审核 Agent 卡片列(2026-07-29 视觉强化版)。
+ * 审核 Agent 卡片列(2026-07-29 视觉强化 v2)。
  *
- * - 顶部深色横幅(icon + 大字 + 计数),与上方 PointsColumn table 视觉强区分
+ * - 顶部深色横幅(icon + 大字 + 计数),由外层 .module-box 包裹
  * - 每张卡片左侧 4px 蓝色色块锚点
- * - 卡片字段(item 名 + 启用 Switch + 3 档阈值 + 审核内容)横版并排 4 列
- * - 不展示「共用阈值」提示文案
- * - 「审核内容」从 audit_item.description 读;空时显示「—」
+ * - 卡片字段(item 名 + 启用 Switch + 3 档阈值)横版并排 3 列
+ *   (2026-07-29 用户反馈:去掉「审核内容」列)
  */
 export default function AgentCardsColumn({ packageCode, items }: Props) {
   const [savingByItemId, setSavingByItemId] = useState<Record<number, boolean>>({})
@@ -48,32 +47,29 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
   }
 
   return (
-    <div style={{ marginTop: 40 }}>
-      {/* 顶部横幅:深色背景 + icon + 大字 + 计数 */}
+    <div>
+      {/* 顶部横幅 2026-07-29 改为浅色:取消黑色背景,与 Box 整体风格一致 */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 12,
-          padding: '14px 18px',
+          gap: 10,
           marginBottom: 16,
-          background: 'linear-gradient(135deg, #1E293B 0%, #334155 100%)',
-          borderRadius: 8,
-          color: '#F8FAFC',
         }}
       >
-        <RobotOutlined style={{ fontSize: 22, color: '#60A5FA' }} />
-        <Text style={{ fontSize: 16, fontWeight: 600, color: '#F8FAFC' }}>
+        <RobotOutlined style={{ fontSize: 18, color: '#2563EB' }} />
+        <Text style={{ fontSize: 14, fontWeight: 600, color: '#0F172A' }}>
           审核 Agent
         </Text>
         <span
           style={{
             fontSize: 11,
-            padding: '2px 10px',
+            padding: '2px 8px',
             borderRadius: 10,
-            background: 'rgba(255, 255, 255, 0.12)',
-            color: '#E2E8F0',
+            background: 'var(--color-divider)',
+            color: 'var(--color-muted)',
             lineHeight: 1.6,
+            fontWeight: 500,
           }}
         >
           {items.length}
@@ -162,11 +158,11 @@ function AgentCard({ item, saving, onPatch }: CardProps) {
         />
       </div>
 
-      {/* 4 列横版:低/中/高阈值 + 审核内容 */}
+      {/* 3 列横版:低/中/高阈值(2026-07-29 去掉审核内容列) */}
       <div
         style={{
           display: 'flex',
-          gap: 20,
+          gap: 24,
           flexWrap: 'wrap',
           alignItems: 'flex-start',
         }}
@@ -195,7 +191,6 @@ function AgentCard({ item, saving, onPatch }: CardProps) {
           disabled={saving}
           onChange={(v) => onPatch(item, { high_threshold_min: v ?? 90 })}
         />
-        <DescriptionField description={item.description} />
       </div>
     </div>
   )
@@ -254,37 +249,6 @@ function ThresholdField({
           {maxDisplay.toFixed(2)}
         </div>
       </Space>
-    </div>
-  )
-}
-
-function DescriptionField({ description }: { description: string | null }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 200 }}>
-      <Text type="secondary" style={{ fontSize: 12 }}>
-        审核内容
-      </Text>
-      {description ? (
-        <Tooltip title={description} placement="topLeft">
-          <Text
-            style={{
-              fontSize: 12,
-              color: '#475569',
-              lineHeight: 1.6,
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              maxWidth: '100%',
-            }}
-          >
-            {description}
-          </Text>
-        </Tooltip>
-      ) : (
-        <Text style={{ fontSize: 12, color: '#CBD5E1', lineHeight: 1.6 }}>—</Text>
-      )}
     </div>
   )
 }

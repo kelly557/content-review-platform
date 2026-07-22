@@ -7,7 +7,6 @@ import {
   Button,
   Space,
   Steps,
-  Typography,
   App,
   Modal,
 } from 'antd'
@@ -43,17 +42,13 @@ import { ItemLibrariesEditor } from '@/components/packages/ItemLibrariesEditor'
 import {
   buildPointMapFromStrategy,
   countEnabledPoints,
-  countExplicitOverrides,
   EMPTY_MEDIA_OVERRIDES,
   flattenEnabledPointsWithOverride,
-  hasAnyOverride,
   type MediaPointMap,
   type MediaPointOverrideMap,
   type PointOverride,
 } from './strategy/pointLevel'
 import { LlmReviewCard } from './strategy/LlmReviewCard'
-
-const { Text } = Typography
 
 type DurationMode = 'always' | 'range'
 
@@ -101,10 +96,6 @@ const EMPTY_POINTS: MediaPointMap = {
   audio: {},
   doc: {},
   video: {},
-}
-
-function countEnabled(map: Record<CategoryKey, number[]>): number {
-  return Object.values(map).reduce((s, arr) => s + arr.length, 0)
 }
 
 function flattenEnabledItems(
@@ -613,37 +604,6 @@ export default function CreateStrategyForm({
                 />
               )
             })()}
-
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                gap: 8,
-                padding: '8px 12px',
-                background: '#F8FAFC',
-                border: '1px solid #E2E8F0',
-                borderRadius: 6,
-              }}
-            >
-              <Text type="secondary">本步合计已选：</Text>
-              <Text strong style={{ color: '#0369A1' }}>
-                {countEnabled(enabledItems)} 条规则
-              </Text>
-              <Text type="secondary">/</Text>
-              <Text strong style={{ color: '#0369A1' }}>
-                {countEnabledPoints(pointMap)} 个审核点
-              </Text>
-              {hasAnyOverride(pointMap) && (
-                <>
-                  <Text type="secondary">（</Text>
-                  <Text strong style={{ color: '#F59E0B' }}>
-                    {countExplicitOverrides(pointMap)} 个已细化
-                  </Text>
-                  <Text type="secondary">）</Text>
-                </>
-              )}
-            </div>
           </div>
         )}
     </Form>
