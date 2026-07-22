@@ -607,12 +607,19 @@ async def create_model(
             else RegisteredModelRegistrationMethod.REMOTE_API.value
         )
 
-    if not body.model_name or not body.model_name.strip():
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "model_name 必填（厂商返回的模型标识 / 小模型为业务标识）",
-        )
-    model_id_str = body.model_name.strip()
+    # 小模型分支：缺省 model_name 时由后端自动生成；
+    #           若用户传了则保留用户值，便于关联既有模型。
+    # 大模型分支：model_name 仍严格必填（厂商模型标识）。
+    if kind == RegisteredModelKind.SMALL.value:
+        user_supplied = (body.model_name or "").strip()
+        model_id_str = user_supplied or generate_registered_model_code()
+    else:
+        if not body.model_name or not body.model_name.strip():
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "model_name 必填（厂商返回的模型标识）",
+            )
+        model_id_str = body.model_name.strip()
     if len(model_id_str) > 128:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "model 过长 (≤128)")
 

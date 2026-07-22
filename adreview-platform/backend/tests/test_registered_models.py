@@ -10,9 +10,14 @@ ADMIN = {
     "password": "admin123",
 }
 
+_SUPERADMIN = {
+    "email": "superadmin@adreview.example.com",
+    "password": "superadmin123",
+}
 
-async def _login(client: AsyncClient) -> None:
-    r = await client.post("/api/v1/auth/login", json=ADMIN)
+
+async def _login(client: AsyncClient, who: dict = ADMIN) -> None:
+    r = await client.post("/api/v1/auth/login", json=who)
     assert r.status_code == 200, r.text
     client.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
 
@@ -660,3 +665,74 @@ async def test_large_model_with_uploaded_file_rejected(client):
     # 实际行为：registration_method=uploaded_file + kind=large -> 走小模型分支（endpoint/cred 强制忽略）。
     # 当前用例只验证不抛 5xx：
     assert r.status_code in (201, 422)
+
+
+@pytest.mark.asyncio
+async def test_small_model_model_name_auto_generated(client):
+    """小模型 create 时不传 model_name → 后端自动生成。"""
+    from app.services.code_generator import generate_registered_model_code
+
+    # 小模型 create/upload 仅 superadmin/root_admin 可作，绕开 admin 登录限制
+    await _login(client, _SUPERADMIN)
+    pid = await _create_provider(client, display_name="auto-mn-a", preset="self-hosted")
+    art = await _upload_small_model_file(client)
+    body = {
+        "name": "auto-name",
+        "kind": "small",
+        "small_category": "porn",
+        "modality": "text",
+        "provider_id": pid,
+        "max_output_tokens": 256,
+        "artifact": art,
+    }
+    assert "model_name" not in body  # 故意不传
+
+    r = await client.post("/api/v1/registered-models", json=body)
+    assert r.status_code == 201, r.text
+    out = r.json()
+    assert out["model_name"], "自动生成 model_name 应非空"
+    # 形如 mdl_<时间戳>_<4 字符>
+    assert out["model_name"] != ""
+    # 与生成函数格式一致
+    sample = generate_registered_model_code()
+    assert sample.startswith("mdl_")
+
+
+@pytest.mark.asyncio
+async def test_small_model_user_supplied_model_name_kept(client):
+    """小模型 create 时传 model_name → 保留用户值。"""
+    await _login(client, _SUPERADMIN)
+    pid = await _create_provider(client, display_name="keep-mn", preset="self-hosted")
+    art = await _upload_small_model_file(client)
+    r = await client.post(
+        "/api/v1/registered-models",
+        json={
+            "name": "kept-name",
+            "kind": "small",
+            "small_category": "porn",
+            "modality": "text",
+            "provider_id": pid,
+            "model_name": "my-custom-mn",
+            "max_output_tokens": 256,
+            "artifact": art,
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["model_name"] == "my-custom-mn"
+
+
+@pytest.mark.asyncio
+async def test_large_model_model_name_required(client):
+    """大模型 branch 仍要求 model_name 必填。"""
+    await _login(client)
+    pid = await _create_provider(client)
+    body = {
+        "name": "no-mn",
+        "kind": "large",
+        "large_category": "text",
+        "provider_id": pid,
+    }
+    assert "model_name" not in body
+
+    r = await client.post("/api/v1/registered-models", json=body)
+    assert r.status_code == 422, r.text

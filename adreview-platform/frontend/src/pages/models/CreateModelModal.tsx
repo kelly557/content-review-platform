@@ -143,10 +143,6 @@ export default function CreateModelModal({
           message.error('请选择识别风险类型')
           return
         }
-        if (!v.model_name || !v.model_name.trim()) {
-          message.error('请填写业务标识')
-          return
-        }
         const autoVersion = `${v.modality}-${v.small_category}`
         // 取"最终生效"的审核点：用户已配置优先；未配置时回退到同组合 reference
         const resolvedPoints =
@@ -154,15 +150,16 @@ export default function CreateModelModal({
         const config = resolvedPoints?.length
           ? { points: resolvedPoints }
           : undefined
+        const userModelName = (v.model_name ?? '').trim() || undefined
         const created = await registeredModelsApi.create({
-          name: v.name ?? v.model_name.trim(),
+          name: (v.name ?? v.model_name ?? '').trim(),
           description: v.description,
           kind: 'small',
           small_category: v.small_category as SmallModelCategory,
           modality: v.modality,
           large_category: null,
           provider_id: null,
-          model_name: v.model_name.trim(),
+          ...(userModelName ? { model_name: userModelName } : {}),
           version: autoVersion,
           config,
           registration_method: 'uploaded_file',

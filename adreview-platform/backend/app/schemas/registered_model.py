@@ -186,7 +186,10 @@ class RegisteredModelCreate(BaseModel):
     model_name: Optional[str] = Field(
         default=None,
         max_length=128,
-        description="Model ID：厂商返回的模型标识（例：gpt-4o-mini）；必填",
+        description=(
+            "Model ID：小模型上传文件时留空由后端自动生成；"
+            "大模型（remote_api）必填，例：gpt-4o-mini"
+        ),
     )
     status: Optional[str] = Field(default=None, description="draft / active / archived")
     version: Optional[str] = Field(default=None, max_length=64, description="语义版本号（可选）")
