@@ -88,6 +88,7 @@ const NAV_SECTIONS: Array<{
         roles: ['admin', 'mlr', 'superadmin', 'root_admin'],
         children: [
           { key: 'strategies-list', path: '/strategies', label: '策略管理' },
+          { key: 'strategies-agents', path: '/strategies/agents', label: '审核智能体', roles: ['superadmin', 'root_admin'] },
         ],
       },
       {
