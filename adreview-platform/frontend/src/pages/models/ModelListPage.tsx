@@ -796,9 +796,8 @@ export default function ModelListPage() {
         isGroupRow(row) ? (
           <div
             style={{
-              borderTop: '2px solid #020617',
-              paddingTop: 10,
-              marginTop: 4,
+              paddingTop: 14,
+              paddingBottom: 8,
               fontWeight: 600,
               fontSize: 15,
               color: '#020617',
@@ -812,7 +811,7 @@ export default function ModelListPage() {
         ),
       onCell: (row) => {
         if (isGroupRow(row)) {
-          return { colSpan: 7, id: `cat-${row.catKey}` }
+          return { colSpan: 6, id: `cat-${row.catKey}` }
         }
         return { rowSpan: row.rowSpan }
       },
@@ -843,19 +842,6 @@ export default function ModelListPage() {
             updated_at: row.updatedAt,
           } as RegisteredModelListItem),
       onCell: (row) => (isGroupRow(row) ? { colSpan: 0 } : { rowSpan: row.rowSpan }),
-    },
-    {
-      title: '版本号',
-      key: 'version',
-      width: '12%',
-      render: (_, row) =>
-        isGroupRow(row) ? null : (
-          <Text type="secondary" style={{ fontSize: 12 }}>{row.versionText}</Text>
-        ),
-      onCell: (row) => {
-        if (isGroupRow(row)) return { colSpan: 0 }
-        return { rowSpan: row.rowSpan }
-      },
     },
     {
       title: '更新时间',
