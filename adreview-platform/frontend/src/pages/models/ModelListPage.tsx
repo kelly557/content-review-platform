@@ -270,6 +270,9 @@ export default function ModelListPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
   const canWrite = user?.role === 'superadmin' || user?.role === 'root_admin'
+  // 添加风险类型：仅 root_admin 可见 — 后端权限沿用 superadmin+root_admin 不动，
+  // 二期再处理 superadmin 隐式越权。
+  const canManageRiskCategory = user?.role === 'root_admin'
   const [activeTab, setActiveTab] = useState<ModelTab>('large')
 
   const [q, setQ] = useState('')
@@ -998,21 +1001,15 @@ export default function ModelListPage() {
         activeKey={activeTab}
         onChange={onTabChange}
         tabBarExtraContent={
-          activeTab !== 'small'
+          activeTab !== 'small' || !canManageRiskCategory
             ? null
-            : canWrite ? (
+            : (
                 <Button
                   icon={<PlusOutlined />}
                   onClick={() => setRiskCreateOpen(true)}
                 >
                   添加风险类型
                 </Button>
-              ) : (
-                <Tooltip title="仅超级管理员 / 根管理员可添加风险类型">
-                  <Button icon={<PlusOutlined />} disabled>
-                    添加风险类型
-                  </Button>
-                </Tooltip>
               )
         }
         items={[
