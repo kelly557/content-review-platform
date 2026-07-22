@@ -31,6 +31,7 @@ import type {
   SmallModelModality,
 } from '@/types/domain'
 import { SMALL_MODEL_CATEGORY_OPTIONS, SMALL_MODEL_MODALITY_OPTIONS } from '@/types/domain'
+import { useRiskCategoryStore } from '@/store/riskCategories'
 
 export interface SmallModelFormValues {
   modality: SmallModelModality
@@ -178,8 +179,12 @@ export default forwardRef<SmallFormHandle, Props>(function SmallModelFormFields(
     | SmallModelModality
     | undefined
   const watchedCategory = Form.useWatch('small_category', form) as
-    | SmallModelCategory
-    | undefined
+    | string | undefined
+  const ensureRiskLoaded = useRiskCategoryStore((s) => s.ensureLoaded)
+  const riskItems = useRiskCategoryStore((s) => s.items)
+  useEffect(() => {
+    void ensureRiskLoaded()
+  }, [ensureRiskLoaded])
   const watchedPoints = Form.useWatch('__auditPoints', form) as
     | AuditPointEntry[]
     | undefined
@@ -450,16 +455,29 @@ export default forwardRef<SmallFormHandle, Props>(function SmallModelFormFields(
         rules={[{ required: true, message: '请选择识别风险类型' }]}
       >
         <Select
-          options={SMALL_MODEL_CATEGORY_OPTIONS.map((o) => ({
-            value: o.value,
-            label: (
-              <span>
-                <Tag color={o.color} style={{ marginRight: 4 }}>
-                  {o.label}
-                </Tag>
-              </span>
-            ),
-          }))}
+          options={
+            riskItems.length > 0
+              ? riskItems.map((o) => ({
+                  value: o.code,
+                  label: (
+                    <span>
+                      <Tag color={o.color} style={{ marginRight: 4 }}>
+                        {o.label}
+                      </Tag>
+                    </span>
+                  ),
+                }))
+              : SMALL_MODEL_CATEGORY_OPTIONS.map((o) => ({
+                  value: o.value,
+                  label: (
+                    <span>
+                      <Tag color={o.color} style={{ marginRight: 4 }}>
+                        {o.label}
+                      </Tag>
+                    </span>
+                  ),
+                }))
+          }
           placeholder="选择识别风险类型（必选）"
         />
       </Form.Item>

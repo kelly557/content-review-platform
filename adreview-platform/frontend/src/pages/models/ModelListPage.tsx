@@ -25,7 +25,7 @@ import {
   ReloadOutlined,
   TagsOutlined,
 } from '@ant-design/icons'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { registeredModelsApi, providersApi } from '@/api/registered-models'
 import type {
@@ -34,7 +34,6 @@ import type {
   RegisteredModelListItem,
   RegisteredModelStatus,
   RegisteredProviderOption,
-  SmallModelCategory,
 } from '@/types/domain'
 import {
   LARGE_MODEL_CATEGORY_OPTIONS,
@@ -42,8 +41,10 @@ import {
   SMALL_MODEL_CATEGORY_OPTIONS,
 } from '@/types/domain'
 import { useAuthStore } from '@/store'
+import { useRiskCategoryStore } from '@/store/riskCategories'
 import CreateModelModal from './CreateModelModal'
 import ConfirmCascadeActivateModal from './ConfirmCascadeActivateModal'
+import CreateRiskCategoryModal from './CreateRiskCategoryModal'
 
 const { Text } = Typography
 
@@ -269,10 +270,14 @@ export default function ModelListPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
   const canWrite = user?.role === 'superadmin' || user?.role === 'root_admin'
-
   const [activeTab, setActiveTab] = useState<ModelTab>('large')
+
   const [q, setQ] = useState('')
-  const [smallCategory, setSmallCategory] = useState<SmallModelCategory | null>(null)
+  const [smallCategory, setSmallCategory] = useState<string | null>(null)
+  const [riskCreateOpen, setRiskCreateOpen] = useState(false)
+  const navigate = useNavigate()
+  const ensureRiskLoaded = useRiskCategoryStore((s) => s.ensureLoaded)
+  const riskItems = useRiskCategoryStore((s) => s.items)
   const [largeCategory, setLargeCategory] = useState<LargeModelCategory | null>(null)
   const [status, setStatus] = useState<RegisteredModelStatus | null>(null)
   const [providerFilter, setProviderFilter] = useState<string | null>(null)
@@ -337,6 +342,7 @@ export default function ModelListPage() {
   useEffect(() => {
     void fetchList()
     void fetchProviders()
+    void ensureRiskLoaded()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -345,6 +351,7 @@ export default function ModelListPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
+  /** 兼容保留：直接弹 CreateModelModal（不跳路由）。小模型入口现已切到独立路由，但大模型仍走 Drawer。 */
   const openCreate = () => {
     if (!canWrite) {
       message.warning('仅管理员可添加模型')
@@ -352,6 +359,7 @@ export default function ModelListPage() {
     }
     setCreateOpen(true)
   }
+  void openCreate
 
   const performActivate = async (row: RegisteredModelListItem) => {
     try {
@@ -631,7 +639,9 @@ export default function ModelListPage() {
       const categories: CategoryGroup[] = []
       for (const [cat, models] of byCat.entries()) {
         totalCount += models.length
-        const catOpt = SMALL_MODEL_CATEGORY_OPTIONS.find((o) => o.value === cat)
+        const catOpt =
+          riskItems.find((o) => o.code === cat) ??
+          SMALL_MODEL_CATEGORY_OPTIONS.find((o) => o.value === cat)
         // 当前生效：cascade 保证同组同时只有一个 active；若无 active 则取 version_no 最大的
         const active = models.find((m) => m.status === 'active')
         const sorted = [...models].sort(
@@ -944,10 +954,12 @@ export default function ModelListPage() {
           <Select
             allowClear
             placeholder="识别风险类型"
-            style={{ width: 140 }}
+            style={{ width: 160 }}
             value={smallCategory ?? undefined}
             onChange={(v) => setSmallCategory(v ?? null)}
-            options={SMALL_MODEL_CATEGORY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            options={riskItems.length > 0
+              ? riskItems.map((o) => ({ value: o.code, label: o.label }))
+              : SMALL_MODEL_CATEGORY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
           />
         )}
         {activeTab === 'large' && (
@@ -977,7 +989,17 @@ export default function ModelListPage() {
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          onClick={openCreate}
+          onClick={() => {
+            if (!canWrite) {
+              message.warning('仅管理员可添加模型')
+              return
+            }
+            if (activeTab === 'small') {
+              navigate('/resources/models/small/new')
+            } else {
+              setCreateOpen(true)
+            }
+          }}
           disabled={!canWrite}
         >
           添加模型
@@ -986,6 +1008,22 @@ export default function ModelListPage() {
       <Tabs
         activeKey={activeTab}
         onChange={onTabChange}
+        tabBarExtraContent={
+          canWrite ? (
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => setRiskCreateOpen(true)}
+            >
+              添加风险类型
+            </Button>
+          ) : (
+            <Tooltip title="仅超级管理员 / 根管理员可添加风险类型">
+              <Button icon={<PlusOutlined />} disabled>
+                添加风险类型
+              </Button>
+            </Tooltip>
+          )
+        }
         items={[
           {
             key: 'large',
@@ -1139,6 +1177,15 @@ export default function ModelListPage() {
         onCreated={() => {
           void fetchProviders()
           void fetchList()
+        }}
+      />
+
+      <CreateRiskCategoryModal
+        open={riskCreateOpen}
+        onClose={() => setRiskCreateOpen(false)}
+        onCreated={(item) => {
+          setSmallCategory(item.code)
+          navigate(`/resources/models/small/new?risk_category=${encodeURIComponent(item.code)}`)
         }}
       />
 

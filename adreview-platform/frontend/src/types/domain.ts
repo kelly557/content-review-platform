@@ -2445,7 +2445,8 @@ export interface RegisteredModelCreate {
   name: string
   description?: string | null
   kind?: RegisteredModelKind
-  small_category?: SmallModelCategory | null
+  /** 识别风险类型：前端可来自 risk_categories 字典（含自定义项），wire 上是 enum 字符串或自定义 code。 */
+  small_category?: string | null
   modality?: SmallModelModality | null
   large_category?: LargeModelCategory | null
   // 大模型必填；小模型可空（不绑定任何 Provider）
@@ -2463,7 +2464,7 @@ export interface RegisteredModelCreate {
 export interface RegisteredModelUpdate {
   name?: string
   description?: string | null
-  small_category?: SmallModelCategory | null
+  small_category?: string | null
   modality?: SmallModelModality | null
   large_category?: LargeModelCategory | null
   model_name?: string | null
