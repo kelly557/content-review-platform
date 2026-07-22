@@ -65,6 +65,18 @@ def _apply_schema(schema: str | None) -> None:
                     v = getattr(prop, attr, None)
                     if isinstance(v, dict) and hasattr(v, "clear"):
                         v.clear()
+            # mapper 自身的 relationship/column 上挂载的 _compiled_cache
+            # (SQLAlchemy 2 的 ORM 在 selectinload 时会把"内层 subquery 选择"挂载
+            # 在 mapper._compiled_cache 里；跨测试 schema 切换需要全清)
+            try:
+                from sqlalchemy.util import LRUCache as _LRU
+
+                for holder_attr in ("_compiled_cache", "_loader_caches"):
+                    holder = getattr(m, holder_attr, None)
+                    if isinstance(holder, _LRU):
+                        holder.clear()
+            except Exception:
+                pass
     except Exception:
         pass
 

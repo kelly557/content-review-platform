@@ -28,6 +28,7 @@ import SmallModelFormFields, {
   type SmallModelFormValues,
 } from './SmallModelFormFields'
 import ModelTestDrawer from './ModelTestDrawer'
+import PublishConfirmModal from './PublishConfirmModal'
 
 interface LargeFormValues {
   display_name: string
@@ -80,6 +81,8 @@ export default function CreateModelModal({
     category?: string
     points: import('@/types/domain').AuditPointEntry[]
   } | null>(null)
+  // 发布确认 Modal：「发布」按钮触发，最终落库时携带 activate_immediately=true
+  const [publishModalOpen, setPublishModalOpen] = useState(false)
 
   // 通过 [+添加风险类型] 跳入 Drawer 时，把新建的 risk_category 预填到 small_category 字段
   useEffect(() => {
@@ -102,7 +105,7 @@ export default function CreateModelModal({
     }
   }
 
-  const submit = async () => {
+  const submit = async (intent: 'save' | 'publish' = 'save') => {
     const v = await form.validateFields().catch(() => null)
     if (!v) return
     if (mode === 'small') {
@@ -175,8 +178,13 @@ export default function CreateModelModal({
           config,
           registration_method: 'uploaded_file',
           artifact,
+          activate_immediately: intent === 'publish',
         })
-        message.success('小模型创建成功')
+        message.success(
+          intent === 'publish'
+            ? '小模型创建并发布成功'
+            : '小模型创建成功',
+        )
         onCreated?.({ modelId: created.id })
       }
       form.resetFields()
@@ -220,6 +228,11 @@ export default function CreateModelModal({
     setTestDrawerOpen(true)
   }
 
+  const handleOpenPublish = () => {
+    if (mode !== 'small') return
+    setPublishModalOpen(true)
+  }
+
   return (
     <Drawer
       title={title}
@@ -233,9 +246,22 @@ export default function CreateModelModal({
             <Button onClick={handleOpenTest}>测试</Button>
           )}
           <Button onClick={handleCloseDrawer}>取消</Button>
-          <Button type="primary" loading={submitting || uploading} onClick={submit}>
+          <Button
+            loading={submitting || uploading}
+            onClick={() => submit('save')}
+          >
             保存
           </Button>
+          {mode === 'small' && (
+            <Button
+              type="primary"
+              danger
+              loading={submitting || uploading}
+              onClick={handleOpenPublish}
+            >
+              发布
+            </Button>
+          )}
         </Space>
       }
     >
@@ -280,6 +306,25 @@ export default function CreateModelModal({
               : undefined
           }
           auditPoints={testSnapshot.points}
+        />
+      )}
+      {mode === 'small' && testSnapshot && (
+        <PublishConfirmModal
+          open={publishModalOpen}
+          loading={submitting}
+          modality={testSnapshot.modality}
+          categoryLabel={
+            testSnapshot.category
+              ? SMALL_MODEL_CATEGORY_LABEL[
+                  testSnapshot.category as SmallModelCategory
+                ] ?? testSnapshot.category
+              : undefined
+          }
+          onCancel={() => setPublishModalOpen(false)}
+          onConfirm={() => {
+            setPublishModalOpen(false)
+            void submit('publish')
+          }}
         />
       )}
     </Drawer>

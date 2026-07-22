@@ -2459,6 +2459,8 @@ export interface RegisteredModelCreate {
   registration_method?: RegisteredModelRegistrationMethod
   max_output_tokens?: number | null
   artifact?: ArtifactUploadResponse | null
+  /** 小模型专用：创建后立即启用并级联下线同组合下的其他 active 模型（kind=small 时生效） */
+  activate_immediately?: boolean
 }
 
 export interface RegisteredModelUpdate {

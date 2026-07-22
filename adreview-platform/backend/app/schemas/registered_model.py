@@ -215,6 +215,13 @@ class RegisteredModelCreate(BaseModel):
             "kind=small 时必填"
         ),
     )
+    activate_immediately: bool = Field(
+        default=False,
+        description=(
+            "小模型专用：创建后立即启用并级联下线同 (modality, small_category) 组合下 "
+            "已 active 的其他模型（仅 kind=small 生效）"
+        ),
+    )
 
 
 class RegisteredModelUpdate(BaseModel):

@@ -670,7 +670,11 @@ async def create_model(
             model_name=model_id_str,
             max_output_tokens=body.max_output_tokens,
             registration_method=registration_method,
-            status=body.status or RegisteredModelStatus.ACTIVE.value,
+            # 默认 draft：若未指定 status，先进 draft 后，
+            #   - activate_immediately=True：在 commit 后通过 _set_status 级联到 active
+            #   - activate_immediately=False：维持 draft 创建（用户后续可手动激活）
+            # 注：status 若用户显式传了（_validate_status 已校验），原样落库。
+            status=body.status or RegisteredModelStatus.DRAFT.value,
             version=body.version,
             config={},
             owner_id=user.id,
@@ -698,7 +702,7 @@ async def create_model(
             artifact_mime_type=art.mime_type,
             artifact_size=art.size,
             artifact_sha256=art.sha256,
-            status=RegisteredModelVersionStatus.ACTIVE.value,
+            status=RegisteredModelVersionStatus.DRAFT.value,
             created_by_id=user.id,
         )
         db.add(ver)
@@ -728,6 +732,21 @@ async def create_model(
             },
         )
         await db.commit()
+        # ── 触发级联激活 ──
+        # activate_immediately=True 仅对 kind=small 生效；
+        # 走 _set_status(ACTIVE, cascading_activate=True) 会：
+        #   1) 把当前 model 从 draft 提到 active
+        #   2) 同 (modality, small_category) 组合下已 active 的兄弟自动改为 inactive
+        #   3) 写审计日志 registered_model.active + cascaded_inactive
+        if kind == RegisteredModelKind.SMALL.value and body.activate_immediately:
+            await _set_status(
+                model.id,
+                RegisteredModelStatus.ACTIVE.value,
+                db,
+                user,
+                cascading_activate=True,
+            )
+            return await _build_out_for_model(db, model)
         return await _build_out_for_model(db, model)
 
     # 大模型 / remote_api 分支
@@ -1684,18 +1703,17 @@ async def _set_status(
     cascading_activate: bool = False,
 ) -> RegisteredModelOut:
     _validate_status(new_status)
+    # 直接查 model，不带 selectinload（避免 SQLAlchemy 2 ORM compiled cache
+    # 在跨 schema 测试场景下泄漏 schema 名）。current_version / provider
+    # 改成响应前 refresh attribute 加载。
     model = await db.scalar(
-        select(RegisteredModel)
-        .options(
-            selectinload(RegisteredModel.current_version),
-            selectinload(RegisteredModel.credential),
-            selectinload(RegisteredModel.provider).selectinload(RegisteredProvider.credential),
-        )
-        .where(RegisteredModel.id == model_id)
+        select(RegisteredModel).where(RegisteredModel.id == model_id)
     )
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
     _require_super_admin_for_small(model.kind, user)
+    # 在做任何 relationship 访问前预先 await 加载
+    await db.refresh(model, ["current_version"])
     prev = model.status
     cascaded_ids: list[int] = []
     if (
@@ -1737,10 +1755,10 @@ async def _set_status(
             payload={"reason": "cascaded_by_activate", "cascaded_ids": cascaded_ids},
         )
     await db.commit()
-    await db.refresh(model, attribute_names=["updated_at"])
+    await db.refresh(model, attribute_names=["updated_at", "provider"])
+    if model.provider is not None:
+        await db.refresh(model.provider, ["credential"])
     return _to_out(model)
-
-
 # ─── Credentials ───
 
 credentials_router = APIRouter(prefix="/credentials", tags=["resource-credentials"])
