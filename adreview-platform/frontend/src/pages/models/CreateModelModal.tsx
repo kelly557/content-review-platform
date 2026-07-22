@@ -15,16 +15,19 @@ import {
   LARGE_MODEL_CATEGORY_OPTIONS,
   REGISTERED_MODEL_PROVIDER_PRESETS,
   SMALL_MODEL_CATEGORY_OPTIONS,
+  SMALL_MODEL_CATEGORY_LABEL,
   type LargeModelCategory,
   type ProviderInitialModel,
   type RegisteredModelProvider,
   type RegisteredModelKind,
   type SmallModelCategory,
+  type SmallModelModality,
 } from '@/types/domain'
 import SmallModelFormFields, {
   type SmallFormHandle,
   type SmallModelFormValues,
 } from './SmallModelFormFields'
+import ModelTestDrawer from './ModelTestDrawer'
 
 interface LargeFormValues {
   display_name: string
@@ -69,6 +72,14 @@ export default function CreateModelModal({
   const severeAckedRef = useRef(false)
   // 指向子组件的 imperative handle，用于在提交时拿到 resolved 审核点
   const smallFormRef = useRef<SmallFormHandle>(null)
+  // 测试子 Drawer
+  const [testDrawerOpen, setTestDrawerOpen] = useState(false)
+  const [testSnapshot, setTestSnapshot] = useState<{
+    modality: SmallModelModality
+    name?: string
+    category?: string
+    points: import('@/types/domain').AuditPointEntry[]
+  } | null>(null)
 
   // 通过 [+添加风险类型] 跳入 Drawer 时，把新建的 risk_category 预填到 small_category 字段
   useEffect(() => {
@@ -189,6 +200,26 @@ export default function CreateModelModal({
     onClose()
   }
 
+  const handleOpenTest = () => {
+    if (mode !== 'small') return
+    const v = form.getFieldsValue() as CreateFormValues
+    const modality = v.modality
+    if (!modality) {
+      message.warning('请先选择支持的素材类型')
+      return
+    }
+    const resolvedPoints =
+      smallFormRef.current?.getResolvedAuditPoints() ?? null
+    const points = (resolvedPoints ?? []).slice()
+    setTestSnapshot({
+      modality,
+      name: (v.name ?? v.model_name ?? '').trim() || undefined,
+      category: v.small_category,
+      points,
+    })
+    setTestDrawerOpen(true)
+  }
+
   return (
     <Drawer
       title={title}
@@ -198,6 +229,9 @@ export default function CreateModelModal({
       destroyOnClose
       extra={
         <Space>
+          {mode === 'small' && (
+            <Button onClick={handleOpenTest}>测试</Button>
+          )}
           <Button onClick={handleCloseDrawer}>取消</Button>
           <Button type="primary" loading={submitting || uploading} onClick={submit}>
             保存
@@ -230,6 +264,22 @@ export default function CreateModelModal({
           onCase3Change={(active) => {
             case3ActiveRef.current = active
           }}
+        />
+      )}
+      {mode === 'small' && testSnapshot && (
+        <ModelTestDrawer
+          open={testDrawerOpen}
+          onClose={() => setTestDrawerOpen(false)}
+          modality={testSnapshot.modality}
+          modelName={testSnapshot.name}
+          categoryLabel={
+            testSnapshot.category
+              ? SMALL_MODEL_CATEGORY_LABEL[
+                  testSnapshot.category as SmallModelCategory
+                ] ?? testSnapshot.category
+              : undefined
+          }
+          auditPoints={testSnapshot.points}
         />
       )}
     </Drawer>
