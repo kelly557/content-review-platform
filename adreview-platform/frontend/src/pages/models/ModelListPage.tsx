@@ -2,9 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
+  Drawer,
   Empty,
   Input,
+  Modal,
+  Popconfirm,
   Select,
+  Skeleton,
   Space,
   Switch,
   Table,
@@ -56,6 +60,8 @@ type ModelRow = {
   kind: 'large' | 'small'
   modality: string | null
   small_category: string | null
+  current_version_no: number | null
+  current_version_id: number | null
 }
 
 type CategoryGroup = {
@@ -64,6 +70,8 @@ type CategoryGroup = {
   color: string
   count: number
   models: ModelRow[]
+  currentVersion: ModelRow | null
+  historicalVersions: ModelRow[]
 }
 
 type ModalityGroup = {
@@ -83,6 +91,7 @@ const MODALITY_META: Record<ModalityKey, { label: string; color: string; icon: R
 
 type FlatRow = {
   flatKey: string
+  cardKey: string
   modelId: number
   modelName: string
   versionText: string
@@ -93,6 +102,7 @@ type FlatRow = {
   kind: 'large' | 'small'
   modality: string | null
   small_category: string | null
+  historicalCount: number
 }
 
 type GroupTitleRow = {
@@ -106,6 +116,153 @@ type UnionRow = FlatRow | GroupTitleRow
 
 function isGroupRow(row: UnionRow): row is GroupTitleRow {
   return (row as GroupTitleRow).catKey !== undefined
+}
+
+type HistoryCardData = {
+  modalityLabel: string
+  categoryLabel: string
+  currentModelId: number | null
+  currentVersionId: number | null
+  currentVersionText: string
+  historicalVersions: ModelRow[]
+}
+
+function HistoryVersionsDrawer({
+  cardKey,
+  cardsByKey,
+  onClose,
+  onPreview,
+  onSwitch,
+}: {
+  cardKey: string | null
+  cardsByKey: Record<string, HistoryCardData>
+  onClose: () => void
+  onPreview: (modelId: number, modelName: string, versionText: string) => void
+  onSwitch: (modelId: number, versionId: number) => Promise<void>
+}) {
+  const data = cardKey ? cardsByKey[cardKey] : null
+  return (
+    <Drawer
+      open={cardKey !== null}
+      onClose={onClose}
+      width={560}
+      destroyOnClose
+      title={data ? `${data.categoryLabel} · 历史版本` : '历史版本'}
+    >
+      {data && (
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            模态: {data.modalityLabel} · 风险类型: {data.categoryLabel} · 当前生效: {data.currentVersionText}
+          </Text>
+          {data.historicalVersions.length === 0 ? (
+            <Text type="secondary">暂无历史版本</Text>
+          ) : (
+            data.historicalVersions.map((row) => {
+              const isCurrent = row.id === data.currentModelId
+              return (
+                <div
+                  key={row.id}
+                  style={{
+                    borderBottom: '1px solid #f1f5f9',
+                    paddingBottom: 12,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 500, color: '#020617' }}>{row.versionText}</div>
+                    <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>{row.name}</div>
+                    <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>
+                      {row.updatedAt ? dayjs(row.updatedAt).format('YYYY-MM-DD') : '-'}
+                    </div>
+                  </div>
+                  <Space size={4}>
+                    {!isCurrent && row.current_version_id != null && (
+                      <Popconfirm
+                        title="确认切换到此版本？"
+                        description={
+                          <div>
+                            切换后，模型将从此版本生效，将直接影响线上环境，请谨慎操作。
+                          </div>
+                        }
+                        okText="确认切换"
+                        cancelText="取消"
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() => onSwitch(row.id, row.current_version_id!)}
+                      >
+                        <Button type="link" size="small" style={{ padding: 0 }}>
+                          切到此版本
+                        </Button>
+                      </Popconfirm>
+                    )}
+                    {isCurrent && <Tag color="green">当前生效</Tag>}
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ padding: 0 }}
+                      onClick={() => onPreview(row.id, row.name, row.versionText)}
+                    >
+                      预览配置
+                    </Button>
+                  </Space>
+                </div>
+              )
+            })
+          )}
+        </Space>
+      )}
+    </Drawer>
+  )
+}
+
+function ConfigPreviewModal({
+  open,
+  title,
+  points,
+  loading,
+  onClose,
+}: {
+  open: boolean
+  title: string
+  points: AuditPointEntry[]
+  loading: boolean
+  onClose: () => void
+}) {
+  return (
+    <Modal
+      open={open}
+      title={title}
+      onCancel={onClose}
+      footer={[<Button key="close" onClick={onClose}>关闭</Button>]}
+      width={640}
+      destroyOnClose
+    >
+      {loading ? (
+        <Skeleton active />
+      ) : points.length === 0 ? (
+        <Text type="secondary">该版本未配置审核点</Text>
+      ) : (
+        <Table
+          size="small"
+          pagination={false}
+          rowKey={(_, i) => String(i)}
+          dataSource={points.map((p, i) => ({ key: i, label: p.label, description: p.description ?? '' }))}
+          columns={[
+            {
+              title: '审核点',
+              dataIndex: 'label',
+              width: 160,
+            },
+            {
+              title: '审核说明',
+              dataIndex: 'description',
+            },
+          ]}
+        />
+      )}
+    </Modal>
+  )
 }
 
 export default function ModelListPage() {
@@ -136,6 +293,16 @@ export default function ModelListPage() {
   const [cascadeSiblings, setCascadeSiblings] = useState<
     Array<{ id: number; name: string; version_label: string | null }>
   >([])
+
+  const [historyDrawerKey, setHistoryDrawerKey] = useState<string | null>(null)
+
+  const [previewModal, setPreviewModal] = useState<{
+    modelId: number
+    modelName: string
+    versionText: string
+  } | null>(null)
+  const [previewPoints, setPreviewPoints] = useState<AuditPointEntry[]>([])
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   const fetchList = async () => {
     setLoading(true)
@@ -252,6 +419,71 @@ export default function ModelListPage() {
     setCascadeOpen(false)
     setCascadeTarget(null)
     setCascadeSiblings([])
+  }
+
+  const openHistoryDrawer = (cardKey: string) => {
+    setHistoryDrawerKey(cardKey)
+  }
+
+  const closeHistoryDrawer = () => {
+    setHistoryDrawerKey(null)
+  }
+
+  const openPreviewModal = async (
+    modelId: number,
+    modelName: string,
+    versionText: string,
+  ) => {
+    setPreviewModal({ modelId, modelName, versionText })
+    setPreviewPoints([])
+    setPreviewLoading(true)
+    try {
+      const detail = await registeredModelsApi.get(modelId)
+      const raw = detail.current_version?.config as { points?: unknown[] } | undefined
+      const rawPoints = raw?.points
+      const out: AuditPointEntry[] = []
+      if (Array.isArray(rawPoints)) {
+        for (const p of rawPoints) {
+          if (typeof p === 'string') {
+            out.push({ label: p, description: '' })
+          } else if (
+            p != null &&
+            typeof p === 'object' &&
+            typeof (p as { label?: unknown }).label === 'string'
+          ) {
+            const obj = p as { label: string; description?: unknown }
+            out.push({
+              label: obj.label,
+              description:
+                typeof obj.description === 'string' ? obj.description : '',
+            })
+          }
+        }
+      }
+      setPreviewPoints(out)
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || '加载审核点失败')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const closePreviewModal = () => {
+    setPreviewModal(null)
+    setPreviewPoints([])
+  }
+
+  const handleSwitchVersion = async (modelId: number, versionId: number) => {
+    try {
+      await registeredModelsApi.activateVersion(modelId, versionId)
+      message.success('已切换到该版本')
+      setHistoryDrawerKey(null)
+      await fetchList()
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || '切换失败')
+    }
   }
 
   const renderEnableSwitch = (
@@ -383,6 +615,8 @@ export default function ModelListPage() {
         kind: m.kind,
         modality: m.modality,
         small_category: m.small_category,
+        current_version_no: m.current_version_no,
+        current_version_id: m.current_version_id,
       }
       if (!byModality.has(mod)) byModality.set(mod, new Map())
       const byCat = byModality.get(mod)!
@@ -398,12 +632,23 @@ export default function ModelListPage() {
       for (const [cat, models] of byCat.entries()) {
         totalCount += models.length
         const catOpt = SMALL_MODEL_CATEGORY_OPTIONS.find((o) => o.value === cat)
+        // 当前生效：cascade 保证同组同时只有一个 active；若无 active 则取 version_no 最大的
+        const active = models.find((m) => m.status === 'active')
+        const sorted = [...models].sort(
+          (a, b) => (b.current_version_no ?? 0) - (a.current_version_no ?? 0),
+        )
+        const currentVersion = active ?? sorted[0] ?? null
+        const historicalVersions = currentVersion
+          ? sorted.filter((m) => m.id !== currentVersion.id)
+          : sorted.slice(1)
         categories.push({
           key: `${mod}-${cat}`,
           label: catOpt?.label ?? cat,
           color: catOpt?.color ?? 'default',
           count: models.length,
           models,
+          currentVersion,
+          historicalVersions,
         })
       }
       groups.push({
@@ -420,6 +665,32 @@ export default function ModelListPage() {
 
   const visibleModality = smallGroups.find((g) => g.key === activeModality) ?? smallGroups[0]
 
+  const historyCardsByKey = useMemo(() => {
+    const map: Record<
+      string,
+      {
+        modalityLabel: string
+        categoryLabel: string
+        currentModelId: number | null
+        currentVersionId: number | null
+        currentVersionText: string
+        historicalVersions: ModelRow[]
+      }
+    > = {}
+    if (!visibleModality) return map
+    for (const cat of visibleModality.categories) {
+      map[cat.key] = {
+        modalityLabel: visibleModality.label,
+        categoryLabel: cat.label,
+        currentModelId: cat.currentVersion?.id ?? null,
+        currentVersionId: cat.currentVersion?.id ?? null,
+        currentVersionText: cat.currentVersion?.versionText ?? '-',
+        historicalVersions: cat.historicalVersions,
+      }
+    }
+    return map
+  }, [visibleModality])
+
   const unionRows = useMemo<UnionRow[]>(() => {
     if (!visibleModality) return []
     const rows: UnionRow[] = []
@@ -430,39 +701,43 @@ export default function ModelListPage() {
         catLabel: cat.label,
         catCount: cat.count,
       })
-      for (const m of cat.models) {
-        const span = Math.max(m.points.length, 1)
-        if (m.points.length === 0) {
+      const m = cat.currentVersion
+      if (!m) continue
+      const span = Math.max(m.points.length, 1)
+      if (m.points.length === 0) {
+        rows.push({
+          flatKey: `${cat.key}-empty`,
+          cardKey: cat.key,
+          modelId: m.id,
+          modelName: m.name,
+          versionText: m.versionText,
+          updatedAt: m.updatedAt,
+          point: null,
+          rowSpan: 1,
+          status: m.status,
+          kind: m.kind,
+          modality: m.modality,
+          small_category: m.small_category,
+          historicalCount: cat.historicalVersions.length,
+        })
+      } else {
+        m.points.forEach((p, i) => {
           rows.push({
-            flatKey: `${m.id}-empty`,
+            flatKey: `${cat.key}-${i}`,
+            cardKey: cat.key,
             modelId: m.id,
             modelName: m.name,
             versionText: m.versionText,
             updatedAt: m.updatedAt,
-            point: null,
-            rowSpan: 1,
+            point: p,
+            rowSpan: i === 0 ? span : 0,
             status: m.status,
             kind: m.kind,
             modality: m.modality,
             small_category: m.small_category,
+            historicalCount: cat.historicalVersions.length,
           })
-        } else {
-          m.points.forEach((p, i) => {
-            rows.push({
-              flatKey: `${m.id}-${i}`,
-              modelId: m.id,
-              modelName: m.name,
-              versionText: m.versionText,
-              updatedAt: m.updatedAt,
-              point: p,
-              rowSpan: i === 0 ? span : 0,
-              status: m.status,
-              kind: m.kind,
-              modality: m.modality,
-              small_category: m.small_category,
-            })
-          })
-        }
+        })
       }
     }
     return rows
@@ -525,7 +800,7 @@ export default function ModelListPage() {
         ),
       onCell: (row) => {
         if (isGroupRow(row)) {
-          return { colSpan: 6, id: `cat-${row.catKey}` }
+          return { colSpan: 7, id: `cat-${row.catKey}` }
         }
         return { rowSpan: row.rowSpan }
       },
@@ -560,7 +835,7 @@ export default function ModelListPage() {
     {
       title: '版本号',
       key: 'version',
-      width: '14%',
+      width: '12%',
       render: (_, row) =>
         isGroupRow(row) ? null : (
           <Text type="secondary" style={{ fontSize: 12 }}>{row.versionText}</Text>
@@ -573,7 +848,7 @@ export default function ModelListPage() {
     {
       title: '更新时间',
       key: 'updatedAt',
-      width: '14%',
+      width: '12%',
       render: (_, row) =>
         isGroupRow(row) ? null : row.updatedAt ? (
           <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(row.updatedAt).format('YYYY-MM-DD HH:mm')}</Text>
@@ -586,9 +861,31 @@ export default function ModelListPage() {
       },
     },
     {
+      title: '历史版本',
+      key: 'history',
+      width: '12%',
+      render: (_, row) =>
+        isGroupRow(row) ? null : row.historicalCount > 0 ? (
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0 }}
+            onClick={() => openHistoryDrawer(row.cardKey)}
+          >
+            {row.historicalCount} 个历史版本 ▸
+          </Button>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>无历史版本</Text>
+        ),
+      onCell: (row) => {
+        if (isGroupRow(row)) return { colSpan: 0 }
+        return { rowSpan: row.rowSpan }
+      },
+    },
+    {
       title: '审核点',
       key: 'point',
-      width: '18%',
+      width: '16%',
       render: (_, row) =>
         isGroupRow(row) ? null : row.point ? (
           <span style={{ color: '#020617' }}>{row.point.label}</span>
@@ -852,6 +1149,26 @@ export default function ModelListPage() {
         confirming={cascadeConfirming}
         onConfirm={onCascadeConfirm}
         onCancel={onCascadeCancel}
+      />
+
+      <HistoryVersionsDrawer
+        cardKey={historyDrawerKey}
+        cardsByKey={historyCardsByKey}
+        onClose={closeHistoryDrawer}
+        onPreview={openPreviewModal}
+        onSwitch={handleSwitchVersion}
+      />
+
+      <ConfigPreviewModal
+        open={previewModal !== null}
+        title={
+          previewModal
+            ? `${previewModal.modelName} ${previewModal.versionText} 审核点`
+            : ''
+        }
+        points={previewPoints}
+        loading={previewLoading}
+        onClose={closePreviewModal}
       />
     </div>
   )

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import {
   Alert,
   Button,
@@ -49,6 +49,14 @@ interface Props {
   setUploading?: (b: boolean) => void
   initialArtifact?: ArtifactUploadResponse | null
   initialPoints?: AuditPointEntry[] | null
+  /** case 3 警告 Modal 是否打开（由父组件在用户点保存时控制） */
+  severeModalOpen?: boolean
+  /** case 3 警告 Modal 确认提交回调 */
+  onSevereConfirm?: () => void
+  /** case 3 警告 Modal 取消回调 */
+  onSevereCancel?: () => void
+  /** 当前 hint 是否处于 case 3（删除或修改审核点） */
+  onCase3Change?: (active: boolean) => void
 }
 
 type DiffEntry = { label: string; description: string }
@@ -86,13 +94,24 @@ type HintState =
     }
   | null
 
-export default function SmallModelFormFields({
-  form,
-  uploading,
-  setUploading,
-  initialArtifact,
-  initialPoints,
-}: Props) {
+export type SmallFormHandle = {
+  getResolvedAuditPoints: () => AuditPointEntry[] | null
+}
+
+export default forwardRef<SmallFormHandle, Props>(function SmallModelFormFields(
+  {
+      form,
+      uploading,
+      setUploading,
+      initialArtifact,
+      initialPoints,
+      severeModalOpen,
+      onSevereConfirm,
+      onSevereCancel,
+      onCase3Change,
+    }: Props,
+    ref,
+  ) {
   const { message } = App.useApp()
   const [artifact, setArtifact] = useState<ArtifactUploadResponse | null>(
     initialArtifact ?? null,
@@ -117,10 +136,6 @@ export default function SmallModelFormFields({
   const [viewConfigOpen, setViewConfigOpen] = useState(false)
   const [viewConfigText, setViewConfigText] = useState('')
   const [viewConfigLoading, setViewConfigLoading] = useState(false)
-
-  // ─── case 3：严重警告 ───
-  const [severeModalOpen, setSevereModalOpen] = useState(false)
-  const [severeConfirmed, setSevereConfirmed] = useState(false)
 
   const onViewReferenceConfig = async (modelId: number) => {
     setViewConfigLoading(true)
@@ -228,6 +243,10 @@ export default function SmallModelFormFields({
     }
     const existingPoints = pointsFromConfig(reference.current_version_config)
     const incomingPoints = (watchedPoints ?? []) as AuditPointEntry[]
+
+    // 用户未配置审核点：默认与 reference 当前版本一致，不显示提示
+    if (incomingPoints.length === 0) return null
+
     const diff = diffAuditPoints(existingPoints, incomingPoints)
 
     const noDiff =
@@ -263,20 +282,29 @@ export default function SmallModelFormFields({
     }
   })()
 
-  // 当 hint 进入 error-severe 且尚未确认 → 弹 Modal
-  // 当 hint 退出 error-severe（例如用户修正了 JSON）→ 重置确认标记
-  const hintCase = hint?.type ?? null
+  // 通知父组件当前是否处于 case 3（仅供保存时拦截使用，不再自动开 Modal）
   useEffect(() => {
-    if (hintCase === 'error-severe' && !severeConfirmed) {
-      setSevereModalOpen(true)
-    } else if (hintCase !== 'error-severe') {
-      // 退出 error-severe 状态 → 重置确认标记（修正 JSON 后允许重新弹 Modal）
-      setSevereConfirmed(false)
-      setSevereModalOpen(false)
-    }
-    // 仅依赖 hintCase，避免 severeConfirmed 变化触发循环
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hintCase])
+    onCase3Change?.(hint?.type === 'error-severe')
+  }, [hint, onCase3Change])
+
+  // 暴露 imperative handle：让父组件在提交时拿到"最终生效的审核点"
+  // - 用户已配置 → 用用户的 __auditPoints
+  // - 用户未配置 + 同组合已有模型 → 用 reference 的现有 points
+  // - 都没有 → null
+  useImperativeHandle(
+    ref,
+    () => ({
+      getResolvedAuditPoints: () => {
+        const user = (watchedPoints ?? []) as AuditPointEntry[]
+        if (user.length > 0) return user
+        const reference = pickReference(comboItems)
+        if (!reference) return null
+        const refPoints = pointsFromConfig(reference.current_version_config)
+        return refPoints.length > 0 ? refPoints : null
+      },
+    }),
+    [watchedPoints, comboItems],
+  )
 
   const beforeUpload = (file: File) => {
     const MAX = 512 * 1024 * 1024
@@ -556,7 +584,7 @@ export default function SmallModelFormFields({
                 </Space>
               )}
               {hint.type === 'error-severe' && (
-                <Tag color="red">严重 · 请创建新风险类型</Tag>
+                <Tag color="red">请创建新风险类型</Tag>
               )}
             </Space>
           }
@@ -675,36 +703,24 @@ export default function SmallModelFormFields({
         </pre>
       </Modal>
 
-      {/* case 3：严重警告 Modal（强制弹窗，不可关闭背后） */}
+      {/* case 3：警告 Modal（点保存时由父组件触发，受控） */}
       <Modal
-        open={severeModalOpen}
-        title="严重警告：检测到删除或修改审核点"
-        onCancel={() => undefined}
+        open={!!severeModalOpen}
+        title="检测到删除或修改审核点"
+        onCancel={onSevereCancel}
         maskClosable={false}
         closable={false}
         keyboard={false}
         width={600}
         footer={[
-          <Button
-            key="cancel"
-            onClick={() => {
-              setSevereConfirmed(false)
-              setSevereModalOpen(false)
-              form.setFieldValue('__auditPoints' as keyof SmallModelFormValues, undefined)
-              setAuditJsonText('')
-              setAuditPoints(null)
-            }}
-          >
+          <Button key="cancel" onClick={onSevereCancel}>
             取消修改
           </Button>,
           <Button
             key="confirm"
             type="primary"
             danger
-            onClick={() => {
-              setSevereConfirmed(true)
-              setSevereModalOpen(false)
-            }}
+            onClick={onSevereConfirm}
           >
             我已知晓，仍要提交
           </Button>,
@@ -769,7 +785,8 @@ export default function SmallModelFormFields({
       </Modal>
     </>
   )
-}
+})
+
 
 function pickReference(
   items: RegisteredModelListItem[],

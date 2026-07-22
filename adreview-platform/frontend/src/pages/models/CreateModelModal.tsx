@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   Button,
   Drawer,
@@ -22,6 +22,7 @@ import {
   type SmallModelCategory,
 } from '@/types/domain'
 import SmallModelFormFields, {
+  type SmallFormHandle,
   type SmallModelFormValues,
 } from './SmallModelFormFields'
 
@@ -51,6 +52,12 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
   const [form] = Form.useForm<CreateFormValues>()
   const [submitting, setSubmitting] = useState(false)
   const [uploading, setUploading] = useState(false)
+  // case 3 警告拦截：保存时由子组件回调触发打开 Modal
+  const [severeModalOpen, setSevereModalOpen] = useState(false)
+  const case3ActiveRef = useRef(false)
+  const severeAckedRef = useRef(false)
+  // 指向子组件的 imperative handle，用于在提交时拿到 resolved 审核点
+  const smallFormRef = useRef<SmallFormHandle>(null)
   const currentPreset = Form.useWatch('provider_preset', form) as
     | RegisteredModelProvider
     | undefined
@@ -65,6 +72,15 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
   const submit = async () => {
     const v = await form.validateFields().catch(() => null)
     if (!v) return
+    if (mode === 'small') {
+      // ── case 3 拦截：JSON 触发了删除/修改审核点 ──
+      // 子组件用 onCase3Change 回调告诉父组件当前是否处于 case 3；
+      // 用户在 Modal 里点"我已知晓，仍要提交"会把 severeAckedRef.current 置 true。
+      if (case3ActiveRef.current && !severeAckedRef.current) {
+        setSevereModalOpen(true)
+        return
+      }
+    }
     setSubmitting(true)
     try {
       if (mode === 'large') {
@@ -110,6 +126,12 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
           return
         }
         const autoVersion = `${v.modality}-${v.small_category}`
+        // 取"最终生效"的审核点：用户已配置优先；未配置时回退到同组合 reference
+        const resolvedPoints =
+          smallFormRef.current?.getResolvedAuditPoints() ?? null
+        const config = resolvedPoints?.length
+          ? { points: resolvedPoints }
+          : undefined
         const created = await registeredModelsApi.create({
           name: v.name ?? v.model_name.trim(),
           description: v.description,
@@ -120,7 +142,7 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
           provider_id: null,
           model_name: v.model_name.trim(),
           version: autoVersion,
-          config: v.__auditPoints?.length ? { points: v.__auditPoints } : undefined,
+          config,
           registration_method: 'uploaded_file',
           artifact,
         })
@@ -128,6 +150,8 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
         onCreated?.({ modelId: created.id })
       }
       form.resetFields()
+      case3ActiveRef.current = false
+      severeAckedRef.current = false
       onClose()
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
@@ -140,16 +164,22 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
 
   const title = mode === 'large' ? '添加模型' : '添加小模型'
 
+  const handleCloseDrawer = () => {
+    case3ActiveRef.current = false
+    severeAckedRef.current = false
+    onClose()
+  }
+
   return (
     <Drawer
       title={title}
       open={open}
-      onClose={onClose}
+      onClose={handleCloseDrawer}
       width={mode === 'large' ? 640 : 560}
       destroyOnClose
       extra={
         <Space>
-          <Button onClick={onClose}>取消</Button>
+          <Button onClick={handleCloseDrawer}>取消</Button>
           <Button type="primary" loading={submitting || uploading} onClick={submit}>
             保存
           </Button>
@@ -164,9 +194,23 @@ export default function CreateModelModal({ open, mode, onClose, onCreated }: Pro
         />
       ) : (
         <SmallForm
+          smallFormRef={smallFormRef}
           form={form}
           uploading={uploading}
           setUploading={setUploading}
+          severeModalOpen={severeModalOpen}
+          onSevereConfirm={() => {
+            severeAckedRef.current = true
+            setSevereModalOpen(false)
+            void submit()
+          }}
+          onSevereCancel={() => {
+            severeAckedRef.current = false
+            setSevereModalOpen(false)
+          }}
+          onCase3Change={(active) => {
+            case3ActiveRef.current = active
+          }}
         />
       )}
     </Drawer>
@@ -362,9 +406,23 @@ interface SmallFormProps {
   form: import('antd').FormInstance<CreateFormValues>
   uploading: boolean
   setUploading: (b: boolean) => void
+  severeModalOpen: boolean
+  onSevereConfirm: () => void
+  onSevereCancel: () => void
+  onCase3Change: (active: boolean) => void
+  smallFormRef: import('react').RefObject<SmallFormHandle>
 }
 
-function SmallForm({ form, uploading, setUploading }: SmallFormProps) {
+function SmallForm({
+  form,
+  uploading,
+  setUploading,
+  severeModalOpen,
+  onSevereConfirm,
+  onSevereCancel,
+  onCase3Change,
+  smallFormRef,
+}: SmallFormProps) {
   return (
     <Form<CreateFormValues>
       form={form}
@@ -372,9 +430,14 @@ function SmallForm({ form, uploading, setUploading }: SmallFormProps) {
       initialValues={{}}
     >
       <SmallModelFormFields
+        ref={smallFormRef}
         form={form as never}
         uploading={uploading}
         setUploading={setUploading}
+        severeModalOpen={severeModalOpen}
+        onSevereConfirm={onSevereConfirm}
+        onSevereCancel={onSevereCancel}
+        onCase3Change={onCase3Change}
       />
     </Form>
   )
