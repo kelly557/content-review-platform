@@ -48,31 +48,28 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
 
   return (
     <div>
-      {/* 顶部横幅:深色背景 + icon + 大字 + 计数 */}
+      {/* 顶部横幅 2026-07-29 改为浅色:取消黑色背景,与 Box 整体风格一致 */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 12,
-          padding: '14px 18px',
+          gap: 10,
           marginBottom: 16,
-          background: 'linear-gradient(135deg, #1E293B 0%, #334155 100%)',
-          borderRadius: 8,
-          color: '#F8FAFC',
         }}
       >
-        <RobotOutlined style={{ fontSize: 22, color: '#60A5FA' }} />
-        <Text style={{ fontSize: 16, fontWeight: 600, color: '#F8FAFC' }}>
+        <RobotOutlined style={{ fontSize: 18, color: '#2563EB' }} />
+        <Text style={{ fontSize: 14, fontWeight: 600, color: '#0F172A' }}>
           审核 Agent
         </Text>
         <span
           style={{
             fontSize: 11,
-            padding: '2px 10px',
+            padding: '2px 8px',
             borderRadius: 10,
-            background: 'rgba(255, 255, 255, 0.12)',
-            color: '#E2E8F0',
+            background: 'var(--color-divider)',
+            color: 'var(--color-muted)',
             lineHeight: 1.6,
+            fontWeight: 500,
           }}
         >
           {items.length}
