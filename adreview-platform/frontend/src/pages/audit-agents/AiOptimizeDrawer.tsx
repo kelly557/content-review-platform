@@ -354,7 +354,6 @@ export default function AiOptimizeDrawer({
           message={
             <div>
               <div>1. 在此处可以补充相应业务信息，通过AI进行提示词的生成或优化。补充信息越详细，通常会有越好的效果。</div>
-              <div>2. 此页面功能公测期间暂不计费，单个账号每天最多支持请求20次。</div>
             </div>
           }
         />
