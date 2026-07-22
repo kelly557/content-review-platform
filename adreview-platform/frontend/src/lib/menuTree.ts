@@ -11,16 +11,6 @@ export const MENU_TREE: MenuNode[] = [
     children: [
       { key: 'strategies-list', label: '策略管理', permissions: ['view', 'edit', 'delete'] },
       {
-        key: 'strategies-image-rules',
-        label: '图片规则管理',
-        permissions: ['view', 'edit', 'delete'],
-      },
-      {
-        key: 'strategies-text-rules',
-        label: '文本规则管理',
-        permissions: ['view', 'edit', 'delete'],
-      },
-      {
         key: 'strategies-agents',
         label: '审核智能体',
         permissions: ['view', 'edit', 'delete'],

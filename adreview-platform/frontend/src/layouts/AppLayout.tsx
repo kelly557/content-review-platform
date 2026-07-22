@@ -87,10 +87,7 @@ const NAV_SECTIONS: Array<{
         icon: <SettingOutlined style={{ fontSize: ICON_SIZE }} />,
         roles: ['admin', 'mlr', 'superadmin', 'root_admin'],
         children: [
-          { key: 'strategies-list', path: '/strategies', label: '策略管理' },
-          { key: 'strategies-image-rules', path: '/rules/audit/image', label: '图片规则管理' },
-          { key: 'strategies-text-rules', path: '/rules/audit/text', label: '文本规则管理' },
-          { key: 'strategies-agents', path: '/strategies/agents', label: '审核智能体', roles: ['superadmin', 'root_admin'] },
+{ key: 'strategies-list', path: '/strategies', label: '策略管理' },
         ],
       },
       {
