@@ -416,7 +416,7 @@ export default function ReviewAgentsPage() {
       {
         title: 'AppId',
         dataIndex: 'appId',
-        width: '14%',
+        width: '16%',
         render: (v: string) => (
           <Space size={6}>
             <Text style={{ fontFamily: 'monospace' }}>{v}</Text>
@@ -435,7 +435,7 @@ export default function ReviewAgentsPage() {
       {
         title: '智能体名称',
         dataIndex: 'name',
-        width: '14%',
+        width: '16%',
         render: (v: string, row: AgentRow) => (
           <Popover
             trigger="click"
@@ -483,24 +483,13 @@ export default function ReviewAgentsPage() {
           </Space>
         ),
       },
-      { title: '模态', dataIndex: 'modality', width: '8%' },
-      { title: '上线时间', dataIndex: 'onlineAt', width: '14%' },
-      {
-        title: '版本',
-        dataIndex: 'version',
-        width: '14%',
-        render: (v: string | null) =>
-          v ? (
-            <Text style={{ fontFamily: 'monospace' }}>{v}</Text>
-          ) : (
-            <Tag>未发布</Tag>
-          ),
-      },
-      { title: '更新时间', dataIndex: 'updatedAt', width: '14%' },
+      { title: '模态', dataIndex: 'modality', width: '9%' },
+      { title: '上线时间', dataIndex: 'onlineAt', width: '16%' },
+      { title: '更新时间', dataIndex: 'updatedAt', width: '18%' },
       {
         title: '操作',
         dataIndex: 'appId',
-        width: '12%',
+        width: '15%',
         render: (_: string, row: AgentRow) => (
           <Space size={4}>
             <Button type="link" size="small" onClick={() => handleOpenConfig(row)}>
