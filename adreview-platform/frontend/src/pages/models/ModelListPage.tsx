@@ -382,21 +382,8 @@ export default function ModelListPage() {
         ),
       onCell: (row) => {
         if (isGroupRow(row)) {
-          return { colSpan: 5, id: `cat-${row.catKey}` }
+          return { colSpan: 4, id: `cat-${row.catKey}` }
         }
-        return { rowSpan: row.rowSpan }
-      },
-    },
-    {
-      title: '版本号',
-      key: 'version',
-      width: '14%',
-      render: (_, row) =>
-        isGroupRow(row) ? null : (
-          <Text type="secondary" style={{ fontSize: 12 }}>{row.versionText}</Text>
-        ),
-      onCell: (row) => {
-        if (isGroupRow(row)) return { colSpan: 0 }
         return { rowSpan: row.rowSpan }
       },
     },
