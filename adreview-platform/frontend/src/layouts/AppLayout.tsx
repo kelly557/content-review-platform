@@ -21,6 +21,7 @@ import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
 import { ROLE_LABELS } from '@/types/domain'
 import { SystemHealthBanner } from '@/components/SystemHealthBanner'
+import { PageGuideButton } from '@/components/PageGuideButton'
 import { DEV_ACCOUNTS, IS_DEV, type DevAccount } from '@/lib/devAccounts'
 
 const { Header, Sider, Content } = Layout
@@ -382,13 +383,16 @@ export default function AppLayout() {
               style={{ color: '#fff' }}
             />
           </Space>
-          <Dropdown menu={{ items: dropdownItems }} placement="bottomRight">
-            <Space style={{ cursor: 'pointer' }}>
-              <Avatar icon={<UserOutlined />} />
-              <Text style={{ color: '#fff' }}>{user.full_name}</Text>
-              <Tag color="blue">{ROLE_LABELS[user.role]}</Tag>
-            </Space>
-          </Dropdown>
+          <Space size="middle">
+            <PageGuideButton />
+            <Dropdown menu={{ items: dropdownItems }} placement="bottomRight">
+              <Space style={{ cursor: 'pointer' }}>
+                <Avatar icon={<UserOutlined />} />
+                <Text style={{ color: '#fff' }}>{user.full_name}</Text>
+                <Tag color="blue">{ROLE_LABELS[user.role]}</Tag>
+              </Space>
+            </Dropdown>
+          </Space>
         </Header>
         <Content
           style={{
