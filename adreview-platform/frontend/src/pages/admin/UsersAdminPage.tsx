@@ -344,7 +344,7 @@ export default function UsersAdminPage() {
             name="role"
             label="角色"
             rules={[{ required: true, message: '请选择角色' }]}
-            extra="业务员 = 提交者 / 审核员 / MLR 专家"
+            extra="业务员 = 审核员 (默认)/ staff"
           >
             <Select
               options={MERGED_ROLE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
@@ -393,7 +393,7 @@ export default function UsersAdminPage() {
             name="role"
             label="角色"
             rules={[{ required: true, message: '请选择角色' }]}
-            extra="业务员 = 提交者 / 审核员 / MLR 专家"
+            extra="业务员 = 审核员 (默认) / staff"
           >
             <Select
               options={MERGED_ROLE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}

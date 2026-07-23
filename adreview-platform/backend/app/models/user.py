@@ -13,9 +13,10 @@ from app.db.session import Base
 
 
 class UserRole(str, enum.Enum):
-    SUBMITTER = "submitter"
+    SUBMITTER = "submitter"  # deprecated: 已并入 staff，仅历史数据兼容
     REVIEWER = "reviewer"
-    MLR = "mlr"
+    MLR = "mlr"  # deprecated: 已并入 staff，仅历史数据兼容
+    STAFF = "staff"
     ADMIN = "admin"
     SUPERADMIN = "superadmin"
     ROOT_ADMIN = "root_admin"

@@ -40,7 +40,8 @@ const CreateTaskPage = lazy(() => import('@/pages/tasks/CreateTaskPage'))
 const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage'))
 const QueryPage = lazy(() => import('@/pages/query/QueryPage'))
 const UsersAdminPage = lazy(() => import('@/pages/admin/UsersAdminPage'))
-const RolesAdminPage = lazy(() => import('@/pages/admin/RolesAdminPage'))
+const PermissionsAdminPage = lazy(() => import('@/pages/admin/PermissionsAdminPage'))
+const RolesMetaAdminPage = lazy(() => import('@/pages/admin/RolesMetaAdminPage'))
 const StrategyListPage = lazy(() => import('@/pages/strategy/StrategyListPage'))
 const CreateStrategyPage = lazy(() => import('@/pages/strategy/CreateStrategyPage'))
 const GeneralRuleListPage = lazy(() => import('@/pages/rules/GeneralRuleListPage'))
@@ -265,13 +266,14 @@ export default function AppRoutes() {
 
             <Route element={<ProtectedRoute allow={['admin', 'superadmin', 'root_admin']} />}>
               <Route path="/admin/users" element={<UsersAdminPage />} />
+              <Route path="/admin/permissions" element={<PermissionsAdminPage />} />
+              <Route path="/admin/roles" element={<RolesMetaAdminPage />} />
               <Route path="/triggers" element={<TriggersListPage />} />
               <Route path="/triggers/new" element={<CreateTriggerPage />} />
               <Route path="/triggers/:id" element={<TriggerDetailPage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['superadmin', 'root_admin']} />}>
-              <Route path="/admin/roles" element={<RolesAdminPage />} />
               <Route path="/strategies/agents" element={<ReviewAgentsPage />} />
             </Route>
 

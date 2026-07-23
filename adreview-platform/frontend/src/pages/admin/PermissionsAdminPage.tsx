@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   App,
   Button,
@@ -6,9 +6,11 @@ import {
   Checkbox,
   Space,
   Table,
+  Tag,
   Typography,
   type TableColumnsType,
 } from 'antd'
+import { SaveOutlined } from '@ant-design/icons'
 import { flattenMenuForTable, MENU_TREE } from '@/lib/menuTree'
 import {
   PERMISSION_KEYS,
@@ -18,21 +20,17 @@ import {
   type RolePermissions,
 } from '@/types/role'
 import {
+  MERGED_ROLE_KEYS,
   MERGED_ROLE_LABELS,
-  STAFF_SUBROLES,
   type MergedRoleKey,
-  type UserRole,
 } from '@/types/domain'
 
-const { Title } = Typography
-
-const EDITABLE_MERGED_ROLES: MergedRoleKey[] = ['root_admin', 'superadmin', 'admin', 'staff']
-const EDITABLE_ROLES: UserRole[] = [...STAFF_SUBROLES, 'admin', 'superadmin', 'root_admin']
+const { Title, Text } = Typography
 
 function buildMockPermissions(): RolePermissions {
   const rows = flattenMenuForTable()
   const out: Record<string, Record<string, Partial<Record<PermissionKey, boolean>>>> = {}
-  for (const role of EDITABLE_ROLES) {
+  for (const role of MERGED_ROLE_KEYS) {
     out[role] = {}
     for (const row of rows) {
       out[role][row.menuNode.key] = { view: true }
@@ -44,9 +42,6 @@ function buildMockPermissions(): RolePermissions {
   for (const row of rows) {
     if (row.menuNode.key === 'reports') {
       out.admin[row.menuNode.key] = { view: true }
-      out.mlr[row.menuNode.key] = { view: true }
-      out.reviewer[row.menuNode.key] = { view: true }
-      out.submitter[row.menuNode.key] = { view: true }
     }
   }
   return out as RolePermissions
@@ -56,26 +51,87 @@ const LEVEL1_LABEL: Record<string, string> = Object.fromEntries(
   MENU_TREE.map((n) => [n.key, n.label]),
 )
 
-export default function RolesAdminPage() {
-  const { message } = App.useApp()
+export default function PermissionsAdminPage() {
+  const { message, modal } = App.useApp()
   const [activeRole, setActiveRole] = useState<MergedRoleKey>('admin')
   const [perms, setPerms] = useState<RolePermissions>(() => buildMockPermissions())
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
   const rows = useMemo(() => flattenMenuForTable(), [])
 
-  const togglePerm = (menuKey: string, perm: PermissionKey, checked: boolean) => {
-    const targetRoles: UserRole[] =
-      activeRole === 'staff' ? [...STAFF_SUBROLES] : [activeRole]
-    setPerms((prev) => {
-      const next = { ...prev }
-      for (const role of targetRoles) {
-        next[role] = {
-          ...next[role],
-          [menuKey]: { ...next[role]?.[menuKey], [perm]: checked },
+  const togglePerm = useCallback(
+    (menuKey: string, perm: PermissionKey, checked: boolean) => {
+      setPerms((prev) => ({
+        ...prev,
+        [activeRole]: {
+          ...prev[activeRole],
+          [menuKey]: { ...prev[activeRole]?.[menuKey], [perm]: checked },
+        },
+      }))
+      setDirty(true)
+    },
+    [activeRole],
+  )
+
+  const handleSave = useCallback(async () => {
+    setSaving(true)
+    // mock: 模拟 300ms 延时
+    await new Promise((r) => setTimeout(r, 300))
+    setSaving(false)
+    setDirty(false)
+    message.success(
+      `已保存 ${MERGED_ROLE_LABELS[activeRole]} 的权限（仅本地，Phase 5 落库）`,
+    )
+  }, [activeRole, message])
+
+  const handleReset = useCallback(() => {
+    setPerms((prev) => ({
+      ...prev,
+      [activeRole]: (() => {
+        const out: Record<string, Partial<Record<PermissionKey, boolean>>> = {}
+        for (const row of rows) {
+          out[row.menuNode.key] = { view: true }
         }
+        if (activeRole === 'superadmin') {
+          for (const row of rows) {
+            out[row.menuNode.key] = { view: true, edit: true, delete: true }
+          }
+        }
+        if (activeRole === 'admin') {
+          for (const row of rows) {
+            if (row.menuNode.key === 'reports') {
+              out[row.menuNode.key] = { view: true }
+            }
+          }
+        }
+        return out
+      })(),
+    }))
+    setDirty(false)
+    message.success(`已重置 ${MERGED_ROLE_LABELS[activeRole]} 的权限为默认值`)
+  }, [activeRole, message, rows])
+
+  const requestSwitchRole = useCallback(
+    (next: MergedRoleKey) => {
+      if (next === activeRole) return
+      if (!dirty) {
+        setActiveRole(next)
+        return
       }
-      return next
-    })
-  }
+      modal.confirm({
+        title: '切换角色',
+        content: `当前 ${MERGED_ROLE_LABELS[activeRole]} 的权限改动尚未保存，切换后将丢失。是否继续？`,
+        okText: '继续切换',
+        cancelText: '取消',
+        okButtonProps: { danger: true },
+        onOk: () => {
+          setActiveRole(next)
+          setDirty(false)
+        },
+      })
+    },
+    [activeRole, dirty, modal],
+  )
 
   const rowKey = (r: MenuPermissionRow) => `${r.level1}-${r.level2}`
 
@@ -110,12 +166,10 @@ export default function RolesAdminPage() {
       render: (_v, row) => {
         const node = row.menuNode
         const available = node.permissions ?? []
-        const sampleRole: UserRole =
-          activeRole === 'staff' ? STAFF_SUBROLES[0] : activeRole
         return (
           <Space size="large">
             {PERMISSION_KEYS.map((p) => {
-              const checked = !!perms[sampleRole]?.[node.key]?.[p]
+              const checked = !!perms[activeRole]?.[node.key]?.[p]
               const disabled = !available.includes(p)
               return (
                 <Checkbox
@@ -136,26 +190,45 @@ export default function RolesAdminPage() {
 
   return (
     <div style={{ width: '100%' }}>
+      <Space direction="vertical" size={4} style={{ marginBottom: 16, width: '100%' }}>
+        <Space size="middle">
+          <Title level={4} style={{ margin: 0 }}>功能菜单权限</Title>
+          {dirty && <Tag color="warning">未保存</Tag>}
+        </Space>
+        <Text type="secondary">
+          当前为本地预览，保存后改动仅在本会话生效（Phase 5 落库）。
+        </Text>
+      </Space>
+
       <Card
-        title={<Title level={4} style={{ margin: 0 }}>功能菜单权限</Title>}
+        title={
+          <Space size="small">
+            <span>{MERGED_ROLE_LABELS[activeRole]} 的菜单权限</span>
+            {dirty && <Tag color="warning">未保存</Tag>}
+          </Space>
+        }
         extra={
           <Space size="middle" wrap>
             <Space.Compact>
-              {EDITABLE_MERGED_ROLES.map((r) => (
+              {MERGED_ROLE_KEYS.map((r) => (
                 <Button
                   key={r}
                   type={activeRole === r ? 'primary' : 'default'}
-                  onClick={() => setActiveRole(r)}
+                  onClick={() => requestSwitchRole(r)}
                 >
                   {MERGED_ROLE_LABELS[r]}
                 </Button>
               ))}
             </Space.Compact>
+            <Button onClick={handleReset} disabled={!dirty}>
+              重置
+            </Button>
             <Button
               type="primary"
-              onClick={() =>
-                message.success(`已保存 ${MERGED_ROLE_LABELS[activeRole]} 的权限（仅本地）`)
-              }
+              icon={<SaveOutlined />}
+              loading={saving}
+              disabled={!dirty}
+              onClick={handleSave}
             >
               保存
             </Button>

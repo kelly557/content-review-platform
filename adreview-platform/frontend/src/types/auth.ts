@@ -1,4 +1,11 @@
-export type UserRole = 'submitter' | 'reviewer' | 'mlr' | 'admin' | 'superadmin' | 'root_admin'
+export type UserRole =
+  | 'submitter' // deprecated: 已并入 staff, 仅历史数据兼容
+  | 'reviewer'
+  | 'mlr' // deprecated: 已并入 staff, 仅历史数据兼容
+  | 'staff'
+  | 'admin'
+  | 'superadmin'
+  | 'root_admin'
 
 export interface User {
   id: number

@@ -25,6 +25,7 @@ from app.models.tag import Tag, TagCategory, TagDomain, TagStatus
 from app.models.audit_item import AuditItem
 from app.models.audit_point import AuditPoint, AuditPointRisk
 from app.models.library import Library, LibraryType, LibraryKind
+from app.models.role import Role
 
 
 DEFAULT_TEMPLATES = [
@@ -867,6 +868,7 @@ async def main(
         await _upsert_tags(db)
         await _upsert_bad_libraries(db)
         await _upsert_politics_libraries(db)
+        await _upsert_roles(db)
         await _upsert_user(db, "admin@adreview.example.com", "系统管理员", UserRole.ADMIN, settings.default_admin_password)
         await _upsert_user(db, "reviewer@adreview.example.com", "审核员 Alice", UserRole.REVIEWER, "reviewer123")
         await _upsert_user(db, "mlr@adreview.example.com", "MLR 专家 Bob", UserRole.MLR, "mlr12345")
@@ -915,6 +917,42 @@ async def _upsert_human_review_configs(db: AsyncSession) -> None:
                     review_rule_id=None,
                 )
             )
+
+
+# 默认 builtin 角色元数据 — key 镜像 UserRole enum, 由 seed 写入, is_builtin=True。
+# submitter/mlr 已并入 staff, 不再作为 builtin 注册。
+# UI 上 builtin 角色禁用删除按钮（仅 UX 提示, 业务层不强制）。
+DEFAULT_ROLES: list[dict] = [
+    {"key": "staff",      "display_name": "业务员",    "description": "业务员工种：提交素材 / 审核 / MLR 联合审核"},
+    {"key": "reviewer",   "display_name": "审核员",    "description": "初审 / 终审"},
+    {"key": "admin",      "display_name": "管理员",    "description": "运营 / 策略 / 用户管理"},
+    {"key": "superadmin", "display_name": "超级管理员", "description": "全部业务能力 + 角色管理"},
+    {"key": "root_admin", "display_name": "根管理员",   "description": "平台最高权限"},
+]
+
+
+async def _upsert_roles(db: AsyncSession) -> None:
+    """builtin 角色幂等 upsert。display_name / description 走 'if 缺则填' 语义,
+    已被人工调过的不会回滚 (与 seed.py 其它 builtin 项一致)。"""
+    for spec in DEFAULT_ROLES:
+        result = await db.execute(select(Role).where(Role.key == spec["key"]))
+        role = result.scalar_one_or_none()
+        if role is None:
+            db.add(
+                Role(
+                    key=spec["key"],
+                    display_name=spec["display_name"],
+                    description=spec.get("description"),
+                    is_active=True,
+                    is_builtin=True,
+                )
+            )
+        else:
+            # 已存在 builtin: 仅在 display_name 为 None/空 时补默认值 (保护手工改名)
+            if not role.display_name:
+                role.display_name = spec["display_name"]
+            # is_builtin 不再降级: 已被 seed 写入的不会被覆盖
+            role.is_builtin = True
 
 
 DEFAULT_TAGS = [

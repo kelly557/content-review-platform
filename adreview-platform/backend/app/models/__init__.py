@@ -45,3 +45,4 @@ from app.models.uploaded_document import (  # noqa: F401
     UploadedDocKind,
     UploadedDocStatus,
 )
+from app.models.role import Role  # noqa: F401
