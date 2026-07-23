@@ -62,6 +62,18 @@ def _validate_effective_range(
 # ────────── Library ──────────
 
 
+class RiskPointRef(BaseModel):
+    """二级风险标签 (审核点) 定位信息：代答库的使用位置。"""
+
+    id: int
+    code: str
+    label: str
+    label_cn: Optional[str] = None
+    item_id: int
+    item_name: Optional[str] = None
+    package_code: Optional[str] = None
+
+
 class LibraryOut(ORMBase):
     id: int
     code: str
@@ -80,6 +92,9 @@ class LibraryOut(ORMBase):
     effective_until: Optional[datetime] = None
     # 派生：当前是否生效。审核消费方应读此字段。
     is_effective: bool = True
+    # 二级风险标签 (审核点)：代答库使用位置定位。reply 库必填（新增时），
+    # word / image 库始终为 None。
+    risk_point: Optional[RiskPointRef] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -98,6 +113,8 @@ class LibraryListItem(ORMBase):
     effective_from: Optional[datetime] = None
     effective_until: Optional[datetime] = None
     is_effective: bool = True
+    # 列表页只需展示使用位置；与 LibraryOut.risk_point 形态一致。
+    risk_point: Optional[RiskPointRef] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -128,6 +145,10 @@ class LibraryCreate(BaseModel):
     # 「通用平台库」标记:仅超级管理员可设为 true;
     # 服务端在 create_library() 中会兜底守卫,非超管 POST 即使带 true 也会被抹为 false 并返回 422。
     is_platform: bool = False
+    # 二级风险标签 (审核点 ID)：代答库使用位置定位。
+    # - 新建 reply 库必填；存量 reply 库允许为 null (向后兼容)。
+    # - word / image 库不传。
+    risk_point_id: Optional[int] = None
 
     @field_validator("words")
     @classmethod
@@ -142,6 +163,8 @@ class LibraryCreate(BaseModel):
         if self.library_type in (LibraryType.WORD, LibraryType.IMAGE):
             if self.kind is None:
                 raise ValueError("词库/图片库必须指定类型（黑名单 或 白名单）")
+            if self.risk_point_id is not None:
+                raise ValueError("词库/图片库不需要风险标签 (risk_point_id 字段)")
         else:
             # 代答库不暴露类型：若客户端误传 kind 则报错（避免静默吞数据）
             if self.kind is not None:
@@ -150,6 +173,9 @@ class LibraryCreate(BaseModel):
             # 代答库强制不存有效时间（命中即触发，不该有"过期"概念）
             self.effective_from = None
             self.effective_until = None
+            # 新建代答库必须指定二级风险标签（审核点）— 仅有助"按审核点定位使用位置"。
+            if self.risk_point_id is None:
+                raise ValueError("新建代答库必须指定二级风险标签 (risk_point_id)")
         _validate_effective_range(self.effective_from, self.effective_until)
         return self
 
@@ -166,6 +192,8 @@ class LibraryUpdate(BaseModel):
     # 「通用平台库」标记:仅超级管理员可在 PATCH 里设置;
     # 缺省 / null = 不动该字段。仅超管请求且 key 显式在 body 里时才会落库。
     is_platform: Optional[bool] = None
+    # 代答库可指定/清空二级风险标签。word / image 库不接该字段（router 兜底 422）。
+    risk_point_id: Optional[int] = None
 
     @model_validator(mode="after")
     def _v_kind(self) -> "LibraryUpdate":
@@ -280,6 +308,7 @@ class LibraryBatchItem(BaseModel):
     effective_from: Optional[datetime] = None
     effective_until: Optional[datetime] = None
     is_platform: bool = False
+    risk_point_id: Optional[int] = None
 
     @field_validator("words")
     @classmethod
@@ -294,12 +323,16 @@ class LibraryBatchItem(BaseModel):
         if self.library_type in (LibraryType.WORD, LibraryType.IMAGE):
             if self.kind is None:
                 raise ValueError("词库/图片库必须指定类型（黑名单 或 白名单）")
+            if self.risk_point_id is not None:
+                raise ValueError("词库/图片库不需要风险标签 (risk_point_id 字段)")
         else:
             if self.kind is not None:
                 raise ValueError("代答库不需要类型（kind 字段）")
             self.kind = None
             self.effective_from = None
             self.effective_until = None
+            if self.risk_point_id is None:
+                raise ValueError("批量创建代答库必须指定二级风险标签 (risk_point_id)")
         _validate_effective_range(self.effective_from, self.effective_until)
         return self
 

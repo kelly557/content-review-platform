@@ -66,6 +66,7 @@ from app.schemas.library import (
     LibraryListItem,
     LibraryOut,
     LibraryUpdate,
+    RiskPointRef,
 )
 from app.services import storage
 
@@ -142,6 +143,68 @@ def _split_trigger_reply(raw: str) -> tuple[str, str] | None:
     return None
 
 
+async def _resolve_risk_point(
+    db: AsyncSession, risk_point_id: Optional[int]
+) -> Optional[AuditPoint]:
+    """校验风险标签 (审核点) 存在，且属于文本审核包 (text_audit_pro)。
+
+    - 不传 (None) → 返回 None（存量 reply 库编辑时允许清空以外场景不调此函数）。
+    - 传了但找不到 → 404。
+    - 找到但不属于文本审核包 → 422。
+    """
+    if risk_point_id is None:
+        return None
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(
+        select(AuditPoint)
+        .where(AuditPoint.id == risk_point_id)
+        .options(selectinload(AuditPoint.linked_libraries))
+    )
+    point = result.scalar_one_or_none()
+    if point is None:
+        raise HTTPException(status_code=404, detail="风险标签（审核点）不存在")
+    if point.package_code != "text_audit_pro":
+        raise HTTPException(
+            status_code=422,
+            detail="代答库的风险标签必须是文本审核（text_audit_pro）下的审核点",
+        )
+    return point
+
+
+async def _risk_point_to_ref(
+    db: AsyncSession, point: Optional[AuditPoint]
+) -> Optional[RiskPointRef]:
+    if point is None:
+        return None
+    from app.models.audit_item import AuditItem
+
+    item_name: Optional[str] = None
+    if point.item_id is not None:
+        item_row = await db.execute(
+            select(AuditItem.name_cn).where(AuditItem.id == point.item_id)
+        )
+        item_name = item_row.scalar_one_or_none()
+    return RiskPointRef(
+        id=point.id,
+        code=point.code,
+        label=point.label,
+        label_cn=point.label_cn or None,
+        item_id=point.item_id,
+        item_name=item_name,
+        package_code=point.package_code,
+    )
+
+
+async def _risk_point_ref_for_id(
+    db: AsyncSession, point_id: Optional[int]
+) -> Optional[RiskPointRef]:
+    if point_id is None:
+        return None
+    point = await _resolve_risk_point(db, point_id)
+    return await _risk_point_to_ref(db, point)
+
+
 def _is_valid_code(code: str, library_type: LibraryType) -> bool:
     if not code or len(code) > 64:
         return False
@@ -179,7 +242,9 @@ async def _next_code(db: AsyncSession, prefix: str) -> str:
     return f"{prefix}{n}"
 
 
-def _to_out(lib: Library, item_count: int) -> LibraryOut:
+def _to_out(
+    lib: Library, item_count: int, risk_point: Optional[RiskPointRef] = None
+) -> LibraryOut:
     return LibraryOut.model_validate(
         {
             "id": lib.id,
@@ -199,13 +264,16 @@ def _to_out(lib: Library, item_count: int) -> LibraryOut:
             "is_effective": is_effectively_active(
                 lib.is_active, lib.effective_from, lib.effective_until
             ),
+            "risk_point": risk_point,
             "created_at": lib.created_at,
             "updated_at": lib.updated_at,
         }
     )
 
 
-def _to_list(lib: Library, item_count: int) -> LibraryListItem:
+def _to_list(
+    lib: Library, item_count: int, risk_point: Optional[RiskPointRef] = None
+) -> LibraryListItem:
     return LibraryListItem.model_validate(
         {
             "id": lib.id,
@@ -223,6 +291,7 @@ def _to_list(lib: Library, item_count: int) -> LibraryListItem:
             "is_effective": is_effectively_active(
                 lib.is_active, lib.effective_from, lib.effective_until
             ),
+            "risk_point": risk_point,
             "created_at": lib.created_at,
             "updated_at": lib.updated_at,
         }
@@ -265,6 +334,36 @@ async def _counts_for_libraries(
     return {lid: n for lid, n in rows.all()}
 
 
+async def _risk_point_refs_for_libraries(
+    db: AsyncSession, libs: List[Library]
+) -> dict[int, RiskPointRef]:
+    """批量取 risk_point_id → RiskPointRef（含 item_name），避免 N+1。"""
+    point_ids = sorted({l.risk_point_id for l in libs if l.risk_point_id is not None})
+    if not point_ids:
+        return {}
+    from app.models.audit_item import AuditItem
+
+    points = (
+        await db.execute(
+            select(AuditPoint, AuditItem.name_cn)
+            .join(AuditItem, AuditItem.id == AuditPoint.item_id, isouter=True)
+            .where(AuditPoint.id.in_(point_ids))
+        )
+    ).all()
+    refs: dict[int, RiskPointRef] = {}
+    for point, item_name in points:
+        refs[point.id] = RiskPointRef(
+            id=point.id,
+            code=point.code,
+            label=point.label,
+            label_cn=point.label_cn or None,
+            item_id=point.item_id,
+            item_name=item_name,
+            package_code=point.package_code,
+        )
+    return refs
+
+
 # ─── CRUD ───────────────────────────────────────────────────────────────
 
 
@@ -283,6 +382,10 @@ async def list_libraries(
         False,
         description="仅返回当前生效的库（is_active=true 且 在有效时间区间内）",
     ),
+    risk_point_id: Optional[int] = Query(
+        None,
+        description="按二级风险标签 (审核点) 过滤 — 用于代答库使用位置定位",
+    ),
 ) -> Page[LibraryListItem]:
     stmt = select(Library)
     conds = []
@@ -294,6 +397,8 @@ async def list_libraries(
         conds.append(Library.kind == kind)
     if is_active is not None:
         conds.append(Library.is_active == is_active)
+    if risk_point_id is not None:
+        conds.append(Library.risk_point_id == risk_point_id)
     if q:
         conds.append(
             or_(Library.name.ilike(f"%{q}%"), Library.code.ilike(f"%{q}%"))
@@ -323,7 +428,15 @@ async def list_libraries(
     stmt = stmt.order_by(Library.id.desc()).offset((page - 1) * size).limit(size)
     libs = list((await db.execute(stmt)).scalars())
     counts = await _counts_for_libraries(db, [l.id for l in libs])
-    items = [_to_list(l, counts.get(l.id, 0)) for l in libs]
+    risk_refs = await _risk_point_refs_for_libraries(db, libs)
+    items = [
+        _to_list(
+            l,
+            counts.get(l.id, 0),
+            risk_refs.get(l.risk_point_id) if l.risk_point_id is not None else None,
+        )
+        for l in libs
+    ]
     return Page(items=items, total=total, page=page, size=size)
 
 
@@ -340,7 +453,8 @@ async def get_library(
     if lib.is_platform and current_user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
         raise HTTPException(status_code=404, detail="库不存在")
     counts = await _counts_for_libraries(db, [lib.id])
-    return _to_out(lib, counts.get(lib.id, 0))
+    risk_ref = await _risk_point_ref_for_id(db, lib.risk_point_id)
+    return _to_out(lib, counts.get(lib.id, 0), risk_ref)
 
 
 @router.get("/{library_id}/references", response_model=List[AuditPointRef])
@@ -413,7 +527,14 @@ async def create_library(
         ignored_services=[],
         effective_from=body.effective_from,
         effective_until=body.effective_until,
+        # 二级风险标签 (审核点)：reply 库必填 (schema 已校验)；word/image 一律 None。
+        risk_point_id=body.risk_point_id
+        if body.library_type == LibraryType.REPLY
+        else None,
     )
+    # 代答库：服务端兜底校验审核点存在 + 属于文本审核包
+    if body.library_type == LibraryType.REPLY and body.risk_point_id is not None:
+        await _resolve_risk_point(db, body.risk_point_id)
     db.add(lib)
     await db.flush()
 
@@ -444,8 +565,9 @@ async def create_library(
 
     await db.refresh(lib)
     counts = await _counts_for_libraries(db, [lib.id])
+    risk_ref = await _risk_point_ref_for_id(db, lib.risk_point_id)
     await db.commit()
-    return _to_out(lib, counts.get(lib.id, 0))
+    return _to_out(lib, counts.get(lib.id, 0), risk_ref)
 
 
 @router.post(
@@ -498,7 +620,15 @@ async def batch_create_libraries(
                 ignored_services=[],
                 effective_from=item.effective_from,
                 effective_until=item.effective_until,
+                risk_point_id=item.risk_point_id
+                if item.library_type == LibraryType.REPLY
+                else None,
             )
+            if (
+                item.library_type == LibraryType.REPLY
+                and item.risk_point_id is not None
+            ):
+                await _resolve_risk_point(db, item.risk_point_id)
             db.add(lib)
             await db.flush()
 
@@ -527,8 +657,9 @@ async def batch_create_libraries(
 
             await db.refresh(lib)
             counts = await _counts_for_libraries(db, [lib.id])
+            risk_ref = await _risk_point_ref_for_id(db, lib.risk_point_id)
             await db.commit()
-            created.append(_to_out(lib, counts.get(lib.id, 0)))
+            created.append(_to_out(lib, counts.get(lib.id, 0), risk_ref))
         except Exception as e:  # noqa: BLE001
             await db.rollback()
             errors.append(
@@ -598,11 +729,24 @@ async def update_library(
             lib.effective_from = body.effective_from
         if "effective_until" in sent:
             lib.effective_until = body.effective_until
+
+    # 二级风险标签 (审核点)：仅 reply 库支持编辑。客户端显式传 risk_point_id 时
+    # 才落库；传 None 表示清空（用于审计点被删除后需要重新指派的场景）。
+    if "risk_point_id" in sent:
+        if lib.library_type != LibraryType.REPLY:
+            raise HTTPException(
+                status_code=400,
+                detail="仅代答库支持修改风险标签",
+            )
+        await _resolve_risk_point(db, body.risk_point_id)
+        lib.risk_point_id = body.risk_point_id
+
     await db.flush()
     await db.refresh(lib)
     counts = await _counts_for_libraries(db, [lib.id])
+    risk_ref = await _risk_point_ref_for_id(db, lib.risk_point_id)
     await db.commit()
-    return _to_out(lib, counts.get(lib.id, 0))
+    return _to_out(lib, counts.get(lib.id, 0), risk_ref)
 
 
 @router.delete("/{library_id}", response_model=LibraryDeleteResponse)

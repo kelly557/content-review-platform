@@ -27,6 +27,7 @@ export const librariesApi = {
     is_active?: boolean
     include_deleted?: boolean
     effective_only?: boolean
+    risk_point_id?: number
   }) {
     return api.get<Page<LibraryListItem>>('/libraries', { params }).then((r) => r.data)
   },

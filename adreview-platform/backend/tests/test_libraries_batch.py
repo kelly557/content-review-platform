@@ -48,7 +48,9 @@ async def test_batch_create_reply_omits_kind(monkeypatch):
                 code="lib_r99001",
                 name="批量回复1",
                 library_type="reply",
+                risk_point_id=42,
             ),
         ],
     )
     assert body.libraries[0].kind is None
+    assert body.libraries[0].risk_point_id == 42

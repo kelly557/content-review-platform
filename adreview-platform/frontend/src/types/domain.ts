@@ -488,9 +488,10 @@ export interface TopRiskLabelItem {
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {
-  submitter: '提交者',
+  submitter: '提交者', // deprecated
   reviewer: '审核员',
-  mlr: 'MLR 专家',
+  mlr: 'MLR 专家', // deprecated
+  staff: '业务员',
   admin: '管理员',
   superadmin: '超级管理员',
   root_admin: '根管理员',
@@ -498,7 +499,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 
 export type MergedRoleKey = 'staff' | 'admin' | 'superadmin' | 'root_admin'
 
-export const STAFF_SUBROLES: ReadonlyArray<UserRole> = ['submitter', 'reviewer', 'mlr']
+export const STAFF_SUBROLES: ReadonlyArray<UserRole> = ['staff', 'reviewer']
 
 export const MERGED_ROLE_LABELS: Record<MergedRoleKey, string> = {
   staff: '业务员',
@@ -514,15 +515,19 @@ export const MERGED_ROLE_OPTIONS: ReadonlyArray<{ value: MergedRoleKey; label: s
   { value: 'root_admin', label: MERGED_ROLE_LABELS.root_admin },
 ]
 
+export const MERGED_ROLE_KEYS: ReadonlyArray<MergedRoleKey> = MERGED_ROLE_OPTIONS.map(
+  (o) => o.value,
+)
+
 export function toMergedRoleKey(role: UserRole): MergedRoleKey {
-  if (role === 'submitter' || role === 'reviewer' || role === 'mlr') return 'staff'
+  if (role === 'submitter' || role === 'reviewer' || role === 'mlr' || role === 'staff') return 'staff'
   if (role === 'admin') return 'admin'
   if (role === 'superadmin') return 'superadmin'
   return 'root_admin'
 }
 
 export function pickPrimaryStaffSubrole(): UserRole {
-  return 'submitter'
+  return 'staff'
 }
 
 export const STATUS_LABELS: Record<MaterialStatus, string> = {
@@ -907,8 +912,20 @@ export interface Library {
   effective_until: string | null
   /** 派生：当前是否生效（停用 / 过期 / 未到 都视为不生效） */
   is_effective: boolean
+  /** 二级风险标签 (审核点) — 代答库使用位置定位 */
+  risk_point: RiskPointRef | null
   created_at: string
   updated_at: string | null
+}
+
+export interface RiskPointRef {
+  id: number
+  code: string
+  label: string
+  label_cn: string | null
+  item_id: number
+  item_name: string | null
+  package_code: string | null
 }
 
 export interface LibraryListItem {
@@ -927,6 +944,8 @@ export interface LibraryListItem {
   effective_from: string | null
   effective_until: string | null
   is_effective: boolean
+  /** 二级风险标签 (审核点) — 代答库使用位置定位 */
+  risk_point: RiskPointRef | null
   created_at: string
   updated_at: string | null
 }
@@ -944,6 +963,8 @@ export interface LibraryCreate {
   effective_until?: string | null
   /** 「通用平台库」标记：仅超级管理员可设为 true；服务端会兜底守卫。 */
   is_platform?: boolean
+  /** 二级风险标签 (审核点 ID)：代答库必填（仅 reply 库有意义） */
+  risk_point_id?: number | null
 }
 
 export interface LibraryUpdate {
@@ -956,6 +977,8 @@ export interface LibraryUpdate {
   effective_until?: string | null
   /** 「通用平台库」标记：仅超级管理员可设置。仅当 key 显式传进 body 时才会落库。 */
   is_platform?: boolean | null
+  /** 二级风险标签 (审核点 ID)：仅 reply 库支持；传 null 清空 */
+  risk_point_id?: number | null
 }
 
 export interface LibraryDeletePayload {
@@ -1336,6 +1359,8 @@ export interface AuditPoint {
   source_quote: string | null
   /** 结构化文件行号 */
   source_line_no: number | null
+  /** 前端 mock 标记：true 表示来自前端兜底数据,真实后端没有,不可提交 */
+  is_mock?: boolean
   created_at: string
   updated_at: string | null
 }

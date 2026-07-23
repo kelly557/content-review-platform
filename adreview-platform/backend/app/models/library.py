@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import (
     Boolean,
     DateTime,
     Enum,
+    ForeignKey,
     Index,
     Integer,
     String,
@@ -29,6 +30,9 @@ from sqlalchemy.types import JSON, TypeDecorator
 
 from app.db.session import Base
 from app.core.id_generator import new_public_id
+
+if TYPE_CHECKING:
+    from app.models.audit_point import AuditPoint
 
 
 class _JSONType(TypeDecorator):
@@ -118,6 +122,15 @@ class Library(Base):
     effective_until: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # 二级风险标签 (审核点):代答库使用位置定位。SET NULL on point 删。
+    # 仅 reply 库有意义；word / image 库应保持 NULL。
+    # 历史存量 reply 库允许为 NULL（schema 兼容），新增 reply 库必传。
+    risk_point_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("audit_points.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), nullable=False
     )
@@ -129,6 +142,11 @@ class Library(Base):
         back_populates="library",
         cascade="all, delete-orphan",
         order_by="LibraryItem.id.desc()",
+    )
+    risk_point: Mapped[Optional["AuditPoint"]] = relationship(
+        "AuditPoint",
+        lazy="joined",
+        foreign_keys=[risk_point_id],
     )
     back_audit_points: Mapped[list["AuditPoint"]] = relationship(
         "AuditPoint",

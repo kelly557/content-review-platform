@@ -1,16 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
+  App,
   Button,
   Empty,
+  Form,
   Input,
   Modal,
   Popconfirm,
+  Select,
   Space,
   Table,
   Tag,
   Tooltip,
   Typography,
-  App,
   type TableColumnsType,
 } from 'antd'
 import {
@@ -23,10 +25,33 @@ import {
 import { Link, useParams } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { librariesApi } from '@/api/libraries'
-import type { Library, LibraryItem } from '@/types/domain'
+import { auditItemsApi } from '@/api/auditItems'
+import { auditPointsApi } from '@/api/auditPoints'
+import { isMockRiskPointId } from '@/lib/riskPointMock'
+import type {
+  AuditItem,
+  AuditPoint,
+  Library,
+  LibraryItem,
+  RiskPointRef,
+} from '@/types/domain'
 import EditReplyDrawer from '@/components/library/EditReplyDrawer'
 import EditPlatformToggleModal from '@/components/library/EditPlatformToggleModal'
 import { useAuthStore } from '@/store'
+
+const TEXT_PACKAGE = 'text_audit_pro'
+
+interface RiskPointOption {
+  value: number
+  label: string
+  itemId: number
+  itemName: string
+  isMock: boolean
+}
+
+interface RiskPointEditValues {
+  risk_point_id?: number | null
+}
 
 const { Title, Text } = Typography
 
@@ -47,10 +72,17 @@ export default function ReplyLibraryDetailPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [addOpen, setAddOpen] = useState(false)
   const [editPlatformOpen, setEditPlatformOpen] = useState(false)
+  const [editRiskPointOpen, setEditRiskPointOpen] = useState(false)
   const [editing, setEditing] = useState<LibraryItem | null>(null)
   const [editTrigger, setEditTrigger] = useState('')
   const [editReply, setEditReply] = useState('')
   const [editSaving, setEditSaving] = useState(false)
+  const [riskPointOptions, setRiskPointOptions] = useState<RiskPointOption[]>(
+    [],
+  )
+  const [riskPointsLoading, setRiskPointsLoading] = useState(false)
+  const [riskPointForm] = Form.useForm<RiskPointEditValues>()
+  const [riskPointSaving, setRiskPointSaving] = useState(false)
 
   const fetchLibrary = async () => {
     if (libraryId == null) return
@@ -62,6 +94,32 @@ export default function ReplyLibraryDetailPage() {
       message.error(d ?? '加载库失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchRiskPoints = async () => {
+    setRiskPointsLoading(true)
+    try {
+      const [aiList, pointList] = await Promise.all([
+        auditItemsApi.list(TEXT_PACKAGE).catch(() => [] as AuditItem[]),
+        auditPointsApi.list(TEXT_PACKAGE).catch(() => [] as AuditPoint[]),
+      ])
+      const itemNameById = new Map<number, string>()
+      aiList.forEach((it) => itemNameById.set(it.id, it.name_cn))
+      const opts: RiskPointOption[] = pointList.map((p) => ({
+        value: p.id,
+        label: p.label_cn || p.label || p.code,
+        itemId: p.item_id,
+        itemName: itemNameById.get(p.item_id) ?? `审核项 ${p.item_id}`,
+        isMock: p.is_mock === true || isMockRiskPointId(p.id),
+      }))
+      opts.sort((a, b) => {
+        if (a.itemId !== b.itemId) return a.itemId - b.itemId
+        return a.label.localeCompare(b.label, 'zh-CN')
+      })
+      setRiskPointOptions(opts)
+    } finally {
+      setRiskPointsLoading(false)
     }
   }
 
@@ -86,6 +144,63 @@ export default function ReplyLibraryDetailPage() {
     void fetchItems('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [libraryId])
+
+  const openEditRiskPoint = () => {
+    riskPointForm.setFieldsValue({
+      risk_point_id: library?.risk_point?.id ?? undefined,
+    })
+    setEditRiskPointOpen(true)
+    if (riskPointOptions.length === 0) void fetchRiskPoints()
+  }
+
+  const submitEditRiskPoint = async () => {
+    if (!library) return
+    const v = await riskPointForm.validateFields().catch(() => null)
+    if (!v) return
+    if (v.risk_point_id != null && isMockRiskPointId(v.risk_point_id)) {
+      message.error('所选风险标签为演示数据,不可提交,请等待后端恢复后重试')
+      return
+    }
+    setRiskPointSaving(true)
+    try {
+      const updated = await librariesApi.update(library.id, {
+        risk_point_id: v.risk_point_id ?? null,
+      })
+      setLibrary(updated)
+      setEditRiskPointOpen(false)
+      message.success('已更新风险标签')
+    } catch (e: unknown) {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(d ?? '保存失败')
+    } finally {
+      setRiskPointSaving(false)
+    }
+  }
+
+  const riskPointTag = useMemo(() => {
+    const rp: RiskPointRef | null = library?.risk_point ?? null
+    if (!rp) {
+      return (
+        <Tooltip title="存量未指定二级风险标签,可点击右侧「指定」按钮补齐">
+          <Tag color="default" style={{ margin: 0 }}>
+            未指定风险标签
+          </Tag>
+        </Tooltip>
+      )
+    }
+    return (
+      <Space size={4} wrap>
+        {rp.item_name && (
+          <Tag color="blue" style={{ margin: 0 }}>
+            {rp.item_name}
+          </Tag>
+        )}
+        <Tag color="geekblue" style={{ margin: 0 }}>
+          {rp.label_cn || rp.label}
+        </Tag>
+      </Space>
+    )
+  }, [library?.risk_point])
 
   const onDeleteItem = async (itemId: number) => {
     if (!library) return
@@ -255,6 +370,24 @@ export default function ReplyLibraryDetailPage() {
             </Button>
           )}
         </Space>
+        <div style={{ marginTop: 8 }}>
+          <Space size={8} wrap align="center">
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              使用位置（风险标签）
+            </Text>
+            {riskPointTag}
+            {library && (
+              <Button
+                type="link"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={openEditRiskPoint}
+              >
+                {library.risk_point ? '更换' : '指定'}
+              </Button>
+            )}
+          </Space>
+        </div>
       </div>
 
       <div
@@ -389,6 +522,51 @@ export default function ReplyLibraryDetailPage() {
             />
           </div>
         </Space>
+      </Modal>
+
+      <Modal
+        open={editRiskPointOpen}
+        title="指定使用位置（二级风险标签）"
+        onCancel={() => setEditRiskPointOpen(false)}
+        onOk={submitEditRiskPoint}
+        confirmLoading={riskPointSaving}
+        okText="保存"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <Form<RiskPointEditValues> form={riskPointForm} layout="vertical">
+          <Form.Item
+            name="risk_point_id"
+            label="二级风险标签（审核点）"
+            extra={
+              <span style={{ color: '#64748B', fontSize: 12 }}>
+                选择文本审核下的二级风险标签,作为该代答库的使用位置
+              </span>
+            }
+          >
+            <Select
+              allowClear
+              placeholder={
+                riskPointsLoading
+                  ? '加载中…'
+                  : riskPointOptions.length === 0
+                    ? '后端暂不可用,正在加载演示数据'
+                    : '请选择二级风险标签'
+              }
+              loading={riskPointsLoading}
+              showSearch
+              optionFilterProp="label"
+              notFoundContent={
+                riskPointsLoading ? '加载中…' : '暂无可用风险标签'
+              }
+              options={riskPointOptions.map((o) => ({
+                value: o.value,
+                label: `${o.itemName} / ${o.label}${o.isMock ? ' (演示,不可提交)' : ''}`,
+                disabled: o.isMock,
+              }))}
+            />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   )

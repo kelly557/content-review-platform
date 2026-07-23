@@ -1,18 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
+  App,
   Button,
   Drawer,
   Form,
   Input,
   Popconfirm,
+  Select,
   Space,
   Table,
   Tabs,
   Tag,
   Tooltip,
   Typography,
-  App,
   Upload,
   type TableColumnsType,
 } from 'antd'
@@ -26,7 +27,12 @@ import {
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { librariesApi } from '@/api/libraries'
+import { auditItemsApi } from '@/api/auditItems'
+import { auditPointsApi } from '@/api/auditPoints'
+import { isMockRiskPointId } from '@/lib/riskPointMock'
 import type {
+  AuditItem,
+  AuditPoint,
   Library,
   LibraryCreate,
   LibraryListItem,
@@ -39,12 +45,22 @@ import { useAuthStore } from '@/store'
 const { Title } = Typography
 
 const MAX_PAIRS = 1000
+const TEXT_PACKAGE = 'text_audit_pro'
+
+interface RiskPointOption {
+  value: number
+  label: string
+  itemId: number
+  itemName: string
+  isMock: boolean
+}
 
 interface CreateFormValues {
   name: string
   description?: string
   pairsText?: string
   is_platform?: boolean
+  risk_point_id?: number
 }
 
 export default function ReplyLibraryListPage() {
@@ -55,11 +71,16 @@ export default function ReplyLibraryListPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [q, setQ] = useState('')
+  const [riskPointFilter, setRiskPointFilter] = useState<number | undefined>(
+    undefined,
+  )
 
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [creatingImport, setImporting] = useState(false)
   const [createForm] = Form.useForm<CreateFormValues>()
+  const [riskPointOptions, setRiskPointOptions] = useState<RiskPointOption[]>([])
+  const [riskPointsLoading, setRiskPointsLoading] = useState(false)
 
   const [deleteTarget, setDeleteTarget] = useState<Library | null>(null)
 
@@ -69,6 +90,7 @@ export default function ReplyLibraryListPage() {
       const data = await librariesApi.list({
         type: 'reply',
         q: q || undefined,
+        risk_point_id: riskPointFilter,
         size: 50,
       })
       setItems(data.items)
@@ -78,19 +100,54 @@ export default function ReplyLibraryListPage() {
     }
   }
 
+  const fetchRiskPoints = async () => {
+    setRiskPointsLoading(true)
+    try {
+      const [aiList, pointList] = await Promise.all([
+        auditItemsApi.list(TEXT_PACKAGE).catch(() => [] as AuditItem[]),
+        auditPointsApi.list(TEXT_PACKAGE).catch(() => [] as AuditPoint[]),
+      ])
+      const itemNameById = new Map<number, string>()
+      aiList.forEach((it) => itemNameById.set(it.id, it.name_cn))
+      const opts: RiskPointOption[] = pointList.map((p) => ({
+        value: p.id,
+        label: p.label_cn || p.label || p.code,
+        itemId: p.item_id,
+        itemName: itemNameById.get(p.item_id) ?? `审核项 ${p.item_id}`,
+        isMock: p.is_mock === true || isMockRiskPointId(p.id),
+      }))
+      opts.sort((a, b) => {
+        if (a.itemId !== b.itemId) return a.itemId - b.itemId
+        return a.label.localeCompare(b.label, 'zh-CN')
+      })
+      setRiskPointOptions(opts)
+    } finally {
+      setRiskPointsLoading(false)
+    }
+  }
+
   useEffect(() => {
     void fetchLibraries()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [riskPointFilter])
 
   const openCreate = () => {
     createForm.resetFields()
     setCreateOpen(true)
+    void fetchRiskPoints()
   }
 
   const submitCreate = async () => {
     const v = await createForm.validateFields().catch(() => null)
     if (!v) return
+    if (!v.risk_point_id) {
+      message.error('请选择二级风险标签（审核点）')
+      return
+    }
+    if (isMockRiskPointId(v.risk_point_id)) {
+      message.error('所选风险标签为演示数据,不可提交,请等待后端恢复后重试')
+      return
+    }
     const pairsText: string = v.pairsText ?? ''
     const words: string[] = pairsText
       .split(/\r?\n/)
@@ -102,6 +159,7 @@ export default function ReplyLibraryListPage() {
       description: v.description,
       words,
       is_platform: v.is_platform ?? false,
+      risk_point_id: v.risk_point_id,
     }
     setCreating(true)
     try {
@@ -121,11 +179,16 @@ export default function ReplyLibraryListPage() {
     }
   }
 
+  const filterOptions = useMemo<RiskPointOption[]>(
+    () => riskPointOptions,
+    [riskPointOptions],
+  )
+
   const cols: TableColumnsType<LibraryListItem> = [
     {
       title: '名称',
       dataIndex: 'name',
-      width: '26%',
+      width: '22%',
       render: (v: string, row) => (
         <Space size={6}>
           <Link
@@ -138,7 +201,35 @@ export default function ReplyLibraryListPage() {
         </Space>
       ),
     },
-    { title: '条数', dataIndex: 'item_count', width: '12%', align: 'right' },
+    {
+      title: '风险标签',
+      dataIndex: 'risk_point',
+      width: '22%',
+      render: (v: LibraryListItem['risk_point']) => {
+        if (!v) {
+          return (
+            <Tooltip title="存量代答库,未指定二级风险标签">
+              <Tag color="default" style={{ margin: 0 }}>
+                未指定
+              </Tag>
+            </Tooltip>
+          )
+        }
+        return (
+          <Space size={4} wrap>
+            {v.item_name && (
+              <Tag color="blue" style={{ margin: 0 }}>
+                {v.item_name}
+              </Tag>
+            )}
+            <Tag color="geekblue" style={{ margin: 0 }}>
+              {v.label_cn || v.label}
+            </Tag>
+          </Space>
+        )
+      },
+    },
+    { title: '条数', dataIndex: 'item_count', width: '10%', align: 'right' },
     {
       title: '归属',
       dataIndex: 'is_platform',
@@ -155,7 +246,7 @@ export default function ReplyLibraryListPage() {
     {
       title: '最近修改',
       dataIndex: 'updated_at',
-      width: '20%',
+      width: '16%',
       render: (v: string | null) => (
         <span style={{ color: '#64748B', fontSize: 12 }}>
           {v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '—'}
@@ -165,14 +256,14 @@ export default function ReplyLibraryListPage() {
     {
       title: '创建时间',
       dataIndex: 'created_at',
-      width: '14%',
+      width: '12%',
       render: (v: string) => (
         <span style={{ color: '#64748B', fontSize: 12 }}>{dayjs(v).format('YYYY-MM-DD')}</span>
       ),
     },
     {
       title: '操作',
-      width: '12%',
+      width: '10%',
       render: (_v, row) => {
         const isPlatform = row.is_platform
         const deleteDisabled = isPlatform && !isSuperadmin
@@ -246,16 +337,33 @@ export default function ReplyLibraryListPage() {
           gap: 12,
         }}
       >
-        <Space>
+        <Space wrap>
           <span style={{ color: '#64748B', fontSize: 12 }}>
             代答库条目本身就是命中即触发的规则,无需指定黑/白名单类型。
           </span>
         </Space>
-        <Space>
+        <Space wrap>
+          <Select
+            allowClear
+            placeholder="按风险标签筛选"
+            style={{ width: 240 }}
+            loading={riskPointsLoading}
+            value={riskPointFilter}
+            onChange={(v) => setRiskPointFilter(v ?? undefined)}
+            onClear={() => setRiskPointFilter(undefined)}
+            notFoundContent={
+              riskPointsLoading ? '加载中…' : '暂无可用风险标签'
+            }
+            options={filterOptions.map((o) => ({
+              value: o.value,
+              label: `${o.itemName} / ${o.label}${o.isMock ? ' (演示)' : ''}`,
+              disabled: o.isMock,
+            }))}
+          />
           <Input.Search
             placeholder="搜索代答库名称"
             allowClear
-            style={{ width: 260 }}
+            style={{ width: 240 }}
             onSearch={(v) => {
               setQ(v.trim())
               void fetchLibraries()
@@ -285,7 +393,7 @@ export default function ReplyLibraryListPage() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="新建代答库"
-        width={520}
+        width={560}
         extra={
           <Space>
             <Button onClick={() => setCreateOpen(false)}>取消</Button>
@@ -311,9 +419,49 @@ export default function ReplyLibraryListPage() {
           </Form.Item>
           <PlatformToggle />
           <Form.Item
-            name="pairsText"
-            label="代答条目（可选,创建时可一并填入）"
+            name="risk_point_id"
+            label="二级风险标签（审核点）"
+            extra={
+              <span style={{ color: '#64748B', fontSize: 12 }}>
+                选择该代答库在策略编辑「文本审核」中的使用位置
+              </span>
+            }
+            rules={[{ required: true, message: '请选择二级风险标签' }]}
           >
+            <Select
+              placeholder={
+                riskPointsLoading
+                  ? '加载中…'
+                  : riskPointOptions.length === 0
+                    ? '后端暂不可用,正在加载演示数据'
+                    : '请选择文本审核下的二级风险标签'
+              }
+              loading={riskPointsLoading}
+              showSearch
+              optionFilterProp="label"
+              notFoundContent={
+                riskPointsLoading ? '加载中…' : '暂无可用风险标签'
+              }
+              options={riskPointOptions.map((o) => ({
+                value: o.value,
+                label: `${o.itemName} / ${o.label}${o.isMock ? ' (演示,不可提交)' : ''}`,
+                disabled: o.isMock,
+              }))}
+              onFocus={() => {
+                if (riskPointOptions.length === 0) void fetchRiskPoints()
+              }}
+            />
+          </Form.Item>
+          <div style={{ marginBottom: 24 }}>
+            <div
+              style={{
+                marginBottom: 8,
+                color: 'rgba(0, 0, 0, 0.88)',
+                fontSize: 14,
+              }}
+            >
+              代答条目（可选,创建时可一并填入）
+            </div>
             <Tabs
               defaultActiveKey="paste"
               items={[
@@ -411,7 +559,7 @@ export default function ReplyLibraryListPage() {
                 },
               ]}
             />
-          </Form.Item>
+          </div>
         </Form>
       </Drawer>
 

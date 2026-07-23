@@ -205,10 +205,12 @@ def test_create_reply_library_strips_effective():
         library_type="reply",
         effective_from="2026-01-01T00:00:00Z",
         effective_until="2026-12-31T23:59:59Z",
+        risk_point_id=42,
     )
     # 代答库强制 effective = None
     assert body.effective_from is None
     assert body.effective_until is None
+    assert body.risk_point_id == 42
 
 
 def test_library_out_schema_has_is_effective():
@@ -238,4 +240,140 @@ def test_update_library_pydantic_fields_for_effective_distinguishes_omit_vs_null
     assert "effective_from" not in u1.model_fields_set
     u2 = LibraryUpdate(name="x", effective_from=None)
     assert "effective_from" in u2.model_fields_set
-    assert u2.effective_from is None
+
+
+# ─── risk_point_id tests (代答库使用位置定位) ──────────
+
+
+def test_create_reply_library_requires_risk_point_id():
+    from pydantic import ValidationError
+    from app.schemas.library import LibraryCreate
+
+    try:
+        LibraryCreate(name="x", library_type="reply")
+    except ValidationError as e:
+        assert "risk_point_id" in str(e)
+    else:
+        raise AssertionError("expected ValidationError for missing risk_point_id")
+
+
+def test_create_reply_library_accepts_risk_point_id():
+    from app.schemas.library import LibraryCreate
+
+    body = LibraryCreate(name="x", library_type="reply", risk_point_id=42)
+    assert body.risk_point_id == 42
+    assert body.kind is None
+    assert body.effective_from is None
+    assert body.effective_until is None
+
+
+def test_create_word_library_rejects_risk_point_id():
+    from pydantic import ValidationError
+    from app.schemas.library import LibraryCreate
+
+    try:
+        LibraryCreate(
+            name="x", library_type="word", kind="黑名单", risk_point_id=42
+        )
+    except ValidationError as e:
+        assert "risk_point_id" in str(e)
+    else:
+        raise AssertionError("expected ValidationError for word + risk_point_id")
+
+
+def test_create_image_library_rejects_risk_point_id():
+    from pydantic import ValidationError
+    from app.schemas.library import LibraryCreate
+
+    try:
+        LibraryCreate(
+            name="x", library_type="image", kind="白名单", risk_point_id=42
+        )
+    except ValidationError as e:
+        assert "risk_point_id" in str(e)
+    else:
+        raise AssertionError("expected ValidationError for image + risk_point_id")
+
+
+def test_library_out_has_risk_point_field():
+    schema = app.openapi()
+    schemas = schema["components"]["schemas"]
+    out = schemas["LibraryOut"]["properties"]
+    assert "risk_point" in out
+    item = schemas["LibraryListItem"]["properties"]
+    assert "risk_point" in item
+    # RiskPointRef schema
+    assert "RiskPointRef" in schemas
+    rp = schemas["RiskPointRef"]["properties"]
+    for f in ("id", "code", "label", "label_cn", "item_id", "item_name", "package_code"):
+        assert f in rp, f"missing {f} in RiskPointRef"
+
+
+def test_create_library_schema_has_risk_point_id():
+    schema = app.openapi()
+    schemas = schema["components"]["schemas"]
+    create = schemas["LibraryCreate"]["properties"]
+    assert "risk_point_id" in create
+    update = schemas["LibraryUpdate"]["properties"]
+    assert "risk_point_id" in update
+
+
+def test_list_libraries_query_param_risk_point_id():
+    schema = app.openapi()
+    paths = schema["paths"]
+    op = paths["/api/v1/libraries"]["get"]
+    params = {p["name"] for p in op.get("parameters", [])}
+    assert "risk_point_id" in params
+
+
+def test_risk_point_resolve_rejects_non_text_package():
+    """非文本审核 (text_audit_pro) 包下的审核点不能作为代答库使用位置。"""
+    import asyncio
+
+    from app.api.v1.libraries import _resolve_risk_point
+
+    class FakePoint:
+        id = 99
+        package_code = "image_audit_pro"
+
+    class FakeResult:
+        def scalar_one_or_none(self_inner):
+            return FakePoint()
+
+    class FakeDB:
+        async def execute(self, stmt):
+            return FakeResult()
+
+    from fastapi import HTTPException
+
+    try:
+        asyncio.run(_resolve_risk_point(FakeDB(), 99))
+    except HTTPException as e:
+        assert e.status_code == 422
+        assert "文本审核" in str(e.detail)
+    else:
+        raise AssertionError("expected 422 for non-text audit point")
+
+
+def test_risk_point_resolve_rejects_missing_point():
+    """不存在的 risk_point_id 必须 404。"""
+    import asyncio
+
+    from app.api.v1.libraries import _resolve_risk_point
+
+    class FakeResult:
+        def scalar_one_or_none(self_inner):
+            return None
+
+    class FakeDB:
+        async def execute(self, stmt):
+            return FakeResult()
+
+    from fastapi import HTTPException
+
+    try:
+        asyncio.run(_resolve_risk_point(FakeDB(), 123456))
+    except HTTPException as e:
+        assert e.status_code == 404
+    else:
+        raise AssertionError("expected 404 for missing risk_point_id")

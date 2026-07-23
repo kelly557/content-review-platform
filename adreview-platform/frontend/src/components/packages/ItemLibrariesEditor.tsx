@@ -7,6 +7,7 @@ import {
   Space,
   Spin,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd'
 import { auditItemsApi } from '@/api/auditItems'
@@ -112,16 +113,17 @@ export function ItemLibrariesEditor({
     () =>
       allowedLibs.map((l) => {
         const t = l.library_type
+        const rp = l.risk_point
         return {
           value: l.id,
           label: (
-            <Space size={4} align="center">
+            <Space size={4} align="center" wrap>
               <Tag color={TYPE_COLOR[t]} style={{ margin: 0 }}>
                 {TYPE_LABEL[t]}
               </Tag>
               {l.kind && (
                 <Tag
-                  color={l.kind === '\u9ed1\u540d\u5355' ? 'red' : 'green'}
+                  color={l.kind === '黑名单' ? 'red' : 'green'}
                   style={{ margin: 0 }}
                 >
                   {l.kind}
@@ -130,8 +132,29 @@ export function ItemLibrariesEditor({
               <span>{l.name}</span>
               {l.is_platform && (
                 <Tag color="gold" style={{ margin: 0 }}>
-                  \u901a\u7528
+                  通用
                 </Tag>
+              )}
+              {rp && (
+                <Tooltip
+                  title={
+                    rp.item_name
+                      ? `使用位置: ${rp.item_name} / ${rp.label_cn || rp.label}`
+                      : `使用位置: ${rp.label_cn || rp.label}`
+                  }
+                >
+                  <Tag color="geekblue" style={{ margin: 0 }}>
+                    {rp.item_name ? `${rp.item_name} / ` : ''}
+                    {rp.label_cn || rp.label}
+                  </Tag>
+                </Tooltip>
+              )}
+              {t === 'reply' && !rp && (
+                <Tooltip title="存量代答库,未指定二级风险标签">
+                  <Tag color="default" style={{ margin: 0 }}>
+                    未指定风险标签
+                  </Tag>
+                </Tooltip>
               )}
             </Space>
           ) as unknown as string,
@@ -190,6 +213,9 @@ export function ItemLibrariesEditor({
       }}
     >
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          代答库选项中会展示其二级风险标签（使用位置）,仅作定位参考,不限制选择。
+        </Text>
         <div>
           <Text strong>{'选择已激活的自定义词库'}</Text>
           <div style={{ marginTop: 6 }}>
