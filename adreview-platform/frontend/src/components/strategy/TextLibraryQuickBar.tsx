@@ -17,15 +17,27 @@ import type { LibraryKind, LibraryListItem } from '@/types/domain'
 
 const { Text } = Typography
 
-type KindKey = 'blacklist' | 'whitelist'
+type KindKey = 'blacklist' | 'whitelist' | 'reply'
 
 const KIND_LABEL: Record<KindKey, string> = {
   blacklist: '黑名单',
   whitelist: '白名单',
+  reply: '代答',
 }
 const KIND_COLOR: Record<KindKey, string> = {
   blacklist: 'red',
   whitelist: 'green',
+  reply: 'purple',
+}
+const KIND_PLACEHOLDER_LABEL: Record<KindKey, string> = {
+  blacklist: '黑名单词库',
+  whitelist: '白名单词库',
+  reply: '代答词库',
+}
+const KIND_EMPTY_TARGET: Record<KindKey, string> = {
+  blacklist: '词库',
+  whitelist: '词库',
+  reply: '代答库',
 }
 const LIBRARY_KIND_TO_KEY: Record<LibraryKind, KindKey> = {
   黑名单: 'blacklist',
@@ -38,6 +50,7 @@ export default function TextLibraryQuickBar() {
   const [selections, setSelections] = useState<Record<KindKey, number[]>>({
     blacklist: [],
     whitelist: [],
+    reply: [],
   })
   const [pickerKind, setPickerKind] = useState<KindKey | null>(null)
   const [search, setSearch] = useState('')
@@ -45,11 +58,16 @@ export default function TextLibraryQuickBar() {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    librariesApi
-      .list({ type: 'word', size: 200 })
-      .then((p) => {
+    Promise.all([
+      librariesApi.list({ type: 'word', size: 200 }),
+      librariesApi.list({ type: 'reply', size: 200 }),
+    ])
+      .then(([wordPage, replyPage]) => {
         if (cancelled) return
-        setLibs(p.items.filter((l) => !l.is_deleted))
+        setLibs([
+          ...wordPage.items.filter((l) => !l.is_deleted),
+          ...replyPage.items.filter((l) => !l.is_deleted),
+        ])
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -60,8 +78,16 @@ export default function TextLibraryQuickBar() {
   }, [])
 
   const libsByKind = useMemo(() => {
-    const map: Record<KindKey, LibraryListItem[]> = { blacklist: [], whitelist: [] }
+    const map: Record<KindKey, LibraryListItem[]> = {
+      blacklist: [],
+      whitelist: [],
+      reply: [],
+    }
     libs.forEach((l) => {
+      if (l.library_type === 'reply') {
+        map.reply.push(l)
+        return
+      }
       if (!l.kind) return
       const key = LIBRARY_KIND_TO_KEY[l.kind]
       if (key) map[key].push(l)
@@ -172,6 +198,8 @@ export default function TextLibraryQuickBar() {
             {renderRow('blacklist')}
             <Divider style={{ margin: '8px 0' }} />
             {renderRow('whitelist')}
+            <Divider style={{ margin: '8px 0' }} />
+            {renderRow('reply')}
           </>
         )}
       </div>
@@ -180,7 +208,7 @@ export default function TextLibraryQuickBar() {
         open={pickerKind !== null}
         onCancel={closePicker}
         onOk={closePicker}
-        title={`选择${pickerKind ? KIND_LABEL[pickerKind] : ''}词库`}
+        title={`选择${pickerKind ? KIND_LABEL[pickerKind] : ''}库`}
         okText="确定"
         cancelText="取消"
         width={560}
@@ -198,7 +226,7 @@ export default function TextLibraryQuickBar() {
             description={
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {pickerLibs.length === 0
-                  ? `暂无${pickerKind ? KIND_LABEL[pickerKind] : ''}词库,请前往「资源库 → 词库」创建。`
+                  ? `暂无${pickerKind ? KIND_PLACEHOLDER_LABEL[pickerKind] : ''}，请前往「资源库 → ${pickerKind ? KIND_EMPTY_TARGET[pickerKind] : ''}」创建。`
                   : '未匹配到结果'}
               </Text>
             }
@@ -224,7 +252,7 @@ export default function TextLibraryQuickBar() {
                     bordered={false}
                     style={{ margin: 0, fontSize: 11 }}
                   >
-                    {lib.kind}
+                    {pickerKind === 'reply' ? '代答' : lib.kind}
                   </Tag>
                   <span style={{ color: '#0F172A' }}>{lib.name}</span>
                   <Text type="secondary" style={{ fontSize: 12 }}>
