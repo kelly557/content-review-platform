@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { Button, Input } from 'antd'
-import { DeleteOutlined, InboxOutlined, FileTextOutlined } from '@ant-design/icons'
+import { DeleteOutlined, InboxOutlined } from '@ant-design/icons'
 import { TYPE_LABELS, type MaterialType } from '@/types/domain'
 import { colors } from '@/styles/theme'
 
@@ -14,6 +14,42 @@ const ACCEPT_MAP: Record<MaterialType, string | undefined> = {
 }
 
 const AUDIO_ACCEPT = 'audio/mpeg,audio/mp4,audio/wav,audio/x-wav'
+
+type HintKey = Exclude<MaterialType, 'text'> | 'audio'
+
+const HINT_MAP: Record<HintKey, string> = {
+  image: '支持PNG、JPG、JPEG，小于10M，最长边不超过6000px的图',
+  video: '支持MP4、AVI、FLV、MOV格式，小于30MB、5分钟的视频',
+  pdf: '支持.txt，.doc，.docx，.pdf格式、小于5MB的文档',
+  audio: '支持MP3、WAV、AAC、AMR、M4A格式，小于10MB、5分钟的音频',
+}
+
+const TEXT_HINT_SINGLE =
+  '请输入需要审核的文本内容，单条文本，最多可以输入600字'
+const TEXT_HINT_BULK =
+  '请输入需要审核的文本，多个文本可以以换行分割，每行文本不超过600字，最多可输入100行文本内容。'
+
+function HintText({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 12,
+        color: colors.muted,
+        marginBottom: 12,
+        lineHeight: 1.6,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function hintFor(type: MaterialType, allowAudio: boolean, multiple: boolean): string {
+  if (type === 'text') return ''
+  const base = HINT_MAP[allowAudio ? 'audio' : type]
+  if (multiple) return `${base}，单次最多10张/个`
+  return base
+}
 
 export interface UploadItem {
   key: string
@@ -79,38 +115,14 @@ export default function UploadArea({
   if (type === 'text') {
     return (
       <div>
-        {value.length === 0 ? (
-          <div
-            style={{
-              border: `1px dashed ${colors.border}`,
-              borderRadius: 6,
-              padding: '48px 20px',
-              textAlign: 'center',
-              background: colors.surface,
-              color: colors.secondary,
-            }}
-          >
-            <FileTextOutlined style={{ fontSize: 32, marginBottom: 8, color: colors.secondary }} />
-            <div
-              style={{
-                fontWeight: 500,
-                color: colors.foreground,
-                fontSize: 15,
-              }}
-            >
-              暂无文案
-            </div>
-            <div style={{ fontSize: 12, marginTop: 4, color: colors.secondary }}>
-              在下方输入或粘贴文案正文
-            </div>
-          </div>
-        ) : (
-          value.map((item) => (
-            <div key={item.key} style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontSize: 12, color: colors.secondary }}>
-                  {item.file ? `文件：${item.file.name}` : '纯文本输入'}
-                </span>
+        <HintText>{multiple ? TEXT_HINT_BULK : TEXT_HINT_SINGLE}</HintText>
+        {value.map((item) => (
+          <div key={item.key} style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <span style={{ fontSize: 12, color: colors.secondary }}>
+                {item.file ? `文件：${item.file.name}` : '纯文本输入'}
+              </span>
+              {value.length > 1 && (
                 <Button
                   type="link"
                   size="small"
@@ -120,73 +132,63 @@ export default function UploadArea({
                 >
                   移除
                 </Button>
-              </div>
-              <TextArea
-                rows={6}
-                value={item.textBody}
-                onChange={(e) => updateText(item.key, e.target.value)}
-                placeholder="文案正文"
-              />
+              )}
             </div>
-          ))
-        )}
-        <Button
-          type="dashed"
-          block
-          style={{ marginTop: value.length === 0 ? 0 : 12 }}
-          onClick={() =>
-            onChange([...value, { key: `text-${Date.now()}`, file: null, textBody: '' }])
-          }
-        >
-          {value.length === 0 ? '新建文案' : '追加文案'}
-        </Button>
+            <TextArea
+              rows={6}
+              value={item.textBody}
+              onChange={(e) => updateText(item.key, e.target.value)}
+              placeholder="请输入需要审核的文本内容"
+            />
+          </div>
+        ))}
       </div>
     )
   }
 
   if (value.length === 0) {
     return (
-      <div
-        style={{
-          border: `1px dashed ${colors.border}`,
-          borderRadius: 6,
-          padding: '40px 20px',
-          textAlign: 'center',
-          background: colors.surface,
-        }}
-      >
-        <input
-          type="file"
-          multiple={multiple}
-          accept={accept}
-          onChange={(e) => {
-            const files = e.target.files
-            if (!files || files.length === 0) return
-            handleFiles(Array.from(files))
-            e.target.value = ''
-          }}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            width: '100%',
-            height: '100%',
-            opacity: 0,
-            cursor: 'pointer',
-          }}
-        />
-        <InboxOutlined style={{ fontSize: 40, color: colors.secondary, marginBottom: 12 }} />
+      <div>
+        <HintText>{hintFor(type, allowAudio, multiple)}</HintText>
         <div
           style={{
-            fontSize: 16,
-            color: colors.foreground,
-            fontWeight: 600,
-            marginBottom: 6,
+            border: `1px dashed ${colors.border}`,
+            borderRadius: 6,
+            padding: '40px 20px',
+            textAlign: 'center',
+            background: colors.surface,
           }}
         >
-          点击或拖拽{TYPE_LABELS[type]}到此处
-        </div>
-        <div style={{ fontSize: 12, color: colors.secondary }}>
-          支持 {ACCEPT_MAP[type]?.split(',').join(' / ')}，单次最多 {maxCount} 个
+          <input
+            type="file"
+            multiple={multiple}
+            accept={accept}
+            onChange={(e) => {
+              const files = e.target.files
+              if (!files || files.length === 0) return
+              handleFiles(Array.from(files))
+              e.target.value = ''
+            }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              opacity: 0,
+              cursor: 'pointer',
+            }}
+          />
+          <InboxOutlined style={{ fontSize: 40, color: colors.secondary, marginBottom: 12 }} />
+          <div
+            style={{
+              fontSize: 16,
+              color: colors.foreground,
+              fontWeight: 600,
+              marginBottom: 6,
+            }}
+          >
+            点击或拖拽{TYPE_LABELS[type]}到此处
+          </div>
         </div>
       </div>
     )
@@ -194,6 +196,7 @@ export default function UploadArea({
 
   return (
     <div>
+      <HintText>{hintFor(type, allowAudio, multiple)}</HintText>
       <div
         style={{
           border: `1px dashed ${colors.border}`,

@@ -1,21 +1,19 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import {
-  App,
-  Button,
-  Card,
-  Select,
-  Space,
-  Tabs,
-  Typography,
-} from 'antd'
-import { RocketOutlined } from '@ant-design/icons'
-import { materialsApi } from '@/api/materials'
+import { useSearchParams } from 'react-router-dom'
+import { App, Button, Card, Select, Space, Tabs, Typography } from 'antd'
 import { strategiesApi } from '@/api/strategies'
+import {
+  runOnlineDetectionMock,
+  type MockRequest,
+  type MockResponse,
+} from '@/api/onlineReviewMock'
 import UploadArea, { type UploadItem } from '@/components/task-create/UploadArea'
 import AnalysisPanel, {
   type ParsedFileItem,
 } from '@/components/task-create/AnalysisPanel'
+import OnlineReviewResultPanel, {
+  type OnlineReviewResultState,
+} from '@/components/task-create/OnlineReviewResultPanel'
 import type { MaterialType, Strategy } from '@/types/domain'
 import { colors } from '@/styles/theme'
 
@@ -37,9 +35,16 @@ const MODE_TABS: { key: DetectionMode; label: string }[] = [
 
 const BULK_LIMIT = 50
 
+interface DetectionResult {
+  state: OnlineReviewResultState
+  request?: MockRequest
+  response?: MockResponse
+  latencyMs?: number
+  errorMessage?: string
+}
+
 export default function CreateTaskPage() {
   const { message } = App.useApp()
-  const navigate = useNavigate()
   const [params] = useSearchParams()
 
   const initialType = (params.get('type') as TabKind | null) || 'text'
@@ -48,10 +53,14 @@ export default function CreateTaskPage() {
   const [type, setType] = useState<TabKind>(
     TYPE_TABS.find((t) => t.key === initialType) ? initialType : 'text',
   )
-  const [uploadItems, setUploadItems] = useState<UploadItem[]>([])
+  const [uploadItems, setUploadItems] = useState<UploadItem[]>(() =>
+    initialType === 'text'
+      ? [{ key: 'text-default', file: null, textBody: '' }]
+      : [],
+  )
   const [strategyId, setStrategyId] = useState<number | undefined>(undefined)
   const [strategies, setStrategies] = useState<Strategy[]>([])
-  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<DetectionResult>({ state: 'idle' })
 
   useEffect(() => {
     strategiesApi
@@ -67,6 +76,12 @@ export default function CreateTaskPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    if (type === 'text' && uploadItems.length === 0) {
+      setUploadItems([{ key: 'text-default', file: null, textBody: '' }])
+    }
+  }, [type, uploadItems.length])
+
   const currentBackendType: MaterialType =
     TYPE_TABS.find((t) => t.key === type)?.backendType ?? 'text'
   const isAudioTab = type === 'audio'
@@ -76,6 +91,7 @@ export default function CreateTaskPage() {
   const onTypeChange = (next: string) => {
     setType(next as TabKind)
     setUploadItems([])
+    setResult({ state: 'idle' })
   }
 
   const onModeChange = (next: string) => {
@@ -100,53 +116,39 @@ export default function CreateTaskPage() {
     return { ok: true, count: effectiveCount }
   }
 
-  const buildTags = (): Record<string, unknown> => {
-    const t: Record<string, unknown> = { source: 'create_task_page' }
-    if (isAudioTab) t.original_kind = 'audio'
-    if (strategyId) t.strategy_id = strategyId
-    return t
-  }
-
-  const createOneFromUpload = async (item: UploadItem, taskName: string): Promise<number> => {
-    const title = item.file ? item.file.name.replace(/\.[^.]+$/, '') : '未命名文案'
-    const created = await materialsApi.create({
-      title,
-      material_type: currentBackendType,
-      tags: buildTags(),
-    })
-    if (item.file) {
-      await materialsApi.uploadVersion(created.id, item.file, item.textBody || undefined)
-    } else if (type === 'text' && item.textBody) {
-      const blob = new Blob([item.textBody], { type: 'text/plain' })
-      const file = new File([blob], 'text.txt', { type: 'text/plain' })
-      await materialsApi.uploadVersion(created.id, file, item.textBody)
-    }
-    await materialsApi.submit(created.id, { task_name: taskName })
-    return created.id
-  }
-
-  const onSubmit = async () => {
+  const onDetect = async () => {
     const v = validateBeforeSubmit()
     if (!v.ok) {
       message.warning(v.reason)
       return
     }
-    setSubmitting(true)
+    setResult({ state: 'loading' })
     try {
-      for (let i = 0; i < uploadItems.length; i++) {
-        await createOneFromUpload(uploadItems[i], `在线审核-${Date.now()}-${i + 1}`)
-      }
-      message.success(`已提交 ${v.count} 个审核任务`)
-      navigate('/overview')
+      const selectedStrategy = strategies.find((s) => s.id === strategyId)
+      const mock = await runOnlineDetectionMock({
+        strategyId,
+        strategyName: selectedStrategy?.name,
+        items: uploadItems,
+        backendType: currentBackendType,
+        mode: detectionMode,
+      })
+      setResult({
+        state: 'done',
+        request: mock.request,
+        response: mock.response,
+        latencyMs: mock.latencyMs,
+      })
+      message.success(`已检测 ${v.count} 个素材`)
     } catch (e) {
-      const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      message.error(err.response?.data?.detail || err.message || '提交失败')
-    } finally {
-      setSubmitting(false)
+      const err = e as { message?: string }
+      const msg = err.message || '检测失败'
+      setResult({ state: 'error', errorMessage: msg })
+      message.error(msg)
     }
   }
 
   const parseItems: ParsedFileItem[] = uploadItems
+  const isDetecting = result.state === 'loading'
 
   return (
     <div style={{ width: '100%' }}>
@@ -224,14 +226,25 @@ export default function CreateTaskPage() {
             }}
           >
             <Space>
-              <Button onClick={() => navigate('/overview')}>取消</Button>
+              <Button
+                onClick={() => {
+                  setUploadItems(
+                    type === 'text'
+                      ? [{ key: 'text-default', file: null, textBody: '' }]
+                      : [],
+                  )
+                  setResult({ state: 'idle' })
+                }}
+              >
+                重置
+              </Button>
               <Button
                 type="primary"
-                icon={<RocketOutlined />}
-                loading={submitting}
-                onClick={onSubmit}
+                loading={isDetecting}
+                disabled={effectiveCount === 0}
+                onClick={onDetect}
               >
-                提交审核{effectiveCount > 1 ? `（${effectiveCount} 个）` : ''}
+                检测{effectiveCount > 1 ? `（${effectiveCount} 个）` : ''}
               </Button>
             </Space>
           </div>
@@ -239,12 +252,22 @@ export default function CreateTaskPage() {
 
         <div style={{ position: 'sticky', top: 80 }}>
           <Card title="在线审核结果">
-            <AnalysisPanel
-              mode="upload"
-              uploadItems={parseItems}
-              pickedItems={[]}
-              backendType={currentBackendType}
-            />
+            {result.state === 'idle' ? (
+              <AnalysisPanel
+                mode="upload"
+                uploadItems={type === 'text' ? [] : parseItems}
+                pickedItems={[]}
+                backendType={currentBackendType}
+              />
+            ) : (
+              <OnlineReviewResultPanel
+                state={result.state}
+                request={result.request}
+                response={result.response}
+                latencyMs={result.latencyMs}
+                errorMessage={result.errorMessage}
+              />
+            )}
           </Card>
         </div>
       </div>

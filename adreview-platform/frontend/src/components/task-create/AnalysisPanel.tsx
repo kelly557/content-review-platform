@@ -81,9 +81,11 @@ export default function AnalysisPanel({
             border: `1px dashed ${colors.border}`,
           }}
         />
-        <Text style={{ color: colors.secondary, fontSize: 13, display: 'block' }}>
-          {mode === 'upload' ? '上传素材后，结果将出现在此' : '选择素材后，详情将出现在此'}
-        </Text>
+        {mode === 'library' && (
+          <Text style={{ color: colors.secondary, fontSize: 13, display: 'block' }}>
+            选择素材后，详情将出现在此
+          </Text>
+        )}
       </div>
     )
   }

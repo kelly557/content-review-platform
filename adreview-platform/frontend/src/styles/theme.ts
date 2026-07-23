@@ -46,6 +46,12 @@ export const colors = {
   destructive: '#DC2626',
   success: '#16A34A',
   warning: '#D97706',
+  jsonString: '#B91C1C',
+  jsonNumber: '#A16207',
+  jsonBool: '#0D9488',
+  jsonNull: '#94A3B8',
+  jsonKey: '#0F172A',
+  jsonMeta: '#94A3B8',
 } as const
 
 /**
