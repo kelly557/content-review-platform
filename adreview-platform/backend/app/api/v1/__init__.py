@@ -15,6 +15,7 @@ from app.api.v1 import (
     libraries,
     material_packages,
     materials,
+    page_guides,
     query,
     registered_models,
     registered_providers,
@@ -64,3 +65,4 @@ api_router.include_router(registered_models.credentials_router)
 api_router.include_router(registered_providers.router)
 api_router.include_router(uploaded_documents.router)
 api_router.include_router(risk_categories.router)
+api_router.include_router(page_guides.router)

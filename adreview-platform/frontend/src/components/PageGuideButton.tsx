@@ -8,6 +8,7 @@ import {
   Input,
   Popconfirm,
   Space,
+  Spin,
   Typography,
 } from 'antd'
 import {
@@ -19,12 +20,9 @@ import {
 } from '@ant-design/icons'
 import { useLocation } from 'react-router-dom'
 import { codeStyle, findGuide, type PageGuide } from '@/lib/pageGuides'
-import { useLocalStorageState } from '@/hooks/useLocalStorageState'
+import { pageGuidesApi, type PageGuideOverride } from '@/api/pageGuides'
 
 const { Text, Paragraph } = Typography
-
-const STORAGE_KEY = 'adreview.pageGuide.overrides'
-const MAX_BYTES = 100 * 1024
 
 function inlineMd(s: string, keyBase: number): ReactNode {
   const parts: ReactNode[] = []
@@ -66,6 +64,16 @@ function renderBlock(block: string, idx: number): ReactNode {
     )
   }
   const lines = trimmed.split('\n')
+  if (lines.every((l) => /^(\s*)\d+\.\s+/.test(l))) {
+    return (
+      <ol key={idx} style={{ margin: '0 0 12px', paddingLeft: 24 }}>
+        {lines.map((l, j) => {
+          const text = l.replace(/^\s*\d+\.\s+/, '')
+          return <li key={j}>{inlineMd(text, idx * 100 + j)}</li>
+        })}
+      </ol>
+    )
+  }
   if (lines.every((l) => /^(\s*)- /.test(l))) {
     return (
       <ul key={idx} style={{ margin: '0 0 12px', paddingLeft: 20 }}>
@@ -89,9 +97,7 @@ function renderBlock(block: string, idx: number): ReactNode {
 }
 
 function renderMarkdown(md: string): ReactNode {
-  return md
-    .split(/\n\n+/)
-    .map((b, i) => renderBlock(b, i))
+  return md.split(/\n\n+/).map((b, i) => renderBlock(b, i))
 }
 
 function sectionsToDraft(g: PageGuide): string {
@@ -120,60 +126,111 @@ export function PageGuideButton() {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
-  const [overrides, setOverrides] = useLocalStorageState<
-    Record<string, string>
-  >(STORAGE_KEY, {})
+  const [draftTitle, setDraftTitle] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [overrides, setOverrides] = useState<
+    Record<string, PageGuideOverride>
+  >({})
+  const [loaded, setLoaded] = useState(false)
 
-  const guide = useMemo(() => findGuide(location.pathname), [location.pathname])
   const screens = Grid.useBreakpoint()
   const isMobile = !screens.md
 
-  const effective = useMemo<PageGuide | null>(() => {
-    if (!guide) return null
-    const ov = overrides[location.pathname]
-    if (!ov) return guide
-    return { title: guide.title, sections: draftToSections(ov) }
-  }, [guide, overrides, location.pathname])
-
-  const isCustomized = !!overrides[location.pathname]
+  const guide = useMemo(() => findGuide(location.pathname), [location.pathname])
 
   useEffect(() => {
-    if (open && guide) {
-      setEditing(false)
-      setDraft(sectionsToDraft(guide))
+    let cancelled = false
+    pageGuidesApi
+      .list()
+      .then((res) => {
+        if (cancelled) return
+        const map: Record<string, PageGuideOverride> = {}
+        for (const g of res.data.guides) map[g.path] = g
+        setOverrides(map)
+      })
+      .catch(() => {
+        // 静默失败 — 后端不可达就退到前端常量
+      })
+      .finally(() => {
+        if (!cancelled) setLoaded(true)
+      })
+    return () => {
+      cancelled = true
     }
-  }, [open, guide])
+  }, [])
+
+  const override = overrides[location.pathname]
+  const effective = useMemo<PageGuide | null>(() => {
+    if (!guide) return null
+    if (!override) return guide
+    return { title: override.title, sections: draftToSections(override.markdown_md) }
+  }, [guide, override])
+
+  const isCustomized = !!override
+
+  useEffect(() => {
+    if (open && effective) {
+      setEditing(false)
+      setDraft(sectionsToDraft(effective))
+      setDraftTitle(effective.title)
+    }
+  }, [open, effective])
 
   const onEdit = () => {
     setDraft(sectionsToDraft(effective ?? guide!))
+    setDraftTitle((effective ?? guide!).title)
     setEditing(true)
   }
 
   const onCancel = () => {
     setEditing(false)
     setDraft(sectionsToDraft(effective ?? guide!))
+    setDraftTitle((effective ?? guide!).title)
   }
 
-  const onSave = () => {
+  const onSave = async () => {
     if (!draft.trim()) {
       message.warning('内容不能为空')
       return
     }
-    if (new Blob([draft]).size > MAX_BYTES) {
-      message.error(`内容超过 ${MAX_BYTES / 1024}KB 上限`)
+    if (new Blob([draft]).size > 100 * 1024) {
+      message.error('内容超过 100KB 上限')
       return
     }
-    setOverrides({ ...overrides, [location.pathname]: draft })
-    setEditing(false)
-    message.success('已保存到本地')
+    setSaving(true)
+    try {
+      const res = await pageGuidesApi.upsert(location.pathname, {
+        title: draftTitle.trim() || (guide?.title ?? '原型说明'),
+        markdown_md: draft,
+      })
+      setOverrides((prev) => ({ ...prev, [location.pathname]: res.data }))
+      setEditing(false)
+      message.success('已保存到数据库')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      message.error(err.response?.data?.detail ?? '保存失败')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const onReset = () => {
-    const next = { ...overrides }
-    delete next[location.pathname]
-    setOverrides(next)
-    setEditing(false)
-    message.success('已恢复默认')
+  const onReset = async () => {
+    setSaving(true)
+    try {
+      await pageGuidesApi.remove(location.pathname)
+      setOverrides((prev) => {
+        const next = { ...prev }
+        delete next[location.pathname]
+        return next
+      })
+      setEditing(false)
+      message.success('已恢复默认')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      message.error(err.response?.data?.detail ?? '恢复失败')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const canEdit = !!effective
@@ -198,22 +255,18 @@ export function PageGuideButton() {
         extra={
           canEdit && !editing ? (
             <Space>
-              <Button
-                size="small"
-                icon={<EditOutlined />}
-                onClick={onEdit}
-              >
+              <Button size="small" icon={<EditOutlined />} onClick={onEdit}>
                 编辑
               </Button>
               {isCustomized && (
                 <Popconfirm
                   title="恢复默认?"
-                  description="将清除当前页面的本地修改,恢复到 pageGuides.tsx 的默认文案。"
+                  description="将清除当前页面的数据库修改,恢复到 pageGuides.tsx 的默认文案。"
                   okText="恢复"
                   cancelText="取消"
                   onConfirm={onReset}
                 >
-                  <Button size="small" icon={<ReloadOutlined />}>
+                  <Button size="small" icon={<ReloadOutlined />} loading={saving}>
                     恢复默认
                   </Button>
                 </Popconfirm>
@@ -225,20 +278,42 @@ export function PageGuideButton() {
         {effective ? (
           editing ? (
             <div>
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-                使用 <code style={codeStyle}>## 标题</code> 分段,段落之间用 <code style={codeStyle}>{'\n\n---\n\n'}</code> 分隔。支持 <code style={codeStyle}>`代码`</code> 与 <code style={codeStyle}>**加粗**</code>。
+              <Text
+                type="secondary"
+                style={{ fontSize: 12, display: 'block', marginBottom: 8 }}
+              >
+                使用 <code style={codeStyle}>## 标题</code> 分段,段落之间用{' '}
+                <code style={codeStyle}>{'\n\n---\n\n'}</code> 分隔。支持{' '}
+                <code style={codeStyle}>`代码`</code> 与{' '}
+                <code style={codeStyle}>**加粗**</code>。
               </Text>
+              <Input
+                value={draftTitle}
+                onChange={(e) => setDraftTitle(e.target.value)}
+                placeholder="标题"
+                style={{ marginBottom: 8 }}
+                maxLength={255}
+              />
               <Input.TextArea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 autoSize={{ minRows: 18, maxRows: 40 }}
-                style={{ fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace', fontSize: 13 }}
+                style={{
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+                  fontSize: 13,
+                }}
               />
               <Space style={{ marginTop: 12 }}>
-                <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={onSave}
+                  loading={saving}
+                >
                   保存
                 </Button>
-                <Button icon={<CloseOutlined />} onClick={onCancel}>
+                <Button icon={<CloseOutlined />} onClick={onCancel} disabled={saving}>
                   取消
                 </Button>
                 {isCustomized && (
@@ -248,12 +323,16 @@ export function PageGuideButton() {
                     cancelText="取消"
                     onConfirm={onReset}
                   >
-                    <Button danger icon={<ReloadOutlined />}>
+                    <Button danger icon={<ReloadOutlined />} disabled={saving}>
                       恢复默认
                     </Button>
                   </Popconfirm>
                 )}
               </Space>
+            </div>
+          ) : !loaded ? (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <Spin />
             </div>
           ) : (
             <div>

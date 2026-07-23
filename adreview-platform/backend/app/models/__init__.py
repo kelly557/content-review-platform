@@ -34,6 +34,7 @@ from app.models.tag import (  # noqa: F401
 from app.models.alert_event import AlertEvent  # noqa: F401
 from app.models.llm_call import LlmCall  # noqa: F401
 from app.models.ops_log import OpsLog  # noqa: F401
+from app.models.page_guide import PageGuide  # noqa: F401
 from app.models.machine_review_feedback import MachineReviewFeedback, FeedbackKind  # noqa: F401
 from app.models.trigger import Trigger, TriggerRun, TriggerType, TriggerRunSource, TriggerRunStatus  # noqa: F401
 from app.models.knowledge_document import KnowledgeDocument, KnowledgeDocumentVersion  # noqa: F401
