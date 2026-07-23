@@ -145,7 +145,7 @@ export default function ReviewAgentsPage() {
   // 测试抽屉的实时表单 points（新建态也可用）
   const [testPoints, setTestPoints] = useState<{ id: string; label: string }[]>([])
   const [testAgentName, setTestAgentName] = useState<string>('')
-  const [testModality, setTestModality] = useState<'文本' | '图像' | '图文'>('文本')
+  const [testModality, setTestModality] = useState<'文本' | '图文'>('文本')
   // 发布 / 下线
   const [publishOpen, setPublishOpen] = useState(false)
   const [unpublishOpen, setUnpublishOpen] = useState(false)
@@ -211,8 +211,7 @@ export default function ReviewAgentsPage() {
       message.success('已更新审核智能体')
     } else {
       const sequence = String(agents.length + 1).padStart(2, '0')
-      const modalityPrefix =
-        payload.modality === '文本' ? 'txt' : payload.modality === '图像' ? 'img' : 'mm'
+      const modalityPrefix = payload.modality === '文本' ? 'txt' : 'mm'
       const appId = `${modalityPrefix}_check_agent_${sequence}`
       const next: AgentRow = {
         appId,
@@ -264,9 +263,9 @@ export default function ReviewAgentsPage() {
     const ts = timestamp()
     const validRows = state.rows.filter((r) => r.label.trim() && r.desc.trim())
     const modality = (step1Payload?.modality ??
-      (editingAgent && ['文本', '图像', '图文'].includes(editingAgent.modality)
+      (editingAgent && ['文本', '图文'].includes(editingAgent.modality)
         ? editingAgent.modality
-        : '图文')) as AgentVersionSnapshot['modality']
+        : '文本')) as AgentVersionSnapshot['modality']   
 
     let targetAppId: string
     let isNew = false
@@ -292,8 +291,7 @@ export default function ReviewAgentsPage() {
     } else {
       // 新建态：先落表
       const sequence = String(agents.length + 1).padStart(2, '0')
-      const modalityPrefix =
-        modality === '文本' ? 'txt' : modality === '图像' ? 'img' : 'mm'
+      const modalityPrefix = modality === '文本' ? 'txt' : 'mm'
       targetAppId = `${modalityPrefix}_check_agent_${sequence}`
       isNew = true
       const next: AgentRow = {
@@ -639,9 +637,9 @@ export default function ReviewAgentsPage() {
           }
           initialModality={
             editingAgent
-              ? (['文本', '图像', '图文'].includes(editingAgent.modality)
+              ? (['文本', '图文'].includes(editingAgent.modality)
                   ? (editingAgent.modality as Step1Modality)
-                  : '图文')
+                  : '文本')
               : step1Payload
                 ? step1Payload.modality
                 : undefined
@@ -662,8 +660,8 @@ export default function ReviewAgentsPage() {
                   .map((r) => ({ id: r.id, label: r.label || '(未命名)' })),
               )
               setTestAgentName(state.name)
-              const m = step1Payload?.modality ?? editingAgent?.modality ?? '图文'
-              setTestModality((['文本', '图像', '图文'].includes(m) ? m : '图文') as '文本' | '图像' | '图文')
+              const m = step1Payload?.modality ?? editingAgent?.modality ?? '文本'
+              setTestModality((['文本', '图文'].includes(m) ? m : '文本') as '文本' | '图文')
             }
             setTestOpen(true)
           }}

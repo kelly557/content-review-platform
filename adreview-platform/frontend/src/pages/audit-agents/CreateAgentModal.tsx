@@ -31,7 +31,7 @@ export interface AgentPromptRow {
 }
 
 export interface CreateAgentPayload {
-  modality: '文本' | '图像' | '图文'
+  modality: '文本' | '图文'
   name: string
   largeModel: string
   rows: AgentPromptRow[]
@@ -54,7 +54,7 @@ export interface CreateAgentFormProps {
   onAiDrawerOpenChange: (open: boolean) => void
   onAddOptimizedConfig?: (cfg: { label: string; desc: string }) => void
   initialName?: string
-  initialModality?: '文本' | '图像' | '图文'
+  initialModality?: '文本' | '图文'
   initialLargeModel?: string
   initialRows?: AgentPromptRow[]
   draftSavedAt?: string | null
@@ -69,12 +69,11 @@ export interface CreateAgentFormProps {
 const LARGE_MODEL_OPTIONS: {
   label: string
   value: string
-  modality: ('文本' | '图像' | '图文')[]
+  modality: ('文本' | '图文')[]
 }[] = [
-  { label: '文本审核大模型', value: 'text_audit_llm', modality: ['文本', '图文'] },
-  { label: '图像审核大模型', value: 'image_audit_llm', modality: ['图像', '图文'] },
-  { label: '多模态审核大模型', value: 'multimodal_audit_llm', modality: ['图文'] },
-]
+  { label: '文本大模型', value: 'text_audit_llm', modality: ['文本'] },
+  { label: '图文多模态', value: 'multimodal_audit_llm', modality: ['图文'] },
+]  
 
 const DEFAULT_ROWS: AgentPromptRow[] = [
   {
@@ -119,7 +118,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
 }, ref) {
   const { message } = App.useApp()
   const filteredLargeModels = LARGE_MODEL_OPTIONS.filter((o) =>
-    o.modality.includes(initialModality ?? '图文'),
+    o.modality.includes(initialModality ?? '文本'),
   )
   const defaultLargeModel = filteredLargeModels[0]?.value ?? LARGE_MODEL_OPTIONS[0].value
   const [name, setName] = useState(initialName || '未命名审核智能体')
@@ -209,7 +208,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
       return
     }
     onSubmit({
-      modality: initialModality ?? '图文',
+      modality: initialModality ?? '文本',
       name: name.trim(),
       largeModel,
       rows: validRows,
@@ -295,7 +294,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
       >
         <div style={{ marginBottom: 12 }}>
           <Text type="secondary">
-            模态：<Text strong>{initialModality ?? '图文'}</Text>
+            模态：<Text strong>{initialModality ?? '文本'}</Text>
           </Text>
         </div>
         <Select
