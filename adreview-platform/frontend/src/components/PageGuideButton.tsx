@@ -9,6 +9,7 @@ import {
   Popconfirm,
   Space,
   Spin,
+  Tabs,
   Typography,
 } from 'antd'
 import {
@@ -19,7 +20,7 @@ import {
   CloseOutlined,
 } from '@ant-design/icons'
 import { useLocation } from 'react-router-dom'
-import { codeStyle, findGuide, type PageGuide } from '@/lib/pageGuides'
+import { codeStyle, draftToGuide, findGuide, guideToDraft, type GuideSection, type GuideTab, type PageGuide } from '@/lib/pageGuides'
 import { pageGuidesApi, type PageGuideOverride } from '@/api/pageGuides'
 
 const { Text, Paragraph } = Typography
@@ -52,6 +53,26 @@ function inlineMd(s: string, keyBase: number): ReactNode {
 function renderBlock(block: string, idx: number): ReactNode {
   const trimmed = block.trimEnd()
   if (!trimmed) return null
+
+  const imgMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/)
+  if (imgMatch) {
+    return (
+      <img
+        key={idx}
+        src={imgMatch[2]}
+        alt={imgMatch[1]}
+        style={{
+          maxWidth: '100%',
+          display: 'block',
+          margin: '8px 0 12px',
+          borderRadius: 4,
+          border: '1px solid #E5E7EB',
+          background: '#fff',
+        }}
+      />
+    )
+  }
+
   if (trimmed.startsWith('## ')) {
     return (
       <Text
@@ -100,24 +121,62 @@ function renderMarkdown(md: string): ReactNode {
   return md.split(/\n\n+/).map((b, i) => renderBlock(b, i))
 }
 
-function sectionsToDraft(g: PageGuide): string {
-  return g.sections
-    .map((s) => (s.heading ? `## ${s.heading}\n${s.markdown}` : s.markdown))
-    .join('\n\n---\n\n')
+function SectionsView({ sections }: { sections: GuideSection[] }) {
+  return (
+    <div>
+      {sections.map((s, idx) => (
+        <div key={idx} style={{ marginBottom: 12 }}>
+          {s.heading && (
+            <Text
+              strong
+              style={{ display: 'block', margin: '8px 0', fontSize: 15 }}
+            >
+              {s.heading}
+            </Text>
+          )}
+          {s.markdown.trim() ? (
+            <div style={{ color: 'rgba(0,0,0,0.85)' }}>{renderMarkdown(s.markdown)}</div>
+          ) : (
+            <Paragraph type="secondary" style={{ margin: 0 }}>
+              （空段落）
+            </Paragraph>
+          )}
+        </div>
+      ))}
+    </div>
+  )
 }
 
-function draftToSections(raw: string): PageGuide['sections'] {
-  const blocks = raw.split(/\n\n---\n\n/)
-  return blocks.map((b) => {
-    const lines = b.split('\n')
-    if (lines[0]?.startsWith('## ')) {
-      return {
-        heading: lines[0].slice(3).trim(),
-        markdown: lines.slice(1).join('\n').trim(),
-      }
-    }
-    return { markdown: b.trim() }
-  })
+function TabsView({
+  tabs,
+  fallbackSections,
+}: {
+  tabs?: GuideTab[]
+  fallbackSections?: GuideSection[]
+}) {
+  if (tabs && tabs.length > 0) {
+    return (
+      <Tabs
+        items={tabs.map((t) => ({
+          key: t.key,
+          label: t.label,
+          children:
+            t.sections.length === 0 ? (
+              <Paragraph type="secondary" style={{ margin: '12px 0' }}>
+                （暂无内容）
+              </Paragraph>
+            ) : (
+              <SectionsView sections={t.sections} />
+            ),
+        }))}
+      />
+    )
+  }
+  return <SectionsView sections={fallbackSections ?? []} />
+}
+
+function sectionsToDraft(g: PageGuide): string {
+  return guideToDraft(g)
 }
 
 export function PageGuideButton() {
@@ -127,6 +186,7 @@ export function PageGuideButton() {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [draftTitle, setDraftTitle] = useState('')
+  const [activeTab, setActiveTab] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [overrides, setOverrides] = useState<
     Record<string, PageGuideOverride>
@@ -163,7 +223,12 @@ export function PageGuideButton() {
   const effective = useMemo<PageGuide | null>(() => {
     if (!guide) return null
     if (!override) return guide
-    return { title: override.title, sections: draftToSections(override.markdown_md) }
+    const parsed = draftToGuide(override.markdown_md)
+    return {
+      title: override.title,
+      sections: parsed.sections,
+      tabs: parsed.tabs,
+    }
   }, [guide, override])
 
   const isCustomized = !!override
@@ -173,6 +238,8 @@ export function PageGuideButton() {
       setEditing(false)
       setDraft(sectionsToDraft(effective))
       setDraftTitle(effective.title)
+      const firstTab = effective.tabs?.[0]?.key
+      if (firstTab) setActiveTab(firstTab)
     }
   }, [open, effective])
 
@@ -283,9 +350,12 @@ export function PageGuideButton() {
                 style={{ fontSize: 12, display: 'block', marginBottom: 8 }}
               >
                 使用 <code style={codeStyle}>## 标题</code> 分段,段落之间用{' '}
-                <code style={codeStyle}>{'\n\n---\n\n'}</code> 分隔。支持{' '}
+                <code style={codeStyle}>{'\n\n---\n\n'}</code> 分隔;需要 Tab
+                时在块首写{' '}
+                <code style={codeStyle}># Tab: 标签名</code>。支持{' '}
                 <code style={codeStyle}>`代码`</code> 与{' '}
-                <code style={codeStyle}>**加粗**</code>。
+                <code style={codeStyle}>**加粗**</code>,以及{' '}
+                <code style={codeStyle}>![alt](url)</code> 图片。
               </Text>
               <Input
                 value={draftTitle}
@@ -294,6 +364,23 @@ export function PageGuideButton() {
                 style={{ marginBottom: 8 }}
                 maxLength={255}
               />
+              <div
+                style={{
+                  marginBottom: 12,
+                  padding: 12,
+                  background: '#F8FAFC',
+                  border: '1px dashed #CBD5E1',
+                  borderRadius: 6,
+                }}
+              >
+                <Text
+                  type="secondary"
+                  style={{ fontSize: 12, display: 'block', marginBottom: 8 }}
+                >
+                  预览
+                </Text>
+                <TabsView {...draftToGuide(draft)} />
+              </div>
               <Input.TextArea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -334,30 +421,24 @@ export function PageGuideButton() {
             <div style={{ textAlign: 'center', padding: '40px 0' }}>
               <Spin />
             </div>
+          ) : effective.tabs && effective.tabs.length > 0 ? (
+            <Tabs
+              activeKey={activeTab}
+              onChange={setActiveTab}
+              items={effective.tabs.map((t) => ({
+                key: t.key,
+                label: t.label,
+                children: t.sections.length === 0 ? (
+                  <Paragraph type="secondary" style={{ margin: '12px 0' }}>
+                    （暂无内容 — 点击右上角「编辑」录入）
+                  </Paragraph>
+                ) : (
+                  <SectionsView sections={t.sections} />
+                ),
+              }))}
+            />
           ) : (
-            <div>
-              {effective.sections.map((s, idx) => (
-                <div key={idx} style={{ marginBottom: 12 }}>
-                  {s.heading && (
-                    <Text
-                      strong
-                      style={{ display: 'block', margin: '8px 0', fontSize: 15 }}
-                    >
-                      {s.heading}
-                    </Text>
-                  )}
-                  {s.markdown.trim() ? (
-                    <div style={{ color: 'rgba(0,0,0,0.85)' }}>
-                      {renderMarkdown(s.markdown)}
-                    </div>
-                  ) : (
-                    <Paragraph type="secondary" style={{ margin: 0 }}>
-                      （空段落）
-                    </Paragraph>
-                  )}
-                </div>
-              ))}
-            </div>
+            <TabsView fallbackSections={effective.sections} />
           )
         ) : (
           <Empty

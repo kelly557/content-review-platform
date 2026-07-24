@@ -5,9 +5,16 @@ export interface GuideSection {
   markdown: string
 }
 
+export interface GuideTab {
+  key: string
+  label: string
+  sections: GuideSection[]
+}
+
 export interface PageGuide {
   title: string
   sections: GuideSection[]
+  tabs?: GuideTab[]
 }
 
 export const codeStyle: CSSProperties = {
@@ -54,6 +61,90 @@ const FILLED: Record<string, PageGuide> = {
         heading: '关键产品逻辑',
         markdown:
           '- 按角色展示不同的快捷入口(审核员看"待审队列",管理员看"策略/规则")。\n- 欢迎语取自当前登录用户的姓名,日期取浏览器本地时区。',
+      },
+    ],
+    tabs: [
+      {
+        key: 'overview',
+        label: '业务说明',
+        sections: [
+          {
+            heading: '页面定位',
+            markdown: '登录后的首屏。给所有角色一个"我今天要做什么"的入口,不做业务操作。',
+          },
+          {
+            heading: '关键产品逻辑',
+            markdown:
+              '- 按角色展示不同的快捷入口(审核员看"待审队列",管理员看"策略/规则")。\n- 欢迎语取自当前登录用户的姓名,日期取浏览器本地时区。',
+          },
+          {
+            heading: 'Notes',
+            markdown:
+              '## 南京项目对接时间线：10月底\n\n'
+              + '业务指标：\n\n'
+              + '1. 准确率高达 90% 以上（第一期的审核指标，重点关注小模型效果）\n'
+              + '2. 网信办法律法规要求，无风险情况下模型的拒答率低于 5%\n'
+              + '3. 模型输入/输出的性能要求（参考数美科技）\n\n'
+              + '响应：50-80ms',
+          },
+        ],
+      },
+      {
+        key: 'flow',
+        label: '业务流程',
+        sections: [
+          {
+            heading: '模型审核全景图',
+            markdown: '![审核服务全景图](/page-guides/overview-flow.png)',
+          },
+          {
+            heading: '一句话概括',
+            markdown:
+              '用户侧输入(AI问答 / Agent / 剧情类多场景)→ 审核服务(输入接口 → 风险模型 → 风险决策引擎 + 安全知识库 + 安全大模型)→ 大模型应用(Query 分类 → 输出柔性拒答 / 代替答案 / 大模型答案)→ 输出审核接口(共用风险模型 + 风险决策引擎2)。',
+          },
+          {
+            heading: '模型输出的流式长文本审核策略',
+            markdown: '![模型输出的流式长文本审核策略](/page-guides/streaming-text-audit.png)',
+          },
+          {
+            heading: '流式长文本审核要点',
+            markdown:
+              '针对大模型输出长文本场景,安审引擎按句切片审核:\n\n'
+              + '- **首句**:截前 200 字符做初审(40ms 内完成),`reject` → 删除回答停止送审,`pass` → 显示回答并继续切片\n'
+              + '- **后续句**:截前 2000 字符切片审核(每片约 500ms),`reject` → 删除所有已生成回答停止送审,`pass` → 继续切片送审\n'
+              + '- **结束**:模型流式输出结束后,审核链路整体结束',
+          },
+          {
+            heading: '审核流程配置示意',
+            markdown: '![审核流程配置示意图](/page-guides/audit-flow-overview.png)',
+          },
+          {
+            heading: '审核流程配置要点',
+            markdown:
+              '审核流程主链路(场景 → 进审 → 处置)由四个环节串联:\n\n'
+              + '- **场景**:覆盖文本对话输入 / 模型文本输出 / AI 美化图片 等多模态输入,按场景路由到对应审核链路\n'
+              + '- **机审进审逻辑**:由机审引擎按命中策略判断是否需要继续走到人工审核\n'
+              + '- **审核策略**:决定走机审 / 人审 / 处置的策略模板(命中后回灌到机审结果)\n'
+              + '- **人审进审逻辑**:对机审结果有疑义的内容进入人审环节\n'
+              + '- **处置方案**:综合机审 + 人审结果,给出最终处置(通过 / 拦截 / 下架 / 封号 / 敏感代答等)',
+          },
+          {
+            heading: '人工审核与处置配置全流程',
+            markdown: '![人工审核和处置配置全流程](/page-guides/manual-review-disposition-flow.png)',
+          },
+          {
+            heading: '人工审核与处置配置要点',
+            markdown:
+              '完整流程从原始内容开始,经场景路由 → 策略匹配 → AI 审核 → 抽审/全量人工审核 → 处置配置:\n\n'
+              + '- **场景 → 选择审核策略**:基于内容类型(文本 / 图片 / 音频 / 视频 / 文档 / 结构化数据)路由到对应审核策略\n'
+              + '- **AI 审核结果 → 处置分流**:高风险 / 中风险 / 低风险 / 敏感 各自走不同处置分支\n'
+              + '- **用户自定义审查范围**:用户可自行定义哪些内容进入人审(如「全部送人审」 / 「内容自审核不通过」 / 「用户 p1 = 封禁 / 禁言 / 上架 / 下架」)\n'
+              + '- **抽审规则**:AI 审核结果是否抽审 → 配置抽审规则(按 media 类型 / 按比例 / 命中后送审等)\n'
+              + '- **人工审核 → 结果一致时**:AI 结果与人审一致,以人审结果为最终结果\n'
+              + '- **人工审核 → 结果不一致时**:以人工结果为准,并支持以人工处置结果为最终结论\n'
+              + '- **结束处置配置**:统一汇总后回写到处置方案,落地到素材 / 账号 / 内容',
+          },
+        ],
       },
     ],
   },
@@ -120,6 +211,18 @@ const onlineReviewGuide: PageGuide = {
       heading: 'Notes',
       markdown:
         '审核模型时,需要额外传 `token_id` 与 `session_id`。',
+    },
+  ],
+}
+
+const usersAdminGuide: PageGuide = {
+  title: '账号管理 · 原型说明',
+  sections: [
+    {
+      heading: '本期范围',
+      markdown:
+        '一期先建立 `super_admin` / `admin` / `user` 三种角色的账号,'
+        + '角色元数据与菜单权限请前往「角色管理」「权限管理」页面。',
     },
   ],
 }
@@ -213,7 +316,7 @@ export const PAGE_GUIDES: Record<string, PageGuide> = {
   '/triggers/new': TBD,
   '/triggers/:id': TBD,
 
-  '/admin/users': TBD,
+  '/admin/users': usersAdminGuide,
   '/admin/roles': TBD,
 
   '/tags': TBD,
@@ -242,4 +345,78 @@ export function findGuide(pathname: string): PageGuide | null {
     if (ok) return PAGE_GUIDES[k]
   }
   return null
+}
+
+export interface ParsedGuideDraft {
+  sections: GuideSection[]
+  tabs?: GuideTab[]
+}
+
+const TAB_HEADING_RE = /^# Tab:\s*(.+?)\s*$/
+
+function slugifyTabLabel(s: string): string {
+  return (
+    s
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^\w\u4e00-\u9fa5-]/g, '') || `tab-${Math.random().toString(36).slice(2, 8)}`
+  )
+}
+
+function blockToSection(block: string): GuideSection {
+  const lines = block.split('\n')
+  if (lines[0]?.startsWith('## ')) {
+    return {
+      heading: lines[0].slice(3).trim(),
+      markdown: lines.slice(1).join('\n').trim(),
+    }
+  }
+  return { markdown: block.trim() }
+}
+
+function sectionToBlock(s: GuideSection): string {
+  return s.heading ? `## ${s.heading}\n${s.markdown}` : s.markdown
+}
+
+export function guideToDraft(g: PageGuide): string {
+  if (g.tabs && g.tabs.length > 0) {
+    return g.tabs
+      .map((t) => {
+        const head = `# Tab: ${t.label}`
+        const body = t.sections.map(sectionToBlock).join('\n\n---\n\n')
+        return body ? `${head}\n\n${body}` : head
+      })
+      .join('\n\n\n\n')
+  }
+  return g.sections.map(sectionToBlock).join('\n\n---\n\n')
+}
+
+export function draftToGuide(raw: string): ParsedGuideDraft {
+  const tabBlocks = raw.split(/\n{4,}/)
+  const firstLineOf = (b: string) => b.split('\n')[0] ?? ''
+
+  const hasAnyTab = tabBlocks.some((b) =>
+    TAB_HEADING_RE.test(firstLineOf(b)),
+  )
+
+  if (!hasAnyTab) {
+    return { sections: raw.split(/\n\n---\n\n/).map(blockToSection) }
+  }
+
+  const tabs: GuideTab[] = []
+  for (const b of tabBlocks) {
+    const m = firstLineOf(b).match(TAB_HEADING_RE)
+    if (!m) continue
+    const rest = b.split('\n').slice(1).join('\n').trim()
+    const sections = rest
+      ? rest.split(/\n\n---\n\n/).map(blockToSection)
+      : []
+    tabs.push({
+      key: slugifyTabLabel(m[1]),
+      label: m[1].trim(),
+      sections,
+    })
+  }
+  return { sections: [], tabs }
 }
