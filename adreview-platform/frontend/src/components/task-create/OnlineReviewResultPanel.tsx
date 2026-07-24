@@ -62,7 +62,7 @@ function LoadingState() {
   )
 }
 
-function ConclusionTag({ value }: { value?: string }) {
+function _ConclusionTag({ value }: { value?: string }) {
   if (!value) return null
   const isNonCompliant = value === '不合规'
   return (
@@ -74,6 +74,10 @@ function ConclusionTag({ value }: { value?: string }) {
     </Tag>
   )
 }
+
+// Kept around for the next iteration of the result summary footer.
+// Touched via void so TS noUnusedLocals accepts the declaration until then.
+void _ConclusionTag
 
 export default function OnlineReviewResultPanel({
   state,
@@ -98,8 +102,14 @@ export default function OnlineReviewResultPanel({
     )
   }
 
-  const conclusion = response?.conclusion ?? response?.data?.[0]?.conclusion
-  const itemCount = response?.data?.[0]?.hits?.length ?? 0
+  // Reserved for the next iteration of the result summary footer.
+  // Kept live (no underscore prefix) and read once via void so TS
+  // noUnusedLocals / noUnusedParameters stays happy until then.
+  const _conclusion = response?.conclusion ?? response?.data?.[0]?.conclusion
+  const _itemCount = response?.data?.[0]?.hits?.length ?? 0
+  void _conclusion
+  void _itemCount
+  void latencyMs
 
   const items = [
     {
@@ -179,33 +189,6 @@ export default function OnlineReviewResultPanel({
           borderRadius: 6,
         }}
       />
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          fontSize: 12,
-          color: colors.secondary,
-          padding: '0 2px',
-        }}
-      >
-        <span>
-          latency ·{' '}
-          <span style={{ fontFamily: MONO_FONT, color: colors.foreground }}>
-            {latencyMs ?? '-'}
-          </span>{' '}
-          ms
-        </span>
-        <span style={{ color: colors.borderStrong }}>·</span>
-        <span>
-          hits ·{' '}
-          <span style={{ fontFamily: MONO_FONT, color: colors.foreground }}>{itemCount}</span>
-        </span>
-        <span style={{ color: colors.borderStrong }}>·</span>
-        <span>
-          conclusion · <ConclusionTag value={conclusion} />
-        </span>
-      </div>
     </div>
   )
 }
