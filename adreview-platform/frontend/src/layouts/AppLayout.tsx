@@ -16,8 +16,6 @@ import {
   DatabaseOutlined,
   SearchOutlined,
   ThunderboltOutlined,
-  SafetyCertificateOutlined,
-  CrownOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
@@ -127,28 +125,17 @@ const NAV_SECTIONS: Array<{
     label: '系统管理',
     items: [
       {
-        kind: 'leaf',
-        key: 'admin-users',
+        kind: 'group',
+        key: 'admin',
         path: '/admin/users',
         label: '账号管理',
         icon: <TeamOutlined style={{ fontSize: ICON_SIZE }} />,
         roles: ['admin', 'superadmin', 'root_admin'],
-      },
-      {
-        kind: 'leaf',
-        key: 'admin-permissions',
-        path: '/admin/permissions',
-        label: '权限管理',
-        icon: <SafetyCertificateOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'superadmin', 'root_admin'],
-      },
-      {
-        kind: 'leaf',
-        key: 'admin-roles',
-        path: '/admin/roles',
-        label: '角色管理',
-        icon: <CrownOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'superadmin', 'root_admin'],
+        children: [
+          { key: 'admin-users', path: '/admin/users', label: '用户管理' },
+          { key: 'admin-roles', path: '/admin/roles', label: '角色管理' },
+          { key: 'admin-permissions', path: '/admin/permissions', label: '权限管理' },
+        ],
       },
       // { kind: 'leaf', key: 'admin-tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
     ],
