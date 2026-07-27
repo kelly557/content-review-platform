@@ -13,6 +13,7 @@ export interface MenuNode {
   label: string
   children?: MenuNode[]
   permissions?: PermissionKey[]
+  scope?: 'system' | 'custom'
 }
 
 export interface MenuPermissionRow {

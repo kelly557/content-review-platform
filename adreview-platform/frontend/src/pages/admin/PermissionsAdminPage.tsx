@@ -25,29 +25,58 @@ import {
   type MergedRoleKey,
 } from '@/types/domain'
 
-const { Title, Text } = Typography
+const { Title } = Typography
 
 // 权限管理页可见的角色 Tab（root_admin 已隐藏）
 const VISIBLE_ROLE_KEYS: ReadonlyArray<MergedRoleKey> = MERGED_ROLE_KEYS.filter(
   (r) => r !== 'root_admin',
 )
 
+// 不渲染"删除"checkbox 的节点（业务上无删除功能）
+const NON_DELETE_NODES = new Set<string>(['query', 'reports'])
+
 function buildMockPermissions(): RolePermissions {
   const rows = flattenMenuForTable()
   const out: Record<string, Record<string, Partial<Record<PermissionKey, boolean>>>> = {}
+
+  // 管理员对以下节点仅查看（无编辑/删除）：词库-系统 / 代答库-系统 / 模型库(系统+自定义)
+  const ADMIN_VIEW_ONLY_NODES = new Set<string>([
+    'resources-words-system',
+    'resources-replies-system',
+    'resources-models',
+  ])
+  // 业务员对账号管理下子节点全部不勾选
+  const STAFF_NO_ACCOUNT_NODES = new Set<string>([
+    'admin-users',
+    'admin-roles',
+    'admin-permissions',
+  ])
+
   for (const role of MERGED_ROLE_KEYS) {
     out[role] = {}
     for (const row of rows) {
-      out[role][row.menuNode.key] = { view: true }
+      const node = row.menuNode
+      const perms = node.permissions ?? []
+      const initial: Partial<Record<PermissionKey, boolean>> = {}
+      for (const p of PERMISSION_KEYS) {
+        initial[p] = perms.includes(p)
+      }
+      out[role][node.key] = initial
     }
   }
+
+  // 管理员：词库-系统 / 代答库-系统 / 模型库(系统+自定义) → 仅查看
+  for (const key of ADMIN_VIEW_ONLY_NODES) {
+    out.admin[key] = { view: true }
+  }
+  // 业务员：账号管理下 3 个子节点 → 全部不勾选
+  for (const key of STAFF_NO_ACCOUNT_NODES) {
+    out.staff[key] = {}
+  }
+  // superadmin / root_admin：全部全勾
   for (const row of rows) {
     out.superadmin[row.menuNode.key] = { view: true, edit: true, delete: true }
-  }
-  for (const row of rows) {
-    if (row.menuNode.key === 'reports') {
-      out.admin[row.menuNode.key] = { view: true }
-    }
+    out.root_admin[row.menuNode.key] = { view: true, edit: true, delete: true }
   }
   return out as RolePermissions
 }
@@ -85,36 +114,9 @@ export default function PermissionsAdminPage() {
     setSaving(false)
     setDirty(false)
     message.success(
-      `已保存 ${MERGED_ROLE_LABELS[activeRole]} 的权限（仅本地，Phase 5 落库）`,
+      `已保存 ${MERGED_ROLE_LABELS[activeRole]} 的菜单权限`,
     )
   }, [activeRole, message])
-
-  const handleReset = useCallback(() => {
-    setPerms((prev) => ({
-      ...prev,
-      [activeRole]: (() => {
-        const out: Record<string, Partial<Record<PermissionKey, boolean>>> = {}
-        for (const row of rows) {
-          out[row.menuNode.key] = { view: true }
-        }
-        if (activeRole === 'superadmin') {
-          for (const row of rows) {
-            out[row.menuNode.key] = { view: true, edit: true, delete: true }
-          }
-        }
-        if (activeRole === 'admin') {
-          for (const row of rows) {
-            if (row.menuNode.key === 'reports') {
-              out[row.menuNode.key] = { view: true }
-            }
-          }
-        }
-        return out
-      })(),
-    }))
-    setDirty(false)
-    message.success(`已重置 ${MERGED_ROLE_LABELS[activeRole]} 的权限为默认值`)
-  }, [activeRole, message, rows])
 
   const requestSwitchRole = useCallback(
     (next: MergedRoleKey) => {
@@ -170,12 +172,24 @@ export default function PermissionsAdminPage() {
       width: '60%',
       render: (_v, row) => {
         const node = row.menuNode
+        if (node.children && node.children.length > 0) return '-'
         const available = node.permissions ?? []
+        // 总览永远只读：只显示「查看」checkbox（锁定），不显示编辑/删除
+        if (node.key === 'overview') {
+          return (
+            <Space size="large">
+              <Checkbox checked disabled>查看</Checkbox>
+            </Space>
+          )
+        }
         return (
           <Space size="large">
             {PERMISSION_KEYS.map((p) => {
+              // query / reports 不渲染"删除"checkbox（业务无该功能）
+              if (p === 'delete' && NON_DELETE_NODES.has(node.key)) return null
               const checked = !!perms[activeRole]?.[node.key]?.[p]
-              const disabled = !available.includes(p)
+              const inAvailable = available.includes(p)
+              const disabled = !inAvailable || activeRole === 'superadmin'
               return (
                 <Checkbox
                   key={p}
@@ -195,14 +209,9 @@ export default function PermissionsAdminPage() {
 
   return (
     <div style={{ width: '100%' }}>
-      <Space direction="vertical" size={4} style={{ marginBottom: 16, width: '100%' }}>
-        <Space size="middle">
-          <Title level={4} style={{ margin: 0 }}>功能菜单权限</Title>
-          {dirty && <Tag color="warning">未保存</Tag>}
-        </Space>
-        <Text type="secondary">
-          当前为本地预览，保存后改动仅在本会话生效（Phase 5 落库）。
-        </Text>
+      <Space size="middle" style={{ marginBottom: 16 }}>
+        <Title level={4} style={{ margin: 0 }}>功能菜单权限</Title>
+        {dirty && <Tag color="warning">未保存</Tag>}
       </Space>
 
       <Card
@@ -225,14 +234,10 @@ export default function PermissionsAdminPage() {
                 </Button>
               ))}
             </Space.Compact>
-            <Button onClick={handleReset} disabled={!dirty}>
-              重置
-            </Button>
             <Button
               type="primary"
               icon={<SaveOutlined />}
               loading={saving}
-              disabled={!dirty}
               onClick={handleSave}
             >
               保存
