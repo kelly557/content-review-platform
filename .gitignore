@@ -33,3 +33,9 @@ adreview-platform/backend/docs/sql/
 # in the project root for quick reference; not for git)
 /专业审核架构图.png
 /审核架构图.png
+/内容安全审核技术架构图.png
+
+# Unrelated scratch files at repo root (not part of adreview-platform source)
+/content-safety-sales-enablement.html
+/.workbuddy/
+/mvp-sprint-plan/
