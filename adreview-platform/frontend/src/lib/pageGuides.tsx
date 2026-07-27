@@ -70,7 +70,7 @@ export const AGILE_PLAN_SECTIONS: GuideSection[] = [
   {
     heading: '会议节奏',
     markdown:
-      '- **每日站会**:每周三、周五 10:00,15 分钟\n'
+      '- **每日站会**:每周一、周三 下午 1:30,15 分钟\n'
       + '- **Sprint 计划和同步**:Sprint 首日 09:00,1 小时',
   },
   {
