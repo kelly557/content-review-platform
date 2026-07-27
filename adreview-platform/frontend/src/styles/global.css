@@ -119,14 +119,17 @@ a:hover { text-decoration: underline; }
   }
 }
 
-/* Borderless rules tree table: no borders, no background, no zebra striping */
+/* Borderless rules tree table: 2026-07-30 全清样式
+ * - 去掉表头分隔线、hover 高亮、行高亮 flash 动画、表格背景
+ * - 仅保留 section 行 padding 与 scroll-margin-top
+ */
 .rules-tree-table.ant-table {
   background: transparent;
 }
 .rules-tree-table.ant-table .ant-table-thead > tr > th {
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: none;
   padding-top: 12px;
   padding-bottom: 12px;
   font-weight: 500;
@@ -137,8 +140,12 @@ a:hover { text-decoration: underline; }
 .rules-tree-table.ant-table .ant-table-tbody > tr > td {
   background: transparent;
   border: none;
-  padding-top: 14px;
-  padding-bottom: 14px;
+  border-top: none;
+  border-bottom: none;
+  padding-top: 0;
+  padding-bottom: 0;
+  /* 2026-07-30 对齐 fix：td 默认 vertical-align middle 让 ☐ ↔ label 同基线 */
+  vertical-align: middle;
 }
 .rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-divider > td {
   height: 36px;
@@ -148,13 +155,13 @@ a:hover { text-decoration: underline; }
   pointer-events: none;
 }
 .rules-tree-table.ant-table .ant-table-tbody > tr:not(.rules-tree-row-section):not(.rules-tree-row-divider):hover > td {
-  background: rgba(37, 99, 235, 0.03);
+  background: transparent;
 }
 .rules-tree-table.ant-table .ant-table-cell-row-hover {
   background: transparent !important;
 }
 .rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-highlight > td {
-  background: rgba(37, 99, 235, 0.06);
+  background: transparent;
 }
 .rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-section > td {
   background: transparent;
@@ -164,12 +171,8 @@ a:hover { text-decoration: underline; }
 .rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-section:hover > td {
   background: transparent;
 }
-@keyframes rules-section-flash {
-  0%   { background: rgba(37, 99, 235, 0.22); }
-  100% { background: transparent; }
-}
 .rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-flash > td {
-  animation: rules-section-flash 1.5s ease-out;
+  animation: none;
 }
 
 /* Right-side drawer backdrop: dims Sider + Header + Content while drawer is open */

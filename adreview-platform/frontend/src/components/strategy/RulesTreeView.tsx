@@ -21,7 +21,9 @@ import { auditPointsApi } from '@/api/auditPoints'
 import type {
   AuditItem,
   AuditPoint,
+  SubAuditPointOverride,
 } from '@/types/domain'
+import { getMockSubAuditPoints } from '@/lib/riskPointMock'
 import { type CategoryKey } from './constants'
 import {
   type MediaPointOverrideMap,
@@ -76,7 +78,7 @@ export default function RulesTreeView({
   getPointMap,
   onPointMapChange,
   pointOverrides,
-  onPointOverrideChange,
+  onPointOverrideChange: _onPointOverrideChange,
   onPointToggle: _onPointToggle,
   refreshKey,
 }: Props) {
@@ -246,7 +248,6 @@ export default function RulesTreeView({
                 getPointMap={getPointMap}
                 pointOverrides={pointOverrides}
                 onPointMapChange={onPointMapChange}
-                onPointOverrideChange={onPointOverrideChange}
                 highlightItemId={highlightItemId}
                 mediaKey={mediaKey}
               />
@@ -453,7 +454,6 @@ function PointsColumn({
   getPointMap,
   pointOverrides,
   onPointMapChange,
-  onPointOverrideChange,
   highlightItemId,
   mediaKey,
 }: {
@@ -462,20 +462,6 @@ function PointsColumn({
   getPointMap: (itemId: number) => PointMap
   pointOverrides: MediaPointOverrideMap
   onPointMapChange: (itemId: number, next: PointMap) => void
-  onPointOverrideChange: (
-    itemId: number,
-    pointId: number,
-    override: {
-      medium_threshold?: number | null
-      high_threshold?: number | null
-      low_threshold_min?: number | null
-      low_threshold_max?: number | null
-      medium_threshold_min?: number | null
-      medium_threshold_max?: number | null
-      high_threshold_min?: number | null
-      high_threshold_max?: number | null
-    },
-  ) => void
   highlightItemId: number | null
   mediaKey: CategoryKey
 }) {
@@ -503,7 +489,30 @@ function PointsColumn({
     })
   })
 
-  const COL_TOTAL = 6
+const COL_TOTAL = 2
+  const [subEnabledMap, setSubEnabledMap] = useState<Record<number, boolean>>({})
+  const [subOverrides, setSubOverrides] = useState<
+    Record<number, SubAuditPointOverride>
+  >({})
+
+  const onSubOverrideChange = (
+    subId: number,
+    patch: Partial<SubAuditPointOverride>,
+  ) => {
+    setSubOverrides((m) => ({ ...m, [subId]: { ...m[subId], ...patch } }))
+  }
+
+  // 2026-07-30 新增：每个父审核点下的 sub 列表(供 ☑ 三态 + label 列共享)
+  const subsByPointId = useMemo(() => {
+    const map: Record<number, ReturnType<typeof getMockSubAuditPoints>> = {}
+    dataSource.forEach((r) => {
+      if (r.kind === 'point') {
+        map[r.point.id] = getMockSubAuditPoints(r.point.id, r.item.name_cn)
+      }
+    })
+    return map
+  }, [dataSource])
+
   const columns: TableColumnsType<FlatRowRecord> = [
     {
       title: '',
@@ -511,7 +520,9 @@ function PointsColumn({
       width: 40,
       onCell: (record) => {
         if (record.kind === 'section') return { colSpan: COL_TOTAL }
-        return {}
+        // 2026-07-30 对齐 fix：td 不再固定高度，由内容撑开（避免截断 sub 多行）
+        // ☐ ↔ label 对齐改为 ☐ cell / label cell 内部 div 强制 40px
+        return { style: { verticalAlign: 'top', padding: 0 } }
       },
       render: (_, record) => {
         if (record.kind === 'section') {
@@ -532,7 +543,6 @@ function PointsColumn({
                   gap: 10,
                   flexWrap: 'wrap',
                   paddingLeft: 10,
-                  borderLeft: '3px solid #2563EB',
                 }}
               >
                 <Text strong style={{ fontSize: 15, color: '#0F172A' }}>
@@ -542,8 +552,6 @@ function PointsColumn({
                   style={{
                     fontSize: 11,
                     padding: '1px 8px',
-                    borderRadius: 10,
-                    background: '#F1F5F9',
                     color: '#64748B',
                     lineHeight: 1.6,
                   }}
@@ -571,206 +579,199 @@ function PointsColumn({
           )
         }
         const pm = getPointMap(record.item.id)
+        // 2026-07-30 对齐 fix + 三态联动：☐ cell 内 div 强制 40px，让 checkbox
+        // 视觉中心与右侧 label cell 内 div 顶部 40px 同基线
+        // 子审核点全选/部分选 联动 父点 checkbox 视觉态：
+        //   - sub 全选  -> 父点 checked (打勾)
+        //   - sub 部分选 -> 父点 indeterminate (回字中间填充)
+        //   - sub 全不选 -> 父点 unchecked (空)
+        // 注意：仅视觉叠加，不联动父点自身 onPointMapChange (语义不变)
+        const pointSubs = subsByPointId[record.point.id] ?? []
+        const enabledCount = pointSubs.filter(
+          (s) => subEnabledMap[s.id] ?? s.is_enabled,
+        ).length
+        const totalCount = pointSubs.length
+        const allSubsSelected =
+          totalCount > 0 && enabledCount === totalCount
+        const partiallySelected =
+          enabledCount > 0 && enabledCount < totalCount
         return (
-          <input
-            type="checkbox"
-            checked={record.checked}
-            onChange={(e) =>
-              onPointMapChange(record.item.id, {
-                ...pm,
-                [record.point.id]: e.target.checked,
-              })
-            }
-            aria-label={`启用审核点 ${record.point.label_cn}`}
-            style={{ margin: 0 }}
-          />
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%',
+              height: 40,
+            }}
+          >
+            <input
+              type="checkbox"
+              ref={(el) => {
+                if (el) el.indeterminate = partiallySelected
+              }}
+              checked={record.checked || allSubsSelected}
+              onChange={(e) =>
+                onPointMapChange(record.item.id, {
+                  ...pm,
+                  [record.point.id]: e.target.checked,
+                })
+              }
+              aria-label={`启用审核点 ${record.point.label_cn}`}
+              style={{ margin: 0 }}
+            />
+          </div>
         )
       },
     },
     {
-      title: '审核点',
+      title: '',
       dataIndex: 'point',
-      onCell: (record) =>
-        record.kind === 'point' ? {} : { colSpan: 0 },
+      onCell: (record) => {
+        if (record.kind === 'point') {
+          // 2026-07-30 对齐 fix：td 顶部对齐，由内容（label 40px + subs 自然撑开）撑高
+          return { style: { verticalAlign: 'top', padding: 0 } }
+        }
+        return { colSpan: 0 }
+      },
       render: (_, record) => {
         if (record.kind !== 'point') return null
         const name = record.point.label_cn || record.point.label || record.point.code
+        const subs = subsByPointId[record.point.id] ?? []
         return (
-          <Space size={6} align="center">
-            <Text strong style={{ color: '#0F172A' }} ellipsis={{ tooltip: name }}>
-              {name}
-            </Text>
-          </Space>
-        )
-      },
-    },
-    {
-      title: '低风险分',
-      dataIndex: 'lowThreshold',
-      width: 220,
-      align: 'left',
-      onCell: (record) =>
-        record.kind === 'point' ? {} : { colSpan: 0 },
-      render: (_, record) => {
-        if (record.kind !== 'point') return null
-        const lowMin = record.override.low_threshold_min ?? 0
-        const medMin =
-          record.override.medium_threshold_min ??
-          (record.override.medium_threshold ?? record.point.medium_threshold)
-        const lowMaxDisplay =
-          typeof medMin === 'number' ? Math.max(0, medMin - 0.01) : null
-        const lowMaxConstraint = lowMaxDisplay ?? 99.99
-        return (
-          <Space size={8} direction="vertical" align="start" style={{ width: '100%' }}>
-            <Space size={8} align="center">
-              <RangeMinOnlyInput
-                disabled={record.editDisabled}
-                minValue={lowMin}
-                maxDisplay={lowMaxDisplay}
-                maxConstraint={lowMaxConstraint}
-                onMinChange={(v) =>
-                  onPointOverrideChange(record.item.id, record.point.id, {
-                    low_threshold_min: v,
-                    low_threshold_max: undefined,
-                  })
-                }
-                label="低风险分"
-              />
-            </Space>
-          </Space>
-        )
-      },
-    },
-    {
-      title: '中风险分',
-      dataIndex: 'mediumThreshold',
-      width: 220,
-      align: 'left',
-      onCell: (record) =>
-        record.kind === 'point' ? {} : { colSpan: 0 },
-      render: (_, record) => {
-        if (record.kind !== 'point') return null
-        const medMin =
-          record.override.medium_threshold_min ??
-          (record.override.medium_threshold ?? record.point.medium_threshold)
-        const highMin =
-          record.override.high_threshold_min ?? record.point.high_threshold
-        const mediumMaxDisplay =
-          typeof highMin === 'number' ? Math.max(0, highMin - 0.01) : null
-        const mediumMaxConstraint =
-          typeof highMin === 'number' ? Math.max(0, highMin - 0.01) : 99.99
-        return (
-          <Space size={8} direction="vertical" align="start" style={{ width: '100%' }}>
-            <Space size={8} align="center">
-              <RangeMinOnlyInput
-                disabled={record.editDisabled}
-                minValue={medMin}
-                maxDisplay={mediumMaxDisplay}
-                maxConstraint={mediumMaxConstraint}
-                onMinChange={(v) =>
-                  onPointOverrideChange(record.item.id, record.point.id, {
-                    medium_threshold_min: v,
-                    medium_threshold_max: undefined,
-                    medium_threshold: undefined,
-                  })
-                }
-                label="中风险分"
-              />
-            </Space>
-            {(() => {
-              const warning = checkThresholdConsistency(
-                medMin,
-                record.override.medium_threshold_max,
-                highMin,
-                record.override.high_threshold_max,
-              )
-              if (!warning) return null
-              return (
-                <Alert
-                  type="warning"
-                  showIcon
-                  message={warning}
-                  style={{ padding: '2px 8px', fontSize: 11 }}
-                />
-              )
-            })()}
-          </Space>
-        )
-      },
-    },
-    {
-      title: '高风险分',
-      dataIndex: 'highThreshold',
-      width: 220,
-      align: 'left',
-      onCell: (record) =>
-        record.kind === 'point' ? {} : { colSpan: 0 },
-      render: (_, record) => {
-        if (record.kind !== 'point') return null
-        const medMin =
-          record.override.medium_threshold_min ??
-          (record.override.medium_threshold ?? record.point.medium_threshold)
-        const highMin =
-          record.override.high_threshold_min ?? record.point.high_threshold
-        return (
-          <Space size={8} direction="vertical" align="start" style={{ width: '100%' }}>
-            <Space size={8} align="center">
-              <RangeMinOnlyInput
-                disabled={record.editDisabled}
-                minValue={highMin}
-                maxDisplay={100}
-                maxConstraint={100}
-                onMinChange={(v) =>
-                  onPointOverrideChange(record.item.id, record.point.id, {
-                    high_threshold_min: v,
-                    high_threshold_max: undefined,
-                    high_threshold: undefined,
-                  })
-                }
-                label="高风险分"
-              />
-            </Space>
-            {(() => {
-              const warning = checkThresholdConsistency(
-                medMin,
-                record.override.medium_threshold_max,
-                highMin,
-                record.override.high_threshold_max,
-              )
-              if (!warning) return null
-              return (
-                <Alert
-                  type="warning"
-                  showIcon
-                  message={warning}
-                  style={{ padding: '2px 8px', fontSize: 11 }}
-                />
-              )
-            })()}
-          </Space>
-        )
-      },
-    },
-    {
-      title: '审核说明',
-      dataIndex: 'description',
-      width: 240,
-      onCell: (record) =>
-        record.kind === 'point' ? {} : { colSpan: 0 },
-      render: (_, record) => {
-        if (record.kind !== 'point') return null
-        if (record.point.description) {
-          return (
-            <Text
-              style={{ fontSize: 12, color: '#475569', lineHeight: 1.6 }}
-              ellipsis={{ tooltip: record.point.description }}
+          <Space size={6} direction="vertical" align="start" style={{ width: '100%' }}>
+            {/* 父行 label：与 ☐ 同基线对齐（div 强制 height: 40 + flex center） */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0 16px',
+                width: '100%',
+                height: 40,
+              }}
             >
-              {record.point.description}
-            </Text>
-          )
-        }
-        return (
-          <span style={{ color: '#CBD5E1', fontSize: 12 }}>—</span>
+              <Text strong style={{ color: '#0F172A' }} ellipsis={{ tooltip: name }}>
+                {name}
+              </Text>
+            </div>
+            {subs.length > 0 && (
+              <div
+                style={{
+                  marginTop: 4,
+                  width: '100%',
+                }}
+              >
+                <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                  {subs.map((sub) => {
+                    const enabled = subEnabledMap[sub.id] ?? sub.is_enabled
+                    const ov = subOverrides[sub.id] ?? {}
+                    const lowMin = ov.low_threshold_min ?? sub.low_threshold
+                    const medMin =
+                      ov.medium_threshold_min ?? sub.medium_threshold
+                    const highMin =
+                      ov.high_threshold_min ?? sub.high_threshold
+                    const lowMaxDisplay =
+                      typeof medMin === 'number'
+                        ? Math.max(0, medMin - 0.01)
+                        : null
+                    const lowMaxConstraint = lowMaxDisplay ?? 99.99
+                    const mediumMaxDisplay =
+                      typeof highMin === 'number'
+                        ? Math.max(0, highMin - 0.01)
+                        : null
+                    const mediumMaxConstraint =
+                      typeof highMin === 'number'
+                        ? Math.max(0, highMin - 0.01)
+                        : 99.99
+                    const warning = checkThresholdConsistency(
+                      medMin,
+                      ov.medium_threshold_max,
+                      highMin,
+                      ov.high_threshold_max,
+                    )
+                    return (
+                      <div
+                        key={sub.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 12,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <Space size={6} align="center">
+                          <input
+                            type="checkbox"
+                            checked={enabled}
+                            onChange={(e) =>
+                              setSubEnabledMap((m) => ({
+                                ...m,
+                                [sub.id]: e.target.checked,
+                              }))
+                            }
+                            aria-label={`启用 sub-审核点 ${sub.label_cn}`}
+                            style={{ margin: 0 }}
+                          />
+                          <Text style={{ fontSize: 12, color: '#0F172A' }}>
+                            {sub.label_cn}
+                          </Text>
+                        </Space>
+                        <Space size={10} align="center" wrap>
+                          <RangeMinOnlyInput
+                            disabled={!enabled}
+                            minValue={lowMin}
+                            maxDisplay={lowMaxDisplay}
+                            maxConstraint={lowMaxConstraint}
+                            onMinChange={(v) =>
+                              onSubOverrideChange(sub.id, {
+                                low_threshold_min: v ?? undefined,
+                                low_threshold_max: undefined,
+                              })
+                            }
+                            label="低风险分"
+                          />
+                          <RangeMinOnlyInput
+                            disabled={!enabled}
+                            minValue={medMin}
+                            maxDisplay={mediumMaxDisplay}
+                            maxConstraint={mediumMaxConstraint}
+                            onMinChange={(v) =>
+                              onSubOverrideChange(sub.id, {
+                                medium_threshold_min: v ?? undefined,
+                                medium_threshold_max: undefined,
+                              })
+                            }
+                            label="中风险分"
+                          />
+                          <RangeMinOnlyInput
+                            disabled={!enabled}
+                            minValue={highMin}
+                            maxDisplay={100}
+                            maxConstraint={100}
+                            onMinChange={(v) =>
+                              onSubOverrideChange(sub.id, {
+                                high_threshold_min: v ?? undefined,
+                                high_threshold_max: undefined,
+                              })
+                            }
+                            label="高风险分"
+                          />
+                        </Space>
+                        {warning && (
+                          <Alert
+                            type="warning"
+                            showIcon
+                            message={warning}
+                            style={{ padding: '2px 8px', fontSize: 11, flexBasis: '100%' }}
+                          />
+                        )}
+                      </div>
+                    )
+                  })}
+                </Space>
+              </div>
+            )}
+          </Space>
         )
       },
     },
@@ -785,7 +786,7 @@ function PointsColumn({
         pagination={false}
         size="small"
         rowKey="key"
-        scroll={{ x: 1200 }}
+        scroll={{ x: 600 }}
         rowClassName={(record) => {
           if (record.kind === 'section') {
             if (highlightItemId != null && record.item.id === highlightItemId) {

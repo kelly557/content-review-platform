@@ -1410,6 +1410,40 @@ export interface AuditPointBatchResult {
   items: AuditPointBatchItem[]
 }
 
+/**
+ * sub-审核点（三级风险标签）展示型类型 — 2026-07-30 新增
+ *
+ * - 仅前端 mock，不参与后端 schema
+ * - 挂在 AuditPoint（审核点，二级风险标签）之下
+ * - 每个 sub 自带 3 档风险分阈值（low/medium/high）
+ * - 风险分阈值由 Box A「平台内置规则」表格的 sub 块内 RangeMinOnlyInput 编辑
+ */
+export interface SubAuditPoint {
+  id: number
+  point_id: number
+  l1_label: string
+  l2_label: string
+  l3_label: string
+  label_cn: string
+  low_threshold: number
+  medium_threshold: number
+  high_threshold: number
+  is_enabled: boolean
+  sort_order: number
+}
+
+/**
+ * sub-审核点阈值 override（前端 useState）— 与父级 AuditPointUpdate 字段对齐
+ */
+export interface SubAuditPointOverride {
+  low_threshold_min?: number
+  low_threshold_max?: number
+  medium_threshold_min?: number
+  medium_threshold_max?: number
+  high_threshold_min?: number
+  high_threshold_max?: number
+}
+
 export type LibraryKindOfType = 'word' | 'image' | 'reply'
 
 export interface LibraryBatchItemPayload {
