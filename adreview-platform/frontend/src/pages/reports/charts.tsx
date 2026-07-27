@@ -347,15 +347,16 @@ export function RiskTrendChart({
   error,
   emptyText = '暂无数据',
 }: RiskTrendChartProps) {
-  // 把每个 bucket 的 4 个 level 计数转成"占当天 4 个 level 之和"的百分比。
+  // 把每个 bucket 的 4 个 level 计数转成"占当天 4 个 level 之和"的百分比，保留 2 位小数。
   const data = points.flatMap((p) => {
     const sum = p.high + p.medium + p.low + p.none
     const safe = sum > 0 ? sum : 1
+    const r2 = (n: number) => Number(((n / safe) * 100).toFixed(2))
     return [
-      { bucket: p.date, level: '已通过', value: ((p.low + p.none) / safe) * 100 },
-      { bucket: p.date, level: '低风险', value: (p.low / safe) * 100 },
-      { bucket: p.date, level: '中风险', value: (p.medium / safe) * 100 },
-      { bucket: p.date, level: '高风险', value: (p.high / safe) * 100 },
+      { bucket: p.date, level: '已通过', value: r2(p.low + p.none) },
+      { bucket: p.date, level: '低风险', value: r2(p.low) },
+      { bucket: p.date, level: '中风险', value: r2(p.medium) },
+      { bucket: p.date, level: '高风险', value: r2(p.high) },
     ]
   })
   const hasData = data.some((d) => d.value > 0)
@@ -373,30 +374,22 @@ export function RiskTrendChart({
       data={data}
       xField="bucket"
       yField="value"
-      seriesField="level"
+      colorField="level"
+      scale={{
+        color: {
+          domain: ['已通过', '低风险', '中风险', '高风险'],
+          range: [PASS_COLOR, APPROVE_COLOR, REVIEW_COLOR, REJECT_COLOR],
+        },
+      }}
       height={height}
       smooth
       animate={false}
-      color={({ level }: { level: string }) => {
-        switch (level) {
-          case '已通过':
-            return PASS_COLOR
-          case '低风险':
-            return APPROVE_COLOR
-          case '中风险':
-            return REVIEW_COLOR
-          case '高风险':
-            return REJECT_COLOR
-          default:
-            return '#94A3B8'
-        }
-      }}
       point={{ shapeField: 'circle', sizeField: 2 }}
       axis={{
         x: { labelAutoRotate: false, labelFontSize: 10 },
         y: {
           labelFontSize: 10,
-          labelFormatter: (v: number) => `${v.toFixed(0)}%`,
+          labelFormatter: (v: number) => `${v.toFixed(2)}%`,
         },
       }}
       style={{ fillOpacity: 0.1 }}

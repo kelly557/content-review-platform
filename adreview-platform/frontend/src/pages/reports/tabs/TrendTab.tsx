@@ -11,7 +11,7 @@ import {
   Typography,
 } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
-import { reportsApi } from '@/api/reports'
+import { reportsApi, type MockMode } from '@/api/reports'
 import type {
   DetectionModality,
   MaterialType,
@@ -47,7 +47,7 @@ function shortDay(d: Dayjs): string {
   return d.format('MM.DD')
 }
 
-export default function TrendTab() {
+export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
   const [windowKey, setWindowKey] = useState<WindowKey>('7d')
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [mediaTypes, setMediaTypes] = useState<DetectionModality[]>([])
@@ -85,7 +85,7 @@ export default function TrendTab() {
       : undefined
 
     reportsApi
-      .riskTrend({ days, material_types: materialTypesParam })
+      .riskTrend({ days, material_types: materialTypesParam }, mock?.enabled ? mock : undefined)
       .then((rt) => {
         if (!alive) return
         setRiskPoints(rt.points)
@@ -98,7 +98,7 @@ export default function TrendTab() {
     return () => {
       alive = false
     }
-  }, [days, combinedMaterialTypes])
+  }, [days, combinedMaterialTypes, mock?.enabled, mock?.seed])
 
   // 4 张风险等级卡片：在窗口内把 4 个 level 的 count 求和，占比 = level_count / sum_of_4。
   const riskTotals = useMemo(() => {

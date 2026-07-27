@@ -21,7 +21,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { SettingOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
-import { reportsApi, alertsApi } from '@/api/reports'
+import { reportsApi, alertsApi, type MockMode } from '@/api/reports'
 import type { AlertEventOut, AnomalyResponse } from '@/types/domain'
 import { useAnomalyThresholds } from '@/hooks/useAnomalyThresholds'
 import {
@@ -66,7 +66,7 @@ const RULE_LABEL: Record<string, string> = {
   high_risk_account_concentration: '高风险账号聚集',
 }
 
-export default function AnomalyTab() {
+export default function AnomalyTab({ mock }: { mock?: MockMode } = {}) {
   const [windowKey, setWindowKey] = useState<WindowKey>('1h')
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [status, setStatus] = useState<'open' | 'acknowledged' | 'all'>('open')
@@ -96,9 +96,10 @@ export default function AnomalyTab() {
               end: customRange[1].endOf('day').toISOString(),
             }
           : { window: windowKey }
+      const mockArg = mock?.enabled ? mock : undefined
       const [a, l] = await Promise.all([
-        reportsApi.anomaly(opts),
-        alertsApi.list({ status: st, limit: 50 }),
+        reportsApi.anomaly(opts, mockArg),
+        alertsApi.list({ status: st, limit: 50 }, mockArg),
       ])
       setAnomaly(a)
       setAlerts(l.items)
@@ -112,14 +113,32 @@ export default function AnomalyTab() {
   useEffect(() => {
     void refresh(status)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [windowKey, status, customRange])
+  }, [windowKey, status, customRange, mock?.enabled, mock?.seed])
 
   const handleAck = async (id: number, note: string) => {
     setAcking(id)
     try {
-      await alertsApi.ack(id, note)
+      const mockArg = mock?.enabled ? mock : undefined
+      await alertsApi.ack(id, note, mockArg)
+      if (mock?.enabled) {
+        // Mock 模式下 ack 后只本地更新状态，避免重新请求打乱 seed
+        setAlerts((prev) =>
+          prev.map((a) =>
+            a.id === id
+              ? {
+                  ...a,
+                  status: 'acknowledged',
+                  ack_by: 1,
+                  ack_at: new Date().toISOString(),
+                  ack_note: note,
+                }
+              : a,
+          ),
+        )
+      } else {
+        await refresh(status)
+      }
       message.success('已确认')
-      await refresh(status)
     } catch (e: unknown) {
       message.error(e instanceof Error ? e.message : '操作失败')
     } finally {
