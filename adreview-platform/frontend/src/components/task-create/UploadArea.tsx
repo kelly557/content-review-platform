@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { Button, Input } from 'antd'
 import { DeleteOutlined, InboxOutlined } from '@ant-design/icons'
-import { TYPE_LABELS, type MaterialType } from '@/types/domain'
+import type { MaterialType } from '@/types/domain'
 import { colors } from '@/styles/theme'
 
 const { TextArea } = Input
@@ -187,7 +187,7 @@ export default function UploadArea({
               marginBottom: 6,
             }}
           >
-            点击或拖拽{TYPE_LABELS[type]}到此处
+            点击或上传文件
           </div>
         </div>
       </div>
