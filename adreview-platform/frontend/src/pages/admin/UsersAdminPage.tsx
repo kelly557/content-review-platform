@@ -163,9 +163,10 @@ export default function UsersAdminPage() {
   }
 
   const filteredItems = useMemo(() => {
-    if (roleFilter.length === 0) return items
+    const withoutRootAdmin = items.filter((u) => toMergedRoleKey(u.role) !== 'root_admin')
+    if (roleFilter.length === 0) return withoutRootAdmin
     const matched: User[] = []
-    for (const u of items) {
+    for (const u of withoutRootAdmin) {
       if (roleFilter.includes(toMergedRoleKey(u.role))) matched.push(u)
     }
     return matched
@@ -179,8 +180,9 @@ export default function UsersAdminPage() {
       title: '角色', dataIndex: 'role', width: 140,
       render: (r: UserRole) => {
         const merged = toMergedRoleKey(r)
+        if (merged === 'root_admin') return null
         const color =
-          merged === 'root_admin' || merged === 'superadmin'
+          merged === 'superadmin'
             ? 'purple'
             : merged === 'admin'
             ? 'blue'

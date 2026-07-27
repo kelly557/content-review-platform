@@ -2,9 +2,6 @@ import type { MenuNode, MenuPermissionRow } from '@/types/role'
 
 export const MENU_TREE: MenuNode[] = [
   { key: 'overview', label: '总览', permissions: ['view'] },
-  { key: 'tasks', label: '审核任务', permissions: ['view', 'edit', 'delete'] },
-  { key: 'triggers', label: '自动审核', permissions: ['view', 'edit', 'delete'] },
-  { key: 'materials', label: '素材库', permissions: ['view', 'edit', 'delete'] },
   {
     key: 'strategies',
     label: '审核策略',
@@ -25,10 +22,8 @@ export const MENU_TREE: MenuNode[] = [
       { key: 'resources-models', label: '模型库管理', permissions: ['view', 'edit', 'delete'] },
       { key: 'resources-images', label: '图片库管理', permissions: ['view', 'edit', 'delete'] },
       { key: 'resources-replies', label: '代答库管理', permissions: ['view', 'edit', 'delete'] },
-      { key: 'resources-knowledge', label: '知识库管理', permissions: ['view', 'edit', 'delete'] },
     ],
   },
-  { key: 'human-review-rules', label: '人工审核策略', permissions: ['view', 'edit', 'delete'] },
   { key: 'query', label: '数据查询', permissions: ['view', 'edit', 'delete'] },
   { key: 'reports', label: '数据报表', permissions: ['view'] },
   {

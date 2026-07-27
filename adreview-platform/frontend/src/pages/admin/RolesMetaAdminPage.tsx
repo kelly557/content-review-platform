@@ -51,6 +51,9 @@ const ENUM_KEYS = new Set<UserRole>([
   'root_admin',
 ])
 
+// 核心角色禁止删除（admin / superadmin / root_admin）
+const NON_DELETABLE_KEYS = new Set<UserRole>(['admin', 'superadmin', 'root_admin'])
+
 export default function RolesMetaAdminPage() {
   const { message } = App.useApp()
   const [roles, setRoles] = useState<RoleRow[]>([])
@@ -64,7 +67,7 @@ export default function RolesMetaAdminPage() {
     setRolesLoading(true)
     rolesApi
       .list()
-      .then((d) => setRoles(d.items))
+      .then((d) => setRoles(d.items.filter((r) => r.key !== 'root_admin')))
       .finally(() => setRolesLoading(false))
   }
 
@@ -173,7 +176,7 @@ export default function RolesMetaAdminPage() {
           <Button type="link" size="small" onClick={() => enterEditMode(row)}>
             编辑
           </Button>
-          {row.is_builtin ? (
+          {NON_DELETABLE_KEYS.has(row.key) ? (
             <Button type="link" size="small" disabled>
               删除
             </Button>
@@ -202,7 +205,8 @@ export default function RolesMetaAdminPage() {
       <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 16 }}>
         管理平台角色元数据（显示名、描述、状态）。Key 是角色的英文标识符，
         创建后不可修改。如需将新建角色分配给用户，需后端同步添加
-        UserRole enum 值。内置角色禁用删除（仅 UX 提示）。菜单权限矩阵请前往「权限管理」页面。
+        UserRole enum 值。admin / superadmin / root_admin 三类核心角色禁止删除；
+        其余角色可在确认后删除。菜单权限矩阵请前往「权限管理」页面。
       </Paragraph>
 
       <Card

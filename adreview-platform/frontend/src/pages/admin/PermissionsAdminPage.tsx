@@ -27,6 +27,11 @@ import {
 
 const { Title, Text } = Typography
 
+// 权限管理页可见的角色 Tab（root_admin 已隐藏）
+const VISIBLE_ROLE_KEYS: ReadonlyArray<MergedRoleKey> = MERGED_ROLE_KEYS.filter(
+  (r) => r !== 'root_admin',
+)
+
 function buildMockPermissions(): RolePermissions {
   const rows = flattenMenuForTable()
   const out: Record<string, Record<string, Partial<Record<PermissionKey, boolean>>>> = {}
@@ -210,7 +215,7 @@ export default function PermissionsAdminPage() {
         extra={
           <Space size="middle" wrap>
             <Space.Compact>
-              {MERGED_ROLE_KEYS.map((r) => (
+              {VISIBLE_ROLE_KEYS.map((r) => (
                 <Button
                   key={r}
                   type={activeRole === r ? 'primary' : 'default'}
