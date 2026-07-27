@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { InputNumber, Space, Switch, Typography, message as antMessage } from 'antd'
+import { Space, Switch, Typography, message as antMessage } from 'antd'
 import { RobotOutlined } from '@ant-design/icons'
 import type { AuditItem } from '@/types/domain'
 import { auditItemsApi } from '@/api/auditItems'
@@ -12,27 +12,18 @@ interface Props {
 }
 
 /**
- * 审核 Agent 卡片列(2026-07-29 视觉强化 v2)。
+ * 审核 Agent 卡片列(2026-07-29 视觉强化 v2;2026-07-29 进一步裁剪为仅保留启动开关)。
  *
- * - 顶部深色横幅(icon + 大字 + 计数),由外层 .module-box 包裹
+ * - 顶部浅色横幅(icon + 计数),由外层 .module-box 包裹
  * - 每张卡片左侧 4px 蓝色色块锚点
- * - 卡片字段(item 名 + 启用 Switch + 3 档阈值)横版并排 3 列
- *   (2026-07-29 用户反馈:去掉「审核内容」列)
+ * - 卡片字段收敛为「item 名 + 启用 Switch」一项,风险分档位已下沉到 Box A 审核点表格
  */
 export default function AgentCardsColumn({ packageCode, items }: Props) {
   const [savingByItemId, setSavingByItemId] = useState<Record<number, boolean>>({})
 
   if (items.length === 0) return null
 
-  const onPatch = async (
-    item: AuditItem,
-    payload: {
-      low_threshold_min?: number
-      medium_threshold_min?: number
-      high_threshold_min?: number
-      is_enabled?: boolean
-    },
-  ) => {
+  const onPatch = async (item: AuditItem, payload: { is_enabled?: boolean }) => {
     if (!packageCode) return
     if (item.is_builtin) return
     setSavingByItemId((m) => ({ ...m, [item.id]: true }))
@@ -81,7 +72,7 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
             color: '#94A3B8',
           }}
         >
-          在此直接定义 Agent 共享阈值(适用于上千条审核点)
+          仅启用 Agent,风险分档位请在左侧审核点表格调整
         </Text>
       </div>
 
@@ -89,12 +80,7 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
         {items.map((item) => {
           const saving = savingByItemId[item.id] ?? false
           return (
-            <AgentCard
-              key={item.id}
-              item={item}
-              saving={saving}
-              onPatch={onPatch}
-            />
+            <AgentCard key={item.id} item={item} saving={saving} onPatch={onPatch} />
           )
         })}
       </Space>
@@ -105,27 +91,10 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
 interface CardProps {
   item: AuditItem
   saving: boolean
-  onPatch: (
-    item: AuditItem,
-    payload: {
-      low_threshold_min?: number
-      medium_threshold_min?: number
-      high_threshold_min?: number
-      is_enabled?: boolean
-    },
-  ) => Promise<void>
+  onPatch: (item: AuditItem, payload: { is_enabled?: boolean }) => Promise<void>
 }
 
 function AgentCard({ item, saving, onPatch }: CardProps) {
-  const lowMin = item.low_threshold_min ?? 0
-  const medMin = item.medium_threshold_min ?? 60
-  const highMin = item.high_threshold_min ?? 90
-
-  const lowMaxDisplay = Math.max(0, medMin - 0.01)
-  const lowMaxConstraint = lowMaxDisplay
-  const medMaxDisplay = Math.max(0, highMin - 0.01)
-  const medMaxConstraint = medMaxDisplay
-
   return (
     <div
       style={{
@@ -144,7 +113,6 @@ function AgentCard({ item, saving, onPatch }: CardProps) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginBottom: 14,
         }}
       >
         <Text strong style={{ fontSize: 15, color: '#0F172A' }}>
@@ -157,98 +125,6 @@ function AgentCard({ item, saving, onPatch }: CardProps) {
           aria-label={`启用 ${item.name_cn}`}
         />
       </div>
-
-      {/* 3 列横版:低/中/高阈值(2026-07-29 去掉审核内容列) */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 24,
-          flexWrap: 'wrap',
-          alignItems: 'flex-start',
-        }}
-      >
-        <ThresholdField
-          label="低风险分"
-          minValue={lowMin}
-          maxDisplay={lowMaxDisplay}
-          maxConstraint={lowMaxConstraint}
-          disabled={saving}
-          onChange={(v) => onPatch(item, { low_threshold_min: v ?? 0 })}
-        />
-        <ThresholdField
-          label="中风险分"
-          minValue={medMin}
-          maxDisplay={medMaxDisplay}
-          maxConstraint={medMaxConstraint}
-          disabled={saving}
-          onChange={(v) => onPatch(item, { medium_threshold_min: v ?? 60 })}
-        />
-        <ThresholdField
-          label="高风险分"
-          minValue={highMin}
-          maxDisplay={100}
-          maxConstraint={100}
-          disabled={saving}
-          onChange={(v) => onPatch(item, { high_threshold_min: v ?? 90 })}
-        />
-      </div>
-    </div>
-  )
-}
-
-interface FieldProps {
-  label: string
-  minValue: number
-  maxDisplay: number
-  maxConstraint: number
-  disabled: boolean
-  onChange: (v: number | null) => void
-}
-
-function ThresholdField({
-  label,
-  minValue,
-  maxDisplay,
-  maxConstraint,
-  disabled,
-  onChange,
-}: FieldProps) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <Text type="secondary" style={{ fontSize: 12 }}>
-        {label}
-      </Text>
-      <Space size={6} align="center">
-        <InputNumber
-          size="small"
-          min={0}
-          max={maxConstraint}
-          step={0.01}
-          precision={2}
-          value={minValue}
-          disabled={disabled}
-          onChange={(v) => onChange(typeof v === 'number' ? v : null)}
-          style={{ width: 80 }}
-        />
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          ~
-        </Text>
-        <div
-          style={{
-            width: 80,
-            fontSize: 12,
-            color: '#64748B',
-            padding: '0 11px',
-            lineHeight: '24px',
-            background: '#F8FAFC',
-            border: '1px solid #E2E8F0',
-            borderRadius: 6,
-            textAlign: 'center',
-          }}
-        >
-          {maxDisplay.toFixed(2)}
-        </div>
-      </Space>
     </div>
   )
 }
