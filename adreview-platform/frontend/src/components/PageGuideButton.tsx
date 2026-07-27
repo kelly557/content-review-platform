@@ -121,7 +121,7 @@ function renderMarkdown(md: string): ReactNode {
   return md.split(/\n\n+/).map((b, i) => renderBlock(b, i))
 }
 
-function SectionsView({ sections }: { sections: GuideSection[] }) {
+export function SectionsView({ sections }: { sections: GuideSection[] }) {
   return (
     <div>
       {sections.map((s, idx) => (

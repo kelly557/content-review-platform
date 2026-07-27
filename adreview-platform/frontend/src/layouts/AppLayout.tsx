@@ -22,6 +22,7 @@ import { useAuthStore, useUiStore } from '@/store'
 import { ROLE_LABELS } from '@/types/domain'
 import { SystemHealthBanner } from '@/components/SystemHealthBanner'
 import { PageGuideButton } from '@/components/PageGuideButton'
+import { PlanButton } from '@/components/PlanButton'
 import { DEV_ACCOUNTS, IS_DEV, type DevAccount } from '@/lib/devAccounts'
 
 const { Header, Sider, Content } = Layout
@@ -386,6 +387,7 @@ export default function AppLayout() {
           </Space>
           <Space size="middle">
             <PageGuideButton />
+            {location.pathname === '/overview' && <PlanButton />}
             <Dropdown menu={{ items: dropdownItems }} placement="bottomRight">
               <Space style={{ cursor: 'pointer' }}>
                 <Avatar icon={<UserOutlined />} />
