@@ -155,6 +155,32 @@ const TBD: PageGuide = {
   ],
 }
 
+const queryGuide: PageGuide = {
+  title: '数据查询 · 原型说明',
+  sections: [
+    {
+      heading: '数据查询需要的字段',
+      markdown:
+        '列表展示字段(按表格降级为列表,保持原顺序):\n\n'
+        + '- **1. 审核模态**:图 / 文 / 语音 / 视频 / 文档\n'
+        + '- **2. 策略名称**:审核策略名称\n'
+        + '- **3. Request ID**:\n'
+        + '- **4. 审核结果**:通过 / 阻断\n'
+        + '- **5. 反馈结果**:漏过 / 误报\n'
+        + '- **6. 请求时间**:\n'
+        + '- **7. 操作**:详情 / 反馈\n'
+        + '- **9. RequestId**:\n'
+        + '- **10. Task ID**:\n'
+        + '- **11. 素材内容**:\n'
+        + '- **13. 风险标签**:label1 - abel2-label3\n'
+        + '- **14. 风险等级**:高 / 中 / 低 / 无\n'
+        + '- **15. IP**:\n'
+        + '- **16. Account Id**:\n'
+        + '- **17. 渠道**:模型输入 / 模型输出 / 小红书等用户自定义',
+    },
+  ],
+}
+
 const FILLED: Record<string, PageGuide> = {
   '/overview': {
     title: '总览 · 原型说明',
@@ -401,7 +427,7 @@ export const PAGE_GUIDES: Record<string, PageGuide> = {
   '/tasks/package/:id': TBD,
 
   '/reports': TBD,
-  '/query': TBD,
+  '/query': queryGuide,
 
   '/strategies': TBD,
   '/strategies/new': auditPointGuide,
