@@ -615,7 +615,7 @@ export default function ReviewAgentsPage() {
         open={step2Open}
         onClose={closeStep2}
         placement="right"
-        width="50vw"
+        width="60vw"
         mask={false}
         destroyOnHidden
         closeIcon={<CloseOutlined aria-label="关闭编辑抽屉" />}

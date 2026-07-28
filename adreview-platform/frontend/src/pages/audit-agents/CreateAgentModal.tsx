@@ -9,6 +9,7 @@ import {
   Popover,
   Select,
   Space,
+  Table,
   Tooltip,
   Typography,
 } from 'antd'
@@ -89,8 +90,21 @@ const DESC_MAX = 1000
 
 const CONFIG_HELP_LINES = [
   '根据您具体的业务检测需求,配置对应的检测规则。',
-  '"审核点"即待检测类别,"审核描述"是对相应审核点检测标准及规则的解释说明。',
-  '系统会将多个审核点及对应提示词以预设的格式拼接形成完整的提示词,调用大模型获得审核结果,故请尽可能用准确、精简的语言描述大模型的每一项审核点。',
+  '"审核标签"即待检测类别,"审核描述"是对相应审核标签检测标准及规则的解释说明。',
+  '系统会将多个审核标签及对应提示词以预设的格式拼接形成完整的提示词,调用大模型获得审核结果,故请尽可能用准确、精简的语言描述大模型的每一项审核标签。',
+]
+
+const EXAMPLE_TAGS = [
+  {
+    key: 'leak',
+    label: '站外引流',
+    desc: '通过直接引导或隐晦暗示（含变体、隐喻等）等表述将用户引导至站外其他平台或渠道的行为，包括明确提及竞品平台名称或其变体（如常见竞品有xx）、提及站外其他平台或其变体（如常见平台有xx），或包含明确的联系方式等。',
+  },
+  {
+    key: 'badreview',
+    label: '品牌恶意差评',
+    desc: '针对xx品牌的无依据恶意拉踩、不实负面差评，或针对品牌创始人的虚假诋毁、造谣等刻意损害品牌或创始人形象的评论或表述。如：xx都是虚假宣传，远不如xx品牌。',
+  },
 ]
 
 function genId() {
@@ -169,16 +183,6 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
   }
 
-  const handleExampleAll = () => {
-    setRows((prev) =>
-      prev.map((r) => ({
-        ...r,
-        desc: '示例:' + (r.desc || '医药/金融/广告等场景的违规识别与拦截'),
-      })),
-    )
-    message.info('已填入示例描述（原型）')
-  }
-
   const handleAiOptimizeAll = () => {
     onAiDrawerOpenChange(true)
   }
@@ -189,7 +193,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
       return prev.map((r, i) => (i === 0 ? { ...r, label: cfg.label, desc: cfg.desc } : r))
     })
     onAiDrawerOpenChange(false)
-    message.success('已替换首条审核点')
+    message.success('已替换首条审核标签')
     onAddOptimizedConfig?.(cfg)
   }
 
@@ -204,7 +208,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
     }
     const validRows = rows.filter((r) => r.label.trim() && r.desc.trim())
     if (validRows.length === 0) {
-      message.warning('请至少填写一行审核点与审核描述')
+      message.warning('请至少填写一行审核标签与审核描述')
       return
     }
     onSubmit({
@@ -313,7 +317,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
       >
         <div style={{ marginBottom: 12 }}>
           <Space size={8} align="center">
-            <Text strong>配置审核点</Text>
+            <Text strong>配置审核标签</Text>
             <Tooltip
               title={
                 <div style={{ maxWidth: 360, lineHeight: 1.6 }}>
@@ -323,7 +327,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
                 </div>
               }
             >
-              <InfoCircleOutlined style={{ color: '#94A3B8', cursor: 'help' }} aria-label="审核点说明" />
+              <InfoCircleOutlined style={{ color: '#94A3B8', cursor: 'help' }} aria-label="审核标签说明" />
             </Tooltip>
             <Text strong>自定义部分字符长度共计：{totalCharLen}</Text>
           </Space>
@@ -338,7 +342,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
             alignItems: 'start',
           }}
         >
-          <div style={{ fontWeight: 600 }}>审核点</div>
+          <div style={{ fontWeight: 600 }}>审核标签</div>
           <div
             style={{
               fontWeight: 600,
@@ -359,14 +363,17 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
               >
                 AI 优化提示词
               </Button>
-              <Button
-                size="small"
-                icon={<QuestionCircleOutlined />}
-                onClick={handleExampleAll}
-                aria-label="示例"
+              <Popover
+                content={<ExampleContent />}
+                title="示例"
+                trigger="hover"
+                placement="bottomRight"
+                overlayInnerStyle={{ width: 560, maxHeight: 480, overflow: 'auto' }}
               >
-                示例
-              </Button>
+                <Button size="small" icon={<QuestionCircleOutlined />} aria-label="示例">
+                  示例
+                </Button>
+              </Popover>
             </Space>
           </div>
           <div />{' '}
@@ -388,7 +395,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
             onClick={handleAddRow}
             style={{ paddingLeft: 0 }}
           >
-            添加自定义审核点
+            添加自定义审核标签
           </Button>
         </div>
       </Card>
@@ -427,6 +434,31 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
   )
 })
 
+function ExampleContent() {
+  return (
+    <Table
+      size="small"
+      bordered
+      pagination={false}
+      rowKey="key"
+      dataSource={EXAMPLE_TAGS}
+      columns={[
+        {
+          title: '审核标签',
+          dataIndex: 'label',
+          width: 120,
+          render: (v: string) => <strong>{v}</strong>,
+        },
+        {
+          title: '审核描述',
+          dataIndex: 'desc',
+          render: (v: string) => <div style={{ whiteSpace: 'pre-wrap' }}>{v}</div>,
+        },
+      ]}
+    />
+  )
+}
+
 export default CreateAgentForm
 
 function FragmentRow({
@@ -460,12 +492,12 @@ function FragmentRow({
   const editContent = (
     <div style={{ width: 360 }}>
       <div style={{ marginBottom: 12 }}>
-        <div style={{ marginBottom: 4 }}>审核点</div>
+        <div style={{ marginBottom: 4 }}>审核标签</div>
         <Input
           value={draft.label}
           onChange={(e) => setDraft({ ...draft, label: e.target.value })}
           maxLength={LABEL_MAX}
-          placeholder="请输入审核点"
+          placeholder="请输入审核标签"
         />
       </div>
       <div style={{ marginBottom: 12 }}>
@@ -495,7 +527,7 @@ function FragmentRow({
         <TextArea
           value={row.label}
           onChange={(e) => onChange({ label: e.target.value })}
-          placeholder="请输入审核点"
+          placeholder="请输入审核标签"
           maxLength={LABEL_MAX}
           showCount
           autoSize={{ minRows: ROW_TEXT_AREA_ROWS, maxRows: ROW_TEXT_AREA_ROWS }}
@@ -525,37 +557,37 @@ function FragmentRow({
       >
         <Popover
           content={editContent}
-          title="编辑审核点"
+title="编辑审核标签"
           trigger="click"
           open={editOpen}
           onOpenChange={(v) => setEditOpen(v)}
           placement="left"
           destroyTooltipOnHide
         >
-          <Tooltip title="编辑审核点" placement="left">
+          <Tooltip title="编辑审核标签" placement="left">
             <Button
               size="small"
               type="text"
               icon={<EditOutlined style={{ fontSize: 13 }} />}
-              aria-label={`编辑审核点 ${row.label || ''}`}
+              aria-label={`编辑审核标签 ${row.label || ''}`}
               style={{ color: '#64748B', width: 24, height: 24, padding: 0 }}
             />
           </Tooltip>
         </Popover>
         <Popconfirm
-          title="确认删除该审核点？删除后无法撤销。"
+          title="确认删除该审核标签？删除后无法撤销。"
           okText="删除"
           cancelText="取消"
           okButtonProps={{ danger: true }}
           onConfirm={onDelete}
           placement="left"
         >
-          <Tooltip title="删除该审核点" placement="left">
+          <Tooltip title="删除该审核标签" placement="left">
             <Button
               size="small"
               type="text"
               icon={<DeleteOutlined style={{ fontSize: 13 }} />}
-              aria-label={`删除审核点 ${row.label || ''}`}
+              aria-label={`删除审核标签 ${row.label || ''}`}
               style={{ color: '#64748B', width: 24, height: 24, padding: 0 }}
             />
           </Tooltip>
