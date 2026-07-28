@@ -194,7 +194,7 @@ export default function RulesTreeView({
       {/* Box A: 内置规则(中栏 + 右栏表格整体一个 box,2026-07-29) */}
       <div className="module-box">
         <div className="module-section-title">
-          <span>平台内置规则</span>
+          <span>通用规则</span>
           <span className="module-section-title-count">{builtinItems.length}</span>
         </div>
         <div
@@ -217,7 +217,7 @@ export default function RulesTreeView({
             }}
           >
             <ItemGroup
-              title="平台内置"
+              title=""
               icon={<LockOutlined style={{ color: '#D97706' }} />}
               items={builtinItems}
               enabledSet={enabledSet}
@@ -578,14 +578,15 @@ const COL_TOTAL = 2
             </div>
           )
         }
-        const pm = getPointMap(record.item.id)
         // 2026-07-30 对齐 fix + 三态联动：☐ cell 内 div 强制 40px，让 checkbox
         // 视觉中心与右侧 label cell 内 div 顶部 40px 同基线
         // 子审核点全选/部分选 联动 父点 checkbox 视觉态：
         //   - sub 全选  -> 父点 checked (打勾)
         //   - sub 部分选 -> 父点 indeterminate (回字中间填充)
         //   - sub 全不选 -> 父点 unchecked (空)
-        // 注意：仅视觉叠加，不联动父点自身 onPointMapChange (语义不变)
+        // 2026-07-30 点击父点 ☐ 联动 toggle 所有 sub:
+        //   - 当前全选 / 部分选 -> 全部取消
+        //   - 当前全不选 -> 全部选中
         const pointSubs = subsByPointId[record.point.id] ?? []
         const enabledCount = pointSubs.filter(
           (s) => subEnabledMap[s.id] ?? s.is_enabled,
@@ -595,6 +596,16 @@ const COL_TOTAL = 2
           totalCount > 0 && enabledCount === totalCount
         const partiallySelected =
           enabledCount > 0 && enabledCount < totalCount
+        const onToggleSubs = () => {
+          const nextAll = !(allSubsSelected || partiallySelected)
+          setSubEnabledMap((m) => {
+            const next = { ...m }
+            pointSubs.forEach((s) => {
+              next[s.id] = nextAll
+            })
+            return next
+          })
+        }
         return (
           <div
             style={{
@@ -611,12 +622,7 @@ const COL_TOTAL = 2
                 if (el) el.indeterminate = partiallySelected
               }}
               checked={record.checked || allSubsSelected}
-              onChange={(e) =>
-                onPointMapChange(record.item.id, {
-                  ...pm,
-                  [record.point.id]: e.target.checked,
-                })
-              }
+              onChange={onToggleSubs}
               aria-label={`启用审核点 ${record.point.label_cn}`}
               style={{ margin: 0 }}
             />

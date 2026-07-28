@@ -1,6 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Space, Switch, Typography, message as antMessage } from 'antd'
-import { RobotOutlined } from '@ant-design/icons'
 import type { AuditItem } from '@/types/domain'
 import { auditItemsApi } from '@/api/auditItems'
 
@@ -12,11 +11,11 @@ interface Props {
 }
 
 /**
- * 审核 Agent 卡片列(2026-07-29 视觉强化 v2;2026-07-29 进一步裁剪为仅保留启动开关)。
+ * 审核 Agent 卡片列(2026-07-30 进一步去视觉)。
  *
- * - 顶部浅色横幅(icon + 计数),由外层 .module-box 包裹
- * - 每张卡片左侧 4px 蓝色色块锚点
- * - 卡片字段收敛为「item 名 + 启用 Switch」一项,风险分档位已下沉到 Box A 审核点表格
+ * - 顶部 banner 仅保留「审核 Agent」标题 + 计数,无 icon、无副标题
+ * - 每张 Agent 行去所有卡片样式(border/底色/圆角/左色块),只保留 padding + 内容
+ * - 布局:Switch 在左、item 名在右
  */
 export default function AgentCardsColumn({ packageCode, items }: Props) {
   const [savingByItemId, setSavingByItemId] = useState<Record<number, boolean>>({})
@@ -39,7 +38,7 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
 
   return (
     <div>
-      {/* 顶部横幅 2026-07-29 改为浅色:取消黑色背景,与 Box 整体风格一致 */}
+      {/* 顶部 banner：2026-07-30 去 icon 与副标题，仅保留标题 + 计数 */}
       <div
         style={{
           display: 'flex',
@@ -48,7 +47,6 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
           marginBottom: 16,
         }}
       >
-        <RobotOutlined style={{ fontSize: 18, color: '#2563EB' }} />
         <Text style={{ fontSize: 14, fontWeight: 600, color: '#0F172A' }}>
           审核 Agent
         </Text>
@@ -56,27 +54,16 @@ export default function AgentCardsColumn({ packageCode, items }: Props) {
           style={{
             fontSize: 11,
             padding: '2px 8px',
-            borderRadius: 10,
-            background: 'var(--color-divider)',
-            color: 'var(--color-muted)',
+            color: '#94A3B8',
             lineHeight: 1.6,
             fontWeight: 500,
           }}
         >
           {items.length}
         </span>
-        <Text
-          style={{
-            marginLeft: 'auto',
-            fontSize: 12,
-            color: '#94A3B8',
-          }}
-        >
-          仅启用 Agent,风险分档位请在左侧审核点表格调整
-        </Text>
       </div>
 
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
         {items.map((item) => {
           const saving = savingByItemId[item.id] ?? false
           return (
@@ -95,35 +82,51 @@ interface CardProps {
 }
 
 function AgentCard({ item, saving, onPatch }: CardProps) {
+  // 2026-07-30 fix: 启动开关不能切换的问题
+  // - 之前 checked={item.is_enabled} 直接绑 props,后端 PATCH 后 props 不刷新,
+  //   用户视觉上「点了没反应」。改为本地 state 乐观更新 + 失败回滚。
+  const [localEnabled, setLocalEnabled] = useState(item.is_enabled)
+
+  // props 变化(父组件刷新 items)时同步本地 state
+  useEffect(() => {
+    setLocalEnabled(item.is_enabled)
+  }, [item.is_enabled])
+
+  const onToggle = async (checked: boolean) => {
+    const prev = localEnabled
+    setLocalEnabled(checked)
+    try {
+      await onPatch(item, { is_enabled: checked })
+    } catch {
+      setLocalEnabled(prev)
+    }
+  }
+
   return (
     <div
       style={{
-        background: '#FFFFFF',
-        border: '1px solid var(--color-border)',
-        borderLeft: '4px solid #2563EB',
-        borderRadius: 8,
-        padding: '14px 16px',
+        padding: '8px 16px',
         opacity: saving ? 0.7 : 1,
         transition: 'opacity 200ms',
       }}
     >
-      {/* 标题行:item 名称 + 启用开关 */}
+      {/* 2026-07-30：去卡片样式 (border/底色/圆角/左色块) + Switch 移到左侧 */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          gap: 12,
         }}
       >
+        <Switch
+          checked={localEnabled}
+          loading={saving}
+          onChange={onToggle}
+          aria-label={`启用 ${item.name_cn}`}
+        />
         <Text strong style={{ fontSize: 15, color: '#0F172A' }}>
           {item.name_cn}
         </Text>
-        <Switch
-          checked={item.is_enabled}
-          disabled={saving}
-          onChange={(checked) => onPatch(item, { is_enabled: checked })}
-          aria-label={`启用 ${item.name_cn}`}
-        />
       </div>
     </div>
   )
