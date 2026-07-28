@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   Form,
   Input,
@@ -9,6 +9,7 @@ import {
   Steps,
   App,
   Modal,
+  Switch,
 } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
@@ -18,18 +19,22 @@ import {
   type CategoryKey,
 } from './strategy/constants'
 import StrategyTypeTabs from './strategy/StrategyTypeTabs'
+import ComposeRuleCard from './strategy/ComposeRuleCard'
 import {
   DEFAULT_AUDIO_FEATURES,
   DEFAULT_DOC_COMPOSE_MODES,
+  DEFAULT_IMAGE_TEXT_CONFIG,
   DEFAULT_VIDEO_COMPOSE_MODES,
   DEFAULT_VIDEO_FRAME_INTERVAL_SEC,
   extractAudioFeatures,
   extractDocComposeModes,
+  extractImageTextConfig,
   extractVideoComposeModes,
   extractVideoFrameInterval,
   extractVoiceRuleMode,
   type AudioFeatures,
   type DocComposeModes,
+  type ImageTextConfig,
   type LibraryType,
   type LlmReviewConfig,
   type StrategyPointRef,
@@ -146,6 +151,10 @@ export default function CreateStrategyForm({
   const [docComposeModes, setDocComposeModes] = useState<DocComposeModes>(DEFAULT_DOC_COMPOSE_MODES)
   const [videoComposeModes, setVideoComposeModes] = useState<VideoComposeModes>(DEFAULT_VIDEO_COMPOSE_MODES)
   const [videoFrameInterval, setVideoFrameInterval] = useState<number>(DEFAULT_VIDEO_FRAME_INTERVAL_SEC)
+  // 图文 (image tab 子分类) — 2026-07-30 新增
+  const [imageTextConfig, setImageTextConfig] = useState<ImageTextConfig>(DEFAULT_IMAGE_TEXT_CONFIG)
+  /** 左栏「图文」item 选中状态;null=未选中,bar 不显示 */
+  const [selectedImageItem, setSelectedImageItem] = useState<AuditItem | null>(null)
   const [llmReview, setLlmReview] = useState<LlmReviewConfig>({
     is_enabled: false,
     model_id: null,
@@ -229,6 +238,7 @@ export default function CreateStrategyForm({
     setDocComposeModes(extractDocComposeModes(initial.definition))
     setVideoComposeModes(extractVideoComposeModes(initial.definition))
     setVideoFrameInterval(extractVideoFrameInterval(initial.definition))
+    setImageTextConfig(extractImageTextConfig(initial.definition))
     const from = initial.effective_from ? dayjs(initial.effective_from) : null
     const until = initial.effective_until ? dayjs(initial.effective_until) : null
     const useRange = !!(from && until)
@@ -259,6 +269,85 @@ export default function CreateStrategyForm({
     setLibraryRefreshTick((n) => n + 1)
   }
 
+  /**
+   * 2026-07-30 「图文」bar (右栏顶部):
+   * - 仅当用户选中左栏「图文」item 时显示
+   * - 默认未选中(Switch OFF);开启后才渲染 ComposeRuleCard
+   * - 「图文」文字紧贴 Switch,带「开」/「关」标签(参考截图)
+   */
+  const renderImageTextBar = (): ReactNode => {
+    if (!selectedImageItem || selectedImageItem.name_cn !== '图文') {
+      return null
+    }
+    const segments: Array<{
+      title: string
+      mode: string
+      reuseValue: string
+      reuseLabel: string
+      independentValue: string
+      helpText: string
+    }> = [
+      {
+        title: '图文审核',
+        mode: imageTextConfig.mode,
+        reuseValue: 'reuse_text',
+        reuseLabel: '复用文本审核规则',
+        independentValue: 'independent',
+        helpText:
+          '复用模式时，图文审核完全镜像「文本审核」标签下的规则；切换为独立规则后将显示独立的图文规则。',
+      },
+    ]
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '12px 0',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: '#0F172A',
+          }}
+        >
+          图文
+        </span>
+        <Switch
+          checked={imageTextConfig.enabled}
+          checkedChildren="开"
+          unCheckedChildren="关"
+          onChange={(checked) =>
+            setImageTextConfig({ ...imageTextConfig, enabled: checked })
+          }
+          aria-label="启用图文审核"
+        />
+        {imageTextConfig.enabled && (
+          <div style={{ flex: 1 }}>
+            <ComposeRuleCard
+              cardTitle=""
+              segments={segments}
+              onSegmentChange={(_idx, next) =>
+                setImageTextConfig({
+                  ...imageTextConfig,
+                  mode: next as ImageTextConfig['mode'],
+                })
+              }
+              onConfirmSegmentSwitch={async (_idx, nextMode) => {
+                if (nextMode === 'independent') {
+                  setPointMap((prev) => ({ ...prev, image: {} }))
+                }
+                return true
+              }}
+            />
+          </div>
+        )}
+      </div>
+    )
+  }
+
   /** modal 取消/关闭 */
   const onLibraryCancel = () => setLinkLibraryItem(null)
 
@@ -272,6 +361,9 @@ export default function CreateStrategyForm({
     out.video_frame_mode = videoComposeModes.frame_mode
     out.video_audio_mode = videoComposeModes.audio_mode
     out.video_frame_interval_sec = videoFrameInterval
+    // 图文 (2026-07-30)
+    out.image_text_enabled = imageTextConfig.enabled
+    out.image_text_mode = imageTextConfig.mode
 
     return Object.keys(out).length > 0 ? out : undefined
   }
@@ -582,6 +674,8 @@ export default function CreateStrategyForm({
               onVideoComposeModesChange={setVideoComposeModes}
               videoFrameInterval={videoFrameInterval}
               onVideoFrameIntervalChange={setVideoFrameInterval}
+              imageTextBar={renderImageTextBar()}
+              onSelectedItemChange={setSelectedImageItem}
             />
 
             {/* 「策略下启用审核项时为其绑词库」入口。即时 PATCH 写 audit_item_libraries。 */}

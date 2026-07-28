@@ -1854,6 +1854,34 @@ export const DEFAULT_VIDEO_COMPOSE_MODES: VideoComposeModes = {
   audio_mode: 'reuse_audio',
 }
 
+// 图文 (2026-07-30 新增): 图片审核 tab 下「图文」子分类开关 + 模式
+export type ImageTextMode = 'reuse_text' | 'independent'
+
+export interface ImageTextConfig {
+  enabled: boolean
+  mode: ImageTextMode
+}
+
+export const DEFAULT_IMAGE_TEXT_CONFIG: ImageTextConfig = {
+  enabled: false,
+  mode: 'reuse_text',
+}
+
+function isImageTextMode(v: unknown): v is ImageTextMode {
+  return v === 'reuse_text' || v === 'independent'
+}
+
+export function extractImageTextConfig(definition?: {
+  image_text_enabled?: unknown
+  image_text_mode?: unknown
+}): ImageTextConfig {
+  const enabled = Boolean(definition?.image_text_enabled)
+  const mode = isImageTextMode(definition?.image_text_mode)
+    ? (definition!.image_text_mode as ImageTextMode)
+    : 'reuse_text'
+  return { enabled, mode }
+}
+
 export const DEFAULT_VIDEO_FRAME_INTERVAL_SEC = 5
 export const MIN_VIDEO_FRAME_INTERVAL_SEC = 1
 export const MAX_VIDEO_FRAME_INTERVAL_SEC = 1000

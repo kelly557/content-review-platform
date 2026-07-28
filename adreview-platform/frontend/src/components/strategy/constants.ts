@@ -27,7 +27,7 @@ export const CATEGORIES: CategoryDef[] = [
   {
     key: 'image',
     label: MEDIA_TYPE_LABELS.image,
-    categoryNames: ['特殊场景'],
+    categoryNames: ['特殊场景', '图文'],
   },
   {
     key: 'text',

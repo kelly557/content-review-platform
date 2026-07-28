@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Alert,
   Button,
@@ -12,10 +12,7 @@ import {
   Typography,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
-import {
-  CheckOutlined,
-  LockOutlined,
-} from '@ant-design/icons'
+import { CheckOutlined } from '@ant-design/icons'
 import { auditItemsApi } from '@/api/auditItems'
 import { auditPointsApi } from '@/api/auditPoints'
 import type {
@@ -62,6 +59,11 @@ interface Props {
    * 重新拉 items 让左栏 badge 同步刷新。
    */
   refreshKey?: number
+  // ---- 2026-07-30 「图文」开关 bar ----
+  /** 父级传入的「图文」bar(右栏顶部,Switch + ComposeRuleCard);默认 null */
+  imageTextBar?: ReactNode
+  /** 左栏 item 选中变化回调(供父级判断是否显示 bar);不传则维持内部 selectedItemId 行为 */
+  onSelectedItemChange?: (item: AuditItem | null) => void
 }
 
 const PACKAGE_TO_MEDIA: Record<string, CategoryKey> = {
@@ -81,6 +83,8 @@ export default function RulesTreeView({
   onPointOverrideChange: _onPointOverrideChange,
   onPointToggle: _onPointToggle,
   refreshKey,
+  imageTextBar,
+  onSelectedItemChange,
 }: Props) {
   const [items, setItems] = useState<AuditItem[]>([])
   const [pointsByItem, setPointsByItem] = useState<Record<number, AuditPoint[]>>(
@@ -218,48 +222,64 @@ export default function RulesTreeView({
           >
             <ItemGroup
               title=""
-              icon={<LockOutlined style={{ color: '#D97706' }} />}
+              icon={null}
               items={builtinItems}
               enabledSet={enabledSet}
               enabledPointCountByItem={enabledPointCountByItem}
               activeItemId={selectedItemId}
-              onPick={(id) => setSelectedItemId(id)}
+              onPick={(id) => {
+                setSelectedItemId(id)
+                if (onSelectedItemChange) {
+                  const picked = builtinItems.find((it) => it.id === id) ?? null
+                  onSelectedItemChange(picked)
+                }
+              }}
               loading={loading}
               emptyText="暂无通用规则"
             />
           </div>
 
-          {/* 右栏：所有内置 item 的审核点摊平 + 共用一个滚动容器 */}
+          {/* 右栏：所有内置 item 的审核点摊平 + 共用一个滚动容器。
+               2026-07-30 「图文」bar 已挪到 PointsColumn 内部 section header 位置(替代「图文通用」module)。 */}
           <div
-            ref={rightPaneRef}
             style={{
               paddingLeft: isStacked ? 0 : 16,
-              maxHeight: isStacked ? 'none' : 720,
-              minHeight: isStacked ? 'auto' : 540,
               minWidth: 0,
-              overflowY: isStacked ? 'visible' : 'auto',
-              overflowX: isStacked ? 'visible' : 'auto',
+              display: 'flex',
+              flexDirection: 'column',
             }}
           >
-            {items.length > 0 ? (
-              <PointsColumn
-                items={builtinItems}
-                pointsByItem={pointsByItem}
-                getPointMap={getPointMap}
-                pointOverrides={pointOverrides}
-                onPointMapChange={onPointMapChange}
-                highlightItemId={highlightItemId}
-                mediaKey={mediaKey}
-              />
-            ) : (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={
-                  <Text type="secondary">该审核类型暂无审核项</Text>
-                }
-                style={{ padding: '80px 0' }}
-              />
-            )}
+            <div
+              ref={rightPaneRef}
+              style={{
+                maxHeight: isStacked ? 'none' : 720,
+                minHeight: isStacked ? 'auto' : 540,
+                minWidth: 0,
+                overflowY: isStacked ? 'visible' : 'auto',
+                overflowX: isStacked ? 'visible' : 'auto',
+              }}
+            >
+              {items.length > 0 ? (
+                <PointsColumn
+                  items={builtinItems}
+                  pointsByItem={pointsByItem}
+                  getPointMap={getPointMap}
+                  pointOverrides={pointOverrides}
+                  onPointMapChange={onPointMapChange}
+                  highlightItemId={highlightItemId}
+                  mediaKey={mediaKey}
+                  imageTextBar={imageTextBar}
+                />
+              ) : (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    <Text type="secondary">该审核类型暂无审核项</Text>
+                  }
+                  style={{ padding: '80px 0' }}
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -303,24 +323,24 @@ function ItemGroup({
 }) {
   return (
     <div style={{ marginBottom: 8 }}>
-      <div
-        style={{
-          padding: '4px 16px 8px',
-          fontSize: 12,
-          color: '#64748B',
-          fontWeight: 500,
-          letterSpacing: 0.5,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-        }}
-      >
-        {icon}
-        <span>{title}</span>
-        <span style={{ color: '#94A3B8', fontWeight: 400 }}>
-          {items.length}
-        </span>
-      </div>
+      {/* 2026-07-30：title 为空且 icon=null 时整行不渲染；保留 title 时也不再显示 items.length「9」计数 */}
+      {(icon || title) && (
+        <div
+          style={{
+            padding: '4px 16px 8px',
+            fontSize: 12,
+            color: '#64748B',
+            fontWeight: 500,
+            letterSpacing: 0.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          {icon}
+          {title && <span>{title}</span>}
+        </div>
+      )}
       {items.length === 0 ? (
         <div
           style={{
@@ -456,6 +476,7 @@ function PointsColumn({
   onPointMapChange,
   highlightItemId,
   mediaKey,
+  imageTextBar,
 }: {
   items: AuditItem[]
   pointsByItem: Record<number, AuditPoint[]>
@@ -464,6 +485,8 @@ function PointsColumn({
   onPointMapChange: (itemId: number, next: PointMap) => void
   highlightItemId: number | null
   mediaKey: CategoryKey
+  /** 「图文」bar;当 record.item.name_cn === '图文' 时,在 section header 位置渲染 */
+  imageTextBar?: ReactNode
 }) {
   const dataSource: FlatRowRecord[] = []
   items.forEach((it) => {
@@ -474,6 +497,9 @@ function PointsColumn({
       item: it,
       pointCount: ps.length,
     })
+    // 2026-07-30 「图文」item 不渲染下方的 parent row + sub row,
+    // 替代方案由 section header render 直接返回 imageTextBar
+    if (it.name_cn === '图文') return
     const pm = getPointMap(it.id)
     ps.forEach((p) => {
       dataSource.push({
@@ -526,6 +552,20 @@ const COL_TOTAL = 2
       },
       render: (_, record) => {
         if (record.kind === 'section') {
+          // 2026-07-30 「图文」item: 不渲染普通 section header(图文 [N 全选]),
+          // 也不渲染下方的 parent row + sub row(由 PointsColumn dataSource 中的 point row 渲染);
+          // 替代方案:渲染 imageTextBar(图文 + Switch + ComposeRuleCard)
+          if (record.item.name_cn === '图文') {
+            return (
+              <div
+                style={{
+                  padding: '20px 0 10px',
+                }}
+              >
+                {imageTextBar}
+              </div>
+            )
+          }
           const pm = getPointMap(record.item.id)
           const points = pointsByItem[record.item.id] ?? []
           const selected = points.filter((p) => pm[p.id] === true).length

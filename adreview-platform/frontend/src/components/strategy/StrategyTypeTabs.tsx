@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Alert, Space, Tabs, type TabsProps } from 'antd'
 import { CATEGORIES, type CategoryKey } from './constants'
 import RulesTreeView from './RulesTreeView'
@@ -79,6 +79,11 @@ interface Props {
   onVideoComposeModesChange?: (next: VideoComposeModes) => void
   videoFrameInterval?: number
   onVideoFrameIntervalChange?: (next: number) => void
+  // ---- 图文 (image tab 子分类) ----
+  /** 「图文」bar 元素(右栏顶部 Switch + ComposeRuleCard 容器);父级传入 */
+  imageTextBar?: ReactNode
+  /** 左栏 item 选中变化回调(供父级判断是否显示 bar) */
+  onSelectedItemChange?: (item: AuditItem | null) => void
   // 点击 item 行「关联库」入口 → 父级 (CreateStrategyForm) 打开 ItemLibrariesEditor 并即时 PATCH
   onItemLibraryLink?: (item: AuditItem) => void
   /**
@@ -106,6 +111,8 @@ export default function StrategyTypeTabs({
   onVideoComposeModesChange,
   videoFrameInterval = DEFAULT_VIDEO_FRAME_INTERVAL_SEC,
   onVideoFrameIntervalChange,
+  imageTextBar,
+  onSelectedItemChange,
   onItemLibraryLink,
   libraryRefreshTick,
 }: Props) {
@@ -137,6 +144,7 @@ export default function StrategyTypeTabs({
     return true
   }
 
+  // 图文 (image tab 子分类): 开启后用户选择模式,模式切到独立时弹确认
   // 文档：两段
   const buildDocSegments = (): ComposeSegment[] | null => {
     if (!docComposeModes || !onDocComposeModesChange) return null
@@ -364,6 +372,8 @@ export default function StrategyTypeTabs({
                 }
                 onItemLibraryLink={onItemLibraryLink}
                 refreshKey={libraryRefreshTick}
+                imageTextBar={cat.key === 'image' ? imageTextBar : undefined}
+                onSelectedItemChange={cat.key === 'image' ? onSelectedItemChange : undefined}
               />
             </>
           )}

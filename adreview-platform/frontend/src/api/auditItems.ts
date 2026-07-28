@@ -1,6 +1,7 @@
 import type { AxiosError } from 'axios'
 import { api } from './client'
 import {
+  MOCK_IMAGE_RISK_ITEMS,
   MOCK_TEXT_RISK_ITEMS,
   type MockRiskItem,
 } from '@/lib/riskPointMock'
@@ -20,10 +21,12 @@ function isFallbackError(err: unknown): boolean {
   return ax.response.status >= 500
 }
 
-function asMockAuditItems(): AuditItem[] {
-  return MOCK_TEXT_RISK_ITEMS.map((m: MockRiskItem) => ({
+function asMockAuditItems(packageCode: string): AuditItem[] {
+  // 2026-07-30: image 包兜底时使用 MOCK_IMAGE_RISK_ITEMS(包含「图文」)
+  const items = packageCode === 'image_audit_pro' ? MOCK_IMAGE_RISK_ITEMS : MOCK_TEXT_RISK_ITEMS
+  return items.map((m: MockRiskItem) => ({
     id: m.id,
-    package_code: 'text_audit_pro',
+    package_code: packageCode,
     code: `mock_${m.id}`,
     name_cn: m.name,
     small_category: null,
@@ -58,8 +61,12 @@ export const auditItemsApi = {
       .get<AuditItem[]>(`/packages/${packageCode}/items`, { params })
       .then((r) => r.data)
       .catch((err: unknown) => {
-        if (packageCode === 'text_audit_pro' && isFallbackError(err)) {
-          return asMockAuditItems()
+        // 2026-07-30: image_audit_pro 也允许兜底到 mock(含「图文」)
+        if (
+          (packageCode === 'text_audit_pro' || packageCode === 'image_audit_pro') &&
+          isFallbackError(err)
+        ) {
+          return asMockAuditItems(packageCode)
         }
         throw err
       })

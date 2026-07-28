@@ -39,6 +39,18 @@ export const MOCK_TEXT_RISK_ITEMS: MockRiskItem[] = [
   { id: 9005, name: '未成年人' },
 ]
 
+/**
+ * 图片审核一级审核项（mock） — 2026-07-30 新增
+ *
+ * 图片审核 tab 在 mock 兜底场景下没有专属 item 列表,直接复用文本的 item
+ * 加上「图文」(image tab 子分类入口)。由 auditItems.ts 的 asMockAuditItems
+ * 在 packageCode 为 image 时调用。
+ */
+export const MOCK_IMAGE_RISK_ITEMS: MockRiskItem[] = [
+  ...MOCK_TEXT_RISK_ITEMS,
+  { id: 9006, name: '图文' },
+]
+
 /** 文本审核二级风险标签 / 审核点（mock） */
 export const MOCK_TEXT_RISK_POINTS: MockRiskPoint[] = [
   // 涉政 (9001)
