@@ -170,10 +170,10 @@ export default function StrategyTypeTabs({
         independentValue: 'independent',
       },
       {
-        title: '图像审核',
+        title: '图片审核',
         mode: docComposeModes.image_mode,
         reuseValue: 'reuse_image' satisfies DocImageMode,
-        reuseLabel: '复用图像审核规则',
+        reuseLabel: '复用图片审核规则',
         independentValue: 'independent',
       },
     ]
@@ -188,14 +188,14 @@ export default function StrategyTypeTabs({
         title: '画面审核',
         mode: videoComposeModes.frame_mode,
         reuseValue: 'reuse_image' satisfies VideoFrameMode,
-        reuseLabel: '复用图像审核规则',
+        reuseLabel: '复用图片审核规则',
         independentValue: 'independent',
       },
       {
         title: '语音审核',
         mode: videoComposeModes.audio_mode,
         reuseValue: 'reuse_audio' satisfies VideoAudioMode,
-        reuseLabel: '复用短音频同步审核规则',
+        reuseLabel: '复用语音审核',
         independentValue: 'independent',
         helpText:
           '复用模式时，语音审核完全镜像短音频同步审核规则；切换为独立规则后将显示独立的视频音频规则。',
