@@ -1,4 +1,4 @@
-import { App, Card, Checkbox, Radio, Space, Tooltip, Typography } from 'antd'
+import { Card, Checkbox, Radio, Space, Tooltip, Typography } from 'antd'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 import type { AudioFeatures, VoiceRuleMode } from '@/types/domain'
 
@@ -9,7 +9,7 @@ interface Props {
   onVoiceRuleModeChange: (next: VoiceRuleMode) => void
   audioFeatures: AudioFeatures
   onAudioFeaturesChange: (next: AudioFeatures) => void
-  /** 当 mode 由独立 → 复用 时，父级会先清空 audio 维度下的 item/point 状态；这里只负责提示用户 */
+  /** @deprecated 2026-07-30 全部场景去掉弹窗后不再调用,保留接口仅为不破坏外部调用方 */
   onConfirmModeSwitch?: (next: VoiceRuleMode) => Promise<boolean> | boolean
 }
 
@@ -18,36 +18,11 @@ export default function AudioRuleCard({
   onVoiceRuleModeChange,
   audioFeatures,
   onAudioFeaturesChange,
-  onConfirmModeSwitch,
+  onConfirmModeSwitch: _onConfirmModeSwitch,
 }: Props) {
-  const { modal } = App.useApp()
-
   const handleModeChange = (next: VoiceRuleMode) => {
     if (next === voiceRuleMode) return
-    const apply = () => onVoiceRuleModeChange(next)
-    if (!onConfirmModeSwitch) {
-      apply()
-      return
-    }
-    modal.confirm({
-      title:
-        next === 'independent'
-          ? '切换为「设置独立规则」'
-          : '切换为「复用文本审核规则」',
-      content:
-        next === 'independent'
-          ? '切换后，语音标签下将显示独立的语音规则（默认全部未启用）。当前语音规则将被清空，是否继续？'
-          : '切换后，语音审核将完全复用「文本审核」标签下的规则。当前语音标签下的自定义规则将被忽略，是否继续？',
-      okText: '确认切换',
-      cancelText: '取消',
-      onOk: async () => {
-        const ok = await onConfirmModeSwitch(next)
-        if (ok) {
-          apply()
-        }
-        return ok
-      },
-    })
+    onVoiceRuleModeChange(next)
   }
 
   const setMoaning = (v: boolean) =>

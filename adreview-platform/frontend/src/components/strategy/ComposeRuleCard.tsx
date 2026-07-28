@@ -1,4 +1,4 @@
-import { App, Card, Radio, Space, Tooltip, Typography } from 'antd'
+import { Card, Radio, Space, Tooltip, Typography } from 'antd'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 
 const { Text } = Typography
@@ -23,6 +23,7 @@ interface Props {
   segments: ReadonlyArray<ComposeSegment>
   independentLabel?: string
   onSegmentChange: (segmentIndex: number, nextMode: string) => void
+  /** @deprecated 2026-07-30 全部场景去掉弹窗后不再调用,保留接口仅为不破坏外部调用方 */
   onConfirmSegmentSwitch?: (segmentIndex: number, nextMode: string) => Promise<boolean> | boolean
   extra?: React.ReactNode
 }
@@ -36,35 +37,13 @@ export default function ComposeRuleCard({
   segments,
   independentLabel = DEFAULT_INDEPENDENT_LABEL,
   onSegmentChange,
-  onConfirmSegmentSwitch,
+  onConfirmSegmentSwitch: _onConfirmSegmentSwitch,
   extra,
 }: Props) {
-  const { modal } = App.useApp()
-
   const handleChange = (segmentIndex: number, nextMode: string) => {
     const seg = segments[segmentIndex]
     if (seg.mode === nextMode) return
-    const apply = () => onSegmentChange(segmentIndex, nextMode)
-    if (!onConfirmSegmentSwitch) {
-      apply()
-      return
-    }
-    const goingIndependent = nextMode === seg.independentValue
-    modal.confirm({
-      title: goingIndependent
-        ? `切换「${seg.title}」为「${independentLabel}」`
-        : `切换「${seg.title}」为「${seg.reuseLabel}」`,
-      content: goingIndependent
-        ? `切换后，${seg.title}将显示独立的${seg.title}规则（默认全部未启用）。当前自定义规则将被清空，是否继续？`
-        : `切换后，该段审核将完全复用对应规则。当前自定义规则将被忽略，是否继续？`,
-      okText: '确认切换',
-      cancelText: '取消',
-      onOk: async () => {
-        const ok = await onConfirmSegmentSwitch(segmentIndex, nextMode)
-        if (ok) apply()
-        return ok
-      },
-    })
+    onSegmentChange(segmentIndex, nextMode)
   }
 
   const sectionTitle: React.CSSProperties = {
