@@ -1882,6 +1882,34 @@ export function extractImageTextConfig(definition?: {
   return { enabled, mode }
 }
 
+/**
+ * 图文独立规则勾选状态(itemId → pointId → checked)。
+ * 持久化到 strategy.definition.image_text_points (JSONB)。
+ * 后端 schema 不解析,仅透传。
+ */
+export type ImageTextPointsMap = Record<number, Record<number, boolean>>
+
+/** 从 definition.image_text_points 反序列化为 ItemPointMap;容错空 map。 */
+export function extractImageTextPoints(definition?: {
+  image_text_points?: unknown
+}): ImageTextPointsMap {
+  const raw = definition?.image_text_points
+  if (!raw || typeof raw !== 'object') return {}
+  const out: ImageTextPointsMap = {}
+  for (const [itemIdStr, byPoint] of Object.entries(raw as Record<string, unknown>)) {
+    const itemId = Number(itemIdStr)
+    if (!Number.isFinite(itemId) || !byPoint || typeof byPoint !== 'object') continue
+    const inner: Record<number, boolean> = {}
+    for (const [pointIdStr, v] of Object.entries(byPoint as Record<string, unknown>)) {
+      const pointId = Number(pointIdStr)
+      if (!Number.isFinite(pointId)) continue
+      inner[pointId] = v === true
+    }
+    if (Object.keys(inner).length > 0) out[itemId] = inner
+  }
+  return out
+}
+
 export const DEFAULT_VIDEO_FRAME_INTERVAL_SEC = 5
 export const MIN_VIDEO_FRAME_INTERVAL_SEC = 1
 export const MAX_VIDEO_FRAME_INTERVAL_SEC = 1000

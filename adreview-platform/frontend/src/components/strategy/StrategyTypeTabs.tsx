@@ -12,6 +12,7 @@ import type {
   DocComposeModes,
   DocImageMode,
   DocTextMode,
+  ImageTextMode,
   VideoAudioMode,
   VideoComposeModes,
   VideoFrameMode,
@@ -21,6 +22,7 @@ import {
   DEFAULT_VIDEO_FRAME_INTERVAL_SEC,
 } from '@/types/domain'
 import {
+  type ItemPointMap,
   type MediaPointMap,
   type MediaPointOverrideMap,
   type PointMap,
@@ -84,6 +86,16 @@ interface Props {
   imageTextBar?: ReactNode
   /** 左栏 item 选中变化回调(供父级判断是否显示 bar) */
   onSelectedItemChange?: (item: AuditItem | null) => void
+  /**
+   * 2026-07-30 「图文」独立规则配置。
+   * 当 imageTextConfig.mode === 'independent' 时,在 image tab 右栏 PointsColumn
+   * 之后追加渲染一棵 text 包规则树,允许用户配置图文专有的独立规则。
+   */
+  imageTextConfig?: {
+    mode: ImageTextMode
+    pointMap: ItemPointMap
+    onPointMapChange: (itemId: number, next: PointMap) => void
+  }
   // 点击 item 行「关联库」入口 → 父级 (CreateStrategyForm) 打开 ItemLibrariesEditor 并即时 PATCH
   onItemLibraryLink?: (item: AuditItem) => void
   /**
@@ -113,6 +125,7 @@ export default function StrategyTypeTabs({
   onVideoFrameIntervalChange,
   imageTextBar,
   onSelectedItemChange,
+  imageTextConfig,
   onItemLibraryLink,
   libraryRefreshTick,
 }: Props) {
@@ -374,6 +387,7 @@ export default function StrategyTypeTabs({
                 refreshKey={libraryRefreshTick}
                 imageTextBar={cat.key === 'image' ? imageTextBar : undefined}
                 onSelectedItemChange={cat.key === 'image' ? onSelectedItemChange : undefined}
+                imageTextConfig={cat.key === 'image' ? imageTextConfig : undefined}
               />
             </>
           )}

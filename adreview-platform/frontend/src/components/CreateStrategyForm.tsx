@@ -29,6 +29,7 @@ import {
   extractAudioFeatures,
   extractDocComposeModes,
   extractImageTextConfig,
+  extractImageTextPoints,
   extractVideoComposeModes,
   extractVideoFrameInterval,
   extractVoiceRuleMode,
@@ -49,6 +50,7 @@ import {
   countEnabledPoints,
   EMPTY_MEDIA_OVERRIDES,
   flattenEnabledPointsWithOverride,
+  type ItemPointMap,
   type MediaPointMap,
   type MediaPointOverrideMap,
   type PointOverride,
@@ -153,6 +155,14 @@ export default function CreateStrategyForm({
   const [videoFrameInterval, setVideoFrameInterval] = useState<number>(DEFAULT_VIDEO_FRAME_INTERVAL_SEC)
   // 图文 (image tab 子分类) — 2026-07-30 新增
   const [imageTextConfig, setImageTextConfig] = useState<ImageTextConfig>(DEFAULT_IMAGE_TEXT_CONFIG)
+  /**
+   * 图文独立规则勾选状态(itemId → pointId → checked)。
+   * 与现有 pointMap.image/text/audio/doc/video 平级但独立存储,
+   * 因为 CategoryKey 不含 'image_text',不污染 MediaPointMap 类型。
+   * 提交时序列化为 definition.image_text_points (JSONB)。
+   * 2026-07-30 新增。
+   */
+  const [imageTextPointMap, setImageTextPointMap] = useState<ItemPointMap>({})
   /** 左栏「图文」item 选中状态;null=未选中,bar 不显示 */
   const [selectedImageItem, setSelectedImageItem] = useState<AuditItem | null>(null)
   const [llmReview, setLlmReview] = useState<LlmReviewConfig>({
@@ -239,6 +249,7 @@ export default function CreateStrategyForm({
     setVideoComposeModes(extractVideoComposeModes(initial.definition))
     setVideoFrameInterval(extractVideoFrameInterval(initial.definition))
     setImageTextConfig(extractImageTextConfig(initial.definition))
+    setImageTextPointMap(extractImageTextPoints(initial.definition))
     const from = initial.effective_from ? dayjs(initial.effective_from) : null
     const until = initial.effective_until ? dayjs(initial.effective_until) : null
     const useRange = !!(from && until)
@@ -364,6 +375,10 @@ export default function CreateStrategyForm({
     // 图文 (2026-07-30)
     out.image_text_enabled = imageTextConfig.enabled
     out.image_text_mode = imageTextConfig.mode
+    // 图文独立规则勾选状态:仅在独立模式下写入,空 map 也写(显式清空)
+    if (imageTextConfig.mode === 'independent') {
+      out.image_text_points = imageTextPointMap
+    }
 
     return Object.keys(out).length > 0 ? out : undefined
   }
@@ -676,6 +691,19 @@ export default function CreateStrategyForm({
               onVideoFrameIntervalChange={setVideoFrameInterval}
               imageTextBar={renderImageTextBar()}
               onSelectedItemChange={setSelectedImageItem}
+              imageTextConfig={
+                imageTextConfig.enabled
+                  ? {
+                      mode: imageTextConfig.mode,
+                      pointMap: imageTextPointMap,
+                      onPointMapChange: (itemId, next) =>
+                        setImageTextPointMap((prev) => ({
+                          ...prev,
+                          [itemId]: next,
+                        })),
+                    }
+                  : undefined
+              }
             />
 
             {/* 「策略下启用审核项时为其绑词库」入口。即时 PATCH 写 audit_item_libraries。 */}

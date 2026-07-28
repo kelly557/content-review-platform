@@ -6,6 +6,7 @@ import {
   Grid,
   InputNumber,
   Space,
+  Spin,
   Table,
   Tag,
   Tooltip,
@@ -21,8 +22,11 @@ import type {
   SubAuditPointOverride,
 } from '@/types/domain'
 import { getMockSubAuditPoints } from '@/lib/riskPointMock'
+import type { ImageTextMode } from '@/types/domain'
 import { type CategoryKey } from './constants'
 import {
+  EMPTY_MEDIA_OVERRIDES,
+  type ItemPointMap,
   type MediaPointOverrideMap,
   type PointMap,
 } from './pointLevel'
@@ -64,6 +68,18 @@ interface Props {
   imageTextBar?: ReactNode
   /** 左栏 item 选中变化回调(供父级判断是否显示 bar);不传则维持内部 selectedItemId 行为 */
   onSelectedItemChange?: (item: AuditItem | null) => void
+  /**
+   * 2026-07-30 「图文」独立规则配置。
+   * 当 mode === 'independent' 时,在右栏 PointsColumn 之后追加渲染
+   * 一棵 text 包规则树 (IndependentTextRulesBlock),
+   * 让用户配置图文专有的独立规则(独立于 image/text 维度)。
+   * enabled=false 或 mode='reuse_text' 时不渲染。
+   */
+  imageTextConfig?: {
+    mode: ImageTextMode
+    pointMap: ItemPointMap
+    onPointMapChange: (itemId: number, next: PointMap) => void
+  }
 }
 
 const PACKAGE_TO_MEDIA: Record<string, CategoryKey> = {
@@ -85,6 +101,7 @@ export default function RulesTreeView({
   refreshKey,
   imageTextBar,
   onSelectedItemChange,
+  imageTextConfig,
 }: Props) {
   const [items, setItems] = useState<AuditItem[]>([])
   const [pointsByItem, setPointsByItem] = useState<Record<number, AuditPoint[]>>(
@@ -277,6 +294,16 @@ export default function RulesTreeView({
                     <Text type="secondary">该审核类型暂无审核项</Text>
                   }
                   style={{ padding: '80px 0' }}
+                />
+              )}
+              {/* 2026-07-30 「图文」独立模式:在 PointsColumn 后追加渲染
+                  text 包规则树,允许用户配置独立的图文规则。
+                  切到「复用」时整块消失,但 imageTextConfig.pointMap 状态保留
+                  (CreateStrategyForm 顶层 imageTextPointMap 持有),再次独立时恢复。 */}
+              {imageTextConfig?.mode === 'independent' && (
+                <IndependentTextRulesBlock
+                  pointMap={imageTextConfig.pointMap}
+                  onPointMapChange={imageTextConfig.onPointMapChange}
                 />
               )}
             </div>
@@ -856,6 +883,113 @@ const COL_TOTAL = 2
             />
           ),
         }}
+      />
+    </div>
+  )
+}
+
+/**
+ * 「图文」独立规则 sub-TreeView (2026-07-30 新增)
+ *
+ * - 渲染在 RulesTreeView(image 包)右栏 PointsColumn 之后
+ * - 自己 fetch text_audit_pro 包 + 渲染一个独立的 PointsColumn
+ * - 不渲染左栏 ItemGroup、不渲染 Box A 标题 — 只关心 PointsColumn
+ * - 勾选状态由父级 CreateStrategyForm.imageTextPointMap 持有(经 imageTextConfig 透传),
+ *   不与 image/text 维度的 pointMap 共享
+ * - 不接 pointOverrides(图文独立规则暂不做阈值/动作 override,2026-07-30 范围最小化)
+ *
+ * 后续如需支持 override/agent,扩展 props 即可,不影响 RulesTreeView 主包。
+ */
+function IndependentTextRulesBlock({
+  pointMap,
+  onPointMapChange,
+}: {
+  pointMap: ItemPointMap
+  onPointMapChange: (itemId: number, next: PointMap) => void
+}) {
+  const [items, setItems] = useState<AuditItem[]>([])
+  const [pointsByItem, setPointsByItem] = useState<Record<number, AuditPoint[]>>({})
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const packageCode = 'text_audit_pro'
+    let cancel = false
+    setLoading(true)
+    auditItemsApi
+      .list(packageCode)
+      .then(async (itemsRes) => {
+        if (cancel) return
+        setItems(itemsRes)
+        const map: Record<number, AuditPoint[]> = {}
+        await Promise.all(
+          itemsRes.map((it) =>
+            auditPointsApi
+              .list(packageCode, { item_id: it.id })
+              .then((ps) => {
+                map[it.id] = ps
+              })
+              .catch(() => {
+                map[it.id] = []
+              }),
+          ),
+        )
+        if (!cancel) setPointsByItem(map)
+      })
+      .catch(() => {
+        if (!cancel) {
+          setItems([])
+          setPointsByItem({})
+        }
+      })
+      .finally(() => {
+        if (!cancel) setLoading(false)
+      })
+    return () => {
+      cancel = true
+    }
+  }, [])
+
+  if (loading && items.length === 0) {
+    return (
+      <div style={{ padding: '24px 0 10px' }}>
+        <Spin tip="加载文本审核规则..." />
+      </div>
+    )
+  }
+  if (!loading && items.length === 0) {
+    return null
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 16,
+        paddingTop: 16,
+        borderTop: '1px dashed #CBD5E1',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: '#475569',
+          paddingLeft: 10,
+          marginBottom: 8,
+        }}
+      >
+        图文独立规则
+        <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+          （基于文本审核维度，与文本 tab 配置相互独立）
+        </Text>
+      </div>
+      <PointsColumn
+        items={items}
+        pointsByItem={pointsByItem}
+        getPointMap={(itemId) => pointMap[itemId] ?? {}}
+        pointOverrides={EMPTY_MEDIA_OVERRIDES}
+        onPointMapChange={onPointMapChange}
+        highlightItemId={null}
+        mediaKey="text"
       />
     </div>
   )
