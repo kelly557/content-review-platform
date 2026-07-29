@@ -386,9 +386,53 @@ export interface AnomalyAlertSummary {
 
 export interface AnomalyResponse {
   window: string
+  granularity: 'hour' | 'day'
+  window_start: string
+  window_end: string
+  applied: AnomalyAppliedFilters
   current: AnomalyCurrent
   series: AnomalyMetricPoint[]
   alerts: AnomalyAlertSummary[]
+}
+
+export interface AnomalyAppliedFilters {
+  modalities: string[]
+  strategy_codes: string[]
+  channels: string[]
+  account_ids: string[]
+  ips: string[]
+  risk_label_paths: string[]
+}
+
+// 异常分析页支持的窗口范围: 1h / 24h / 7d, 复用 RiskTrendGranularity.
+export type AnomalyWindow = '1h' | '24h' | '7d'
+
+export interface AnomalyQuery {
+  window?: AnomalyWindow
+  start?: string
+  end?: string
+  granularity?: 'hour' | 'day'
+  modalities?: string[]
+  strategy_codes?: string[]
+  channels?: string[]
+  account_ids?: string[]
+  ips?: string[]
+  risk_label_paths?: string[]
+}
+
+export interface AlertsListQuery {
+  status?: 'open' | 'acknowledged' | 'all'
+  limit?: number
+  offset?: number
+  window?: AnomalyWindow
+  start?: string
+  end?: string
+  modalities?: string[]
+  strategy_codes?: string[]
+  channels?: string[]
+  account_ids?: string[]
+  ips?: string[]
+  risk_label_paths?: string[]
 }
 
 export interface QualityVerdictCount {

@@ -279,9 +279,14 @@ export function buildAnomalyResponse(opts: {
   endMs: number
   granularity: '5min' | 'hour' | 'day'
   mockSeed?: number
+  filterSeed?: string
+  filtered?: boolean
 }): AnomalyResponse {
   const buckets = buildBuckets(opts.startMs, opts.endMs, opts.granularity)
-  const prng = mulberry32((opts.mockSeed ?? 0xb1c2d3e4) ^ hashString(`anomaly|${opts.startMs}|${opts.endMs}`))
+  const filterHash = opts.filterSeed ? hashString(opts.filterSeed) : 0
+  const prng = mulberry32(
+    (opts.mockSeed ?? 0xb1c2d3e4) ^ hashString(`anomaly|${opts.startMs}|${opts.endMs}`) ^ filterHash,
+  )
 
   const series: AnomalyMetricPoint[] = buckets.map((b) => {
     // 拒绝率基线 12-22%, 偶发突跳到 30+% 制造告警
@@ -343,8 +348,20 @@ export function buildAnomalyResponse(opts: {
 
   void SEVERITY_COLOR
 
+  const exposedGranularity: 'hour' | 'day' = opts.granularity === '5min' ? 'hour' : opts.granularity
   return {
     window: bucketLabel(opts.granularity),
+    granularity: exposedGranularity,
+    window_start: new Date(opts.startMs).toISOString(),
+    window_end: new Date(opts.endMs).toISOString(),
+    applied: {
+      modalities: [],
+      strategy_codes: [],
+      channels: [],
+      account_ids: [],
+      ips: [],
+      risk_label_paths: [],
+    },
     current,
     series,
     alerts,
@@ -399,6 +416,8 @@ export function getMockAlerts(opts: {
   status: 'open' | 'acknowledged' | 'all'
   limit: number
   mockSeed?: number
+  filterSeed?: string
+  filtered?: boolean
 }): AlertEventOut[] {
   const seed = opts.mockSeed ?? 0xc1d2e3f4
   let pool = _alertPool[seed]

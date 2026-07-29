@@ -88,6 +88,7 @@ interface MultiMetricLineProps {
   loading?: boolean
   error?: string | null
   emptyText?: string
+  granularity?: 'hour' | 'day'
 }
 
 export function MultiMetricLineChart({
@@ -96,11 +97,19 @@ export function MultiMetricLineChart({
   loading,
   error,
   emptyText = '暂无数据',
+  granularity,
 }: MultiMetricLineProps) {
+  const labelFor = (b: string): string => {
+    if (!granularity) return b.slice(5, 16).replace('T', ' ')
+    if (granularity === 'day') {
+      return b.slice(5, 10).replace('-', '.')
+    }
+    return b.slice(5, 16).replace('T', ' ')
+  }
   const data = series.flatMap((p) => [
-    { bucket: p.bucket.slice(5, 16).replace('T', ' '), metric: '拒绝率', value: p.reject_rate },
-    { bucket: p.bucket.slice(5, 16).replace('T', ' '), metric: '审核率', value: p.review_rate },
-    { bucket: p.bucket.slice(5, 16).replace('T', ' '), metric: '通过率', value: p.approve_rate },
+    { bucket: labelFor(p.bucket), metric: '拒绝率', value: p.reject_rate },
+    { bucket: labelFor(p.bucket), metric: '审核率', value: p.review_rate },
+    { bucket: labelFor(p.bucket), metric: '通过率', value: p.approve_rate },
   ])
   return (
     <Spin spinning={!!loading}>
