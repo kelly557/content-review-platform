@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import csv
-import json
 from datetime import datetime, timezone
 from io import StringIO
 from typing import Any, Dict, List, Optional
@@ -15,6 +14,8 @@ from sqlalchemy.orm import aliased
 
 from app.core.deps import require_roles
 from app.db.session import get_db
+from app.models.audit_item import AuditItem
+from app.models.audit_point import AuditPoint
 from app.models.machine_review_feedback import MachineReviewFeedback
 from app.models.material import Material, MaterialType, MaterialVersion
 from app.models.review import (
@@ -24,14 +25,14 @@ from app.models.review import (
     ReviewTask,
     ReviewType,
 )
+from app.models.risk_category import RiskCategory
 from app.models.strategy import Strategy
 from app.models.user import User
 from app.schemas.query import (
-    AdvancedCondition,
-    ContentMedia,
     DECISION_LABELS,
     MachineHitOut,
     MachineReviewFeedbackIn,
+    MachineReviewFeedbackKind,
     MachineReviewFeedbackOut,
     MachineReviewRecordOut,
     QueryLabelsOut,
@@ -39,6 +40,8 @@ from app.schemas.query import (
     ReviewPage,
     ReviewRecordOut,
     RISK_TO_DECISION,
+    RiskTaxonomyNode,
+    RiskTaxonomyOut,
     derive_content_media,
 )
 from app.services import audit as audit_service
@@ -57,6 +60,117 @@ def _enum_value(value: Any) -> Optional[str]:
     return str(value)
 
 
+def _format_risk_label_path(h: MachineHitOut) -> str:
+    """Render a single hit as a three-level Chinese label path."""
+    cat = getattr(h, "risk_category_label", None) or ""
+    item = getattr(h, "audit_item_label", None) or ""
+    point = h.label_cn or h.label or ""
+    parts = [p for p in (cat, item, point) if p]
+    return " / ".join(parts)
+
+
+async def _load_risk_taxonomy(db: AsyncSession) -> List[RiskTaxonomyNode]:
+    """Build the three-level risk label tree.
+
+    Hierarchy: ``risk_categories`` (一级) → ``audit_items`` via
+    ``audit_items.small_category`` (二级) → ``audit_points.label`` /
+    ``audit_points.label_cn`` (三级).
+
+    Leaf node ``path`` is the slash-joined wire identifier chain, e.g.
+    ``politics/ai_3/ap_3_1``; ``label`` prefers the third-level Chinese label
+    so the front-end can show a friendly path directly.
+    """
+    category_rows = (
+        await db.execute(
+            select(RiskCategory).order_by(RiskCategory.sort_order.asc(), RiskCategory.id.asc())
+        )
+    ).scalars().all()
+    item_rows = (
+        await db.execute(
+            select(AuditItem)
+            .where(AuditItem.small_category.is_not(None))
+            .order_by(AuditItem.sort_order.asc(), AuditItem.id.asc())
+        )
+    ).scalars().all()
+    item_ids = [i.id for i in item_rows]
+    point_rows: List[AuditPoint] = []
+    if item_ids:
+        point_rows = list(
+            (
+                await db.execute(
+                    select(AuditPoint)
+                    .where(AuditPoint.item_id.in_(item_ids))
+                    .order_by(AuditPoint.sort_order.asc(), AuditPoint.id.asc())
+                )
+            ).scalars()
+        )
+
+    points_by_item: Dict[int, List[AuditPoint]] = {}
+    for p in point_rows:
+        points_by_item.setdefault(p.item_id, []).append(p)
+
+    nodes_by_category: Dict[str, RiskTaxonomyNode] = {}
+    for cat in category_rows:
+        nodes_by_category[cat.code] = RiskTaxonomyNode(
+            code=cat.code, label=cat.label, path=cat.code, children=[]
+        )
+
+    bucket_by_code: Dict[str, RiskTaxonomyNode] = {c.code: c for c in nodes_by_category.values()}
+    for item in item_rows:
+        parent = bucket_by_code.get(item.small_category or "")
+        if parent is None:
+            continue
+        item_node = RiskTaxonomyNode(
+            code=item.code,
+            label=item.name_cn or item.code,
+            path=f"{parent.path}/{item.code}",
+            children=[],
+        )
+        for p in points_by_item.get(item.id, []):
+            point_label = p.label_cn or p.label or p.code
+            item_node.children.append(
+                RiskTaxonomyNode(
+                    code=p.code,
+                    label=point_label,
+                    path=f"{item_node.path}/{p.code}",
+                )
+            )
+        parent.children.append(item_node)
+
+    return list(nodes_by_category.values())
+
+
+def _build_label_index(
+    db_taxonomy: List[RiskTaxonomyNode],
+) -> Dict[str, Dict[str, Any]]:
+    """Flatten the taxonomy into a lookup keyed by ``label_cn`` / ``label``."""
+
+    index: Dict[str, Dict[str, Any]] = {}
+    for cat in db_taxonomy:
+        for item in cat.children:
+            for pt in item.children:
+                if pt.label and pt.label not in index:
+                    index[pt.label] = {
+                        "category_code": cat.code,
+                        "category_label": cat.label,
+                        "item_code": item.code,
+                        "item_label": item.label,
+                        "point_code": pt.code,
+                        "point_path": pt.path,
+                        "point_label": pt.label,
+                    }
+    return index
+
+
+def _resolve_taxonomy(
+    label_cn: Optional[str], label: Optional[str], index: Dict[str, Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    for key in (label_cn, label):
+        if key and key in index:
+            return index[key]
+    return None
+
+
 def _to_record(
     task: ReviewTask,
     material: Optional[Material],
@@ -66,6 +180,7 @@ def _to_record(
     tag_snapshots: List[Dict[str, Any]],
     strategy_orm: Optional[Strategy] = None,
     last_feedback: Optional[MachineReviewFeedbackOut] = None,
+    label_index: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> MachineReviewRecordOut:
     mr: Dict[str, Any] = dict(task.machine_result or {})
     strategy_snapshot = mr.get("strategy") or {}
@@ -85,6 +200,24 @@ def _to_record(
                 hits.append(MachineHitOut(**h))
             except Exception:
                 continue
+    if label_index is not None:
+        for idx, h in enumerate(list(hits)):
+            meta = _resolve_taxonomy(h.label_cn, h.label, label_index)
+            if meta is None:
+                continue
+            hits[idx] = MachineHitOut(
+                service_code=h.service_code,
+                service_name=h.service_name,
+                label=h.label,
+                label_cn=h.label_cn,
+                score=h.score,
+                quote=h.quote,
+                risk_category_code=meta["category_code"],
+                risk_category_label=meta["category_label"],
+                audit_item_code=meta["item_code"],
+                audit_item_label=meta["item_label"],
+                audit_point_code=meta["point_code"],
+            )
 
     # 优先级：FK 真名 > machine_result.strategy JSONB 快照 > stage_key
     # production 写路径不再写 JSONB 快照，FK 是唯一权威来源。
@@ -112,6 +245,7 @@ def _to_record(
         metadata = material.extra_metadata
     ip = metadata.get("ip")
     account_id = metadata.get("account_id")
+    channel = metadata.get("channel")
 
     requested_at = task.machine_started_at or task.created_at
 
@@ -153,6 +287,7 @@ def _to_record(
         bailian_request_id=bailian,
         ip=ip,
         account_id=account_id,
+        channel=channel,
         submitter_id=submitter.id if submitter else None,
         submitter_name=submitter.full_name if submitter else None,
         assignee_id=assignee.id if assignee else None,
@@ -172,23 +307,38 @@ def _split_csv(raw: Optional[str]) -> List[str]:
     return [s.strip() for s in raw.split(",") if s.strip()]
 
 
-def _parse_conditions(raw: Optional[str]) -> List[AdvancedCondition]:
-    if not raw:
+def _collect_labels_under_paths(
+    taxonomy: List[RiskTaxonomyNode],
+    selected_paths: List[str],
+) -> List[str]:
+    """Resolve ``risk_label_paths`` selection against the taxonomy snapshot.
+
+    Returns the flat list of leaf labels that fall under the selected paths,
+    so the SQL ``ILIKE %label%`` filter can match against stored hits.
+    """
+    if not selected_paths:
         return []
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="conditions 必须是合法 JSON")
-    if not isinstance(data, list):
-        raise HTTPException(status_code=400, detail="conditions 必须是 JSON 数组")
-    out: List[AdvancedCondition] = []
-    for item in data:
-        try:
-            out.append(AdvancedCondition(**item))
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"条件不合法: {exc}")
-    if len(out) > 5:
-        raise HTTPException(status_code=400, detail="最多 5 个条件")
+    by_path: Dict[str, RiskTaxonomyNode] = {}
+    queue: List[RiskTaxonomyNode] = list(taxonomy)
+    while queue:
+        node = queue.pop()
+        by_path[node.path] = node
+        queue.extend(node.children)
+    out: List[str] = []
+    seen: set[str] = set()
+    for path in selected_paths:
+        node = by_path.get(path)
+        if node is None:
+            continue
+        stack: List[RiskTaxonomyNode] = [node]
+        while stack:
+            cur = stack.pop()
+            if not cur.children:
+                if cur.label and cur.label not in seen:
+                    seen.add(cur.label)
+                    out.append(cur.label)
+                continue
+            stack.extend(cur.children)
     return out
 
 
@@ -202,11 +352,12 @@ def _apply_filters(
     machine_decision,
     request_ids,
     task_ids,
-    text_contains,
-    labels,
+    risk_label_paths,
     feedback,
-    conditions,
-    content_medias,
+    channels,
+    ips,
+    account_ids,
+    taxonomy: Optional[List[RiskTaxonomyNode]] = None,
 ):
     if start is not None:
         ts = ReviewTask.machine_started_at
@@ -216,50 +367,18 @@ def _apply_filters(
         stmt = stmt.where(or_(ts <= end, and_(ts.is_(None), ReviewTask.created_at <= end)))
     if material_types:
         stmt = stmt.where(Material.material_type.in_(material_types))
-    if content_medias:
-        media_clauses = []
-        if "audio" in content_medias:
-            media_clauses.append(MaterialVersion.mime_type.ilike("audio/%"))
-        if "video" in content_medias:
-            media_clauses.append(
-                or_(
-                    MaterialVersion.mime_type.ilike("video/%"),
-                    and_(
-                        MaterialVersion.mime_type.is_(None),
-                        Material.material_type == MaterialType.VIDEO,
-                    ),
-                )
-            )
-        if "image" in content_medias:
-            media_clauses.append(
-                or_(
-                    MaterialVersion.mime_type.ilike("image/%"),
-                    and_(
-                        MaterialVersion.mime_type.is_(None),
-                        Material.material_type == MaterialType.IMAGE,
-                    ),
-                )
-            )
-        if "text" in content_medias:
-            media_clauses.append(
-                or_(
-                    MaterialVersion.mime_type.ilike("text/%"),
-                    and_(
-                        MaterialVersion.mime_type.is_(None),
-                        Material.material_type.in_(
-                            [MaterialType.TEXT, MaterialType.PDF]
-                        ),
-                    ),
-                )
-            )
-        if media_clauses:
-            stmt = stmt.where(or_(*media_clauses))
     if request_ids:
         stmt = stmt.where(ReviewTask.id.in_(request_ids))
     if task_ids:
         stmt = stmt.where(ReviewTask.material_version_id.in_(task_ids))
     if feedback is not None:
-        stmt = stmt.where(ReviewTask.final_decision == feedback)
+        stmt = stmt.where(
+            ReviewTask.id.in_(
+                select(MachineReviewFeedback.task_id).where(
+                    MachineReviewFeedback.kind == feedback
+                )
+            )
+        )
     if strategy_code:
         stmt = stmt.where(
             or_(
@@ -273,25 +392,32 @@ def _apply_filters(
         target_risks = [r for r, d in RISK_TO_DECISION.items() if d == machine_decision]
         if target_risks:
             stmt = stmt.where(ReviewTask.machine_result["risk_level"].astext.in_(target_risks))
-    if labels:
-        for lbl in labels:
-            stmt = stmt.where(
-                func.cast(ReviewTask.machine_result, String).ilike(f"%{lbl}%")
-            )
-    if text_contains:
-        like = f"%{text_contains}%"
-        stmt = stmt.where(
-            or_(
-                ReviewTask.title.ilike(like),
-                func.cast(ReviewTask.machine_result, String).ilike(like),
-            )
+    if risk_label_paths:
+        # taxonomy 里叶子 path 是 “category/item/point”。
+        # 任意一级被选中时，命中的 label 只要落在这棵子树内即可。
+        leaf_labels = (
+            _collect_labels_under_paths(taxonomy, risk_label_paths)
+            if taxonomy is not None
+            else []
         )
-    for c in conditions:
-        needle = f"%{c.value}%"
-        if c.op == "contains":
-            stmt = stmt.where(func.cast(ReviewTask.machine_result, String).ilike(needle))
+        if not leaf_labels:
+            stmt = stmt.where(False)
         else:
-            stmt = stmt.where(~func.cast(ReviewTask.machine_result, String).ilike(needle))
+            clauses = []
+            for needle in leaf_labels:
+                clauses.append(
+                    func.cast(ReviewTask.machine_result, String).ilike(f"%{needle}%")
+                )
+            stmt = stmt.where(or_(*clauses))
+    if channels:
+        ch = Material.extra_metadata["channel"].astext
+        stmt = stmt.where(ch.in_(channels))
+    if ips:
+        ip = Material.extra_metadata["ip"].astext
+        stmt = stmt.where(ip.in_(ips))
+    if account_ids:
+        acct = Material.extra_metadata["account_id"].astext
+        stmt = stmt.where(acct.in_(account_ids))
     return stmt
 
 
@@ -305,13 +431,15 @@ async def _run_query(
     machine_decision,
     request_ids,
     task_ids,
-    text_contains,
-    labels,
+    risk_label_paths,
     feedback,
-    conditions,
-    content_medias,
+    channels,
+    ips,
+    account_ids,
     page: int,
     size: int,
+    taxonomy: Optional[List[RiskTaxonomyNode]] = None,
+    label_index: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[MachineReviewRecordOut]:
     Submitter = aliased(User, name="submitter")
     Assignee = aliased(User, name="assignee")
@@ -346,11 +474,12 @@ async def _run_query(
         machine_decision=machine_decision,
         request_ids=request_ids,
         task_ids=task_ids,
-        text_contains=text_contains,
-        labels=labels,
+        risk_label_paths=risk_label_paths,
         feedback=feedback,
-        conditions=conditions,
-        content_medias=content_medias,
+        channels=channels,
+        ips=ips,
+        account_ids=account_ids,
+        taxonomy=taxonomy,
     )
     stmt = stmt.order_by(ReviewTask.id.desc()).offset((page - 1) * size).limit(size)
 
@@ -392,6 +521,11 @@ async def _run_query(
             created_at=fb.created_at,
         )
 
+    if label_index is None:
+        if taxonomy is None:
+            taxonomy = await _load_risk_taxonomy(db)
+        label_index = _build_label_index(taxonomy)
+
     out: List[MachineReviewRecordOut] = []
     for task, material, submitter, assignee, strategy_orm, material_version in rows:
         out.append(
@@ -404,6 +538,7 @@ async def _run_query(
                 tags_by_task.get(task.id, []),
                 strategy_orm=strategy_orm,
                 last_feedback=feedback_by_task.get(task.id),
+                label_index=label_index,
             )
         )
     return out
@@ -416,38 +551,34 @@ async def list_results(
     start: Optional[datetime] = Query(None, description="请求时间 ≥ start"),
     end: Optional[datetime] = Query(None, description="请求时间 ≤ end"),
     material_types: List[MaterialType] = Query(
-        default_factory=list, description="检测模态多选"
+        default_factory=list, description="审核模态多选"
     ),
     strategy_code: Optional[str] = Query(None, description="审核策略 code"),
     machine_decision: Optional[str] = Query(
-        None, pattern="^(block|review|pass)$", description="机审检测结果"
+        None, pattern="^(block|review|pass)$", description="机审结果 (block/review/pass)"
     ),
     request_ids: Optional[str] = Query(None, description="英文逗号分隔的 Request ID"),
     task_ids: Optional[str] = Query(None, description="英文逗号分隔的 Task ID"),
-    text_contains: Optional[str] = Query(None, description="文本内容模糊匹配"),
-    labels: List[str] = Query(default_factory=list, description="返回标签多选"),
-    feedback: Optional[ReviewDecision] = Query(None, description="反馈结果"),
-    conditions: Optional[str] = Query(None, description="高级条件 JSON"),
-    content_medias: List[ContentMedia] = Query(
+    risk_label_paths: List[str] = Query(
         default_factory=list,
-        description="呈现内容多选: text/image/audio/video",
+        description="风险标签路径多选 (一级/二级/三级皆可)",
     ),
+    feedback: Optional[MachineReviewFeedbackKind] = Query(
+        None, description="反馈结果：false_positive=未违规误报，false_negative=违规漏报"
+    ),
+    channels: List[str] = Query(default_factory=list, description="渠道多选"),
+    ips: List[str] = Query(default_factory=list, description="IP 多选"),
+    account_ids: List[str] = Query(default_factory=list, description="AccountId 多选"),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=MAX_PAGE_SIZE),
 ) -> QueryPage:
     req_ids = [int(x) for x in _split_csv(request_ids)]
     t_ids = [int(x) for x in _split_csv(task_ids)]
-    conds = _parse_conditions(conditions)
+
+    taxonomy = await _load_risk_taxonomy(db) if risk_label_paths else None
+    label_index = _build_label_index(taxonomy) if taxonomy is not None else None
 
     base_count = select(func.count(ReviewTask.id)).join(Material, Material.id == ReviewTask.material_id)
-    if content_medias:
-        base_count = base_count.outerjoin(
-            MaterialVersion,
-            and_(
-                MaterialVersion.id == ReviewTask.material_version_id,
-                MaterialVersion.material_id == ReviewTask.material_id,
-            ),
-        )
     base_count = _apply_filters(
         base_count,
         start=start,
@@ -457,11 +588,12 @@ async def list_results(
         machine_decision=machine_decision,
         request_ids=req_ids,
         task_ids=t_ids,
-        text_contains=text_contains,
-        labels=labels,
+        risk_label_paths=risk_label_paths,
         feedback=feedback,
-        conditions=conds,
-        content_medias=content_medias,
+        channels=channels,
+        ips=ips,
+        account_ids=account_ids,
+        taxonomy=taxonomy,
     )
     total = await db.scalar(base_count) or 0
 
@@ -474,15 +606,75 @@ async def list_results(
         machine_decision=machine_decision,
         request_ids=req_ids,
         task_ids=t_ids,
-        text_contains=text_contains,
-        labels=labels,
+        risk_label_paths=risk_label_paths,
         feedback=feedback,
-        conditions=conds,
-        content_medias=content_medias,
+        channels=channels,
+        ips=ips,
+        account_ids=account_ids,
         page=page,
         size=size,
+        taxonomy=taxonomy,
+        label_index=label_index,
     )
     return QueryPage(items=items, total=total, page=page, size=size)
+
+
+@router.get("/risk-taxonomy", response_model=RiskTaxonomyOut)
+async def list_risk_taxonomy(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("reviewer", "mlr", "admin")),
+) -> RiskTaxonomyOut:
+    """三级风险标签树 (风险类型 → 审核项 → 审核点)."""
+
+    items = await _load_risk_taxonomy(db)
+    return RiskTaxonomyOut(items=items)
+
+
+@router.get("/filter-options")
+async def list_filter_options(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("reviewer", "mlr", "admin")),
+    channel_limit: int = Query(200, ge=1, le=1000),
+    ip_limit: int = Query(500, ge=1, le=5000),
+    account_limit: int = Query(500, ge=1, le=5000),
+) -> Dict[str, List[str]]:
+    """高级筛选下拉项 (渠道/IP/AccountId)."""
+
+    ch = Material.extra_metadata["channel"].astext
+    ch_rows = (
+        await db.execute(
+            select(ch)
+            .where(ch.is_not(None))
+            .group_by(ch)
+            .order_by(ch)
+            .limit(channel_limit)
+        )
+    ).all()
+    ip = Material.extra_metadata["ip"].astext
+    ip_rows = (
+        await db.execute(
+            select(ip)
+            .where(ip.is_not(None))
+            .group_by(ip)
+            .order_by(ip)
+            .limit(ip_limit)
+        )
+    ).all()
+    acct = Material.extra_metadata["account_id"].astext
+    acct_rows = (
+        await db.execute(
+            select(acct)
+            .where(acct.is_not(None))
+            .group_by(acct)
+            .order_by(acct)
+            .limit(account_limit)
+        )
+    ).all()
+    return {
+        "channels": [r[0] for r in ch_rows if r[0]],
+        "ips": [r[0] for r in ip_rows if r[0]],
+        "account_ids": [r[0] for r in acct_rows if r[0]],
+    }
 
 
 @router.get("/results/export.csv")
@@ -496,15 +688,17 @@ async def export_results(
     machine_decision: Optional[str] = Query(None, pattern="^(block|review|pass)$"),
     request_ids: Optional[str] = Query(None),
     task_ids: Optional[str] = Query(None),
-    text_contains: Optional[str] = Query(None),
-    labels: List[str] = Query(default_factory=list),
-    feedback: Optional[ReviewDecision] = Query(None),
-    conditions: Optional[str] = Query(None),
-    content_medias: List[ContentMedia] = Query(default_factory=list),
+    risk_label_paths: List[str] = Query(default_factory=list),
+    feedback: Optional[MachineReviewFeedbackKind] = Query(None),
+    channels: List[str] = Query(default_factory=list),
+    ips: List[str] = Query(default_factory=list),
+    account_ids: List[str] = Query(default_factory=list),
 ) -> StreamingResponse:
     req_ids = [int(x) for x in _split_csv(request_ids)]
     t_ids = [int(x) for x in _split_csv(task_ids)]
-    conds = _parse_conditions(conditions)
+
+    taxonomy = await _load_risk_taxonomy(db) if risk_label_paths else None
+    label_index = _build_label_index(taxonomy) if taxonomy is not None else None
 
     all_items: List[MachineReviewRecordOut] = []
     cursor = 1
@@ -518,13 +712,15 @@ async def export_results(
             machine_decision=machine_decision,
             request_ids=req_ids,
             task_ids=t_ids,
-            text_contains=text_contains,
-            labels=labels,
+            risk_label_paths=risk_label_paths,
             feedback=feedback,
-            conditions=conds,
-            content_medias=content_medias,
+            channels=channels,
+            ips=ips,
+            account_ids=account_ids,
             page=cursor,
             size=MAX_PAGE_SIZE,
+            taxonomy=taxonomy,
+            label_index=label_index,
         )
         if not batch:
             break
@@ -545,12 +741,11 @@ async def export_results(
         "Request ID",
         "Task ID",
         "策略名称",
-        "检测模态",
+        "审核模态",
         "风险等级",
-        "检测结果",
+        "审核结果",
         "反馈结果",
-        "命中标签",
-        "置信度",
+        "风险标签",
         "请求时间",
         "完成时间",
         "提交用户",
@@ -560,12 +755,12 @@ async def export_results(
         "BailianRequestId",
     ])
     for r in all_items:
-        labels_text = " | ".join(
-            h.label_cn or h.label or "" for h in r.hits if h.label_cn or h.label
-        )
-        scores_text = " | ".join(
-            f"{h.score:.2f}" for h in r.hits if h.score is not None
-        )
+        labels_text = " | ".join(_format_risk_label_path(h) for h in r.hits)
+        last_fb = r.last_feedback
+        feedback_text = {
+            "false_positive": "未违规误报",
+            "false_negative": "违规漏报",
+        }.get(last_fb.kind if last_fb else "", "")
         writer.writerow([
             r.id,
             r.material_version_id or "",
@@ -573,9 +768,8 @@ async def export_results(
             r.material_type or "",
             r.risk_level or "",
             DECISION_LABELS.get(r.machine_decision or "", ""),
-            r.final_decision or "",
+            feedback_text,
             labels_text,
-            scores_text,
             r.requested_at.isoformat() if r.requested_at else "",
             r.finished_at.isoformat() if r.finished_at else "",
             r.submitter_name or "",

@@ -1,5 +1,5 @@
 import { Card, Descriptions, Drawer, Empty, Space, Tag, Typography } from 'antd'
-import type { MachineReviewRecord, ReviewRecord } from '@/types/domain'
+import type { MachineHit, MachineReviewFeedbackKind, MachineReviewRecord, ReviewRecord } from '@/types/domain'
 import { MACHINE_DECISION_OPTIONS } from '@/types/domain'
 
 const { Text } = Typography
@@ -24,15 +24,16 @@ function decisionMeta(v?: string | null) {
   return MACHINE_DECISION_OPTIONS.find((m) => m.value === v)
 }
 
-function feedbackLabel(v?: string | null): string {
-  if (!v) return '-'
-  const map: Record<string, string> = {
-    pending: '待处理',
-    approved: '通过',
-    rejected: '驳回',
-    returned: '退回',
-  }
-  return map[v] ?? v
+const FEEDBACK_LABEL: Record<MachineReviewFeedbackKind, string> = {
+  false_positive: '未违规误报',
+  false_negative: '违规漏报',
+}
+
+function riskLabelPath(h: MachineHit): string {
+  const cat = h.risk_category_label || ''
+  const item = h.audit_item_label || ''
+  const point = h.label_cn || h.label || ''
+  return [cat, item, point].filter(Boolean).join(' / ')
 }
 
 function riskMeta(risk?: string | null): { label: string; color: string } | null {
@@ -151,7 +152,7 @@ export default function RecordDetailDrawer({ record, onClose }: Props) {
                   items={[
                     {
                       key: 'machine_decision',
-                      label: '检测结果',
+                      label: '审核结果',
                       children: decision ? (
                         <Tag color={decision.color}>{decision.label}</Tag>
                       ) : (
@@ -166,24 +167,27 @@ export default function RecordDetailDrawer({ record, onClose }: Props) {
                     {
                       key: 'feedback',
                       label: '反馈结果',
-                      children: feedbackLabel(r.final_decision),
+                      children: lastFb ? (
+                        <Tag color={lastFb.kind === 'false_positive' ? 'orange' : 'purple'}>
+                          {FEEDBACK_LABEL[lastFb.kind]}
+                        </Tag>
+                      ) : (
+                        '-'
+                      ),
                     },
                     {
                       key: 'hits',
-                      label: '命中审核点',
+                      label: '风险标签',
                       children:
                         hits.length === 0 ? (
                           '-'
                         ) : (
                           <Space wrap size={[4, 4]}>
-                            {hits.map((h, idx) => {
-                              const score = h.score != null ? ` ${(h.score * 100).toFixed(0)}%` : ''
-                              return (
-                                <Tag key={idx} color="blue">
-                                  {h.label_cn || h.label || '-'}${score === '' ? '' : score}
-                                </Tag>
-                              )
-                            })}
+                            {hits.map((h, idx) => (
+                              <Tag key={idx} color="blue">
+                                {riskLabelPath(h) || '-'}
+                              </Tag>
+                            ))}
                           </Space>
                         ),
                     },
@@ -204,7 +208,7 @@ export default function RecordDetailDrawer({ record, onClose }: Props) {
                           <Tag
                             color={lastFb.kind === 'false_positive' ? 'orange' : 'purple'}
                           >
-                            {lastFb.kind === 'false_positive' ? '未违规误报' : '违规漏过'}
+                            {FEEDBACK_LABEL[lastFb.kind]}
                           </Tag>
                           {lastFb.created_by_name && (
                             <Text type="secondary">由 {lastFb.created_by_name}</Text>

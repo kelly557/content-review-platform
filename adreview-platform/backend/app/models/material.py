@@ -28,6 +28,8 @@ class MaterialType(str, enum.Enum):
     VIDEO = "video"
     PDF = "pdf"
     TEXT = "text"
+    AUDIO = "audio"
+    DOCUMENT = "document"
 
 
 class MaterialStatus(str, enum.Enum):

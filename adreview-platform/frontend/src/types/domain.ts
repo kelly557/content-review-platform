@@ -466,8 +466,12 @@ export interface AlertPage {
 export const RISK_LEVELS = ['高风险', '中风险', '低风险', '敏感', '无风险'] as const
 
 export interface RiskTimeseriesPoint {
-  date: string
+  /** UTC ISO start of the bucket. Replaces the old `date` field. */
+  bucket: string
+  /** Total completed machine reviews in the bucket (any risk_level). */
   total: number
+  /** Sum of high + medium + low + none. The percentage base for 占比. */
+  denominator: number
   high: number
   medium: number
   low: number
@@ -1995,14 +1999,57 @@ export interface ReplyLibraryItemCreate {
 
 // ─── 数据查询 (Inspection Query) ────────────────────────────────────────────────
 
-export type DetectionModality = 'image' | 'video' | 'pdf' | 'text'
+export type DetectionModality = 'image' | 'video' | 'pdf' | 'text' | 'audio' | 'document'
 
 export const DETECTION_MODALITIES: { value: DetectionModality; label: string }[] = [
-  { value: 'text', label: '文本' },
   { value: 'image', label: '图片' },
+  { value: 'text', label: '文本' },
+  { value: 'audio', label: '语音' },
   { value: 'video', label: '视频' },
-  { value: 'pdf', label: '文件' },
+  { value: 'document', label: '文档' },
+  { value: 'pdf', label: 'PDF' },
 ]
+
+// ─── 审核模态 (Audit Modality) ──────────────────────────────────────────────────
+// 5 选: 图片 / 文本 / 视频 / 语音 / 文档. 与 DetectionModality 的差异:
+// - audio 由 mime_type 派生, 不在 DetectionModality 枚举中
+// - document 折叠所有 office/PDF/html 业务"文档"类型
+export type AuditModality = 'image' | 'text' | 'video' | 'audio' | 'document'
+
+export const AUDIT_MODALITIES: { value: AuditModality; label: string }[] = [
+  { value: 'image', label: '图片' },
+  { value: 'text', label: '文本' },
+  { value: 'video', label: '视频' },
+  { value: 'audio', label: '语音' },
+  { value: 'document', label: '文档' },
+]
+
+export type RiskTrendGranularity = 'hour' | 'day' | 'month'
+
+export interface RiskTrendAppliedFilters {
+  modalities: string[]
+  strategy_codes: string[]
+  account_ids: string[]
+  ips: string[]
+  channels: string[]
+  risk_label_paths: string[]
+}
+
+export interface RiskTrendOptionsResponse {
+  modalities: { value: AuditModality; label: string }[]
+  strategies: { value: string; label: string }[]
+  channels: { value: string; label: string }[]
+  account_ids: { value: string; label: string }[]
+  ips: { value: string; label: string }[]
+  risk_taxonomy: RiskTaxonomyNode[]
+}
+
+export interface RiskTaxonomyNode {
+  code: string
+  label: string
+  path: string
+  children?: RiskTaxonomyNode[]
+}
 
 // 呈现内容(text/image/audio/video) — 与 DetectionModality 的差异:
 // pdf 在呈现内容维度折叠到 text；audio 不在 DetectionModality 内，
@@ -2031,6 +2078,15 @@ export const FEEDBACK_OPTIONS: { value: ReviewDecision; label: string }[] = [
   { value: 'returned', label: '退回' },
 ]
 
+// 反馈结果筛选项对应后端 machine_review_feedback.kind
+export const MACHINE_REVIEW_FEEDBACK_OPTIONS: {
+  value: MachineReviewFeedbackKind
+  label: string
+}[] = [
+  { value: 'false_negative', label: '违规漏报' },
+  { value: 'false_positive', label: '未违规误报' },
+]
+
 export interface MachineHit {
   service_code?: string | null
   service_name?: string | null
@@ -2038,6 +2094,15 @@ export interface MachineHit {
   label_cn?: string | null
   score?: number | null
   quote?: string | null
+  risk_category_code?: string | null
+  risk_category_label?: string | null
+  audit_item_code?: string | null
+  audit_item_label?: string | null
+  audit_point_code?: string | null
+}
+
+export interface RiskTaxonomy {
+  items: RiskTaxonomyNode[]
 }
 
 export type MachineReviewFeedbackKind = 'false_positive' | 'false_negative'
@@ -2074,6 +2139,7 @@ export interface MachineReviewRecord {
   bailian_request_id?: string | null
   ip?: string | null
   account_id?: string | null
+  channel?: string | null
   submitter_id?: number | null
   submitter_name?: string | null
   assignee_id?: number | null
@@ -2086,34 +2152,30 @@ export interface MachineReviewRecord {
   last_feedback?: MachineReviewFeedback | null
 }
 
-export interface AdvancedCondition {
-  op: 'contains' | 'not_contains'
-  value: string
-}
-
 export interface QueryFilters {
   start?: string
   end?: string
   material_types?: DetectionModality[]
-  content_medias?: ContentMedia[]
   strategy_code?: string
   machine_decision?: MachineDecision
   request_ids?: number[]
   task_ids?: number[]
-  text_contains?: string
-  labels?: string[]
-  feedback?: ReviewDecision
-  conditions?: AdvancedCondition[]
+  risk_label_paths?: string[]
+  feedback?: MachineReviewFeedbackKind
+  channels?: string[]
+  ips?: string[]
+  account_ids?: string[]
   page?: number
   size?: number
 }
 
 export type QueryColumnKey =
-  | 'task_title'
+  | 'content_preview'
   | 'strategy_name'
   | 'machine_decision'
   | 'feedback'
   | 'material_type'
+  | 'channel'
   | 'request_id'
   | 'task_id'
   | 'labels'
@@ -2121,7 +2183,6 @@ export type QueryColumnKey =
   | 'requested_at'
   | 'ip'
   | 'account_id'
-  | 'content_preview'
 
 export interface QueryColumnDef {
   key: QueryColumnKey
@@ -2131,25 +2192,45 @@ export interface QueryColumnDef {
 }
 
 export const QUERY_COLUMNS: QueryColumnDef[] = [
-  { key: 'task_title', title: '任务名称', defaultVisible: true },
-  { key: 'strategy_name', title: '策略名称', defaultVisible: true },
-  { key: 'machine_decision', title: '检测结果', defaultVisible: true },
-  { key: 'feedback', title: '反馈结果', defaultVisible: true },
-  {
-    key: 'material_type',
-    title: '审核类型',
-    defaultVisible: true,
-    tooltip: '审核通道类型：指请求走的是文本/图片/视频/文件哪条审核链路',
-  },
   {
     key: 'content_preview',
     title: '素材内容',
     defaultVisible: true,
     tooltip: '素材内容预览：文本摘要 / 图片缩略图 / 音视频入口，点击查看完整',
   },
+  { key: 'strategy_name', title: '策略名称', defaultVisible: true },
+  {
+    key: 'machine_decision',
+    title: '审核结果',
+    defaultVisible: true,
+    tooltip: '机审最终判定：阻断 / 复核 / 通过',
+  },
+  {
+    key: 'feedback',
+    title: '反馈结果',
+    defaultVisible: true,
+    tooltip: '最近一次反馈：违规漏报 / 未违规误报；无反馈时为空',
+  },
+  {
+    key: 'material_type',
+    title: '审核模态',
+    defaultVisible: true,
+    tooltip: '审核通道类型：指请求走的是文本/图片/视频/文件哪条审核链路',
+  },
+  {
+    key: 'channel',
+    title: '渠道',
+    defaultVisible: true,
+    tooltip: '业务侧写入的渠道标识',
+  },
   { key: 'request_id', title: 'Request ID', defaultVisible: false },
   { key: 'task_id', title: 'Task ID', defaultVisible: false },
-  { key: 'labels', title: '命中审核点及置信度', defaultVisible: false },
+  {
+    key: 'labels',
+    title: '风险标签',
+    defaultVisible: true,
+    tooltip: '三级路径：风险类型 / 审核项 / 审核点',
+  },
   { key: 'risk_level', title: '风险等级', defaultVisible: false },
   { key: 'requested_at', title: '请求时间', defaultVisible: false },
   { key: 'ip', title: 'IP', defaultVisible: false },
@@ -2160,7 +2241,7 @@ export const DEFAULT_VISIBLE_COLUMNS: QueryColumnKey[] = QUERY_COLUMNS.filter(
   (c) => c.defaultVisible,
 ).map((c) => c.key)
 
-export const QUERY_COLUMNS_SCHEMA_VERSION = 2
+export const QUERY_COLUMNS_SCHEMA_VERSION = 3
 
 // ─── 复审队列 (/query/review) — 卡片视图，只读 ────────────────────────────────
 
