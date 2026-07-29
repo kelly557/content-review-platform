@@ -1533,3 +1533,296 @@ async def test_alerts_keeps_existing_status_filter(client, db_session):
     body = resp.json()
     assert body["total"] == 1
     assert body["items"][0]["status"] == "open"
+
+
+# ---------------------------------------------------------------------------
+# Root cause — /api/v1/alerts/{id}/root-cause
+#
+# Three rule codes map to three different drill-downs. Added 2026-07-29.
+# ---------------------------------------------------------------------------
+
+
+async def _make_risk_task_with_hits(
+    db_session,
+    *,
+    submitter: User,
+    hit_labels: list[str],
+    risk_level: str = "高风险",
+    completed_at: datetime | None = None,
+    metadata: dict | None = None,
+) -> tuple[Material, ReviewTask]:
+    """Like _make_risk_task but injects a hits array into machine_result."""
+    m, task = await _make_risk_task(
+        db_session,
+        submitter=submitter,
+        risk_level=risk_level,
+        completed_at=completed_at,
+        metadata=metadata,
+    )
+    task.machine_result = {
+        "risk_level": risk_level,
+        "hits": [{"label_cn": label} for label in hit_labels],
+    }
+    await db_session.flush()
+    return m, task
+
+
+@pytest.mark.asyncio
+async def test_root_cause_reject_rate_high_routes_to_top_risk_labels(client, db_session):
+    """reject_rate_high → top risk labels."""
+    await db_session.execute(delete(AlertEvent))
+    await db_session.commit()
+
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    now = datetime.now(timezone.utc)
+    # 3 条 "政治敏感" + 2 条 "暴恐", 都安排在 alert 窗口内部
+    # (alert 窗口结束于 now, 因此任务 completed_at < now, 避开半开区间边界)
+    for _ in range(3):
+        await _make_risk_task_with_hits(
+            db_session, submitter=sub, hit_labels=["政治敏感"],
+            completed_at=now - timedelta(minutes=5),
+        )
+    for _ in range(2):
+        await _make_risk_task_with_hits(
+            db_session, submitter=sub, hit_labels=["暴恐"],
+            completed_at=now - timedelta(minutes=10),
+        )
+    await db_session.commit()
+
+    a = AlertEvent(
+        rule_code="reject_rate_high",
+        severity="critical",
+        metric="reject_rate",
+        window_start=now - timedelta(hours=1),
+        window_end=now,
+        observed_value=35.0,
+        threshold=5.0,
+        status="open",
+        detail={},
+    )
+    db_session.add(a)
+    await db_session.commit()
+    await db_session.refresh(a)
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(f"/api/v1/alerts/{a.id}/root-cause")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["rule_code"] == "reject_rate_high"
+    assert body["rule_label"] == "拒绝率异常"
+    assert body["window"]["size_min"] == 60
+    labels = [r["label"] for r in body["top_risk_labels"]]
+    assert "政治敏感" in labels and "暴恐" in labels
+    # 排序检查
+    counts = {r["label"]: r["count"] for r in body["top_risk_labels"]}
+    assert counts["政治敏感"] >= counts["暴恐"]
+    assert body["top_accounts"] == []
+    assert body["top_account_ips"] == []
+
+
+@pytest.mark.asyncio
+async def test_root_cause_high_risk_content_routes_to_top_accounts(client, db_session):
+    """high_risk_content_high → top accounts (rejected)."""
+    await db_session.execute(delete(AlertEvent))
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    now = datetime.now(timezone.utc)
+    # acct-A: 5 提交 / 4 驳回
+    for _ in range(5):
+        await _make_risk_task(
+            db_session, submitter=sub, risk_level="高风险",
+            completed_at=now, metadata={"account_id": "acct-A"},
+        )
+    # acct-B: 2 提交 / 1 驳回
+    for _ in range(2):
+        await _make_risk_task(
+            db_session, submitter=sub, risk_level="高风险",
+            completed_at=now - timedelta(minutes=30),
+            metadata={"account_id": "acct-B"},
+        )
+    await db_session.commit()
+
+    a = AlertEvent(
+        rule_code="high_risk_content_high",
+        severity="critical",
+        metric="high_risk_block_density",
+        window_start=now - timedelta(hours=1),
+        window_end=now,
+        observed_value=80.0,
+        threshold=30.0,
+        status="open",
+        detail={},
+    )
+    db_session.add(a)
+    await db_session.commit()
+    await db_session.refresh(a)
+
+    resp = await client.get(f"/api/v1/alerts/{a.id}/root-cause")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["rule_code"] == "high_risk_content_high"
+    assert body["rule_label"] == "账号高风险阻断异常"
+    assert len(body["top_accounts"]) >= 2
+    # acct-A 必须在最前 (rejected 多)
+    assert body["top_accounts"][0]["account_id"] == "acct-A"
+    assert body["top_accounts"][0]["submitted"] >= 5
+    assert body["top_risk_labels"] == []
+    assert body["top_account_ips"] == []
+
+
+@pytest.mark.asyncio
+async def test_root_cause_high_risk_account_concentration_routes_to_account_ips(client, db_session):
+    """high_risk_account_concentration → top accounts → top IPs."""
+    await db_session.execute(delete(AlertEvent))
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    now = datetime.now(timezone.utc)
+    # acct-A 在 10.0.0.1 上 3 提交 / 3 驳回
+    for _ in range(3):
+        await _make_risk_task(
+            db_session, submitter=sub, risk_level="高风险",
+            completed_at=now,
+            metadata={"account_id": "acct-A", "ip": "10.0.0.1"},
+        )
+    # acct-A 在 10.0.0.2 上 1 提交 / 1 驳回
+    await _make_risk_task(
+        db_session, submitter=sub, risk_level="高风险",
+        completed_at=now - timedelta(minutes=10),
+        metadata={"account_id": "acct-A", "ip": "10.0.0.2"},
+    )
+    await db_session.commit()
+
+    a = AlertEvent(
+        rule_code="high_risk_account_concentration",
+        severity="critical",
+        metric="high_risk_account_density",
+        window_start=now - timedelta(hours=1),
+        window_end=now,
+        observed_value=60.0,
+        threshold=50.0,
+        status="open",
+        detail={},
+    )
+    db_session.add(a)
+    await db_session.commit()
+    await db_session.refresh(a)
+
+    resp = await client.get(f"/api/v1/alerts/{a.id}/root-cause")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["rule_code"] == "high_risk_account_concentration"
+    assert body["rule_label"] == "高风险账号聚集异常"
+    # 至少 1 行 (acct-A 的 10.0.0.1)
+    assert len(body["top_account_ips"]) >= 1
+    first = body["top_account_ips"][0]
+    assert first["account_id"] == "acct-A"
+    assert first["ip"] == "10.0.0.1"
+    assert body["top_risk_labels"] == []
+    assert body["top_accounts"] == []
+
+
+@pytest.mark.asyncio
+async def test_root_cause_unknown_rule_returns_empty_three_panels(client, db_session):
+    """未在 ROOT_CAUSE_RULES 映射里的 rule_code: 返回 3 个空数组而不报错."""
+    await db_session.execute(delete(AlertEvent))
+    await db_session.commit()
+
+    a = AlertEvent(
+        rule_code="unknown_rule_xyz",
+        severity="warn",
+        metric="unknown",
+        window_start=datetime.now(timezone.utc) - timedelta(hours=1),
+        window_end=datetime.now(timezone.utc),
+        observed_value=1.0,
+        threshold=0.0,
+        status="open",
+        detail={},
+    )
+    db_session.add(a)
+    await db_session.commit()
+    await db_session.refresh(a)
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(f"/api/v1/alerts/{a.id}/root-cause")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["rule_code"] == "unknown_rule_xyz"
+    assert body["top_risk_labels"] == []
+    assert body["top_accounts"] == []
+    assert body["top_account_ips"] == []
+
+
+@pytest.mark.asyncio
+async def test_root_cause_404_for_missing_alert(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/alerts/999999/root-cause")
+    assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.asyncio
+async def test_root_cause_dimensions_passed_through(client, db_session):
+    """alert.dimension 里的 modality / strategy_code / channel 会传到聚合查询."""
+    await db_session.execute(delete(AlertEvent))
+    await db_session.commit()
+
+    a = AlertEvent(
+        rule_code="reject_rate_high",
+        severity="critical",
+        metric="reject_rate",
+        window_start=datetime.now(timezone.utc) - timedelta(hours=1),
+        window_end=datetime.now(timezone.utc),
+        observed_value=35.0,
+        threshold=5.0,
+        status="open",
+        dimension={"modality": "image", "strategy_code": "qa-strategy", "channel": "ios"},
+        detail={},
+    )
+    db_session.add(a)
+    await db_session.commit()
+    await db_session.refresh(a)
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(f"/api/v1/alerts/{a.id}/root-cause")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["dimension"] == {
+        "modality": "image",
+        "strategy_code": "qa-strategy",
+        "channel": "ios",
+    }
+
+
+@pytest.mark.asyncio
+async def test_alerts_list_includes_public_id(client, db_session):
+    """新写入的 AlertEvent 自动得到 public_id, list 接口返回 public_id 字段."""
+    await db_session.execute(delete(AlertEvent))
+    await db_session.commit()
+
+    now = datetime.now(timezone.utc)
+    a = AlertEvent(
+        rule_code="reject_rate_spike",
+        severity="warn",
+        metric="reject_rate",
+        window_start=now - timedelta(minutes=30),
+        window_end=now,
+        observed_value=5.0,
+        threshold=3.0,
+        status="open",
+        detail={},
+    )
+    db_session.add(a)
+    await db_session.commit()
+    await db_session.refresh(a)
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/alerts?status=open")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] >= 1
+    item = next(i for i in body["items"] if i["id"] == a.id)
+    assert item["public_id"], "public_id should be populated"
+    assert len(item["public_id"]) >= 8  # UUID 长

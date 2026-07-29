@@ -1748,3 +1748,272 @@ async def risk_label_taxonomy(db: AsyncSession) -> List[dict]:
     for v in sorted(roots.values(), key=lambda x: x["code"]):
         out.append({**v, "children": _lower(v["children"])})
     return out
+
+
+# ---------------------------------------------------------------------------
+# Root-cause aggregations — used by /api/v1/alerts/{id}/root-cause.
+#
+# Three rule codes map to three different drill-downs:
+#   * reject_rate_high                 → top risk labels
+#   * high_risk_content_high           → top accounts (rejected)
+#   * high_risk_account_concentration  → top accounts → their top IPs
+#
+# The window is the alert's own ``window_start ~ window_end`` (typically a
+# few minutes to an hour). The functions below also accept optional cohort
+# filters (modality / strategy_code / channel) so the root cause reflects
+# the cohort that triggered the alert.
+# ---------------------------------------------------------------------------
+
+
+async def top_risk_labels_by_window(
+    db: AsyncSession,
+    *,
+    start: datetime,
+    end: datetime,
+    modality: Optional[str] = None,
+    strategy_code: Optional[str] = None,
+    limit: int = 10,
+) -> List[dict]:
+    """Top risk labels hit in [start, end).
+
+    Mirrors :func:`top_risk_labels` but bounded by an explicit interval
+    and optional cohort filters. ``modality`` and ``strategy_code`` are
+    applied via the same EXISTS-based patterns as the trend / distribution
+    endpoints.
+    """
+    from sqlalchemy import exists as _exists
+
+    mr = ReviewTask.machine_result
+    stmt = (
+        select(
+            mr.label("machine_result_raw"),
+            ReviewTask.machine_completed_at.label("hit_at"),
+        )
+        .where(ReviewTask.machine_status == MachineStatus.COMPLETED)
+        .where(mr.is_not(None))
+        .where(ReviewTask.machine_completed_at >= start)
+        .where(ReviewTask.machine_completed_at < end)
+        .where(ReviewTask.machine_completed_at.is_not(None))
+    )
+
+    if modality:
+        match = _build_modality_exists([modality])
+        if match is not None:
+            stmt = stmt.where(
+                _exists().where(
+                    (Material.id == ReviewTask.material_id) & match
+                )
+            )
+
+    if strategy_code:
+        from app.models.strategy import Strategy
+
+        stmt = stmt.where(
+            or_(
+                ReviewTask.machine_result["strategy"]["code"].astext == strategy_code,
+                ReviewTask.strategy_id.in_(
+                    select(Strategy.id).where(Strategy.code == strategy_code)
+                ),
+            )
+        )
+
+    rows = (await db.execute(stmt)).all()
+
+    agg: dict[str, dict] = {}
+    for r in rows:
+        mr_raw = r.machine_result_raw
+        if not isinstance(mr_raw, dict):
+            continue
+        hits = mr_raw.get("hits")
+        if not isinstance(hits, list) or not hits:
+            continue
+        task_at: datetime = r.hit_at
+        for h in hits:
+            if not isinstance(h, dict):
+                continue
+            label = h.get("label_cn") or h.get("label")
+            if not label:
+                continue
+            label_str = str(label)
+            cur = agg.get(label_str)
+            if cur is None:
+                agg[label_str] = {"count": 1, "last_hit_at": task_at}
+            else:
+                cur["count"] += 1
+                if task_at and (cur["last_hit_at"] is None or task_at > cur["last_hit_at"]):
+                    cur["last_hit_at"] = task_at
+
+    ranked = sorted(
+        agg.items(),
+        key=lambda kv: (
+            -kv[1]["count"],
+            -(kv[1]["last_hit_at"].timestamp() if kv[1]["last_hit_at"] else 0.0),
+        ),
+    )[:limit]
+
+    return [
+        {
+            "label": label,
+            "count": data["count"],
+            "last_hit_at": data["last_hit_at"],
+        }
+        for label, data in ranked
+    ]
+
+
+async def top_accounts_by_window(
+    db: AsyncSession,
+    *,
+    start: datetime,
+    end: datetime,
+    modality: Optional[str] = None,
+    strategy_code: Optional[str] = None,
+    channel: Optional[str] = None,
+    limit: int = 10,
+) -> List[dict]:
+    """Top ``account_id`` by submission volume in [start, end).
+
+    Returns ``{account_id, submitted, rejected}`` per row, sorted by
+    rejected DESC then submitted DESC.
+    """
+    from sqlalchemy import exists as _exists
+
+    acct = Material.extra_metadata["account_id"].astext
+    stmt = (
+        select(
+            acct.label("account_id"),
+            func.count(Material.id).label("sub"),
+            func.sum(
+                case(
+                    (Material.status.in_(REJECTED_STATUSES), 1),
+                    else_=0,
+                )
+            ).label("rej"),
+        )
+        .where(Material.created_at >= start)
+        .where(Material.created_at < end)
+        .where(acct.is_not(None))
+        .group_by(acct)
+    )
+
+    if modality:
+        match = _build_modality_exists([modality])
+        if match is not None:
+            stmt = stmt.where(match)
+
+    if strategy_code:
+        from app.models.strategy import Strategy
+
+        # Strategy filters via the most recent review task on the material.
+        stmt = stmt.where(
+            _exists().where(
+                (ReviewTask.material_id == Material.id)
+                & or_(
+                    ReviewTask.machine_result["strategy"]["code"].astext == strategy_code,
+                    ReviewTask.strategy_id.in_(
+                        select(Strategy.id).where(Strategy.code == strategy_code)
+                    ),
+                )
+            )
+        )
+
+    if channel:
+        stmt = stmt.where(Material.extra_metadata["channel"].astext == channel)
+
+    rows = (await db.execute(stmt)).all()
+
+    items = [
+        {
+            "account_id": r.account_id,
+            "submitted": int(r.sub or 0),
+            "rejected": int(r.rej or 0),
+        }
+        for r in rows
+        if r.account_id
+    ]
+    items.sort(key=lambda x: (-x["rejected"], -x["submitted"]))
+    return items[:limit]
+
+
+async def top_accounts_by_ip_by_window(
+    db: AsyncSession,
+    *,
+    start: datetime,
+    end: datetime,
+    modality: Optional[str] = None,
+    strategy_code: Optional[str] = None,
+    channel: Optional[str] = None,
+    limit: int = 5,
+    per_account_ip_limit: int = 3,
+) -> List[dict]:
+    """Top accounts → their top IPs.
+
+    Returns a flat list of ``{account_id, ip, submitted, rejected}`` rows.
+    The per-account IP cap is ``per_account_ip_limit``; the total row cap
+    is ``limit`` (top accounts by rejections).
+    """
+    from sqlalchemy import exists as _exists
+
+    acct = Material.extra_metadata["account_id"].astext
+    ip = Material.extra_metadata["ip"].astext
+
+    # 1. Find top accounts by rejection count.
+    top_accounts = await top_accounts_by_window(
+        db,
+        start=start,
+        end=end,
+        modality=modality,
+        strategy_code=strategy_code,
+        channel=channel,
+        limit=limit,
+    )
+    if not top_accounts:
+        return []
+
+    account_ids = [a["account_id"] for a in top_accounts]
+
+    # 2. For these accounts, find their top IPs.
+    stmt = (
+        select(
+            acct.label("account_id"),
+            ip.label("ip"),
+            func.count(Material.id).label("sub"),
+            func.sum(
+                case(
+                    (Material.status.in_(REJECTED_STATUSES), 1),
+                    else_=0,
+                )
+            ).label("rej"),
+        )
+        .where(Material.created_at >= start)
+        .where(Material.created_at < end)
+        .where(acct.in_(account_ids))
+        .where(ip.is_not(None))
+        .group_by(acct, ip)
+        .order_by(func.sum(case((Material.status.in_(REJECTED_STATUSES), 1), else_=0)).desc())
+    )
+
+    rows = (await db.execute(stmt)).all()
+
+    # 3. Group by account_id, cap per-account IPs.
+    by_account: dict[str, dict] = {}
+    for r in rows:
+        if not r.account_id or not r.ip:
+            continue
+        cur = by_account.setdefault(r.account_id, {"count": 0, "rows": []})
+        cur["count"] += 1
+        if len(cur["rows"]) < per_account_ip_limit:
+            cur["rows"].append(
+                {
+                    "account_id": r.account_id,
+                    "ip": r.ip,
+                    "submitted": int(r.sub or 0),
+                    "rejected": int(r.rej or 0),
+                }
+            )
+
+    # 4. Flatten in top_accounts order.
+    out: List[dict] = []
+    for a in top_accounts:
+        out.extend(by_account.get(a["account_id"], {}).get("rows", []))
+    return out

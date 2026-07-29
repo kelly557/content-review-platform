@@ -21,15 +21,47 @@ from app.services.report_metrics import (
     _build_modality_exists,
     resolve_custom_window,
     resolve_window,
+    top_accounts_by_ip_by_window,
+    top_accounts_by_window,
+    top_risk_labels_by_window,
 )
-from app.schemas.alert import AlertAckRequest, AlertEventOut, AlertPage
+from app.schemas.alert import (
+    AlertAckRequest,
+    AlertEventOut,
+    AlertPage,
+    AlertRootCauseAccount,
+    AlertRootCauseAccountIP,
+    AlertRootCauseResponse,
+    AlertRootCauseWindow,
+)
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+
+
+# ---------------------------------------------------------------------------
+# Root cause routing — rule_code → which aggregation to run.
+# ---------------------------------------------------------------------------
+
+ROOT_CAUSE_LABELS: dict[str, str] = {
+    "reject_rate_high": "拒绝率异常",
+    "high_risk_content_high": "账号高风险阻断异常",
+    "high_risk_account_concentration": "高风险账号聚集异常",
+    "reject_rate_spike": "拒绝率突升",
+    "high_risk_concentration": "高风险账号聚集",
+    "submit_drop": "提交量骤降",
+}
+
+ROOT_CAUSE_RULES: dict[str, str] = {
+    "reject_rate_high": "top_risk_labels",
+    "high_risk_content_high": "top_accounts",
+    "high_risk_account_concentration": "top_account_ips",
+}
 
 
 def _to_out(a: AlertEvent) -> AlertEventOut:
     return AlertEventOut(
         id=a.id,
+        public_id=a.public_id or "",
         rule_code=a.rule_code,
         severity=a.severity,
         metric=a.metric,
@@ -259,6 +291,105 @@ async def list_alerts(
         total=int(total),
         page=page,
         size=limit,
+    )
+
+
+@router.get("/{alert_id}/root-cause", response_model=AlertRootCauseResponse)
+async def get_alert_root_cause(
+    alert_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("reviewer", "mlr", "admin")),
+) -> AlertRootCauseResponse:
+    """Per-alert root cause drill-down.
+
+    Routes to one of three aggregations based on ``rule_code``:
+
+    * ``reject_rate_high``                 → top risk labels
+    * ``high_risk_content_high``           → top accounts (rejected)
+    * ``high_risk_account_concentration``  → top accounts → their top IPs
+
+    The alert's own ``window_start ~ window_end`` defines the aggregation
+    window. Optional cohort filters (modality / strategy_code / channel) are
+    read from ``AlertEvent.dimension`` so the result reflects the slice that
+    triggered the alert.
+    """
+    alert = await db.get(AlertEvent, alert_id)
+    if alert is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="alert not found"
+        )
+
+    dimension = alert.dimension or {}
+    modality = dimension.get("modality")
+    strategy_code = dimension.get("strategy_code")
+    channel = dimension.get("channel")
+
+    size_min = max(
+        int((alert.window_end - alert.window_start).total_seconds() // 60),
+        1,
+    )
+    window = AlertRootCauseWindow(
+        start=alert.window_start,
+        end=alert.window_end,
+        size_min=size_min,
+    )
+
+    rule_code = alert.rule_code
+    rule_label = ROOT_CAUSE_LABELS.get(rule_code, rule_code)
+    route = ROOT_CAUSE_RULES.get(rule_code)
+
+    top_risk_labels: List[dict] = []
+    top_accounts: List[AlertRootCauseAccount] = []
+    top_account_ips: List[AlertRootCauseAccountIP] = []
+
+    if route == "top_risk_labels":
+        rows = await top_risk_labels_by_window(
+            db,
+            start=alert.window_start,
+            end=alert.window_end,
+            modality=modality,
+            strategy_code=strategy_code,
+            limit=10,
+        )
+        top_risk_labels = rows
+    elif route == "top_accounts":
+        rows = await top_accounts_by_window(
+            db,
+            start=alert.window_start,
+            end=alert.window_end,
+            modality=modality,
+            strategy_code=strategy_code,
+            channel=channel,
+            limit=10,
+        )
+        top_accounts = [AlertRootCauseAccount(**r) for r in rows]
+    elif route == "top_account_ips":
+        rows = await top_accounts_by_ip_by_window(
+            db,
+            start=alert.window_start,
+            end=alert.window_end,
+            modality=modality,
+            strategy_code=strategy_code,
+            channel=channel,
+            limit=5,
+            per_account_ip_limit=3,
+        )
+        top_account_ips = [AlertRootCauseAccountIP(**r) for r in rows]
+    # else: rule_code 不在 ROOT_CAUSE_RULES 里 → 返回空三栏.
+
+    return AlertRootCauseResponse(
+        alert_id=alert.id,
+        rule_code=rule_code,
+        rule_label=rule_label,
+        window=window,
+        dimension={
+            "modality": modality,
+            "strategy_code": strategy_code,
+            "channel": channel,
+        },
+        top_risk_labels=top_risk_labels,
+        top_accounts=top_accounts,
+        top_account_ips=top_account_ips,
     )
 
 
