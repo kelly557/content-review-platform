@@ -703,62 +703,125 @@ async def _trend_review_rate_last(
 
 
 async def anomaly(
-    db: AsyncSession, *, window: Window, granularity: str
+    db: AsyncSession,
+    *,
+    window: Window,
+    granularity: str = "hour",
+    modalities: Optional[Sequence[str]] = None,
+    strategy_codes: Optional[Sequence[str]] = None,
+    account_ids: Optional[Sequence[str]] = None,
+    ips: Optional[Sequence[str]] = None,
+    channels: Optional[Sequence[str]] = None,
+    risk_label_paths: Optional[Sequence[str]] = None,
 ) -> dict:
     """Return current snapshot + series of core metrics + recent alerts.
 
     Series is built by bucketing the window. ``current`` is the most-recent
     (smallest bucket) sub-window.
+
+    The 5 filter dimensions mirror :func:`risk_trend`:
+
+      * ``modalities``        — 5 选 (image/text/video/audio/document)
+      * ``strategy_codes``    — by ``machine_result['strategy']['code']`` or FK
+      * ``account_ids`` / ``ips`` / ``channels``
+                               — by ``material.metadata`` JSONB
+      * ``risk_label_paths``  — by `machine_result` JSONB content
+
+    Granularity is restricted to ``hour`` / ``day`` (no 5min / month):
+    anomaly windows only span 1h / 24h / 7d so finer / coarser buckets are
+    not useful.
     """
+    from sqlalchemy import and_ as _and_, exists as _exists, or_ as _or_
+    from sqlalchemy import String as _String
+
+    if granularity not in {"hour", "day"}:
+        raise ValueError(f"unsupported granularity: {granularity}")
+
     bucket = _bucket_expr(granularity)
-    stmt = (
-        select(
-            bucket.label("b"),
-            func.sum(
-                case(
-                    (Material.status.in_(REJECTED_STATUSES), 1),
-                    else_=0,
-                )
-            ).label("rej"),
-            func.sum(
-                case(
-                    (Material.status.in_(APPROVED_STATUSES), 1),
-                    else_=0,
-                )
-            ).label("apr"),
-            func.sum(
-                case(
-                    (Material.status.in_(SUBMITTED_STATUSES), 1),
-                    else_=0,
-                )
-            ).label("sub"),
+
+    base = select(
+        bucket.label("b"),
+        func.sum(case((Material.status.in_(REJECTED_STATUSES), 1), else_=0)).label("rej"),
+        func.sum(case((Material.status.in_(APPROVED_STATUSES), 1), else_=0)).label("apr"),
+        func.sum(case((Material.status.in_(SUBMITTED_STATUSES), 1), else_=0)).label("sub"),
+    ).where(Material.created_at >= window.start).where(Material.created_at < window.end)
+
+    if modalities:
+        valid = set(AUDIT_MODALITIES)
+        unknown = [m for m in modalities if m not in valid]
+        if unknown:
+            raise ValueError(f"unsupported modality: {', '.join(unknown)}")
+        material_match = _build_modality_exists(list(modalities))
+        if material_match is not None:
+            base = base.where(material_match)
+
+    if strategy_codes:
+        from app.models.strategy import Strategy
+
+        strategy_match = _exists().where(
+            (ReviewTask.material_id == Material.id)
+            & _or_(
+                ReviewTask.machine_result["strategy"]["code"].astext.in_(list(strategy_codes)),
+                ReviewTask.strategy_id.in_(
+                    select(Strategy.id).where(Strategy.code.in_(list(strategy_codes)))
+                ),
+            )
         )
-        .where(Material.created_at >= window.start)
-        .where(Material.created_at < window.end)
-        .group_by("b")
-        .order_by("b")
-    )
+        base = base.where(strategy_match)
+
+    if account_ids:
+        base = base.where(
+            _or_(*[Material.extra_metadata["account_id"].astext == a for a in account_ids])
+        )
+
+    if ips:
+        base = base.where(
+            _or_(*[Material.extra_metadata["ip"].astext == i for i in ips])
+        )
+
+    if channels:
+        base = base.where(
+            _or_(*[Material.extra_metadata["channel"].astext == c for c in channels])
+        )
+
+    stmt = base.group_by("b").order_by("b")
     rows = (await db.execute(stmt)).all()
 
-    # Reviewed counts (join to ReviewTask)
+    # Reviewed counts (join to ReviewTask) — apply the same filter set so the
+    # review_rate per bucket reflects the selected cohort.
     if granularity == "hour":
         task_b = func.date_trunc("hour", ReviewTask.created_at)
-    elif granularity == "5min":
-        task_b = func.date_trunc("hour", ReviewTask.created_at) + (
-            (func.extract("minute", ReviewTask.created_at) / 5).cast(Integer) * 5
-        ) * func.make_interval(0, 0, 0, 0, 0, 1, 0)
     else:
         task_b = func.date_trunc("day", ReviewTask.created_at)
     rev_stmt = (
-        select(
-            task_b.label("b"),
-            func.count(ReviewTask.id).label("c"),
-        )
+        select(task_b.label("b"), func.count(ReviewTask.id).label("c"))
         .where(ReviewTask.created_at >= window.start)
         .where(ReviewTask.created_at < window.end)
         .where(ReviewTask.final_decision != ReviewDecision.PENDING)
-        .group_by("b")
     )
+    if strategy_codes:
+        from app.models.strategy import Strategy
+
+        rev_stmt = rev_stmt.where(
+            _or_(
+                ReviewTask.machine_result["strategy"]["code"].astext.in_(list(strategy_codes)),
+                ReviewTask.strategy_id.in_(
+                    select(Strategy.id).where(Strategy.code.in_(list(strategy_codes)))
+                ),
+            )
+        )
+    if risk_label_paths:
+        label_predicates = []
+        for p in risk_label_paths:
+            segments = [seg for seg in p.split("/") if seg and seg != "*"]
+            for seg in segments:
+                like = f'%"{seg}"%'
+                label_predicates.append(
+                    func.cast(ReviewTask.machine_result, _String).like(like)
+                )
+        if label_predicates:
+            rev_stmt = rev_stmt.where(_and_(*label_predicates))
+    rev_stmt = rev_stmt.group_by("b")
     rev_rows = (await db.execute(rev_stmt)).all()
     rev_map = {r.b: int(r.c) for r in rev_rows}
 
@@ -787,8 +850,8 @@ async def anomaly(
             "approve_rate": last["approve_rate"],
             "submitted": last["submitted"],
             "rejected": int(round(last["submitted"] * last["reject_rate"] / 100.0)),
-            "high_risk_accounts": 0,  # computed separately below
-            "high_risk_content_count": 0,  # computed separately below
+            "high_risk_accounts": 0,
+            "high_risk_content_count": 0,
         }
     else:
         current = {
@@ -803,7 +866,8 @@ async def anomaly(
         }
 
     # Distinct submitters with at least 1 rejected material in the most-recent
-    # bucket. Approximate: use the most recent 1h slice of the window.
+    # 1h slice. Apply the same filter set so the headline number reflects the
+    # selected cohort.
     last_hour_start = max(window.end - timedelta(hours=1), window.start)
     hr_q = (
         select(func.count(func.distinct(Material.submitter_id)))
@@ -811,6 +875,26 @@ async def anomaly(
         .where(Material.created_at < window.end)
         .where(Material.status.in_(REJECTED_STATUSES))
     )
+    if modalities:
+        material_match = _build_modality_exists(list(modalities))
+        if material_match is not None:
+            hr_q = hr_q.where(material_match)
+    if account_ids:
+        hr_q = hr_q.where(
+            _or_(
+                *[Material.extra_metadata["account_id"].astext == a for a in account_ids]
+            )
+        )
+    if ips:
+        hr_q = hr_q.where(
+            _or_(*[Material.extra_metadata["ip"].astext == i for i in ips])
+        )
+    if channels:
+        hr_q = hr_q.where(
+            _or_(
+                *[Material.extra_metadata["channel"].astext == c for c in channels]
+            )
+        )
     current["high_risk_accounts"] = int(await db.scalar(hr_q) or 0)
 
     # Distinct materials whose latest completed machine review has
@@ -824,6 +908,17 @@ async def anomaly(
         .where(ReviewTask.machine_completed_at >= last_hour_start)
         .where(ReviewTask.machine_completed_at < window.end)
     )
+    if risk_label_paths:
+        label_predicates = []
+        for p in risk_label_paths:
+            segments = [seg for seg in p.split("/") if seg and seg != "*"]
+            for seg in segments:
+                like = f'%"{seg}"%'
+                label_predicates.append(
+                    func.cast(ReviewTask.machine_result, _String).like(like)
+                )
+        if label_predicates:
+            hr_content_q = hr_content_q.where(_and_(*label_predicates))
     current["high_risk_content_count"] = int(await db.scalar(hr_content_q) or 0)
 
     # Recent alerts (top 20)
@@ -853,6 +948,17 @@ async def anomaly(
 
     return {
         "window": granularity,
+        "granularity": granularity,
+        "window_start": window.start,
+        "window_end": window.end,
+        "applied": {
+            "modalities": list(modalities or []),
+            "strategy_codes": list(strategy_codes or []),
+            "channels": list(channels or []),
+            "account_ids": list(account_ids or []),
+            "ips": list(ips or []),
+            "risk_label_paths": list(risk_label_paths or []),
+        },
         "current": current,
         "series": series,
         "alerts": alerts,

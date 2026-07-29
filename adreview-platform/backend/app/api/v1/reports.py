@@ -138,12 +138,36 @@ async def trend(
 async def anomaly(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("reviewer", "mlr", "admin")),
-    window: str = Query("1h", description="监控时间窗, e.g. 1h, 24h"),
+    window: str = Query("1h", description="监控时间窗, e.g. 1h, 24h, 7d"),
     start: Optional[datetime] = Query(
         None, description="自定义窗口起点 (ISO 8601), 与 end 一起使用"
     ),
     end: Optional[datetime] = Query(
         None, description="自定义窗口终点 (ISO 8601), 与 start 一起使用"
+    ),
+    granularity: Optional[str] = Query(
+        None,
+        description="横轴粒度: hour|day. 缺省时按窗口跨度自动选取 (≤6h→hour, 否则→day).",
+    ),
+    modalities: Optional[List[str]] = Query(
+        None,
+        description="审核模态过滤 (image/text/video/audio/document), 可重复. 5 选.",
+    ),
+    strategy_codes: Optional[List[str]] = Query(
+        None, description="策略 code, 可重复"
+    ),
+    account_ids: Optional[List[str]] = Query(
+        None, description="业务账号 (material.metadata.account_id), 可重复"
+    ),
+    ips: Optional[List[str]] = Query(
+        None, description="IP (material.metadata.ip), 可重复"
+    ),
+    channels: Optional[List[str]] = Query(
+        None, description="渠道 (material.metadata.channel), 可重复. 业务自由填写值。"
+    ),
+    risk_label_paths: Optional[List[str]] = Query(
+        None,
+        description="风险标签路径 (一级/二级/三级 code, 用 '/' 拼接), 可重复. 支持前缀匹配.",
     ),
 ) -> AnomalyResponse:
     custom = _resolve_optional_range(start, end)
@@ -153,8 +177,30 @@ async def anomaly(
         w = resolve_window(window)
     else:
         w = custom
-    gran = bucket_granularity(w)
-    data = await anomaly_metric(db, window=w, granularity=gran)
+    if granularity not in (None, "hour", "day"):
+        raise HTTPException(
+            status_code=400, detail=f"unsupported granularity: {granularity}"
+        )
+    if granularity is None:
+        # 异常分析只支持 1h / 24h / 7d: 6h 以内走 hour, 否则走 day.
+        hours = w.duration.total_seconds() / 3600
+        gran = "hour" if hours <= 6 else "day"
+    else:
+        gran = granularity
+    try:
+        data = await anomaly_metric(
+            db,
+            window=w,
+            granularity=gran,
+            modalities=modalities,
+            strategy_codes=strategy_codes,
+            account_ids=account_ids,
+            ips=ips,
+            channels=channels,
+            risk_label_paths=risk_label_paths,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return AnomalyResponse(**data)
 
 

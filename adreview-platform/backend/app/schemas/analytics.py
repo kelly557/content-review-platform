@@ -181,8 +181,27 @@ class AnomalyAlertSummary(BaseModel):
     detail: Dict[str, Any] = Field(default_factory=dict)
 
 
+class AnomalyAppliedFilters(BaseModel):
+    """Echo of the resolved filter set so the UI can render a chip strip.
+
+    Mirrors the structure on the trend page so the frontend can reuse a
+    single ``AnomalyAppliedFilters`` shape across both analytics endpoints.
+    """
+
+    modalities: List[str] = Field(default_factory=list)
+    strategy_codes: List[str] = Field(default_factory=list)
+    channels: List[str] = Field(default_factory=list)
+    account_ids: List[str] = Field(default_factory=list)
+    ips: List[str] = Field(default_factory=list)
+    risk_label_paths: List[str] = Field(default_factory=list)
+
+
 class AnomalyResponse(BaseModel):
     window: str
+    granularity: str
+    window_start: datetime
+    window_end: datetime
+    applied: AnomalyAppliedFilters = Field(default_factory=AnomalyAppliedFilters)
     current: AnomalyCurrent
     series: List[AnomalyMetricPoint]
     alerts: List[AnomalyAlertSummary]

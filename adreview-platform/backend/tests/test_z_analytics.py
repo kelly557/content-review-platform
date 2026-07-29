@@ -1119,3 +1119,417 @@ async def test_risk_trend_custom_range_passes_through(client, db_session):
     body = resp.json()
     high_total = sum(p["high"] for p in body["points"])
     assert high_total == 1
+
+
+# ---------------------------------------------------------------------------
+# Anomaly tab — multi-window (1h/24h/7d), explicit granularity, 5 filter
+# dimensions (审核模态 / 策略 / 渠道 / account_id / ip / 风险标签).
+# Added 2026-07-29 for the Anomaly page rework.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_anomaly_window_7d_accepted(client):
+    """异常分析支持 7d 窗口."""
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/reports/anomaly?window=7d")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["granularity"] == "day"  # 7d 窗口无小时维度 (span > 6h)
+    assert "applied" in body
+    assert body["applied"] == {
+        "modalities": [],
+        "strategy_codes": [],
+        "channels": [],
+        "account_ids": [],
+        "ips": [],
+        "risk_label_paths": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_anomaly_explicit_granularity(client):
+    """手动覆盖 granularity: 1h 窗口下选 day, 桶按天切."""
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/anomaly",
+        params=[("window", "1h"), ("granularity", "day")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["granularity"] == "day"
+
+
+@pytest.mark.asyncio
+async def test_anomaly_rejects_unknown_granularity(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/anomaly",
+        params=[("window", "1h"), ("granularity", "month")],
+    )
+    assert resp.status_code == 400, resp.text
+    assert "granularity" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_anomaly_filter_by_modality(client, db_session):
+    """审核模态过滤: 5 选 (image/text/video/audio/document)."""
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    # 2 文本 + 1 图片, 按模态过滤后只保留 1.
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.TEXT,
+        mime_type="text/plain",
+        risk_level="低风险",
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.TEXT,
+        mime_type="text/plain",
+        risk_level="低风险",
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.IMAGE,
+        mime_type="image/png",
+        risk_level="低风险",
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/anomaly",
+        params=[
+            ("window", "1h"),
+            ("granularity", "hour"),
+            ("modalities", "image"),
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["applied"]["modalities"] == ["image"]
+    # 模态=image 只保留 1 条 approved/rejected 事件
+    assert body["current"]["submitted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_anomaly_filter_by_ip(client, db_session):
+    """IP 过滤: 取 material.metadata['ip']."""
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="低风险",
+        metadata={"ip": "10.0.0.1"},
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="低风险",
+        metadata={"ip": "10.0.0.2"},
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/anomaly",
+        params=[
+            ("window", "1h"),
+            ("granularity", "hour"),
+            ("ips", "10.0.0.1"),
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["applied"]["ips"] == ["10.0.0.1"]
+    assert body["current"]["submitted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_anomaly_filter_by_account_and_channel(client, db_session):
+    """account_id + 渠道双重过滤."""
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="低风险",
+        metadata={"account_id": "acct-A", "channel": "ios"},
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="低风险",
+        metadata={"account_id": "acct-A", "channel": "android"},
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="低风险",
+        metadata={"account_id": "acct-B", "channel": "ios"},
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/anomaly",
+        params=[
+            ("window", "1h"),
+            ("granularity", "hour"),
+            ("account_ids", "acct-A"),
+            ("channels", "ios"),
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["applied"]["account_ids"] == ["acct-A"]
+    assert body["applied"]["channels"] == ["ios"]
+    assert body["current"]["submitted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_anomaly_filter_by_strategy_code(client, db_session):
+    """策略 code 过滤：通过ReviewTask.machine_result['strategy']['code']."""
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    from app.models.strategy import Strategy
+
+    s1 = Strategy(code="qa-strategy-anomaly-1", name="qa", scope="general", is_active=True)
+    s2 = Strategy(code="qa-strategy-anomaly-2", name="qa2", scope="general", is_active=True)
+    db_session.add_all([s1, s2])
+    await db_session.commit()
+
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="低风险",
+        strategy=s1,
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="低风险",
+        strategy=s2,
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="低风险",
+        strategy=s1,
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/anomaly",
+        params=[
+            ("window", "1h"),
+            ("granularity", "hour"),
+            ("strategy_codes", "qa-strategy-anomaly-1"),
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["applied"]["strategy_codes"] == ["qa-strategy-anomaly-1"]
+    assert body["current"]["submitted"] == 2
+
+
+@pytest.mark.asyncio
+async def test_anomaly_filter_by_risk_label_path(client, db_session):
+    """风险标签路径过滤（仅作用于高风险内容计数)."""
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    now = datetime.now(timezone.utc)
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="高风险",
+        completed_at=now,
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    # 不匹配任何路径前置 → 高风险内容计数=0
+    resp = await client.get(
+        "/api/v1/reports/anomaly",
+        params=[
+            ("window", "1h"),
+            ("granularity", "hour"),
+            ("risk_label_paths", "nonexistent_category"),
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["current"]["high_risk_content_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_anomaly_rejects_unknown_modality(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/anomaly",
+        params=[
+            ("window", "1h"),
+            ("granularity", "hour"),
+            ("modalities", "pdf"),
+        ],
+    )
+    assert resp.status_code == 400, resp.text
+    assert "modality" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/alerts — time window + 5 dimensions.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_alerts_filter_by_window(client, db_session):
+    """异常分析 alerts 接受 1h/24h/7d 窗口."""
+    await db_session.execute(delete(AlertEvent))
+    await db_session.commit()
+
+    now = datetime.now(timezone.utc)
+    a_old = AlertEvent(
+        rule_code="reject_rate_spike",
+        severity="warn",
+        metric="reject_rate",
+        window_start=now - timedelta(days=10),
+        window_end=now - timedelta(days=10) + timedelta(minutes=30),
+        observed_value=5.0,
+        threshold=3.0,
+        created_at=now - timedelta(days=10),
+        detail={"note": "old"},
+    )
+    a_new = AlertEvent(
+        rule_code="reject_rate_spike",
+        severity="warn",
+        metric="reject_rate",
+        window_start=now - timedelta(hours=1),
+        window_end=now,
+        observed_value=5.0,
+        threshold=3.0,
+        detail={"note": "new"},
+    )
+    db_session.add_all([a_old, a_new])
+    await db_session.commit()
+    await db_session.refresh(a_new)
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/alerts?window=24h")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == a_new.id
+
+
+@pytest.mark.asyncio
+async def test_alerts_filter_by_5_dimensions(client, db_session):
+    """alerts 接受 modalities / strategy_codes / account_ids / ips / channels / risk_label_paths."""
+    await db_session.execute(delete(AlertEvent))
+    await db_session.commit()
+
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    # 创建一个有完整 metadata 的 material + 一条高风险 review_task
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="高风险",
+        metadata={"ip": "10.0.0.1", "account_id": "acct-X", "channel": "ios"},
+    )
+    await db_session.commit()
+
+    now = datetime.now(timezone.utc)
+    a = AlertEvent(
+        rule_code="reject_rate_spike",
+        severity="warn",
+        metric="reject_rate",
+        window_start=now - timedelta(minutes=30),
+        window_end=now,
+        observed_value=5.0,
+        threshold=3.0,
+        detail={"note": "test"},
+    )
+    db_session.add(a)
+    await db_session.commit()
+    await db_session.refresh(a)
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    # 不匹配 IP → 0 items
+    resp = await client.get("/api/v1/alerts", params=[("ips", "9.9.9.9")])
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 0
+
+    # 匹配 IP → 1 item
+    resp = await client.get("/api/v1/alerts", params=[("ips", "10.0.0.1")])
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == a.id
+
+    # 多维组合: account + channel
+    resp = await client.get(
+        "/api/v1/alerts",
+        params=[("account_ids", "acct-X"), ("channels", "ios")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 1
+
+    # account 对但 channel 错 → 0
+    resp = await client.get(
+        "/api/v1/alerts",
+        params=[("account_ids", "acct-X"), ("channels", "android")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_alerts_rejects_unknown_modality(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/alerts", params=[("modalities", "pdf")])
+    assert resp.status_code == 400, resp.text
+    assert "modality" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_alerts_keeps_existing_status_filter(client, db_session):
+    """status 过滤仍按 status_=open/acknowledged/all 工作."""
+    await db_session.execute(delete(AlertEvent))
+    await db_session.commit()
+
+    now = datetime.now(timezone.utc)
+    a_open = AlertEvent(
+        rule_code="reject_rate_spike",
+        severity="warn",
+        metric="reject_rate",
+        window_start=now - timedelta(minutes=30),
+        window_end=now,
+        observed_value=5.0,
+        threshold=3.0,
+        status="open",
+        detail={},
+    )
+    a_ack = AlertEvent(
+        rule_code="reject_rate_spike",
+        severity="warn",
+        metric="reject_rate",
+        window_start=now - timedelta(minutes=30),
+        window_end=now,
+        observed_value=5.0,
+        threshold=3.0,
+        status="acknowledged",
+        detail={},
+    )
+    db_session.add_all([a_open, a_ack])
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/alerts?status=open")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["status"] == "open"
