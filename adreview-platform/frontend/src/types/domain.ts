@@ -2150,6 +2150,7 @@ export interface MachineReviewRecord {
   requested_at?: string | null
   finished_at?: string | null
   last_feedback?: MachineReviewFeedback | null
+  machine_result?: Record<string, unknown> | null
 }
 
 export interface QueryFilters {
@@ -2276,6 +2277,7 @@ export interface ReviewRecord {
   bailian_request_id?: string | null
   data_id?: string | null
   last_feedback?: MachineReviewFeedback | null
+  machine_result?: Record<string, unknown> | null
 }
 
 export interface ReviewFilters {

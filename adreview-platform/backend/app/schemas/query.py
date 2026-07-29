@@ -159,6 +159,8 @@ class MachineReviewRecordOut(ORMBase):
     requested_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
+    machine_result: Optional[Dict[str, Any]] = None
+
 
 class QueryLabelsOut(BaseModel):
     """Distinct labels aggregated from ``machine_result.hits``."""
@@ -215,6 +217,8 @@ class ReviewRecordOut(ORMBase):
     data_id: Optional[str] = None
 
     last_feedback: Optional["MachineReviewFeedbackOut"] = None
+
+    machine_result: Optional[Dict[str, Any]] = None
 
 
 class MachineReviewFeedbackIn(BaseModel):

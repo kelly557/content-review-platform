@@ -298,6 +298,7 @@ def _to_record(
         requested_at=requested_at,
         finished_at=task.machine_completed_at,
         last_feedback=last_feedback,
+        machine_result=mr or None,
     )
 
 
@@ -923,6 +924,7 @@ def _to_review_record(
         bailian_request_id=machine_request_id,
         data_id=data_id,
         last_feedback=last_feedback,
+        machine_result=mr or None,
     )
 
 
