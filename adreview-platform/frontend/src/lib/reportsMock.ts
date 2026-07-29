@@ -11,6 +11,10 @@
  */
 import type {
   AlertEventOut,
+  AlertRootCauseAccount,
+  AlertRootCauseAccountIP,
+  AlertRootCauseResponse,
+  AlertRootCauseTopRiskLabel,
   AnomalyAlertSummary,
   AnomalyCurrent,
   AnomalyMetricPoint,
@@ -388,7 +392,7 @@ function buildAnomalyAlert(
   })
   return {
     id,
-    public_id: `mock-${id}`,
+    public_id: formatPublicId(id, startMs),
     rule_code: ruleCode,
     severity,
     metric: RULE_LABEL[ruleCode] ?? ruleCode,
@@ -400,6 +404,14 @@ function buildAnomalyAlert(
     created_at: new Date(startMs + 30_000).toISOString(),
     detail: { generated: detailStr },
   }
+}
+
+function formatPublicId(id: number, atMs: number): string {
+  const d = new Date(atMs)
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `ALERT-${y}${m}${day}-${String(id).padStart(4, '0')}`
 }
 
 function bucketLabel(g: '5min' | 'hour' | 'day'): string {
@@ -498,7 +510,7 @@ function buildFullAlert(
   void mockSeed
   return {
     id,
-    public_id: `mock-${id}`,
+    public_id: formatPublicId(id, startMs),
     rule_code: ruleCode,
     severity,
     metric: RULE_LABEL[ruleCode] ?? ruleCode,
@@ -562,6 +574,137 @@ export function buildTrend(metric: 'reject_rate' | 'review_rate' | 'approve_rate
     points: buckets,
     delta_pct: delta,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Alert root cause — mock per-rule drill-down content.
+// ---------------------------------------------------------------------------
+
+const ROOT_CAUSE_RULE_LABELS: Record<string, string> = {
+  reject_rate_high: '拒绝率异常',
+  high_risk_content_high: '账号高风险阻断异常',
+  high_risk_account_concentration: '高风险账号聚集异常',
+  reject_rate_spike: '拒绝率突升',
+  high_risk_concentration: '高风险账号聚集',
+  submit_drop: '提交量骤降',
+}
+
+const TOP_RISK_LABELS_POOL = [
+  '政治敏感',
+  '暴恐',
+  '低俗',
+  '广告',
+  '辱骂',
+  '涉政',
+  '诱导分享',
+  '未成年人',
+  '虚假宣传',
+  '版权',
+  '色情',
+  '违禁',
+]
+
+const TOP_ACCOUNTS_POOL = [
+  'acct-A',
+  'acct-B',
+  'acct-C',
+  'acct-D',
+  'acct-E',
+  'acct-F',
+  'acct-G',
+  'acct-H',
+]
+
+const TOP_IPS_POOL = [
+  '10.0.0.1',
+  '10.0.0.2',
+  '10.0.0.3',
+  '10.0.0.4',
+  '10.0.0.5',
+  '192.168.1.1',
+  '192.168.1.2',
+  '192.168.1.3',
+]
+
+export function buildMockRootCause(opts: {
+  alertId: number
+  ruleCode?: string
+  mockSeed?: number
+}): AlertRootCauseResponse {
+  const seed = (opts.mockSeed ?? 0xc1d2e3f4) ^ opts.alertId
+  const prng = mulberry32(seed)
+  const ruleCode = opts.ruleCode ?? 'reject_rate_high'
+  const ruleLabel = ROOT_CAUSE_RULE_LABELS[ruleCode] ?? ruleCode
+
+  // 1h window ending now
+  const endMs = Date.now()
+  const startMs = endMs - 60 * 60 * 1000
+  const dimension = {
+    modality: prng() < 0.5 ? 'image' : 'text',
+    strategy_code: 'qa-strategy-anomaly',
+    channel: '模型输入',
+  }
+
+  let top_risk_labels: AlertRootCauseTopRiskLabel[] = []
+  let top_accounts: AlertRootCauseAccount[] = []
+  let top_account_ips: AlertRootCauseAccountIP[] = []
+
+  if (ruleCode === 'reject_rate_high') {
+    const n = 5 + Math.floor(prng() * 4)
+    const labels = pickN(TOP_RISK_LABELS_POOL, n, prng)
+    top_risk_labels = labels.map((label) => ({
+      label,
+      count: 12 + Math.floor(prng() * 200),
+      last_hit_at: new Date(endMs - Math.floor(prng() * 60 * 60 * 1000)).toISOString(),
+    }))
+    top_risk_labels.sort((a, b) => b.count - a.count)
+  } else if (ruleCode === 'high_risk_content_high') {
+    const n = 3 + Math.floor(prng() * 4)
+    const accts = pickN(TOP_ACCOUNTS_POOL, n, prng)
+    top_accounts = accts.map((account_id) => {
+      const submitted = 20 + Math.floor(prng() * 200)
+      const rejected = Math.floor(submitted * (0.4 + prng() * 0.5))
+      return { account_id, submitted, rejected }
+    })
+    top_accounts.sort((a, b) => b.rejected - a.rejected)
+  } else if (ruleCode === 'high_risk_account_concentration') {
+    const n = 3 + Math.floor(prng() * 3)
+    const accts = pickN(TOP_ACCOUNTS_POOL, n, prng)
+    top_account_ips = []
+    for (const account_id of accts) {
+      const ipN = 1 + Math.floor(prng() * 2)
+      const ips = pickN(TOP_IPS_POOL, ipN, prng)
+      for (const ip of ips) {
+        const submitted = 5 + Math.floor(prng() * 50)
+        const rejected = Math.floor(submitted * (0.5 + prng() * 0.4))
+        top_account_ips.push({ account_id, ip, submitted, rejected })
+      }
+    }
+  }
+
+  return {
+    alert_id: opts.alertId,
+    rule_code: ruleCode,
+    rule_label: ruleLabel,
+    window: {
+      start: new Date(startMs).toISOString(),
+      end: new Date(endMs).toISOString(),
+      size_min: 60,
+    },
+    dimension,
+    top_risk_labels,
+    top_accounts,
+    top_account_ips,
+  }
+}
+
+function pickN<T>(pool: T[], n: number, prng: () => number): T[] {
+  const arr = [...pool]
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(prng() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr.slice(0, Math.min(n, arr.length))
 }
 
 // ---------------------------------------------------------------------------

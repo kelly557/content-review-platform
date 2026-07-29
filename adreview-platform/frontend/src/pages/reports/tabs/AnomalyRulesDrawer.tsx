@@ -159,14 +159,14 @@ export default function AnomalyRulesDrawer({ open, onClose }: Props) {
       ),
     },
     {
-      title: '警告',
+      title: '提醒',
       key: 'warn',
       width: 120,
       render: (_v, row) => (
         <Space direction="vertical" size={2} style={{ lineHeight: 1.3 }}>
           {renderPartCell(row.warn)}
           <Tag color="orange" style={{ marginRight: 0 }}>
-            警告
+            提醒
           </Tag>
         </Space>
       ),

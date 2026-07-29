@@ -2,6 +2,7 @@ import { api } from './client'
 import type {
   AlertEventOut,
   AlertPage,
+  AlertRootCauseResponse,
   AlertsListQuery,
   AnomalyAppliedFilters,
   AnomalyQuery,
@@ -19,6 +20,7 @@ import type {
 } from '@/types/domain'
 import {
   buildAnomalyResponse,
+  buildMockRootCause,
   buildRiskTrend,
   buildRiskTrendOptions,
   buildTrend,
@@ -410,6 +412,18 @@ export const alertsApi = {
     }
     return api
       .post<AlertEventOut>(`/alerts/${_id}/ack`, { note: _note ?? null })
+      .then((r) => r.data)
+  },
+  detail(alertId: number, opts: { ruleCode?: string } = {}, mock?: MockMode) {
+    if (mock?.enabled) {
+      return Promise.resolve(buildMockRootCause({
+        alertId,
+        ruleCode: opts.ruleCode ?? 'reject_rate_high',
+        mockSeed: mock.seed,
+      }))
+    }
+    return api
+      .get<AlertRootCauseResponse>(`/alerts/${alertId}/root-cause`)
       .then((r) => r.data)
   },
 }

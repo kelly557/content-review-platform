@@ -262,7 +262,7 @@ export default function AnomalyRuleForm({ open, initial, onClose, onSubmit }: Pr
           </Form.Item>
 
           <Form.Item
-            label="警告"
+            label="提醒"
             style={{ flex: 1, marginBottom: 8 }}
             required
           >

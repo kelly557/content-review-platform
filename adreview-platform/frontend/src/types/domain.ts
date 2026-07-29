@@ -499,6 +499,55 @@ export interface AlertPage {
   size: number
 }
 
+// ---------------------------------------------------------------------------
+// Root cause drill-down (/api/v1/alerts/{id}/root-cause).
+//
+// Three rule codes map to three different views:
+//   * reject_rate_high                 → top_risk_labels
+//   * high_risk_content_high           → top_accounts
+//   * high_risk_account_concentration  → top_account_ips
+// ---------------------------------------------------------------------------
+
+export interface AlertRootCauseAccount {
+  account_id: string
+  submitted: number
+  rejected: number
+}
+
+export interface AlertRootCauseAccountIP {
+  account_id: string
+  ip: string
+  submitted: number
+  rejected: number
+}
+
+export interface AlertRootCauseWindow {
+  start: string
+  end: string
+  size_min: number
+}
+
+export interface AlertRootCauseTopRiskLabel {
+  label: string
+  count: number
+  last_hit_at?: string | null
+}
+
+export interface AlertRootCauseResponse {
+  alert_id: number
+  rule_code: string
+  rule_label: string
+  window: AlertRootCauseWindow
+  dimension: {
+    modality?: string | null
+    strategy_code?: string | null
+    channel?: string | null
+  }
+  top_risk_labels: AlertRootCauseTopRiskLabel[]
+  top_accounts: AlertRootCauseAccount[]
+  top_account_ips: AlertRootCauseAccountIP[]
+}
+
 /**
  * Risk dashboard types (overview page).
  * The 5-level enum matches the backend ``RiskLevel`` (高/中/低/敏感/无).
