@@ -26,7 +26,7 @@ import {
   type RoleUpdatePayload,
 } from '@/types/role'
 
-const { Title, Paragraph } = Typography
+const { Title } = Typography
 
 interface RoleFormValues {
   key: string
@@ -201,13 +201,7 @@ export default function RolesMetaAdminPage() {
 
   return (
     <div style={{ width: '100%' }}>
-      <Title level={4} style={{ margin: 0 }}>角色管理</Title>
-      <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 16 }}>
-        管理平台角色元数据（显示名、描述、状态）。Key 是角色的英文标识符，
-        创建后不可修改。如需将新建角色分配给用户，需后端同步添加
-        UserRole enum 值。admin / superadmin / root_admin 三类核心角色禁止删除；
-        其余角色可在确认后删除。菜单权限矩阵请前往「权限管理」页面。
-      </Paragraph>
+      <Title level={4} style={{ margin: 0, marginBottom: 16 }}>角色管理</Title>
 
       <Card
         title={
