@@ -341,7 +341,7 @@ export function PageGuideButton() {
       <Drawer
         title={effective?.title ?? '原型说明'}
         placement="right"
-        width={isMobile ? '100%' : '70vw'}
+        width={isMobile ? '100%' : '60vw'}
         open={open}
         onClose={() => setOpen(false)}
         destroyOnClose

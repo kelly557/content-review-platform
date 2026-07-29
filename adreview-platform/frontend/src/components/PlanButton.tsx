@@ -22,7 +22,7 @@ export function PlanButton() {
       <Drawer
         title="30天 MVP 计划"
         placement="right"
-        width={isMobile ? '100%' : '70vw'}
+        width={isMobile ? '100%' : '60vw'}
         open={open}
         onClose={() => setOpen(false)}
         destroyOnClose
