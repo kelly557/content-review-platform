@@ -23,11 +23,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, List, Optional, Sequence
 
-from sqlalchemy import Integer, String, and_, case, func, select
+from sqlalchemy import Integer, String, and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.alert_event import AlertEvent
-from app.models.material import Material, MaterialStatus
+from app.models.material import Material, MaterialStatus, MaterialVersion
 from app.models.review import (
     MachineStatus,
     ReviewAssignment,
@@ -37,6 +37,66 @@ from app.models.review import (
     ReviewType,
 )
 from app.schemas.analytics import RISK_LEVELS
+
+
+# ---------------------------------------------------------------------------
+# Audit modality — derived from MaterialType + MaterialVersion.mime_type.
+# 5 buckets: image / text / video / audio / document.
+# ---------------------------------------------------------------------------
+
+AUDIT_MODALITIES: tuple[str, ...] = ("image", "text", "video", "audio", "document")
+"""审核模态（5 选）: 与 MaterialType 的差异:
+- ``document`` 折叠所有 office/PDF/HTML 等业务"文档"类型.
+- ``audio``   由 mime_type 派生 (audio/*), 不在 MaterialType 枚举中.
+- ``text``    包含 TEXT + mime:text/* + 派生为文本的 PDF.
+"""
+
+# mime → 业务所属模态的映射. 优先级: 派生自 mime_type 时最优先; 缺失时
+# 退到 MaterialType. SQL 端用 ilike 模式; 这里只做文档化.
+_AUDIO_MIME_PATTERNS = ("audio/%",)
+_VIDEO_MIME_PATTERNS = ("video/%",)
+_IMAGE_MIME_PATTERNS = ("image/%",)
+_TEXT_MIME_PATTERNS = ("text/%",)
+# document: 业务约定走 PDF + office + html 类型; mime 前缀白名单
+_DOCUMENT_MIME_PATTERNS = (
+    "application/pdf",
+    "application/msword",
+    "application/vnd.ms-",
+    "application/vnd.openxmlformats-officedocument",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/rtf",
+    "text/html",
+    "application/xhtml",
+)
+
+
+def audit_modality_for_material(material_type: Optional[str], mime_type: Optional[str]) -> Optional[str]:
+    """派生单条素材的审核模态. 仅供 Python 侧单条判断 / 文档 / 测试使用."""
+    if mime_type:
+        mt = mime_type.lower()
+        if mt.startswith("audio/"):
+            return "audio"
+        if mt.startswith("video/"):
+            return "video"
+        if mt.startswith("image/"):
+            return "image"
+        if mt.startswith("text/"):
+            return "text"
+        if any(mt == p or mt.startswith(p) for p in _DOCUMENT_MIME_PATTERNS):
+            return "document"
+    if material_type is None:
+        return None
+    mt = str(material_type).lower()
+    if mt == "image":
+        return "image"
+    if mt == "video":
+        return "video"
+    if mt == "pdf":
+        return "document"
+    if mt == "text":
+        return "text"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +184,92 @@ def bucket_granularity(window: Window) -> str:
     if hours <= 48:
         return "hour"
     return "day"
+
+
+# ---------------------------------------------------------------------------
+# Risk-trend granularity helpers (hour/day/month) — separate from the generic
+# bucket_granularity which only emits {5min, hour, day}.
+# ---------------------------------------------------------------------------
+
+
+def pick_risk_trend_granularity(window: Window) -> str:
+    """Pick hour/day/month for the trend page based on span.
+
+    Defaults: ≤ 48h → hour, ≤ 31d → day, otherwise month. The UI may explicitly
+    override via the ``granularity`` query parameter.
+    """
+    hours = window.duration.total_seconds() / 3600
+    if hours <= 48:
+        return "hour"
+    if hours <= 24 * 31:
+        return "day"
+    return "month"
+
+
+def _requested_at_expr():
+    """Time anchor for the trend page: ``machine_started_at`` if non-null,
+    otherwise ``created_at``. Aligned with the wider "请求时间" semantics
+    used by the inspection result query page."""
+    return func.coalesce(ReviewTask.machine_started_at, ReviewTask.created_at)
+
+
+def _risk_trend_bucket_col(granularity: str):
+    """Bucket start as a UTC-tagged timestamp.
+
+    The DB server's session timezone may not be UTC, so we first re-anchor
+    the timestamp to UTC via ``AT TIME ZONE 'UTC'`` (which yields a naive
+    timestamp in UTC wall-clock time), then truncate to the requested
+    granularity. The result is wrapped in AT TIME ZONE 'UTC' to return a
+    UTC-tagged timestamptz so the value round-trips to a tz-aware Python
+    datetime.
+    """
+    expr = _requested_at_expr()
+    if granularity == "hour":
+        trunc = func.date_trunc("hour", expr.op("AT TIME ZONE")("UTC"))
+    elif granularity == "month":
+        trunc = func.date_trunc("month", expr.op("AT TIME ZONE")("UTC"))
+    else:
+        trunc = func.date_trunc("day", expr.op("AT TIME ZONE")("UTC"))
+    return trunc.op("AT TIME ZONE")("UTC")
+
+
+def _iter_buckets(window: Window, granularity: str):
+    """Yield (start, end) tuples for every bucket in the window.
+
+    Buckets are aligned to the same truncation as the SQL bucket column so the
+    Python-side name keys match the database-rendered bucket start times.
+    Window.start is floored to the bucket boundary as long as it falls within
+    the window's elapsed range.
+    """
+    cur = _floor_to_bucket(window.start, granularity)
+    delta: timedelta
+    if granularity == "hour":
+        delta = timedelta(hours=1)
+    elif granularity == "month":
+        delta = None  # iterate by month math
+    else:
+        delta = timedelta(days=1)
+
+    while cur < window.end:
+        if granularity == "month":
+            # advance to next month, anchored at 1st 00:00 UTC
+            if cur.month == 12:
+                nxt = cur.replace(year=cur.year + 1, month=1, day=1)
+            else:
+                nxt = cur.replace(month=cur.month + 1, day=1)
+        else:
+            nxt = cur + delta
+        yield (cur, min(nxt, window.end))
+        cur = nxt
+
+
+def _floor_to_bucket(value: datetime, granularity: str) -> datetime:
+    """Floor ``value`` to the start of its bucket boundary (UTC)."""
+    if granularity == "hour":
+        return value.replace(minute=0, second=0, microsecond=0)
+    if granularity == "month":
+        return value.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return value.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 # ---------------------------------------------------------------------------
@@ -944,33 +1090,44 @@ def _risk_case(machine_result_col) -> case:
 async def risk_trend(
     db: AsyncSession,
     *,
-    days: int,
-    material_types: Optional[Sequence[str]] = None,
+    window: "Window",
+    granularity: str = "day",
+    modalities: Optional[Sequence[str]] = None,
+    strategy_codes: Optional[Sequence[str]] = None,
+    account_ids: Optional[Sequence[str]] = None,
+    ips: Optional[Sequence[str]] = None,
+    channels: Optional[Sequence[str]] = None,
+    risk_label_paths: Optional[Sequence[str]] = None,
 ) -> dict:
-    """Daily counts of completed machine reviews, split by risk level.
+    """Trend of completed machine reviews, split by risk level.
 
-    Returns a dict compatible with ``RiskTrendResponse``: ``{days, points}``
-    where each point has all-zero counts filled in for missing dates so the
-    UI can render a continuous x-axis.
+    The 占比公式 documented in the spec is::
+        ratio(level) = count(level) / sum(high + medium + low + none)
+    so the response echoes a ``denominator`` per bucket (sum of the four
+    reportable levels) and the per-level counts. ``敏感`` is surfaced in a
+    separate field so the UI can show it as a non-percentage hint without
+    polluting the percentage base.
 
-    ``material_types`` (when non-empty) restricts the aggregation to
-    ``Material.material_type IN (...)``; ignored otherwise. The Trend tab UI
-    passes a single combined list to filter both "审核媒体类型" and "素材类型"
-    filters at once since both map to the same enum.
-
-    Implementation note: ``material_types`` is applied via a correlated
-    EXISTS subquery on ``materials`` rather than a ``.join(Material, ...)``
-    — see ``quality`` (line ~715) for the same pattern; this avoids a
-    per-test schema oddity where SQLAlchemy compiles the join target with
-    a stale schema name.
+    ``modalities`` (when non-empty) restricts the aggregation to the union of
+    cases derived from ``material_version.mime_type`` and
+    ``Material.material_type`` (see ``audit_modality_for_material``).
+    ``strategy_codes`` matches via the FK first and falls back to the
+    ``machine_result['strategy']['code']`` JSONB snapshot for legacy data.
+    ``account_ids`` / ``ips`` / ``channels`` are matched against
+    ``material.metadata['account_id']`` / ``['ip']`` / ``['channel']`` and
+    thus require the metadata to be a JSONB column.
+    ``risk_label_paths`` is a list of slash-joined ``risk_category/audit_item/
+    audit_point`` codes; selecting a parent path implicitly includes all leaf
+    descendants via prefix matching.
     """
     from sqlalchemy import exists as _exists
 
-    now = datetime.now(timezone.utc)
-    start = now - timedelta(days=days)
+    if granularity not in {"hour", "day", "month"}:
+        raise ValueError(f"unsupported granularity: {granularity}")
 
     mr = ReviewTask.machine_result
-    bucket = func.date_trunc("day", ReviewTask.machine_completed_at)
+    bucket = _risk_trend_bucket_col(granularity)
+    requested_at = _requested_at_expr()
 
     total_col = func.count(ReviewTask.id).label("total")
     risk_cols = []
@@ -986,22 +1143,93 @@ async def risk_trend(
         select(bucket.label("b"), total_col, *risk_cols)
         .where(ReviewTask.machine_status == MachineStatus.COMPLETED)
         .where(mr.is_not(None))
-        .where(ReviewTask.machine_completed_at >= start)
-        .where(ReviewTask.machine_completed_at.is_not(None))
+        .where(requested_at >= window.start)
+        .where(requested_at < window.end)
     )
-    if material_types:
-        material_match = _exists().where(
-            (Material.id == ReviewTask.material_id)
-            & (Material.material_type.in_(list(material_types)))
+
+    if modalities:
+        valid = set(AUDIT_MODALITIES)
+        unknown = [m for m in modalities if m not in valid]
+        if unknown:
+            raise ValueError(f"unsupported modality: {', '.join(unknown)}")
+        material_match = _build_modality_exists(list(modalities))
+        if material_match is not None:
+            stmt = stmt.where(material_match)
+
+    if strategy_codes:
+        from app.models.strategy import Strategy
+
+        stmt = stmt.where(
+            or_(
+                ReviewTask.machine_result["strategy"]["code"].astext.in_(list(strategy_codes)),
+                ReviewTask.strategy_id.in_(
+                    select(Strategy.id).where(Strategy.code.in_(list(strategy_codes)))
+                ),
+            )
         )
-        stmt = stmt.where(material_match)
+
+    if account_ids:
+        # Match JSONB text values; the schema is freeform so we COALESCE
+        # text/null to text and use equality.
+        acct_clauses = [
+            Material.extra_metadata["account_id"].astext == a for a in account_ids
+        ]
+        account_match = _exists().where(
+            (Material.id == ReviewTask.material_id) & or_(*acct_clauses)
+        )
+        stmt = stmt.where(account_match)
+
+    if ips:
+        ip_clauses = [
+            Material.extra_metadata["ip"].astext == i for i in ips
+        ]
+        ip_match = _exists().where(
+            (Material.id == ReviewTask.material_id) & or_(*ip_clauses)
+        )
+        stmt = stmt.where(ip_match)
+
+    if channels:
+        ch_clauses = [
+            Material.extra_metadata["channel"].astext == c for c in channels
+        ]
+        channel_match = _exists().where(
+            (Material.id == ReviewTask.material_id) & or_(*ch_clauses)
+        )
+        stmt = stmt.where(channel_match)
+
+    if risk_label_paths:
+        # Match any hit whose audit_point_code / audit_item_code / risk_category_code
+        # belongs to one of the selected paths. Path semantics: a path is
+        # 'a' (root only) / 'a/b' (root + child) / 'a/b/c' (leaf). Selecting a
+        # parent path also keeps its descendants.
+        #
+        # Implementation: scan the serialized JSONB with a LIKE clause for
+        # each non-empty segment. All segments must appear in the same row
+        # (AND). The serialized JSONB output is not stable between keys, so
+        # we add quotes around the segment to ensure exact-segment matching.
+        label_predicates = []
+        for p in risk_label_paths:
+            segments = [seg for seg in p.split("/") if seg]
+            for seg in segments:
+                # Also allow the empty `*` segment as a wildcard for any level.
+                if seg == "*":
+                    continue
+                # Wrap in quotes so we match the JSONB-encoded value, not a
+                # substring of a sibling key.
+                like = f'%"{seg}"%'
+                label_predicates.append(
+                    func.cast(ReviewTask.machine_result, String).like(like)
+                )
+        if label_predicates:
+            stmt = stmt.where(and_(*label_predicates))
+
     stmt = stmt.group_by("b").order_by("b")
     rows = (await db.execute(stmt)).all()
 
     bucket_map: dict[str, dict] = {}
     for r in rows:
         b: datetime = r.b
-        key = b.date().isoformat()
+        key = b.isoformat()
         bucket_map[key] = {
             "total": int(r.total or 0),
             "high": int(r.high or 0),
@@ -1012,23 +1240,112 @@ async def risk_trend(
         }
 
     points: List[dict] = []
-    for offset in range(days - 1, -1, -1):
-        d = (now - timedelta(days=offset)).date()
-        key = d.isoformat()
+    for cur, _ in _iter_buckets(window, granularity):
+        key = cur.isoformat()
         row = bucket_map.get(key, {})
+        high = row.get("high", 0)
+        medium = row.get("medium", 0)
+        low = row.get("low", 0)
+        sensitive = row.get("sensitive", 0)
+        none = row.get("none", 0)
         points.append(
             {
-                "date": key,
+                "bucket": key,
                 "total": row.get("total", 0),
-                "high": row.get("high", 0),
-                "medium": row.get("medium", 0),
-                "low": row.get("low", 0),
-                "sensitive": row.get("sensitive", 0),
-                "none": row.get("none", 0),
+                "denominator": high + medium + low + none,
+                "high": high,
+                "medium": medium,
+                "low": low,
+                "sensitive": sensitive,
+                "none": none,
             }
         )
 
-    return {"days": days, "points": points}
+    return {
+        "granularity": granularity,
+        "window_start": window.start,
+        "window_end": window.end,
+        "applied": {
+            "modalities": list(modalities or []),
+            "strategy_codes": list(strategy_codes or []),
+            "account_ids": list(account_ids or []),
+            "ips": list(ips or []),
+            "channels": list(channels or []),
+            "risk_label_paths": list(risk_label_paths or []),
+        },
+        "points": points,
+    }
+
+
+def _build_modality_exists(modalities: List[str]):
+    """Build an EXISTS clause restricting review tasks to one of the given
+    审核模态 (image/text/video/audio/document)."""
+    from sqlalchemy import exists as _exists
+
+    if not modalities:
+        return None
+    clauses = []
+    for m in modalities:
+        if m == "audio":
+            clauses.append(MaterialVersion.mime_type.ilike("audio/%"))
+        elif m == "video":
+            clauses.append(
+                or_(
+                    MaterialVersion.mime_type.ilike("video/%"),
+                    and_(
+                        MaterialVersion.mime_type.is_(None),
+                        Material.material_type == "video",
+                    ),
+                )
+            )
+        elif m == "image":
+            clauses.append(
+                or_(
+                    MaterialVersion.mime_type.ilike("image/%"),
+                    and_(
+                        MaterialVersion.mime_type.is_(None),
+                        Material.material_type == "image",
+                    ),
+                )
+            )
+        elif m == "text":
+            clauses.append(
+                or_(
+                    MaterialVersion.mime_type.ilike("text/%"),
+                    and_(
+                        MaterialVersion.mime_type.is_(None),
+                        Material.material_type.in_(["text", "pdf"]),
+                    ),
+                )
+            )
+        elif m == "document":
+            doc_patterns = [
+                "application/pdf",
+                "application/msword",
+                "application/vnd.ms-",
+                "application/vnd.openxmlformats-officedocument",
+                "application/vnd.ms-excel",
+                "application/vnd.ms-powerpoint",
+                "application/rtf",
+                "text/html",
+                "application/xhtml",
+            ]
+            doc_clauses = [MaterialVersion.mime_type.ilike(f"{p}%") for p in doc_patterns]
+            clauses.append(
+                or_(
+                    *doc_clauses,
+                    and_(
+                        MaterialVersion.mime_type.is_(None),
+                        Material.material_type == "pdf",
+                    ),
+                )
+            )
+
+    return _exists().where(
+        (Material.id == ReviewTask.material_id)
+        & (MaterialVersion.material_id == Material.id)
+        & or_(*clauses)
+    )
 
 
 async def risk_distribution(db: AsyncSession, *, days: int) -> dict:
@@ -1158,3 +1475,170 @@ async def top_risk_labels(db: AsyncSession, *, days: int, limit: int) -> dict:
     ]
 
     return {"days": days, "items": items}
+
+
+# ---------------------------------------------------------------------------
+# Trend tab option helpers
+# ---------------------------------------------------------------------------
+
+
+async def distinct_channels(db: AsyncSession, *, limit: int = 200) -> List[str]:
+    """Distinct ``material.metadata['channel']`` values seen in the DB.
+
+    Channels are free-form business values (模型输入 / 模型输出 / 小红书 / 电商 …),
+    so we simply de-dup across all rows. Missing values are skipped.
+    """
+    from sqlalchemy import String as _String
+
+    channel = Material.extra_metadata["channel"].astext
+    stmt = (
+        select(channel.label("ch"))
+        .where(channel.is_not(None))
+        .group_by(channel)
+        .order_by(channel)
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [r.ch for r in rows if r.ch]
+
+
+async def distinct_account_ids(db: AsyncSession, *, limit: int = 500) -> List[str]:
+    """Distinct ``material.metadata['account_id']`` values seen in the DB.
+
+    See :func:`distinct_channels` for the same free-form rationale.
+    """
+    acct = Material.extra_metadata["account_id"].astext
+    stmt = (
+        select(acct.label("a"))
+        .where(acct.is_not(None))
+        .group_by(acct)
+        .order_by(acct)
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [r.a for r in rows if r.a]
+
+
+async def distinct_ips(db: AsyncSession, *, limit: int = 500) -> List[str]:
+    """Distinct ``material.metadata['ip']`` values seen in the DB."""
+    ip = Material.extra_metadata["ip"].astext
+    stmt = (
+        select(ip.label("i"))
+        .where(ip.is_not(None))
+        .group_by(ip)
+        .order_by(ip)
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [r.i for r in rows if r.i]
+
+
+async def risk_label_taxonomy(db: AsyncSession) -> List[dict]:
+    """Build a three-level taxonomy from ``machine_result.hits``.
+    Each hit carries ``risk_category_code`` / ``audit_item_code`` / ``audit_point_code``;
+    we de-dup into a root → middle → leaf tree.
+
+    Returns a list of dicts shaped like::
+
+        [{"code": "politics", "label": "涉政",
+          "children": [
+            {"code": "politics/sensitive_term", "label": "敏感词",
+             "children": [
+               {"code": "politics/sensitive_term/xxx", "label": "...", "path": "..."}
+             ]}
+          ]}, ...]
+    """
+    from sqlalchemy import String as _String
+
+    raw_stmt = select(ReviewTask.machine_result).where(
+        ReviewTask.machine_result.is_not(None)
+    )
+    rows = (await db.execute(raw_stmt)).all()
+
+    # root_label is keyed off the existing TagDomain enum (or fall back to the
+    # code itself for unmapped categories).
+    from app.models.tag import TagDomain
+
+    root_label = {
+        "politics": "涉政",
+        "porn": "涉黄",
+        "violence": "涉暴",
+        "ads_law": "广告法",
+        "medical": "医药",
+        "finance": "金融",
+        "minor": "未成年人",
+        "privacy": "隐私",
+        "ip": "知识产权",
+        "gambling": "赌博",
+        "fraud": "欺诈",
+        "custom": "自定义",
+    }
+
+    roots: dict[str, dict] = {}
+    for (mr_raw,) in rows:
+        if not isinstance(mr_raw, dict):
+            continue
+        hits = mr_raw.get("hits")
+        if not isinstance(hits, list):
+            continue
+        for h in hits:
+            if not isinstance(h, dict):
+                continue
+            cat = (
+                h.get("risk_category_code")
+                or h.get("domain")
+                or "custom"
+            )
+            item = (
+                h.get("audit_item_code")
+                or h.get("audit_item_name")
+                or "*"
+            )
+            point = (
+                h.get("audit_point_code")
+                or h.get("label_cn")
+                or h.get("label")
+                or "*"
+            )
+            cat_label = h.get("risk_category_label") or root_label.get(cat, cat)
+            item_label = h.get("audit_item_label") or h.get("audit_item_name") or item
+            point_label = h.get("label_cn") or h.get("label") or point
+
+            root = roots.setdefault(
+                cat,
+                {
+                    "code": cat,
+                    "label": cat_label,
+                    "path": cat,
+                    "children": {},
+                },
+            )
+            mid = root["children"].setdefault(
+                item,
+                {
+                    "code": f"{cat}/{item}",
+                    "label": item_label,
+                    "path": f"{cat}/{item}",
+                    "children": {},
+                },
+            )
+            mid["children"].setdefault(
+                point,
+                {
+                    "code": f"{cat}/{item}/{point}",
+                    "label": point_label,
+                    "path": f"{cat}/{item}/{point}",
+                },
+            )
+
+    # convert nested dicts to lists and sort
+    def _lower(entries: dict) -> list:
+        return [
+            {**v, "children": _lower(v["children"])} if "children" in v else v
+            for v in sorted(entries.values(), key=lambda x: x["code"])
+        ]
+
+    out = []
+    for v in sorted(roots.values(), key=lambda x: x["code"]):
+        out.append({**v, "children": _lower(v["children"])})
+    return out

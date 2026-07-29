@@ -17,6 +17,7 @@ import type {
   AnomalyResponse,
   MaterialType,
   RiskTimeseriesPoint,
+  RiskTrendOptionsResponse,
 } from '@/types/domain'
 import type { DetectionModality } from '@/types/domain'
 
@@ -79,25 +80,57 @@ export function pickGranularity(spanMs: number): '5min' | 'hour' | 'day' {
   return 'day'
 }
 
-function buildBuckets(startMs: number, endMs: number, granularity: '5min' | 'hour' | 'day'): TimeBucket[] {
+function buildBuckets(
+  startMs: number,
+  endMs: number,
+  granularity: '5min' | 'hour' | 'day' | 'month',
+): TimeBucket[] {
   const buckets: TimeBucket[] = []
-  const sizeMs =
-    granularity === '5min' ? 5 * 60 * 1000 : granularity === 'hour' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000
   let cur = startMs
+  const advance = (current: number): number => {
+    if (granularity === 'month') {
+      const d = new Date(current)
+      return new Date(Date.UTC(
+        d.getUTCMonth() === 11 ? d.getUTCFullYear() + 1 : d.getUTCFullYear(),
+        (d.getUTCMonth() + 1) % 12,
+        1,
+      )).getTime()
+    }
+    const sizeMs =
+      granularity === '5min'
+        ? 5 * 60 * 1000
+        : granularity === 'hour'
+          ? 60 * 60 * 1000
+          : 24 * 60 * 60 * 1000
+    return current + sizeMs
+  }
+  let floor = startMs
+  if (granularity === 'month') {
+    const d = new Date(startMs)
+    floor = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)
+  } else {
+    const d = new Date(startMs)
+    const hour = granularity === 'day' ? 0 : d.getUTCHours()
+    const min = granularity === '5min' ? Math.floor(d.getUTCMinutes() / 5) * 5 : 0
+    floor = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour, min)
+  }
+  cur = floor
   while (cur < endMs) {
     const d = new Date(cur)
     let key: string
-    if (granularity === 'day') {
+    if (granularity === 'month') {
+      key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01T00:00:00`
+    } else if (granularity === 'day') {
       key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T00:00:00`
     } else if (granularity === 'hour') {
       key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}:00:00`
     } else {
-      // 5min: 用整 5 分钟对齐的 key
       const baseMin = Math.floor(d.getUTCMinutes() / 5) * 5
       key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}:${String(baseMin).padStart(2, '0')}:00`
     }
+    const sizeMs = granularity === 'month' ? 30 * 24 * 60 * 60 * 1000 : (granularity === 'day' ? 24 * 60 * 60 * 1000 : granularity === 'hour' ? 60 * 60 * 1000 : 5 * 60 * 1000)
     buckets.push({ startMs: cur, sizeMs, key })
-    cur += sizeMs
+    cur = advance(cur)
   }
   return buckets
 }
@@ -114,11 +147,15 @@ export function buildRiskTrend(opts: {
   filtered?: boolean
   filterSeed?: string
   mockSeed?: number
+  /** 颗粒度: hour/day/month. 缺省按窗口长度自动估算. */
+  granularity?: 'hour' | 'day' | 'month'
 }): RiskTimeseriesPoint[] {
   const now = Date.now()
   const start = now - opts.days * 24 * 60 * 60 * 1000
-  const buckets = buildBuckets(start, now, 'day')
-  const prng = mulberry32((opts.mockSeed ?? 0xa1b2c3d4) ^ hashString(`riskTrend|${opts.days}|${opts.filtered ? opts.filterSeed ?? '' : ''}`))
+  const granularity: 'hour' | 'day' | 'month' =
+    opts.granularity ?? (opts.days <= 2 ? 'hour' : opts.days <= 31 ? 'day' : 'month')
+  const buckets = buildBuckets(start, now, granularity)
+  const prng = mulberry32((opts.mockSeed ?? 0xa1b2c3d4) ^ hashString(`riskTrend|${opts.days}|${granularity}|${opts.filtered ? opts.filterSeed ?? '' : ''}`))
 
   return buckets.map((b, idx) => {
     // 周末 (周六=6, 周日=0 in JS) 提交量更高; 工作日波动
@@ -135,9 +172,11 @@ export function buildRiskTrend(opts: {
     const none = Math.max(0, baseTotal - high - medium - low)
     void EMPTY_4
     void idx
+    const denominator = high + medium + low + none
     return {
-      date: b.key.slice(0, 10),
-      total: none + low + medium + high,
+      bucket: b.key,
+      total: denominator,
+      denominator,
       high,
       medium,
       low,
@@ -146,6 +185,74 @@ export function buildRiskTrend(opts: {
       none,
     }
   })
+}
+
+export function buildRiskTrendOptions(seed: number): RiskTrendOptionsResponse {
+  const prng = mulberry32(seed ^ 0xfeed_face)
+  const pick = (n: number, alphabet: string) =>
+    Array.from({ length: n }, () => alphabet[Math.floor(prng() * alphabet.length)]).join('')
+  return {
+    modalities: [
+      { value: 'image', label: '图片' },
+      { value: 'text', label: '文本' },
+      { value: 'video', label: '视频' },
+      { value: 'audio', label: '语音' },
+      { value: 'document', label: '文档' },
+    ],
+    strategies: [
+      { value: 'default', label: '默认策略' },
+      { value: 'medical-strict', label: '医药严格策略' },
+      { value: 'finance-strict', label: '金融严格策略' },
+    ],
+    channels: [
+      { value: '模型输入', label: '模型输入' },
+      { value: '模型输出', label: '模型输出' },
+      { value: '小红书', label: '小红书' },
+      { value: '电商', label: '电商' },
+    ],
+    account_ids: [
+      { value: `acc-${pick(4, '0123456789')}`, label: `acc-${pick(4, '0123456789')}` },
+      { value: `acc-${pick(4, '0123456789')}`, label: `acc-${pick(4, '0123456789')}` },
+    ],
+    ips: [
+      { value: '10.0.0.1', label: '10.0.0.1' },
+      { value: '10.0.0.2', label: '10.0.0.2' },
+      { value: '192.168.1.10', label: '192.168.1.10' },
+    ],
+    risk_taxonomy: [
+      {
+        code: 'politics',
+        label: '涉政',
+        path: 'politics',
+        children: [
+          {
+            code: 'politics/sensitive_term',
+            label: '敏感词',
+            path: 'politics/sensitive_term',
+            children: [
+              { code: 'politics/sensitive_term/leader', label: '领导人', path: 'politics/sensitive_term/leader' },
+              { code: 'politics/sensitive_term/event', label: '敏感事件', path: 'politics/sensitive_term/event' },
+            ],
+          },
+        ],
+      },
+      {
+        code: 'porn',
+        label: '涉黄',
+        path: 'porn',
+        children: [
+          {
+            code: 'porn/figure',
+            label: '人物',
+            path: 'porn/figure',
+            children: [
+              { code: 'porn/figure/explicit', label: '明显色情', path: 'porn/figure/explicit' },
+            ],
+          },
+        ],
+      },
+    ],
+  }
 }
 
 // ---------------------------------------------------------------------------

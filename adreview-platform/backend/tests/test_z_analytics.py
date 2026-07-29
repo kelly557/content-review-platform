@@ -15,6 +15,7 @@ import app.models  # noqa: F401
 from app.main import app
 from app.models.alert_event import AlertEvent
 from app.models.material import Material, MaterialStatus, MaterialType, MaterialVersion
+from app.models.strategy import Strategy, StrategyScope
 from app.models.review import (
     MachineStatus,
     ReviewAssignment,
@@ -533,6 +534,10 @@ async def _make_risk_task(
     material_type: MaterialType = MaterialType.TEXT,
     risk_level: str | None = None,
     completed_at: datetime | None = None,
+    started_at: datetime | None = None,
+    mime_type: str = "text/plain",
+    metadata: dict | None = None,
+    strategy=None,
 ) -> tuple[Material, ReviewTask]:
     """Create a Material + WorkflowInstance + a completed ReviewTask with machine_result.risk_level."""
     m = Material(
@@ -540,6 +545,7 @@ async def _make_risk_task(
         material_type=material_type,
         status=MaterialStatus.APPROVED if risk_level in {"低风险", "无风险"} else MaterialStatus.REJECTED,
         submitter_id=submitter.id,
+        extra_metadata=metadata or {},
     )
     db_session.add(m)
     await db_session.flush()
@@ -548,7 +554,7 @@ async def _make_risk_task(
         version_no=1,
         storage_key=f"qa/risk/{m.id}/v1.txt",
         original_filename="x.txt",
-        mime_type="text/plain",
+        mime_type=mime_type,
         file_size=1,
         text_body="x",
         created_by_id=submitter.id,
@@ -570,6 +576,9 @@ async def _make_risk_task(
     db_session.add(inst)
     await db_session.flush()
 
+    completed = completed_at or datetime.now(timezone.utc)
+    if completed.tzinfo is None:
+        completed = completed.replace(tzinfo=timezone.utc)
     task = ReviewTask(
         material_id=m.id,
         material_version_id=v.id,
@@ -579,7 +588,9 @@ async def _make_risk_task(
         review_type=ReviewType.MACHINE,
         machine_status=MachineStatus.COMPLETED,
         machine_result={"risk_level": risk_level} if risk_level else None,
-        machine_completed_at=completed_at or datetime.utcnow(),
+        machine_completed_at=completed,
+        machine_started_at=started_at if started_at is not None else completed,
+        strategy_id=strategy.id if strategy is not None else None,
     )
     db_session.add(task)
     await db_session.flush()
@@ -589,18 +600,24 @@ async def _make_risk_task(
 @pytest.mark.asyncio
 async def test_risk_trend_empty(client):
     await _login(client, "mlr@adreview.example.com", "mlr12345")
-    resp = await client.get("/api/v1/reports/risk/trend?days=7")
+    resp = await client.get("/api/v1/reports/risk/trend?window=7d")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["days"] == 7
-    assert len(body["points"]) == 7
+    assert body["granularity"] == "day"
+    # 7d window floored to day boundary produces 7 or 8 buckets depending on
+    # the wall-clock time of the test run. The contract is "one bucket per day,
+    # all zero-filled".
+    assert 7 <= len(body["points"]) <= 8
     for p in body["points"]:
         assert p["total"] == 0
+        assert p["denominator"] == 0
         assert p["high"] == 0
         assert p["medium"] == 0
         assert p["low"] == 0
         assert p["sensitive"] == 0
         assert p["none"] == 0
+    assert body["applied"]["modalities"] == []
+    assert body["applied"]["strategy_codes"] == []
 
 
 @pytest.mark.asyncio
@@ -613,29 +630,56 @@ async def test_risk_trend_splits_levels(client, db_session):
     await db_session.commit()
 
     await _login(client, "mlr@adreview.example.com", "mlr12345")
-    resp = await client.get("/api/v1/reports/risk/trend?days=7")
+    resp = await client.get("/api/v1/reports/risk/trend?window=7d")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     totals = {lvl: sum(p[lvl] for p in body["points"]) for lvl in ("high", "medium", "low", "none")}
     assert totals == {"high": 1, "medium": 1, "low": 1, "none": 1}
+    # denominator must equal sum of reportable levels (敏感 excluded)
+    denom = sum(p["denominator"] for p in body["points"])
+    assert denom == 4
 
 
 @pytest.mark.asyncio
-async def test_risk_trend_filter_by_material_type(client, db_session):
+async def test_risk_trend_excludes_sensitive_from_denominator(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(db_session, submitter=sub, risk_level="敏感")
+    await _make_risk_task(db_session, submitter=sub, risk_level="敏感")
+    await _make_risk_task(db_session, submitter=sub, risk_level="高风险")
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/reports/risk/trend?window=7d")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    sensitive_total = sum(p["sensitive"] for p in body["points"])
+    high_total = sum(p["high"] for p in body["points"])
+    denom = sum(p["denominator"] for p in body["points"])
+    assert sensitive_total == 2
+    assert high_total == 1
+    assert denom == 1  # sensitive must NOT enter the percentage base
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_filter_by_modality(client, db_session):
     sub = await _get_user(db_session, "submitter@adreview.example.com")
     # 2 text (高风险) — should be counted
-    await _make_risk_task(db_session, submitter=sub, material_type=MaterialType.TEXT, risk_level="高风险")
-    await _make_risk_task(db_session, submitter=sub, material_type=MaterialType.TEXT, risk_level="高风险")
+    await _make_risk_task(db_session, submitter=sub, material_type=MaterialType.TEXT, risk_level="高风险", mime_type="text/plain")
+    await _make_risk_task(db_session, submitter=sub, material_type=MaterialType.TEXT, risk_level="高风险", mime_type="text/plain")
     # 1 image (中风险) — should be filtered out
     await _make_risk_task(
-        db_session, submitter=sub, material_type=MaterialType.IMAGE, risk_level="中风险"
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.IMAGE,
+        risk_level="中风险",
+        mime_type="image/png",
     )
     await db_session.commit()
 
     await _login(client, "mlr@adreview.example.com", "mlr12345")
     resp = await client.get(
         "/api/v1/reports/risk/trend",
-        params={"days": 7, "material_types": "text"},
+        params=[("window", "7d"), ("modalities", "text")],
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -643,27 +687,435 @@ async def test_risk_trend_filter_by_material_type(client, db_session):
     medium_total = sum(p["medium"] for p in body["points"])
     assert high_total == 2
     assert medium_total == 0
+    assert body["applied"]["modalities"] == ["text"]
 
 
 @pytest.mark.asyncio
-async def test_risk_trend_filter_accepts_multiple_types(client, db_session):
+async def test_risk_trend_filter_accepts_multiple_modalities(client, db_session):
     sub = await _get_user(db_session, "submitter@adreview.example.com")
-    await _make_risk_task(db_session, submitter=sub, material_type=MaterialType.TEXT, risk_level="高风险")
+    await _make_risk_task(db_session, submitter=sub, material_type=MaterialType.TEXT, risk_level="高风险", mime_type="text/plain")
     await _make_risk_task(
-        db_session, submitter=sub, material_type=MaterialType.IMAGE, risk_level="高风险"
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.IMAGE,
+        risk_level="高风险",
+        mime_type="image/png",
     )
-    # pdf excluded
+    # pdf excluded (mapped to document, not selected)
     await _make_risk_task(
-        db_session, submitter=sub, material_type=MaterialType.PDF, risk_level="高风险"
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.PDF,
+        risk_level="高风险",
+        mime_type="application/pdf",
     )
     await db_session.commit()
 
     await _login(client, "mlr@adreview.example.com", "mlr12345")
     resp = await client.get(
         "/api/v1/reports/risk/trend",
-        params=[("days", 7), ("material_types", "text"), ("material_types", "image")],
+        params=[("window", "7d"), ("modalities", "text"), ("modalities", "image")],
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     high_total = sum(p["high"] for p in body["points"])
     assert high_total == 2
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_filter_by_account_id(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.TEXT,
+        risk_level="高风险",
+        metadata={"account_id": "acc-1"},
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.TEXT,
+        risk_level="高风险",
+        metadata={"account_id": "acc-2"},
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[("window", "7d"), ("account_ids", "acc-1")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    high_total = sum(p["high"] for p in body["points"])
+    assert high_total == 1
+    assert body["applied"]["account_ids"] == ["acc-1"]
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_filter_by_ip(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.TEXT,
+        risk_level="高风险",
+        metadata={"ip": "10.0.0.1"},
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.TEXT,
+        risk_level="高风险",
+        metadata={"ip": "10.0.0.2"},
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[("window", "7d"), ("ips", "10.0.0.1")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    high_total = sum(p["high"] for p in body["points"])
+    assert high_total == 1
+    assert body["applied"]["ips"] == ["10.0.0.1"]
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_options_includes_ips(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.TEXT,
+        risk_level="高风险",
+        metadata={"ip": "192.168.1.1"},
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/reports/risk-trend/options")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert any(i["value"] == "192.168.1.1" for i in body["ips"])
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_filter_by_channel(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.TEXT,
+        risk_level="中风险",
+        metadata={"channel": "小红书"},
+    )
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.TEXT,
+        risk_level="中风险",
+        metadata={"channel": "电商"},
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[("window", "7d"), ("channels", "小红书")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    medium_total = sum(p["medium"] for p in body["points"])
+    assert medium_total == 1
+    assert body["applied"]["channels"] == ["小红书"]
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_filter_by_strategy_code(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    s1 = Strategy(code="qa-strategy-a", name="策略 A", scope=StrategyScope.GENERAL, is_active=True, created_by_id=sub.id)
+    s2 = Strategy(code="qa-strategy-b", name="策略 B", scope=StrategyScope.GENERAL, is_active=True, created_by_id=sub.id)
+    db_session.add_all([s1, s2])
+    await db_session.flush()
+    await _make_risk_task(
+        db_session, submitter=sub, risk_level="高风险", strategy=s1
+    )
+    await _make_risk_task(
+        db_session, submitter=sub, risk_level="高风险", strategy=s2
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[("window", "7d"), ("strategy_codes", "qa-strategy-a")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    high_total = sum(p["high"] for p in body["points"])
+    assert high_total == 1
+    assert body["applied"]["strategy_codes"] == ["qa-strategy-a"]
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_filter_by_risk_label_path(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    # Two hits, one matching the label path; one not.
+    matches = ReviewTask
+    m1 = Material(
+        title="risk with hit",
+        material_type=MaterialType.TEXT,
+        status=MaterialStatus.REJECTED,
+        submitter_id=sub.id,
+    )
+    db_session.add(m1)
+    await db_session.flush()
+    v1 = MaterialVersion(
+        material_id=m1.id,
+        version_no=1,
+        storage_key=f"qa/risk/{m1.id}/v1.txt",
+        original_filename="x.txt",
+        mime_type="text/plain",
+        file_size=1,
+        text_body="x",
+        created_by_id=sub.id,
+    )
+    db_session.add(v1)
+    await db_session.flush()
+    m1.current_version_id = v1.id
+    tpl = WorkflowTemplate(code=f"risk_tpl_{datetime.utcnow().timestamp()}", name="risk_tpl", definition={})
+    db_session.add(tpl)
+    await db_session.flush()
+    inst = WorkflowInstance(template_id=tpl.id, material_id=m1.id, material_version_id=v1.id, state="running")
+    db_session.add(inst)
+    await db_session.flush()
+    now = datetime.now(timezone.utc)
+    task1 = ReviewTask(
+        material_id=m1.id,
+        material_version_id=v1.id,
+        workflow_instance_id=inst.id,
+        stage_key="machine",
+        title="risk w/ hit",
+        review_type=ReviewType.MACHINE,
+        machine_status=MachineStatus.COMPLETED,
+        machine_result={
+            "risk_level": "高风险",
+            "hits": [
+                {"risk_category_code": "politics", "audit_item_code": "sensitive_term", "audit_point_code": "leader"},
+            ],
+        },
+        machine_completed_at=now,
+        machine_started_at=now,
+    )
+    db_session.add(task1)
+    # second task: different label, should be filtered out
+    m2 = Material(
+        title="risk no hit",
+        material_type=MaterialType.TEXT,
+        status=MaterialStatus.REJECTED,
+        submitter_id=sub.id,
+    )
+    db_session.add(m2)
+    await db_session.flush()
+    v2 = MaterialVersion(
+        material_id=m2.id,
+        version_no=1,
+        storage_key=f"qa/risk/{m2.id}/v1.txt",
+        original_filename="x.txt",
+        mime_type="text/plain",
+        file_size=1,
+        text_body="x",
+        created_by_id=sub.id,
+    )
+    db_session.add(v2)
+    await db_session.flush()
+    m2.current_version_id = v2.id
+    inst2 = WorkflowInstance(template_id=tpl.id, material_id=m2.id, material_version_id=v2.id, state="running")
+    db_session.add(inst2)
+    await db_session.flush()
+    task2 = ReviewTask(
+        material_id=m2.id,
+        material_version_id=v2.id,
+        workflow_instance_id=inst2.id,
+        stage_key="machine",
+        title="risk no hit",
+        review_type=ReviewType.MACHINE,
+        machine_status=MachineStatus.COMPLETED,
+        machine_result={
+            "risk_level": "高风险",
+            "hits": [
+                {"risk_category_code": "finance", "audit_item_code": "claim", "audit_point_code": "guarantee"},
+            ],
+        },
+        machine_completed_at=now,
+        machine_started_at=now,
+    )
+    db_session.add(task2)
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[("window", "7d"), ("risk_label_paths", "politics/sensitive_term")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    high_total = sum(p["high"] for p in body["points"])
+    assert high_total == 1
+    assert body["applied"]["risk_label_paths"] == ["politics/sensitive_term"]
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_granularity_hour(client, db_session):
+    """今天窗口强制按小时粒度, 至少 1 个桶, 每个桶的 bucket 字段是 ISO 小时."""
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/reports/risk/trend?window=today&granularity=hour")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["granularity"] == "hour"
+    assert len(body["points"]) >= 1
+    bad = [p["bucket"] for p in body["points"] if not p["bucket"].endswith("00:00+00:00")]
+    assert not bad, f"hour buckets should end with 00:00+00:00 but got: {bad[:3]}"
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_granularity_month(client, db_session):
+    """超出自定义 90 天上限时应返回 400."""
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    end = datetime.utcnow().replace(tzinfo=timezone.utc)
+    start = end - timedelta(days=400)
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params={
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "granularity": "month",
+        },
+    )
+    assert resp.status_code == 400, resp.text
+
+    # 90-day window with month granularity should still return 3 buckets.
+    start = end - timedelta(days=89)
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params={
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "granularity": "month",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["granularity"] == "month"
+    for p in body["points"]:
+        # bucket should be 1st of some month at 00:00:00
+        assert p["bucket"].endswith("01T00:00:00+00:00")
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_rejects_unknown_modality(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[("window", "7d"), ("modalities", "video")],
+    )
+    assert resp.status_code == 200, resp.text
+    # unknown modality should be rejected
+    resp_bad = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[("window", "7d"), ("modalities", "smell")],
+    )
+    assert resp_bad.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_modality_document_via_pdf(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.PDF,
+        risk_level="高风险",
+        mime_type="application/pdf",
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[("window", "7d"), ("modalities", "document")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    high_total = sum(p["high"] for p in body["points"])
+    assert high_total == 1
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_modality_audio_via_mime(client, db_session):
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        material_type=MaterialType.TEXT,
+        risk_level="中风险",
+        mime_type="audio/mpeg",
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[("window", "7d"), ("modalities", "audio")],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    medium_total = sum(p["medium"] for p in body["points"])
+    assert medium_total == 1
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_options_endpoint(client):
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get("/api/v1/reports/risk-trend/options")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert {m["value"] for m in body["modalities"]} == {"image", "text", "video", "audio", "document"}
+    assert isinstance(body["strategies"], list)
+    assert isinstance(body["channels"], list)
+    assert isinstance(body["account_ids"], list)
+    assert isinstance(body["risk_taxonomy"], list)
+
+
+@pytest.mark.asyncio
+async def test_risk_trend_custom_range_passes_through(client, db_session):
+    """历史自定义日期应该精确匹配 [start, end), 而不是 now-N 天."""
+    sub = await _get_user(db_session, "submitter@adreview.example.com")
+    # Place a task within a historical 2-day window.
+    started = datetime(2026, 7, 10, 5, 0, 0, tzinfo=timezone.utc)
+    await _make_risk_task(
+        db_session,
+        submitter=sub,
+        risk_level="高风险",
+        started_at=started,
+        completed_at=started,
+    )
+    await db_session.commit()
+
+    await _login(client, "mlr@adreview.example.com", "mlr12345")
+    resp = await client.get(
+        "/api/v1/reports/risk/trend",
+        params=[
+            ("start", "2026-07-10T00:00:00Z"),
+            ("end", "2026-07-11T00:00:00Z"),
+            ("granularity", "hour"),
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    high_total = sum(p["high"] for p in body["points"])
+    assert high_total == 1

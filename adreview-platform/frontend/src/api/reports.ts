@@ -7,6 +7,9 @@ import type {
   QualityResponse,
   RiskDistributionBucket,
   RiskTimeseriesPoint,
+  RiskTrendAppliedFilters,
+  RiskTrendGranularity,
+  RiskTrendOptionsResponse,
   TopRiskLabelItem,
   TrendMetric,
   TrendResponse,
@@ -14,14 +17,31 @@ import type {
 import {
   buildAnomalyResponse,
   buildRiskTrend,
+  buildRiskTrendOptions,
   buildTrend,
   getMockAlerts,
   pickGranularity,
 } from '@/lib/reportsMock'
 
 export interface RiskTrendResponse {
-  days: number
+  granularity: RiskTrendGranularity
+  window_start: string
+  window_end: string
+  applied: RiskTrendAppliedFilters
   points: RiskTimeseriesPoint[]
+}
+
+export interface RiskTrendQuery {
+  window?: string
+  start?: string
+  end?: string
+  granularity?: RiskTrendGranularity
+  modalities?: string[]
+  strategy_codes?: string[]
+  account_ids?: string[]
+  ips?: string[]
+  channels?: string[]
+  risk_label_paths?: string[]
 }
 
 export interface RiskDistributionResponse {
@@ -175,24 +195,77 @@ export const reportsApi = {
     const qs = params.toString()
     return `/api/v1/reports/quality/export.csv${qs ? `?${qs}` : ''}`
   },
-  riskTrend(opts: { days?: number; material_types?: string[] } = {}, mock?: MockMode) {
+  riskTrend(opts: RiskTrendQuery = {}, mock?: MockMode) {
     if (mock?.enabled) {
-      const days = opts.days ?? 7
-      const filterSeed = (opts.material_types ?? []).join(',')
+      const days = (() => {
+        if (opts.start && opts.end) {
+          return Math.max(
+            Math.ceil(
+              (Date.parse(opts.end) - Date.parse(opts.start)) / (24 * 60 * 60 * 1000),
+            ),
+            1,
+          )
+        }
+        if (opts.window === 'today') return 1
+        if (opts.window === '30d') return 30
+        return 7
+      })()
+      const filterSeed = JSON.stringify({
+        modalities: opts.modalities ?? [],
+        strategy_codes: opts.strategy_codes ?? [],
+        account_ids: opts.account_ids ?? [],
+        ips: opts.ips ?? [],
+        channels: opts.channels ?? [],
+        risk_label_paths: opts.risk_label_paths ?? [],
+      })
+      const granularity: RiskTrendGranularity =
+        opts.granularity ?? (days <= 2 ? 'hour' : days <= 31 ? 'day' : 'month')
       const points = buildRiskTrend({
         days,
-        filtered: !!opts.material_types?.length,
+        filtered: !!filterSeed && filterSeed !== '{}',
         filterSeed,
         mockSeed: mock.seed,
+        granularity,
       })
-      return Promise.resolve({ days, points } satisfies RiskTrendResponse)
+      return Promise.resolve({
+        granularity,
+        window_start: new Date(Date.now() - days * 86400_000).toISOString(),
+        window_end: new Date().toISOString(),
+        applied: {
+          modalities: opts.modalities ?? [],
+          strategy_codes: opts.strategy_codes ?? [],
+          account_ids: opts.account_ids ?? [],
+          ips: opts.ips ?? [],
+          channels: opts.channels ?? [],
+          risk_label_paths: opts.risk_label_paths ?? [],
+        },
+        points,
+      } satisfies RiskTrendResponse)
     }
-    const params: Record<string, unknown> = { days: opts.days ?? 7 }
-    if (opts.material_types && opts.material_types.length) {
-      params.material_types = opts.material_types
+    const params: Record<string, unknown> = {}
+    if (opts.start && opts.end) {
+      params.start = opts.start
+      params.end = opts.end
+    } else {
+      params.window = opts.window ?? '7d'
     }
+    if (opts.granularity) params.granularity = opts.granularity
+    if (opts.modalities?.length) params.modalities = opts.modalities
+    if (opts.strategy_codes?.length) params.strategy_codes = opts.strategy_codes
+    if (opts.account_ids?.length) params.account_ids = opts.account_ids
+    if (opts.ips?.length) params.ips = opts.ips
+    if (opts.channels?.length) params.channels = opts.channels
+    if (opts.risk_label_paths?.length) params.risk_label_paths = opts.risk_label_paths
     return api
       .get<RiskTrendResponse>('/reports/risk/trend', { params })
+      .then((r) => r.data)
+  },
+  riskTrendOptions(mock?: MockMode) {
+    if (mock?.enabled) {
+      return Promise.resolve(buildRiskTrendOptions(mock.seed))
+    }
+    return api
+      .get<RiskTrendOptionsResponse>('/reports/risk-trend/options')
       .then((r) => r.data)
   },
   riskDistribution(days = 7) {

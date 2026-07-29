@@ -47,10 +47,20 @@ RISK_LEVELS: tuple[str, ...] = ("高风险", "中风险", "低风险", "敏感",
 
 
 class RiskTrendPoint(BaseModel):
-    """One day's risk counts. Dates are local-time YYYY-MM-DD strings."""
+    """One time bucket's risk counts. ``bucket`` is always a UTC ISO 8601
+    timestamp marking the start of the bucket.
 
-    date: str
+    Only the four levels required by the 占比公式 are reported
+    (高/中/低/无风险); ``敏感`` is intentionally aggregated into a separate
+    ``sensitive`` field so the UI can show it without affecting the percentage
+    base. ``total`` is the count of all completed machine reviews in the
+    bucket (whatever risk_level); ``denominator`` is the sum of the four
+    reportable levels and is the base for the percentage formula.
+    """
+
+    bucket: str
     total: int = 0
+    denominator: int = 0
     high: int = 0
     medium: int = 0
     low: int = 0
@@ -58,8 +68,22 @@ class RiskTrendPoint(BaseModel):
     none: int = 0
 
 
+class AppliedFilters(BaseModel):
+    """Echo of the resolved filter set so the UI can render a chip strip."""
+
+    modalities: List[str] = Field(default_factory=list)
+    strategy_codes: List[str] = Field(default_factory=list)
+    account_ids: List[str] = Field(default_factory=list)
+    ips: List[str] = Field(default_factory=list)
+    channels: List[str] = Field(default_factory=list)
+    risk_label_paths: List[str] = Field(default_factory=list)
+
+
 class RiskTrendResponse(BaseModel):
-    days: int
+    granularity: str
+    window_start: datetime
+    window_end: datetime
+    applied: AppliedFilters = Field(default_factory=AppliedFilters)
     points: List[RiskTrendPoint] = Field(default_factory=list)
 
 

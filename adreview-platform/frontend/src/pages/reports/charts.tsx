@@ -250,12 +250,12 @@ export function RiskStackedAreaChart({
   emptyText = '暂无数据',
 }: RiskStackedAreaProps) {
   const rows = points.flatMap((p) => {
-    const out: { date: string; level: RiskLevel; count: number }[] = []
-    if (p.high) out.push({ date: p.date, level: '高风险', count: p.high })
-    if (p.medium) out.push({ date: p.date, level: '中风险', count: p.medium })
-    if (p.low) out.push({ date: p.date, level: '低风险', count: p.low })
-    if (p.sensitive) out.push({ date: p.date, level: '敏感', count: p.sensitive })
-    if (p.none) out.push({ date: p.date, level: '无风险', count: p.none })
+    const out: { bucket: string; level: RiskLevel; count: number }[] = []
+    if (p.high) out.push({ bucket: p.bucket, level: '高风险', count: p.high })
+    if (p.medium) out.push({ bucket: p.bucket, level: '中风险', count: p.medium })
+    if (p.low) out.push({ bucket: p.bucket, level: '低风险', count: p.low })
+    if (p.sensitive) out.push({ bucket: p.bucket, level: '敏感', count: p.sensitive })
+    if (p.none) out.push({ bucket: p.bucket, level: '无风险', count: p.none })
     return out
   })
   return (
@@ -267,7 +267,7 @@ export function RiskStackedAreaChart({
       ) : (
         <Area
           data={rows}
-          xField="date"
+          xField="bucket"
           yField="count"
           seriesField="level"
           height={height}
@@ -275,7 +275,11 @@ export function RiskStackedAreaChart({
           scale={{ color: { range: RISK_COLOR_LIST } }}
           style={{ fillOpacity: 0.7 }}
           axis={{
-            x: { labelAutoRotate: false, labelFontSize: 10 },
+            x: {
+              labelAutoRotate: false,
+              labelFontSize: 10,
+              labelFormatter: (v: string) => String(v).slice(5, 10),
+            },
             y: { labelFontSize: 10 },
           }}
           legend={{ color: { position: 'top-right' } }}
@@ -327,9 +331,10 @@ export function RiskDistributionBarChart({
 }
 
 // ---------------------------------------------------------------------------
-// Risk distribution trend — four lines (已通过 / 低风险 / 中风险 / 高风险)
-// driven by ``/reports/risk/trend``. "已通过" is computed client-side as
-// ``low + none`` per the spec; it does not have its own backend column yet.
+// Risk distribution trend — four lines (无风险 / 低风险 / 中风险 / 高风险)
+// driven by ``/reports/risk/trend``. Each line is the percentage of the
+// 4-level sum (高/中/低/无) for the bucket — 占比公式:
+//     ratio(level) = count(level) / sum(high + medium + low + none) × 100
 // ---------------------------------------------------------------------------
 
 interface RiskTrendChartProps {
@@ -338,6 +343,8 @@ interface RiskTrendChartProps {
   loading?: boolean
   error?: string | null
   emptyText?: string
+  /** Granularity drives x-axis label format. Defaults to 'day'. */
+  granularity?: 'hour' | 'day' | 'month'
 }
 
 export function RiskTrendChart({
@@ -346,28 +353,45 @@ export function RiskTrendChart({
   loading,
   error,
   emptyText = '暂无数据',
+  granularity = 'day',
 }: RiskTrendChartProps) {
-  // 把每个 bucket 的 4 个 level 计数转成"占当天 4 个 level 之和"的百分比，保留 2 位小数。
+  // 把每个 bucket 的 4 个 level 计数转成"占当天 4 个 level 之和"的百分比（0~100），
+  // 保留 2 位小数。
   const data = points.flatMap((p) => {
-    const sum = p.high + p.medium + p.low + p.none
-    const safe = sum > 0 ? sum : 1
+    const denom = p.denominator || p.high + p.medium + p.low + p.none
+    const safe = denom > 0 ? denom : 1
     const r2 = (n: number) => Number(((n / safe) * 100).toFixed(2))
     return [
-      { bucket: p.date, level: '已通过', value: r2(p.low + p.none) },
-      { bucket: p.date, level: '低风险', value: r2(p.low) },
-      { bucket: p.date, level: '中风险', value: r2(p.medium) },
-      { bucket: p.date, level: '高风险', value: r2(p.high) },
+      { bucket: p.bucket, level: '无风险', value: r2(p.none) },
+      { bucket: p.bucket, level: '低风险', value: r2(p.low) },
+      { bucket: p.bucket, level: '中风险', value: r2(p.medium) },
+      { bucket: p.bucket, level: '高风险', value: r2(p.high) },
     ]
   })
   const hasData = data.some((d) => d.value > 0)
 
   // 4 条 series 的颜色配置 — 与手动 legend 的色块保持一致。
   const legendItems: { label: string; color: string }[] = [
-    { label: '已通过', color: PASS_COLOR },
+    { label: '无风险', color: PASS_COLOR },
     { label: '低风险', color: APPROVE_COLOR },
     { label: '中风险', color: REVIEW_COLOR },
     { label: '高风险', color: REJECT_COLOR },
   ]
+
+  const xLabelFormatter = (raw: string) => {
+    if (!raw) return raw
+    if (granularity === 'hour') {
+      // YYYY-MM-DDTHH:MM:SS+00:00 → MM-DD HH:00
+      const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})/)
+      return m ? `${m[2]}-${m[3]} ${m[4]}:00` : raw
+    }
+    if (granularity === 'month') {
+      // YYYY-MM-01T00:00:00+00:00 → YYYY-MM
+      return raw.slice(0, 7)
+    }
+    // day: YYYY-MM-DDTHH:MM:SS → MM-DD
+    return raw.slice(5, 10)
+  }
 
   const chart = (
     <Line
@@ -377,16 +401,23 @@ export function RiskTrendChart({
       colorField="level"
       scale={{
         color: {
-          domain: ['已通过', '低风险', '中风险', '高风险'],
+          domain: ['无风险', '低风险', '中风险', '高风险'],
           range: [PASS_COLOR, APPROVE_COLOR, REVIEW_COLOR, REJECT_COLOR],
         },
+        // 占比范围 0..100, Y 轴顶刻度给到 120 留出顶部 padding 空间，
+        // 避免 100% 标签被 cartesian 区域裁掉.
+        value: { min: 0, max: 120, tickCount: 5, nice: true },
       }}
       height={height}
       smooth
       animate={false}
       point={{ shapeField: 'circle', sizeField: 2 }}
       axis={{
-        x: { labelAutoRotate: false, labelFontSize: 10 },
+        x: {
+          labelAutoRotate: false,
+          labelFontSize: 10,
+          labelFormatter: (v: string) => xLabelFormatter(String(v)),
+        },
         y: {
           labelFontSize: 10,
           labelFormatter: (v: number) => `${v.toFixed(2)}%`,
