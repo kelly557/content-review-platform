@@ -13,21 +13,30 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Select,
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
+  Upload,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import type { UploadFile } from 'antd/es/upload/interface'
 import {
+  DownOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   SearchOutlined,
   ExclamationCircleOutlined,
+  UpOutlined,
+  UploadOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/store'
+import { runModelTest, type ModelTestResponse } from '@/api/modelTest'
 
 const { Text, Title } = Typography
 
@@ -56,6 +65,17 @@ interface MockRef {
   id: string
   path: string
 }
+interface MockModelTestRecord {
+  decision: 'pass' | 'block'
+  latencyMs: number
+  confidence: number
+  rawOutput: string
+}
+interface RiskThresholdRange {
+  low: [number, number]
+  mid: [number, number]
+  high: [number, number]
+}
 interface MockModel {
   id: number
   name: string
@@ -67,6 +87,8 @@ interface MockModel {
   currentVersion: MockVersion
   history: MockVersion[]
   refs: MockRef[]
+  testHistory?: MockModelTestRecord[]
+  riskThreshold?: RiskThresholdRange
 }
 
 const MOCK_MODELS: MockModel[] = [
@@ -95,6 +117,24 @@ const MOCK_MODELS: MockModel[] = [
     refs: [
       { id: 'r1', path: '涉政 / 一号领导 / 写实' },
       { id: 'r2', path: '涉政 / 二号领导 / 写实' },
+    ],
+    testHistory: [
+      {
+        decision: 'block',
+        latencyMs: 1832,
+        confidence: 78.4,
+        rawOutput: JSON.stringify(
+          {
+            decision: 'block',
+            modality: 'image',
+            image_provided: true,
+            triggered_points: ['涉政 / 一号领导 / 写实'],
+            latency_ms: 1832,
+          },
+          null,
+          2,
+        ),
+      },
     ],
   },
   {
@@ -143,6 +183,29 @@ const MOCK_MODELS: MockModel[] = [
       { id: 'r11', path: '涉政 / 政治讽刺 / 漫画' },
       { id: 'r12', path: '涉政 / 政治讽刺 / 配图' },
     ],
+    testHistory: [
+      {
+        decision: 'pass',
+        latencyMs: 2158,
+        confidence: 87.5,
+        rawOutput: JSON.stringify(
+          {
+            decision: 'pass',
+            modality: 'image',
+            image_provided: true,
+            triggered_points: [],
+            latency_ms: 2158,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+    riskThreshold: {
+      low: [0.2, 0.35],
+      mid: [0.36, 0.74],
+      high: [0.75, 1.0],
+    },
   },
   {
     id: 3,
@@ -176,6 +239,29 @@ const MOCK_MODELS: MockModel[] = [
       { id: 'r20', path: '涉政 / 国旗国徽 / 篡改' },
       { id: 'r21', path: '涉政 / 国旗国徽 / 涂鸦' },
     ],
+    testHistory: [
+      {
+        decision: 'pass',
+        latencyMs: 1623,
+        confidence: 91.2,
+        rawOutput: JSON.stringify(
+          {
+            decision: 'pass',
+            modality: 'image',
+            image_provided: true,
+            triggered_points: [],
+            latency_ms: 1623,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+    riskThreshold: {
+      low: [0.0, 0.25],
+      mid: [0.26, 0.7],
+      high: [0.71, 1.0],
+    },
   },
   {
     id: 4,
@@ -227,6 +313,25 @@ const MOCK_MODELS: MockModel[] = [
       { id: 'r30', path: '广告法 / 极限词 / 识别' },
       { id: 'r31', path: '广告法 / 虚假宣传 / OCR' },
     ],
+    testHistory: [
+      {
+        decision: 'pass',
+        latencyMs: 945,
+        confidence: 93.8,
+        rawOutput: JSON.stringify(
+          {
+            decision: 'pass',
+            modality: 'text',
+            segments: ['本产品绝对有效，根治各种问题...'],
+            image_provided: false,
+            triggered_points: ['广告法 / 极限词 / 识别'],
+            latency_ms: 945,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
   },
   {
     id: 5,
@@ -272,6 +377,29 @@ const MOCK_MODELS: MockModel[] = [
       { id: 'r40', path: '涉黄 / 成人内容 / 面部' },
       { id: 'r41', path: '涉黄 / 表情包 / 露骨' },
     ],
+    testHistory: [
+      {
+        decision: 'pass',
+        latencyMs: 2241,
+        confidence: 88.1,
+        rawOutput: JSON.stringify(
+          {
+            decision: 'pass',
+            modality: 'image',
+            image_provided: true,
+            triggered_points: [],
+            latency_ms: 2241,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+    riskThreshold: {
+      low: [0.15, 0.4],
+      mid: [0.41, 0.8],
+      high: [0.81, 1.0],
+    },
   },
 ]
 
@@ -387,6 +515,24 @@ function healthErrorTag(time: string) {
   )
 }
 
+function checkRiskThreshold(r: RiskThresholdRange): string | null {
+  const [loMin, loMax] = r.low
+  const [mdMin, mdMax] = r.mid
+  const [hiMin, hiMax] = r.high
+  if (loMin < 0 || loMin > 1 || loMax < 0 || loMax > 1)
+    return '低风险分必须在 0~1 之间'
+  if (mdMin < 0 || mdMin > 1 || mdMax < 0 || mdMax > 1)
+    return '中风险分必须在 0~1 之间'
+  if (hiMin < 0 || hiMin > 1 || hiMax < 0 || hiMax > 1)
+    return '高风险分必须在 0~1 之间'
+  if (loMin > loMax) return '低风险分下限不能大于上限'
+  if (mdMin > mdMax) return '中风险分下限不能大于上限'
+  if (hiMin > hiMax) return '高风险分下限不能大于上限'
+  if (loMax >= mdMin) return '低风险上限必须小于中风险下限'
+  if (mdMax >= hiMin) return '中风险上限必须小于高风险下限'
+  return null
+}
+
 export default function ModelsAdminSmallPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
@@ -408,6 +554,119 @@ export default function ModelsAdminSmallPage() {
   const [uploadForm] = Form.useForm<{ endpoint_url: string }>()
   const [publishTarget, setPublishTarget] = useState<MockVersion | null>(null)
   const [healthCheckedAt, setHealthCheckedAt] = useState<string>('')
+
+  // ── 模型测试 ──────────────────────
+  const [testImage, setTestImage] = useState<UploadFile | null>(null)
+  const [testText, setTestText] = useState('')
+  const [testRunning, setTestRunning] = useState(false)
+  const [testCardOpen, setTestCardOpen] = useState(false)
+
+  const handleRunTest = async () => {
+    if (!selected) return
+    if (selected.modality === 'text' && !testText.trim()) {
+      message.warning('请输入待检测文本')
+      return
+    }
+    if (selected.modality !== 'text' && !testImage) {
+      message.warning('请先上传图片')
+      return
+    }
+    setTestRunning(true)
+    try {
+      const r =
+        selected.modality === 'text'
+          ? await runModelTest({
+              modality: 'text',
+              inputText: testText,
+              auditPoints: [],
+            })
+          : await runModelTest({
+              modality: 'image',
+              imageFile:
+                (testImage?.originFileObj as File | undefined) ??
+                new File([new Blob()], testImage?.name ?? 'mock.png'),
+              auditPoints: [],
+            })
+      // 将测试结果写入当前模型的 testHistory
+      setModels((prev) =>
+        prev.map((m) =>
+          m.id === selected.id
+            ? {
+                ...m,
+                testHistory: [
+                  {
+                    decision: r.decision,
+                    latencyMs: r.latencyMs,
+                    confidence: r.confidence,
+                    rawOutput: r.rawOutput,
+                  },
+                  ...(m.testHistory ?? []),
+                ],
+              }
+            : m,
+        ),
+      )
+    } catch {
+      message.error('测试失败')
+    } finally {
+      setTestRunning(false)
+    }
+  }
+
+  // ── 推荐风险阈值（行内编辑）──────────────────────
+  type ThresholdKey = 'low' | 'mid' | 'high'
+  const [editingKey, setEditingKey] = useState<ThresholdKey | null>(null)
+  const [draftLow, setDraftLow] = useState<[number, number]>([0, 0])
+  const [draftMid, setDraftMid] = useState<[number, number]>([0, 0])
+  const [draftHigh, setDraftHigh] = useState<[number, number]>([0, 1])
+
+  const startEdit = (key: ThresholdKey) => {
+    if (!selected) return
+    if (!selected.riskThreshold) return
+    if (key === 'low') setDraftLow([...selected.riskThreshold.low] as [number, number])
+    if (key === 'mid') setDraftMid([...selected.riskThreshold.mid] as [number, number])
+    if (key === 'high') setDraftHigh([...selected.riskThreshold.high] as [number, number])
+    setEditingKey(key)
+  }
+
+  const commitEdit = (key: ThresholdKey) => {
+    if (!selected || !selected.riskThreshold) return
+    const current = selected.riskThreshold
+    const next: RiskThresholdRange = {
+      low: key === 'low' ? draftLow : current.low,
+      mid: key === 'mid' ? draftMid : current.mid,
+      high: key === 'high' ? [draftHigh[0], 1] : current.high,
+    }
+    const err = checkRiskThreshold(next)
+    if (err) {
+      message.error(err)
+      setEditingKey(null)
+      return
+    }
+    setModels((prev) =>
+      prev.map((m) =>
+        m.id === selected.id ? { ...m, riskThreshold: next } : m,
+      ),
+    )
+    setEditingKey(null)
+    message.success('已保存阈值')
+  }
+
+  const handleUnconfiguredClick = () => {
+    if (!selected) return
+    const defaults: RiskThresholdRange = {
+      low: [0, 0.35],
+      mid: [0.36, 0.75],
+      high: [0.76, 1.0],
+    }
+    setModels((prev) =>
+      prev.map((m) =>
+        m.id === selected.id ? { ...m, riskThreshold: defaults } : m,
+      ),
+    )
+    setDraftLow([0, 0.35])
+    setEditingKey('low')
+  }
 
   useEffect(() => {
     const POLL_MS = 60 * 60 * 1000
@@ -502,9 +761,27 @@ export default function ModelsAdminSmallPage() {
     [models, selectedId],
   )
 
+  // 测试结果从当前选中模型派生（每个模型独立持有 testHistory，不再共享）
+  const testResult: ModelTestResponse | null = useMemo(() => {
+    const r = selected?.testHistory?.[0]
+    if (!r) return null
+    return {
+      decision: r.decision,
+      latencyMs: r.latencyMs,
+      confidence: r.confidence,
+      results: [],
+      rawOutput: r.rawOutput,
+    }
+  }, [selected?.testHistory])
+
   // mock 健康探测：leader_v1 异常，其他模型健康。
   const healthStatus: 'ok' | 'error' =
     selected?.name === 'leader_v1' ? 'error' : 'ok'
+
+  // 测试门控：testResult 由当前选中模型的 testHistory 派生
+  const isCurrentModelTested = testResult !== null
+  const isCurrentModelTestedPass =
+    isCurrentModelTested && testResult.decision === 'pass'
 
   const nextVersionNo = useMemo(() => {
     if (!selected) return 1
@@ -717,14 +994,22 @@ export default function ModelsAdminSmallPage() {
         }
         if (row.status === 'pending') {
           return (
-            <Button
-              size="small"
-              type="link"
-              disabled={!canWrite}
-              onClick={() => setPublishTarget(row)}
+            <Tooltip
+              title={
+                !isCurrentModelTestedPass
+                  ? '请先在「模型测试」中通过测试'
+                  : ''
+              }
             >
-              发布
-            </Button>
+              <Button
+                size="small"
+                type="link"
+                disabled={!canWrite || !isCurrentModelTestedPass}
+                onClick={() => setPublishTarget(row)}
+              >
+                发布
+              </Button>
+            </Tooltip>
           )
         }
         if (row.status === 'inactive') {
@@ -909,13 +1194,21 @@ export default function ModelsAdminSmallPage() {
                       </Button>
                     </Popconfirm>
                   ) : (
-                    <Button
-                      type="primary"
-                      onClick={handleActivate}
-                      disabled={!canWrite}
+                    <Tooltip
+                      title={
+                        !isCurrentModelTestedPass
+                          ? '请先在「模型测试」中通过测试'
+                          : ''
+                      }
                     >
-                      发布
-                    </Button>
+                      <Button
+                        type="primary"
+                        onClick={handleActivate}
+                        disabled={!canWrite || !isCurrentModelTestedPass}
+                      >
+                        发布
+                      </Button>
+                    </Tooltip>
                   )}
                 </div>
 
@@ -996,6 +1289,397 @@ export default function ModelsAdminSmallPage() {
                     pagination={false}
                   />
                 </div>
+              </div>
+
+              {/* 模型测试 */}
+              <div
+                style={{
+                  border: '1px solid #E2E8F0',
+                  borderRadius: 8,
+                  background: '#FFFFFF',
+                  marginBottom: 16,
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  onClick={() => setTestCardOpen((v) => !v)}
+                  style={{
+                    padding: '16px 24px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    userSelect: 'none',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        width: 3,
+                        height: 16,
+                        background: '#1677ff',
+                        borderRadius: 2,
+                      }}
+                    />
+                    <Text strong style={{ fontSize: 15 }}>
+                      模型测试
+                    </Text>
+                    {isCurrentModelTested && testResult && (
+                      <Tag
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          background:
+                            testResult.decision === 'pass'
+                              ? '#ECFDF5'
+                              : '#FEF2F2',
+                          borderColor:
+                            testResult.decision === 'pass'
+                              ? '#A7F3D0'
+                              : '#FECACA',
+                          color:
+                            testResult.decision === 'pass'
+                              ? '#047857'
+                              : '#B91C1C',
+                          margin: 0,
+                        }}
+                      >
+                        ●{' '}
+                        {testResult.decision === 'pass'
+                          ? '测试通过'
+                          : '测试失败'}
+                      </Tag>
+                    )}
+                  </div>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={testCardOpen ? <UpOutlined /> : <DownOutlined />}
+                  >
+                    {testCardOpen ? '收起' : '展开'}
+                  </Button>
+                </div>
+
+                {testCardOpen && (
+                  <div
+                    style={{
+                      padding: '16px 24px 20px',
+                      borderTop: '1px solid #F0F0F0',
+                    }}
+                  >
+                    <Space style={{ marginBottom: 12 }}>
+                      <Text type="secondary">模型：</Text>
+                      <Text strong>
+                        {selected.name} {selected.currentVersion.versionLabel}
+                      </Text>
+                    </Space>
+
+                    <Text
+                      type="secondary"
+                      style={{ display: 'block', marginBottom: 6 }}
+                    >
+                      {selected.modality === 'text'
+                        ? '输入测试文本'
+                        : '上传测试图片'}
+                    </Text>
+
+                    {selected.modality === 'text' ? (
+                      <Input.TextArea
+                        rows={4}
+                        value={testText}
+                        onChange={(e) => setTestText(e.target.value)}
+                        placeholder="请输入待检测文本…"
+                        maxLength={64_000}
+                        showCount
+                      />
+                    ) : (
+                      <Upload
+                        beforeUpload={(file) => {
+                          if (file.size > 10 * 1024 * 1024) {
+                            message.error('图片大小不能超过 10MB')
+                            return Upload.LIST_IGNORE
+                          }
+                          setTestImage({
+                            uid: String(Date.now()),
+                            name: file.name,
+                            status: 'done',
+                            originFileObj: file,
+                          })
+                          return false
+                        }}
+                        onRemove={() => {
+                          setTestImage(null)
+                          return true
+                        }}
+                        fileList={testImage ? [testImage] : []}
+                        maxCount={1}
+                        accept="image/*"
+                      >
+                        <Button icon={<UploadOutlined />}>上传图片</Button>
+                      </Upload>
+                    )}
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'flex-start',
+                        marginTop: 16,
+                      }}
+                    >
+                      <Button
+                        type="primary"
+                        icon={<PlayCircleOutlined />}
+                        loading={testRunning}
+                        disabled={
+                          selected.modality === 'text'
+                            ? !testText.trim()
+                            : !testImage
+                        }
+                        onClick={handleRunTest}
+                      >
+                        开始测试
+                      </Button>
+                    </div>
+
+                    {testResult && (
+                      <>
+                        <Divider style={{ margin: '20px 0 12px' }} />
+                        <Space
+                          size={16}
+                          wrap
+                          style={{ marginBottom: 12 }}
+                        >
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            测试模型：{selected.name}{' '}
+                            {selected.currentVersion.versionLabel}
+                          </Text>
+                        </Space>
+                        <Space
+                          size={16}
+                          wrap
+                          style={{ marginBottom: 12 }}
+                        >
+                          <Tag
+                            color={
+                              testResult.decision === 'pass'
+                                ? 'green'
+                                : 'red'
+                            }
+                            style={{ margin: 0 }}
+                          >
+                            {testResult.decision === 'pass'
+                              ? '● 通过'
+                              : '● 拦截'}
+                          </Tag>
+                          <Text type="secondary">
+                            延迟 {testResult.latencyMs}ms
+                          </Text>
+                          <Text type="secondary">
+                            置信度 {testResult.confidence}%
+                          </Text>
+                        </Space>
+                        <Text
+                          strong
+                          style={{ display: 'block', marginBottom: 8 }}
+                        >
+                          返回模型原始结果
+                        </Text>
+                        <pre
+                          style={{
+                            background: '#F8FAFC',
+                            padding: 12,
+                            borderRadius: 6,
+                            overflow: 'auto',
+                            margin: 0,
+                            fontSize: 12,
+                          }}
+                        >
+                          {testResult.rawOutput}
+                        </pre>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 推荐风险阈值 */}
+              <div
+                style={{
+                  border: '1px solid #E2E8F0',
+                  borderRadius: 8,
+                  background: '#FFFFFF',
+                  padding: '16px 24px 20px',
+                  marginBottom: 16,
+                }}
+              >
+                <div
+                  style={{
+                    marginBottom: 16,
+                    paddingLeft: 12,
+                    borderLeft: '3px solid #1677ff',
+                  }}
+                >
+                  <Text strong style={{ fontSize: 15 }}>
+                    推荐风险阈值
+                  </Text>
+                </div>
+
+                {selected.riskThreshold ? (
+                  <div>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr 1fr',
+                        gap: 16,
+                        marginBottom: 12,
+                      }}
+                    >
+                      {(
+                        [
+                          { key: 'low', label: '低风险', color: '#2563EB' },
+                          { key: 'mid', label: '中风险', color: '#D97706' },
+                          { key: 'high', label: '高风险', color: '#DC2626' },
+                        ] as const
+                      ).map(({ key, label, color }) => {
+                        const [a, b] = selected.riskThreshold![key]
+                        const isEditing = editingKey === key
+                        const draft =
+                          key === 'low'
+                            ? draftLow
+                            : key === 'mid'
+                              ? draftMid
+                              : draftHigh
+                        return (
+                          <div key={key}>
+                            <div style={{ marginBottom: 8 }}>
+                              <Tag
+                                style={{
+                                  background: `${color}14`,
+                                  borderColor: `${color}40`,
+                                  color,
+                                  margin: 0,
+                                  minWidth: 56,
+                                  textAlign: 'center',
+                                }}
+                              >
+                                {label}
+                              </Tag>
+                            </div>
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              {isEditing ? (
+                                <>
+                                  <InputNumber
+                                    size="small"
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    precision={2}
+                                    value={draft[0]}
+                                    onChange={(v) => {
+                                      const nv =
+                                        typeof v === 'number' ? v : 0
+                                      if (key === 'low')
+                                        setDraftLow([nv, draft[1]])
+                                      if (key === 'mid')
+                                        setDraftMid([nv, draft[1]])
+                                      if (key === 'high')
+                                        setDraftHigh([nv, draft[1]])
+                                    }}
+                                    onBlur={() => commitEdit(key)}
+                                    onPressEnter={() => commitEdit(key)}
+                                    autoFocus
+                                    style={{ width: 64 }}
+                                  />
+                                  <span
+                                    style={{
+                                      color: '#94A3B8',
+                                      fontSize: 12,
+                                    }}
+                                  >
+                                    ~
+                                  </span>
+                                  <InputNumber
+                                    size="small"
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    precision={2}
+                                    value={key === 'high' ? 1 : draft[1]}
+                                    disabled={key === 'high'}
+                                    onChange={(v) => {
+                                      const nv =
+                                        typeof v === 'number' ? v : 0
+                                      if (key === 'low')
+                                        setDraftLow([draft[0], nv])
+                                      if (key === 'mid')
+                                        setDraftMid([draft[0], nv])
+                                    }}
+                                    onBlur={() => commitEdit(key)}
+                                    onPressEnter={() => commitEdit(key)}
+                                    style={{ width: 64 }}
+                                  />
+                                </>
+                              ) : (
+                                <span
+                                  onClick={() => startEdit(key)}
+                                  style={{
+                                    cursor: 'pointer',
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  {a.toFixed(2)} ~ {b.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <Text
+                      type="secondary"
+                      style={{ fontSize: 12, display: 'block' }}
+                    >
+                      用于策略管理初始化配置
+                    </Text>
+                  </div>
+                ) : (
+                  <div
+                    onClick={handleUnconfiguredClick}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '8px 0',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Tag
+                      style={{
+                        background: '#FFF7ED',
+                        borderColor: '#FED7AA',
+                        color: '#C2410C',
+                        margin: 0,
+                      }}
+                    >
+                      未配置
+                    </Tag>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      点击「未配置」或此处即可配置推荐风险阈值
+                    </Text>
+                  </div>
+                )}
               </div>
 
               <div
