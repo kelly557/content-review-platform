@@ -43,6 +43,8 @@ interface MockModel {
   name: string
   kind: ModelKind
   version: string
+  /** 模型可处理的单一模态 */
+  modality: Modality
 }
 
 interface MockTag {
@@ -58,16 +60,16 @@ interface MockTag {
 
 // ── mock 模型（仅小模型） ──
 const MOCK_MODELS: MockModel[] = [
-  { id: 1, name: 'gpt-4o-mini', kind: 'small', version: 'v2' },
-  { id: 2, name: 'claude-3-haiku', kind: 'small', version: 'v1' },
-  { id: 3, name: 'qwen-vl-max', kind: 'small', version: 'v3' },
-  { id: 4, name: 'leader_v1', kind: 'small', version: 'v1' },
-  { id: 5, name: 'cartoon_model', kind: 'small', version: 'v3' },
-  { id: 6, name: 'flag_model', kind: 'small', version: 'v2' },
-  { id: 7, name: 'ocr_model', kind: 'small', version: 'v5' },
-  { id: 8, name: 'face_model', kind: 'small', version: 'v4' },
-  { id: 9, name: 'nsfw_detector', kind: 'small', version: 'v6' },
-  { id: 10, name: 'speech_to_text', kind: 'small', version: 'v2' },
+  { id: 1, name: 'gpt-4o-mini', kind: 'small', version: 'v2', modality: 'text' },
+  { id: 2, name: 'claude-3-haiku', kind: 'small', version: 'v1', modality: 'text' },
+  { id: 3, name: 'qwen-vl-max', kind: 'small', version: 'v3', modality: 'image' },
+  { id: 4, name: 'leader_v1', kind: 'small', version: 'v1', modality: 'image' },
+  { id: 5, name: 'cartoon_model', kind: 'small', version: 'v3', modality: 'image' },
+  { id: 6, name: 'flag_model', kind: 'small', version: 'v2', modality: 'image' },
+  { id: 7, name: 'ocr_model', kind: 'small', version: 'v5', modality: 'image' },
+  { id: 8, name: 'face_model', kind: 'small', version: 'v4', modality: 'image' },
+  { id: 9, name: 'nsfw_detector', kind: 'small', version: 'v6', modality: 'image' },
+  { id: 10, name: 'speech_to_text', kind: 'small', version: 'v2', modality: 'audio' },
 ]
 
 // ── mock 标签树（三级） ──
@@ -409,6 +411,17 @@ export default function TagsAdminPage() {
   }
 
   const watchLevel = Form.useWatch('level', form) as Level | undefined
+  const watchModality = Form.useWatch('modality', form) as Modality | undefined
+
+  // 受前置模态驱动的模型选项列表：编辑模式用 editing.modality，新增模式用 watchModality
+  const modelOptionsByModality = useMemo(
+    () => {
+      const currentModality = editing?.modality ?? watchModality
+      if (!currentModality) return MOCK_MODELS
+      return MOCK_MODELS.filter((m) => m.modality === currentModality)
+    },
+    [editing, watchModality],
+  )
 
   // ── 列定义 ──
   const columns: ColumnsType<FlatRow> = [
@@ -802,10 +815,20 @@ export default function TagsAdminPage() {
               rules={[{ required: true, message: '请选择模型' }]}
             >
               <Select
-                placeholder="请选择"
+                placeholder="搜索模型名称"
                 showSearch
                 optionFilterProp="label"
-                options={MOCK_MODELS.map((m) => ({
+                filterOption={(input, option) =>
+                  ((option?.label ?? '') as string)
+                    .toLowerCase()
+                    .includes(input.trim().toLowerCase())
+                }
+                notFoundContent={
+                  (editing?.modality ?? watchModality)
+                    ? '当前模态下无可用模型'
+                    : '暂无匹配模型'
+                }
+                options={modelOptionsByModality.map((m) => ({
                   value: m.id,
                   label: m.name,
                 }))}
