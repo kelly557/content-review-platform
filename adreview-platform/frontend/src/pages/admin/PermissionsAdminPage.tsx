@@ -39,17 +39,30 @@ function buildMockPermissions(): RolePermissions {
   const rows = flattenMenuForTable()
   const out: Record<string, Record<string, Partial<Record<PermissionKey, boolean>>>> = {}
 
-  // 管理员对以下节点仅查看（无编辑/删除）：词库-系统 / 代答库-系统 / 模型库(系统+自定义)
+  // 管理员对以下节点仅查看（无编辑/删除）：词库-系统 / 代答库-系统
   const ADMIN_VIEW_ONLY_NODES = new Set<string>([
     'resources-words-system',
     'resources-replies-system',
-    'resources-models',
+  ])
+  // 管理员对模型管理 / 标签管理：仅查看（包括一级和子节点）
+  const ADMIN_VIEW_ONLY_TAG_NODES = new Set<string>([
+    'system-models',
+    'admin-models-large',
+    'admin-models-small',
+    'system-tags',
   ])
   // 业务员对账号管理下子节点全部不勾选
   const STAFF_NO_ACCOUNT_NODES = new Set<string>([
     'admin-users',
     'admin-roles',
     'admin-permissions',
+  ])
+  // 业务员对模型管理 / 标签管理：全部不勾选（一级 + 子节点）
+  const STAFF_NO_TAG_NODES = new Set<string>([
+    'system-models',
+    'admin-models-large',
+    'admin-models-small',
+    'system-tags',
   ])
 
   for (const role of MERGED_ROLE_KEYS) {
@@ -65,12 +78,20 @@ function buildMockPermissions(): RolePermissions {
     }
   }
 
-  // 管理员：词库-系统 / 代答库-系统 / 模型库(系统+自定义) → 仅查看
+  // 管理员：词库-系统 / 代答库-系统 → 仅查看
   for (const key of ADMIN_VIEW_ONLY_NODES) {
+    out.admin[key] = { view: true }
+  }
+  // 管理员：模型管理 / 标签管理（一级+子节点）→ 仅查看
+  for (const key of ADMIN_VIEW_ONLY_TAG_NODES) {
     out.admin[key] = { view: true }
   }
   // 业务员：账号管理下 3 个子节点 → 全部不勾选
   for (const key of STAFF_NO_ACCOUNT_NODES) {
+    out.staff[key] = {}
+  }
+  // 业务员：模型管理 / 标签管理 → 全部不勾选
+  for (const key of STAFF_NO_TAG_NODES) {
     out.staff[key] = {}
   }
   // superadmin / root_admin：全部全勾
