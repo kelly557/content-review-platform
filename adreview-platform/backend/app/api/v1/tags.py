@@ -1,14 +1,17 @@
-"""Tag management API — CRUD + multi-dimensional filter.
+"""Tag management API — CRUD + 三级级联 + tree + 反查。
 
 Endpoints
 ---------
-  GET    /api/v1/tags                       list tags (multi-dim filter)
-  POST   /api/v1/tags                       create tag
+  GET    /api/v1/tags                       list tags (multi-dim filter + level/parent/bound_model)
+  POST   /api/v1/tags                       create tag (parent_id / level / bound_model_* 校验)
   GET    /api/v1/tags/{id}                  detail
   PUT    /api/v1/tags/{id}                  update tag
-  DELETE /api/v1/tags/{id}                  delete tag (platform tags refused)
+  DELETE /api/v1/tags/{id}                  delete tag (soft delete; 级联删子标签 by FK CASCADE)
   POST   /api/v1/tags/{id}/activate         flip status active
   POST   /api/v1/tags/{id}/deprecate        flip status deprecated
+
+  GET    /api/v1/tags/tree                  完整三级树（前端 Cascader/Tree 渲染）
+  GET    /api/v1/tags/references            反查：哪些三级标签绑定了 model_id
 """
 from __future__ import annotations
 
@@ -22,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user
 from app.db.session import get_db
 from app.models.tag import (
+    TAG_LEVEL_LEAF,
     TagDomain,
     TagStatus,
 )
@@ -30,7 +34,9 @@ from app.schemas.common import Page
 from app.schemas.tag import (
     TagCreate,
     TagOut,
+    TagReferenceList,
     TagSummary,
+    TagTreeNode,
     TagUpdate,
 )
 from app.services import tag as tag_service
@@ -67,6 +73,10 @@ def _to_summary(tag) -> TagSummary:
         industries=list(tag.industries or []),
         channels=list(tag.channels or []),
         status=tag.status,
+        level=tag.level,
+        parent_id=tag.parent_id,
+        bound_model_id=tag.bound_model_id,
+        bound_model_kind=tag.bound_model_kind,
         updated_at=tag.updated_at,
     )
 
@@ -87,6 +97,9 @@ async def list_tags(
     industry: Optional[List[str]] = Query(None),
     channel: Optional[List[str]] = Query(None),
     q: Optional[str] = None,
+    level: Optional[int] = Query(None, ge=1, le=3),
+    parent_id: Optional[str] = None,
+    bound_model_id: Optional[int] = Query(None, ge=1),
 ):
     items, total = await tag_service.list_tags(
         db,
@@ -99,6 +112,9 @@ async def list_tags(
         industries=industry,
         channels=channel,
         q=q,
+        level=level,
+        parent_id=parent_id,
+        bound_model_id=bound_model_id,
     )
     return Page(items=[_to_summary(t) for t in items], total=total, page=page, size=size)
 
@@ -125,6 +141,23 @@ async def create_tag(
     await db.commit()
     await db.refresh(tag)
     return _to_out(tag)
+
+
+@router.get("/tree", response_model=List[TagTreeNode])
+async def get_tag_tree(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    return await tag_service.build_tree(db)
+
+
+@router.get("/references", response_model=TagReferenceList)
+async def get_tag_references(
+    model_id: int = Query(..., ge=1),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    return await tag_service.list_references_by_model(db, model_id)
 
 
 @router.get("/{tag_id}", response_model=TagOut)
