@@ -319,7 +319,7 @@ const [items, setItems] = useState<RegisteredModelListItem[]>([])
             模型管理 / 大模型
           </Typography.Title>
           <Text type="secondary">
-            大模型（LLM）注册、版本、发布管理
+            大模型（LLM）注册、启用管理
           </Text>
         </div>
         <Space>

@@ -1286,7 +1286,12 @@ export default function ModelsAdminSmallPage() {
                     size="middle"
                     dataSource={selected.history}
                     columns={versionColumns}
-                    pagination={false}
+                    pagination={{
+                      pageSize: 5,
+                      showSizeChanger: true,
+                      showTotal: (total) => `共 ${total} 个版本`,
+                      pageSizeOptions: [5, 10, 20, 50],
+                    }}
                   />
                 </div>
               </div>

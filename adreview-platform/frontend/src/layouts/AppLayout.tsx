@@ -104,7 +104,7 @@ const NAV_SECTIONS: Array<{
         roles: ['admin', 'mlr', 'superadmin', 'root_admin'],
         children: [
           { key: 'strategies-words', path: '/resources/words', label: '词库管理' },
-          { key: 'strategies-models', path: '/resources/models', label: '模型库管理' },
+          { key: 'strategies-models', path: '/resources/models', label: '模型库管理', roles: ['root_admin'] },
           { key: 'strategies-images', path: '/resources/images', label: '图片库管理', roles: ['root_admin'] },
           { key: 'strategies-replies', path: '/resources/replies', label: '代答库管理' },
           { key: 'strategies-knowledge', path: '/resources/knowledge', label: '知识库管理', roles: ['root_admin'] },
