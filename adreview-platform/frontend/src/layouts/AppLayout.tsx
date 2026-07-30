@@ -16,6 +16,8 @@ import {
   DatabaseOutlined,
   SearchOutlined,
   ThunderboltOutlined,
+  TagsOutlined,
+  RobotOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
@@ -138,7 +140,26 @@ const NAV_SECTIONS: Array<{
           { key: 'admin-permissions', path: '/admin/permissions', label: '权限管理' },
         ],
       },
-      // { kind: 'leaf', key: 'admin-tags', path: '/tags', label: '标签管理', icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['admin'] },
+      {
+        kind: 'group',
+        key: 'admin-models',
+        path: '/admin/models/large',
+        label: '模型管理',
+        icon: <RobotOutlined style={{ fontSize: ICON_SIZE }} />,
+        roles: ['admin', 'superadmin', 'root_admin'],
+        children: [
+          { key: 'admin-models-large', path: '/admin/models/large', label: '大模型' },
+          { key: 'admin-models-small', path: '/admin/models/small', label: '小模型' },
+        ],
+      },
+      {
+        kind: 'leaf',
+        key: 'admin-tags',
+        path: '/admin/tags',
+        label: '标签管理',
+        icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />,
+        roles: ['admin', 'superadmin', 'root_admin'],
+      },
     ],
   },
 ]

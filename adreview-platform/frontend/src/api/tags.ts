@@ -5,8 +5,11 @@ import type {
   TagCategory,
   TagCreate,
   TagDomain,
+  TagLevel,
+  TagReferenceList,
   TagStatus,
   TagSummary,
+  TagTreeNode,
   TagUpdate,
 } from '@/types/domain'
 
@@ -20,6 +23,9 @@ export interface TagListParams {
   industry?: string[]
   channel?: string[]
   q?: string
+  level?: TagLevel
+  parent_id?: string
+  bound_model_id?: number
 }
 
 export const tagsApi = {
@@ -48,5 +54,13 @@ export const tagsApi = {
   },
   deprecate(id: string) {
     return api.post<Tag>(`/tags/${id}/deprecate`).then((r) => r.data)
+  },
+  tree() {
+    return api.get<TagTreeNode[]>('/tags/tree').then((r) => r.data)
+  },
+  referencesByModel(modelId: number) {
+    return api
+      .get<TagReferenceList>('/tags/references', { params: { model_id: modelId } })
+      .then((r) => r.data)
   },
 }

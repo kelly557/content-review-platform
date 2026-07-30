@@ -1231,6 +1231,9 @@ export type TagCategory =
 
 export type TagStatus = 'draft' | 'active' | 'deprecated'
 
+export type TagLevel = 1 | 2 | 3
+export type BoundModelKind = 'large' | 'small'
+
 export interface Tag {
   id: string
   code: string
@@ -1246,6 +1249,10 @@ export interface Tag {
   evidence_refs: string[]
   status: TagStatus
   version: number
+  level: TagLevel
+  parent_id?: string | null
+  bound_model_id?: number | null
+  bound_model_kind?: BoundModelKind | null
   created_at: string
   updated_at?: string | null
 }
@@ -1261,6 +1268,10 @@ export interface TagSummary {
   industries: string[]
   channels: string[]
   status: TagStatus
+  level: TagLevel
+  parent_id?: string | null
+  bound_model_id?: number | null
+  bound_model_kind?: BoundModelKind | null
   updated_at?: string | null
 }
 
@@ -1268,7 +1279,7 @@ export interface TagCreate {
   code?: string
   name: string
   name_en?: string
-  description?: string
+  description?: string | null
   domain: TagDomain
   category: TagCategory
   jurisdictions?: string[]
@@ -1277,6 +1288,10 @@ export interface TagCreate {
   knowledge_refs?: string[]
   evidence_refs?: string[]
   status?: TagStatus
+  level?: TagLevel
+  parent_id?: string | null
+  bound_model_id?: number | null
+  bound_model_kind?: BoundModelKind | null
 }
 
 export interface TagUpdate {
@@ -1291,6 +1306,34 @@ export interface TagUpdate {
   knowledge_refs?: string[]
   evidence_refs?: string[]
   status?: TagStatus
+  bound_model_id?: number | null
+  bound_model_kind?: BoundModelKind | null
+}
+
+export interface TagTreeNode {
+  id: string
+  name: string
+  code: string
+  level: TagLevel
+  status: TagStatus
+  domain: TagDomain
+  bound_model_id?: number | null
+  bound_model_kind?: BoundModelKind | null
+  bound_model_label?: string | null
+  children: TagTreeNode[]
+}
+
+export interface TagReferenceItem {
+  id: string
+  name: string
+  path: string
+  level: TagLevel
+}
+
+export interface TagReferenceList {
+  model_id: number
+  total: number
+  items: TagReferenceItem[]
 }
 
 export const TAG_DOMAIN_OPTIONS: { value: TagDomain; label: string; cn: string }[] = [
