@@ -1,12 +1,13 @@
 // 模型管理 / 小模型（mock 数据版本）
 // 按 ASCII 设计稿实现：左 280px 列表 + 右详情（版本历史、引用标签、操作）。
 // 数据来源：当前为前端 mock（无后端依赖），后续接 API 时替换 fetchList / fetchVersions / fetchRefs。
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import {
   App,
   Alert,
   Button,
+  Cascader,
   Divider,
   Drawer,
   Empty,
@@ -24,7 +25,6 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   PlusOutlined,
   SearchOutlined,
-  RollbackOutlined,
   ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/store'
@@ -45,11 +45,11 @@ const MODALITY_LABEL_4: Record<Modality4, string> = MODALITY_OPTIONS_4.reduce(
 )
 
 // ── mock 数据类型 ──
-type MockStatus = 'active' | 'inactive'
+type MockStatus = 'active' | 'inactive' | 'pending'
 interface MockVersion {
   id: number
   versionLabel: string
-  status: 'active' | 'inactive'
+  status: MockStatus
   releasedAt: string
 }
 interface MockRef {
@@ -289,32 +289,17 @@ function statusTag(status: MockStatus) {
         ● 已发布
       </Tag>
     )
-  return (
-    <Tag
-      style={{
-        background: '#F1F5F9',
-        borderColor: '#E2E8F0',
-        color: '#64748B',
-        margin: 0,
-      }}
-    >
-      ● 已下线
-    </Tag>
-  )
-}
-
-function versionStatusTag(status: 'active' | 'inactive'): React.ReactNode {
-  if (status === 'active')
+  if (status === 'pending')
     return (
       <Tag
         style={{
-          background: '#ECFDF5',
-          borderColor: '#A7F3D0',
-          color: '#047857',
+          background: '#FFF7ED',
+          borderColor: '#FED7AA',
+          color: '#C2410C',
           margin: 0,
         }}
       >
-        ● 在线
+        ● 未发布
       </Tag>
     )
   return (
@@ -331,6 +316,77 @@ function versionStatusTag(status: 'active' | 'inactive'): React.ReactNode {
   )
 }
 
+function versionStatusTag(status: 'active' | 'inactive' | 'pending'): React.ReactNode {
+  if (status === 'active')
+    return (
+      <Tag
+        style={{
+          background: '#ECFDF5',
+          borderColor: '#A7F3D0',
+          color: '#047857',
+          margin: 0,
+        }}
+      >
+        ● 在线
+      </Tag>
+    )
+  if (status === 'pending')
+    return (
+      <Tag
+        style={{
+          background: '#FFF7ED',
+          borderColor: '#FED7AA',
+          color: '#C2410C',
+          margin: 0,
+        }}
+      >
+        ● 未发布
+      </Tag>
+    )
+  return (
+    <Tag
+      style={{
+        background: '#F1F5F9',
+        borderColor: '#E2E8F0',
+        color: '#64748B',
+        margin: 0,
+      }}
+    >
+      ● 已下线
+    </Tag>
+  )
+}
+
+function healthOkTag(time: string) {
+  return (
+    <Tag
+      style={{
+        background: '#ECFDF5',
+        borderColor: '#A7F3D0',
+        color: '#047857',
+        margin: 0,
+      }}
+    >
+      ● 服务状态：健康 {time}
+    </Tag>
+  )
+}
+
+function healthErrorTag(time: string) {
+  return (
+    <Tag
+      style={{
+        background: '#FEF2F2',
+        borderColor: '#FECACA',
+        color: '#B91C1C',
+        margin: 0,
+      }}
+    >
+      ● 服务状态：异常 {time}
+    </Tag>
+  )
+}
+
 export default function ModelsAdminSmallPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
@@ -338,6 +394,8 @@ export default function ModelsAdminSmallPage() {
 
   const [models, setModels] = useState<MockModel[]>(MOCK_MODELS)
   const [q, setQ] = useState('')
+  const [modalityFilter, setModalityFilter] = useState<Modality4[]>([])
+  const [refTagsFilter, setRefTagsFilter] = useState<string[][]>([])
   const [selectedId, setSelectedId] = useState<number | null>(
     MOCK_MODELS[0]?.id ?? null,
   )
@@ -347,11 +405,17 @@ export default function ModelsAdminSmallPage() {
     target: MockModel | null
   }>({ open: false, refs: [], target: null })
   const [newVersionOpen, setNewVersionOpen] = useState(false)
-  const [rollbackConfirmOpen, setRollbackConfirmOpen] = useState(false)
-  const [rollbackTarget, setRollbackTarget] = useState<{
-    from: string
-    to: string
-  } | null>(null)
+  const [uploadForm] = Form.useForm<{ endpoint_url: string }>()
+  const [publishTarget, setPublishTarget] = useState<MockVersion | null>(null)
+  const [healthCheckedAt, setHealthCheckedAt] = useState<string>('')
+
+  useEffect(() => {
+    const POLL_MS = 60 * 60 * 1000
+    const tick = () => setHealthCheckedAt(dayjs().format('HH:mm:ss'))
+    tick()
+    const id = setInterval(tick, POLL_MS)
+    return () => clearInterval(id)
+  }, [])
   const [addOpen, setAddOpen] = useState(false)
   const [addSubmitting, setAddSubmitting] = useState(false)
   const [addForm] = Form.useForm<{
@@ -360,20 +424,102 @@ export default function ModelsAdminSmallPage() {
     endpoint_url: string
   }>()
 
+  // 从 models[].refs 动态推导三级标签树（Cascader 用）
+  const refTagTree = useMemo(() => {
+    interface TreeNode {
+      value: string
+      label: string
+      children?: TreeNode[]
+    }
+    const level1 = new Map<string, Map<string, Set<string>>>()
+    for (const m of models) {
+      for (const r of m.refs) {
+        const parts = r.path
+          .split('/')
+          .map((s) => s.trim())
+          .filter(Boolean)
+        if (parts.length < 2) continue
+        const [l1, l2, l3] = parts
+        if (!level1.has(l1)) level1.set(l1, new Map())
+        const l2Map = level1.get(l1)!
+        if (!l2Map.has(l2)) l2Map.set(l2, new Set())
+        if (l3) l2Map.get(l2)!.add(l3)
+      }
+    }
+    const build = (
+      l1Name: string,
+      l2Map: Map<string, Set<string>>,
+    ): TreeNode => {
+      const l2Nodes: TreeNode[] = []
+      const l2Keys = [...l2Map.keys()].sort((a, b) => a.localeCompare(b, 'zh'))
+      for (const l2Name of l2Keys) {
+        const l3Set = l2Map.get(l2Name)!
+        const l2Path = `${l1Name} / ${l2Name}`
+        if (l3Set.size === 0) {
+          l2Nodes.push({ value: l2Path, label: l2Name })
+        } else {
+          const l3Children: TreeNode[] = []
+          const l3Keys = [...l3Set].sort((a, b) => a.localeCompare(b, 'zh'))
+          for (const l3Name of l3Keys) {
+            const l3Path = `${l2Path} / ${l3Name}`
+            l3Children.push({ value: l3Path, label: l3Name })
+          }
+          l2Nodes.push({ value: l2Path, label: l2Name, children: l3Children })
+        }
+      }
+      return { value: l1Name, label: l1Name, children: l2Nodes }
+    }
+    return [...level1.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], 'zh'))
+      .map(([l1Name, l2Map]) => build(l1Name, l2Map))
+  }, [models])
+
   const filtered = useMemo(
     () =>
-      q.trim()
-        ? models.filter((m) =>
-            m.name.toLowerCase().includes(q.toLowerCase().trim()),
+      models.filter((m) => {
+        if (
+          q.trim() &&
+          !m.name.toLowerCase().includes(q.toLowerCase().trim())
+        )
+          return false
+        if (modalityFilter.length > 0 && !modalityFilter.includes(m.modality))
+          return false
+        if (refTagsFilter.length > 0) {
+          const paths = m.refs.map((r) => r.path)
+          const leafTags = refTagsFilter.map((arr) =>
+            arr[arr.length - 1],
           )
-        : models,
-    [models, q],
+          const hit = leafTags.some((tag) => paths.includes(tag))
+          if (!hit) return false
+        }
+        return true
+      }),
+    [models, q, modalityFilter, refTagsFilter],
   )
 
   const selected = useMemo(
     () => models.find((m) => m.id === selectedId) ?? null,
     [models, selectedId],
   )
+
+  // mock 健康探测：leader_v1 异常，其他模型健康。
+  const healthStatus: 'ok' | 'error' =
+    selected?.name === 'leader_v1' ? 'error' : 'ok'
+
+  const nextVersionNo = useMemo(() => {
+    if (!selected) return 1
+    return (
+      Math.max(
+        ...selected.history.map(
+          (h) => parseInt(h.versionLabel.replace(/[^0-9]/g, ''), 10) || 0,
+        ),
+        parseInt(
+          selected.currentVersion.versionLabel.replace(/[^0-9]/g, ''),
+          10,
+        ) || 0,
+      ) + 1
+    )
+  }, [selected])
 
   // ── 操作：发布 / 取消发布 ──────────────────────
   const handleActivate = () => {
@@ -409,20 +555,18 @@ export default function ModelsAdminSmallPage() {
   // ── 操作：上传新版本 ──────────────────────
   const handleUploadNewVersion = () => {
     if (!selected) return
+    uploadForm.resetFields()
     setNewVersionOpen(true)
   }
 
-  const confirmUploadNewVersion = () => {
+  const confirmUploadNewVersion = async () => {
     if (!selected) return
-    const nextVersionNo =
-      Math.max(
-        ...selected.history.map((h) => parseInt(h.versionLabel.replace(/[^0-9]/g, ''), 10) || 0),
-        parseInt(selected.currentVersion.versionLabel.replace(/[^0-9]/g, ''), 10) || 0,
-      ) + 1
+    const v = await uploadForm.validateFields().catch(() => null)
+    if (!v) return
     const newV: MockVersion = {
-      id: Math.floor(Math.random() * 1e6),
+      id: Date.now(),
       versionLabel: `v${nextVersionNo}`,
-      status: 'active',
+      status: 'pending',
       releasedAt: dayjs().format('YYYY-MM-DD'),
     }
     setModels((prev) =>
@@ -430,76 +574,13 @@ export default function ModelsAdminSmallPage() {
         m.id === selected.id
           ? {
               ...m,
-              status: 'active',
-              currentVersion: newV,
               history: [newV, ...m.history],
             }
           : m,
       ),
     )
-    message.success(`已上传新版本 ${newV.versionLabel} 并自动启用`)
+    message.success(`已保存新版本 ${newV.versionLabel}，状态：未发布`)
     setNewVersionOpen(false)
-  }
-
-  // ── 操作：回滚版本 ──────────────────────
-  const handleRollback = () => {
-    if (!selected) return
-    const previous = selected.history
-      .filter(
-        (h) =>
-          h.id !== selected.currentVersion.id &&
-          parseInt(h.versionLabel.replace(/[^0-9]/g, ''), 10) <
-            parseInt(
-              selected.currentVersion.versionLabel.replace(/[^0-9]/g, ''),
-              10,
-            ),
-      )
-      .sort(
-        (a, b) =>
-          parseInt(b.versionLabel.replace(/[^0-9]/g, ''), 10) -
-          parseInt(a.versionLabel.replace(/[^0-9]/g, ''), 10),
-      )[0]
-    if (!previous) {
-      message.warning('没有可回滚的历史版本')
-      return
-    }
-    setRollbackTarget({
-      from: selected.currentVersion.versionLabel,
-      to: previous.versionLabel,
-    })
-    setRollbackConfirmOpen(true)
-  }
-
-  const confirmRollback = () => {
-    if (!selected || !rollbackTarget) return
-    const target = selected.history.find(
-      (h) => h.versionLabel === rollbackTarget.to,
-    )
-    if (!target) {
-      setRollbackConfirmOpen(false)
-      return
-    }
-    setModels((prev) =>
-      prev.map((m) =>
-        m.id === selected.id
-          ? {
-              ...m,
-              status: 'active',
-              currentVersion: { ...target, status: 'active' },
-              history: m.history.map((h) =>
-                h.id === target.id
-                  ? { ...h, status: 'active' }
-                  : h.id === selected.currentVersion.id
-                    ? { ...h, status: 'inactive' }
-                    : h,
-              ),
-            }
-          : m,
-      ),
-    )
-    message.success(`已回滚到 ${target.versionLabel}`)
-    setRollbackConfirmOpen(false)
-    setRollbackTarget(null)
   }
 
   // ── 操作：新增模型 ──────────────────────
@@ -514,7 +595,7 @@ export default function ModelsAdminSmallPage() {
       const v1: MockVersion = {
         id: Date.now(),
         versionLabel: 'v1',
-        status: 'inactive',
+        status: 'pending',
         releasedAt: today,
       }
       const newModel: MockModel = {
@@ -523,7 +604,7 @@ export default function ModelsAdminSmallPage() {
         smallCategory: '',
         modality: v.modality,
         endpoint_url: v.endpoint_url.trim(),
-        status: 'inactive',
+        status: 'pending',
         createdAt: today,
         currentVersion: v1,
         history: [v1],
@@ -544,9 +625,9 @@ export default function ModelsAdminSmallPage() {
     addForm.resetFields()
   }
 
-  const handleActivateVersion = (version: MockVersion) => {
+  // ── 操作：切换版本（pending / inactive → current，带二次确认） ──────────────────────
+  const handlePublishVersion = (version: MockVersion) => {
     if (!selected) return
-    if (version.id === selected.currentVersion.id) return
     setModels((prev) =>
       prev.map((m) =>
         m.id === selected.id
@@ -565,7 +646,11 @@ export default function ModelsAdminSmallPage() {
           : m,
       ),
     )
-    message.success(`已切换到 ${version.versionLabel}`)
+    message.success(
+      version.status === 'pending'
+        ? `已发布 ${version.versionLabel}`
+        : `已切换到 ${version.versionLabel}`,
+    )
   }
 
   // ── 版本历史表 ──────────────────────
@@ -630,27 +715,34 @@ export default function ModelsAdminSmallPage() {
             </Text>
           )
         }
+        if (row.status === 'pending') {
+          return (
+            <Button
+              size="small"
+              type="link"
+              disabled={!canWrite}
+              onClick={() => setPublishTarget(row)}
+            >
+              发布
+            </Button>
+          )
+        }
         if (row.status === 'inactive') {
           return (
-            <Space size={4}>
-              <Button
-                size="small"
-                type="link"
-                disabled={!canWrite}
-                onClick={() => handleActivateVersion(row)}
-              >
-                回滚
-              </Button>
-              <Button size="small" type="link" disabled>
-                查看
-              </Button>
-            </Space>
+            <Button
+              size="small"
+              type="link"
+              disabled={!canWrite}
+              onClick={() => setPublishTarget(row)}
+            >
+              回滚到此版本
+            </Button>
           )
         }
         return (
-          <Button size="small" type="link" disabled>
-            查看
-          </Button>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            —
+          </Text>
         )
       },
     },
@@ -671,7 +763,7 @@ export default function ModelsAdminSmallPage() {
         <div>
           <Title level={3} style={{ margin: 0 }}>模型管理 / 小模型</Title>
           <Text type="secondary">
-            小模型（传统 ML/深度学习）注册、版本、上传与回滚管理
+            小模型 注册、版本与发布管理
           </Text>
         </div>
         <Button
@@ -705,13 +797,48 @@ export default function ModelsAdminSmallPage() {
             flexDirection: 'column',
           }}
         >
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 8 }}>
             <Input
               prefix={<SearchOutlined />}
               placeholder="搜索小模型名称"
               allowClear
               value={q}
               onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              marginBottom: 12,
+            }}
+          >
+            <Select
+              mode="multiple"
+              allowClear
+              placeholder="模态"
+              style={{ width: '100%' }}
+              value={modalityFilter}
+              onChange={(v) => setModalityFilter(v as Modality4[])}
+              options={MODALITY_OPTIONS_4.map((o) => ({
+                value: o.value,
+                label: o.label,
+              }))}
+              maxTagCount="responsive"
+              size="middle"
+            />
+            <Cascader
+              multiple
+              changeOnSelect
+              placeholder="标签"
+              style={{ width: '100%' }}
+              value={refTagsFilter}
+              onChange={(v) => setRefTagsFilter(v as string[][])}
+              options={refTagTree}
+              showCheckedStrategy={Cascader.SHOW_CHILD}
+              maxTagCount="responsive"
+              size="middle"
             />
           </div>
           <div
@@ -815,6 +942,10 @@ export default function ModelsAdminSmallPage() {
                   <Divider type="vertical" />
                   <Text type="secondary">创建时间：</Text>
                   <Text strong>{selected.createdAt}</Text>
+                  <Divider type="vertical" />
+                  {healthStatus === 'ok'
+                    ? healthOkTag(healthCheckedAt)
+                    : healthErrorTag(healthCheckedAt)}
                 </Space>
               </div>
 
@@ -832,14 +963,29 @@ export default function ModelsAdminSmallPage() {
                     padding: '16px 24px 12px',
                     borderBottom: '1px solid #F0F0F0',
                     borderLeft: '3px solid #1677ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
                   }}
                 >
-                  <Text strong style={{ fontSize: 15 }}>
-                    【版本历史】
-                  </Text>
-                  <Text type="secondary" style={{ marginLeft: 12 }}>
-                    {selected.history.length} 个版本
-                  </Text>
+                  <div>
+                    <Text strong style={{ fontSize: 15 }}>
+                      【版本历史】
+                    </Text>
+                    <Text type="secondary" style={{ marginLeft: 12 }}>
+                      {selected.history.length} 个版本
+                    </Text>
+                  </div>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    disabled={!canWrite}
+                    onClick={handleUploadNewVersion}
+                  >
+                    上传新版本
+                  </Button>
                 </div>
                 <div style={{ padding: '0 24px 16px' }}>
                   <Table<MockVersion>
@@ -936,31 +1082,6 @@ export default function ModelsAdminSmallPage() {
                 )}
               </div>
 
-              <div
-                style={{
-                  border: '1px solid #E2E8F0',
-                  borderRadius: 8,
-                  background: '#FFFFFF',
-                  padding: '16px 24px',
-                }}
-              >
-                <Space>
-                  <Button
-                    icon={<PlusOutlined />}
-                    disabled={!canWrite}
-                    onClick={handleUploadNewVersion}
-                  >
-                    上传新版本
-                  </Button>
-                  <Button
-                    icon={<RollbackOutlined />}
-                    disabled={!canWrite}
-                    onClick={handleRollback}
-                  >
-                    回滚版本
-                  </Button>
-                </Space>
-              </div>
             </div>
           )}
         </div>
@@ -1024,49 +1145,89 @@ export default function ModelsAdminSmallPage() {
         )}
       </Drawer>
 
-      {/* 上传新版本确认 */}
+      {/* 上传新版本 */}
       <Modal
         title="上传新版本"
         open={newVersionOpen}
         onCancel={() => setNewVersionOpen(false)}
         onOk={confirmUploadNewVersion}
-        okText="确认上传"
+        okText="保存"
         cancelText="取消"
+        width={520}
+        destroyOnClose
       >
         {selected && (
-          <>
-            <p>
-              将为 <Text strong>{selected.name}</Text> 上传新版本。
-            </p>
+          <Form
+            form={uploadForm}
+            layout="vertical"
+            requiredMark
+            style={{ marginTop: 8 }}
+          >
+            <Form.Item label="模型名称">
+              <Input value={selected.name} disabled />
+            </Form.Item>
+
+            <Form.Item label="当前版本">
+              <Space size={8}>
+                <Tag>{selected.currentVersion.versionLabel}</Tag>
+                <Text type="secondary">→</Text>
+                <Tag color="blue">v{nextVersionNo}</Tag>
+              </Space>
+            </Form.Item>
+
+            <Form.Item
+              label="API 地址"
+              name="endpoint_url"
+              rules={[
+                { required: true, message: '请输入 API 地址' },
+                { type: 'url', message: '请输入有效的 URL' },
+              ]}
+            >
+              <Input placeholder="请输入新版本的 API 地址，例如 https://api.example.com/v3" />
+            </Form.Item>
+
             <Alert
-              type="info"
+              type="warning"
               showIcon
-              message="新版本上传后将自动设为当前版本并启用，旧版本转为下线状态。"
+              message="新版本保存后状态为「未发布」，需手动点击「发布」启用。"
             />
-          </>
+          </Form>
         )}
       </Modal>
 
-      {/* 回滚版本确认 */}
+      {/* 切换版本确认 */}
       <Modal
-        title="回滚版本确认"
-        open={rollbackConfirmOpen}
-        onCancel={() => {
-          setRollbackConfirmOpen(false)
-          setRollbackTarget(null)
+        title="切换版本确认"
+        open={!!publishTarget}
+        onCancel={() => setPublishTarget(null)}
+        onOk={() => {
+          if (publishTarget) handlePublishVersion(publishTarget)
+          setPublishTarget(null)
         }}
-        onOk={confirmRollback}
-        okText="确认回滚"
+        okText="确认切换"
         cancelText="取消"
+        width={520}
       >
-        {selected && rollbackTarget && (
-          <p>
-            将 <Text strong>{selected.name}</Text> 从{' '}
-            <Text strong>{rollbackTarget.from}</Text> 回滚到{' '}
-            <Text strong>{rollbackTarget.to}</Text>。
-            <br />
-            回滚后将自动启用 {rollbackTarget.to}，并把 {rollbackTarget.from} 转为下线状态。
-          </p>
+        {selected && publishTarget && (
+          <>
+            <p>
+              将 <Text strong>{selected.name}</Text> 从{' '}
+              <Text strong>{selected.currentVersion.versionLabel}</Text>{' '}
+              切换到 <Text strong>{publishTarget.versionLabel}</Text>。
+            </p>
+            <Alert
+              type="warning"
+              showIcon
+              message={
+                <>
+                  切换后将启用{' '}
+                  <Text strong>{publishTarget.versionLabel}</Text> 作为当前版本
+                  （已发布/在线），<Text strong>{selected.currentVersion.versionLabel}</Text>{' '}
+                  转为下线状态（已下线）。此操作会立即影响线上业务，请谨慎操作。
+                </>
+              }
+            />
+          </>
         )}
       </Modal>
 
