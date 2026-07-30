@@ -18,7 +18,7 @@ export function RiskTrendChart({ days = 7 }: Props) {
     setLoading(true)
     setError(null)
     reportsApi
-      .riskTrend({ days })
+      .riskTrend({ window: days === 1 ? 'today' : days === 30 ? '30d' : '7d' })
       .then((res) => {
         if (!alive) return
         setData(res.points)
@@ -35,8 +35,8 @@ export function RiskTrendChart({ days = 7 }: Props) {
 
   const flat =
     data?.flatMap((p) => [
-      { date: p.date, level: '高风险', count: p.high },
-      { date: p.date, level: '中风险', count: p.medium },
+      { bucket: p.bucket, level: '高风险', count: p.high },
+      { bucket: p.bucket, level: '中风险', count: p.medium },
     ]) ?? []
 
   return (
@@ -49,7 +49,7 @@ export function RiskTrendChart({ days = 7 }: Props) {
         ) : (
           <Line
             data={flat}
-            xField="date"
+            xField="bucket"
             yField="count"
             seriesField="level"
             smooth
@@ -58,7 +58,11 @@ export function RiskTrendChart({ days = 7 }: Props) {
             color={['#DC2626', '#D97706']}
             legend={{ color: { position: 'top-right' } }}
             axis={{
-              x: { labelAutoRotate: false, labelFontSize: 11 },
+              x: {
+                labelAutoRotate: false,
+                labelFontSize: 11,
+                labelFormatter: (v: string) => String(v).slice(5, 10),
+              },
               y: { labelFontSize: 11 },
             }}
             style={{ fillOpacity: 0.15 }}

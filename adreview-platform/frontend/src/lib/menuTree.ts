@@ -21,7 +21,6 @@ export const MENU_TREE: MenuNode[] = [
     children: [
       { key: 'resources-words-system', label: '词库管理-系统通用', permissions: ['view'] },
       { key: 'resources-words-custom', label: '词库管理-自定义', permissions: ['view', 'edit', 'delete'] },
-      { key: 'resources-models', label: '模型库管理', permissions: ['view'] },
       { key: 'resources-replies-system', label: '代答库管理-系统通用', permissions: ['view'] },
       { key: 'resources-replies-custom', label: '代答库管理-自定义', permissions: ['view', 'edit', 'delete'] },
     ],
@@ -36,6 +35,20 @@ export const MENU_TREE: MenuNode[] = [
       { key: 'admin-roles', label: '角色管理', permissions: ['view', 'edit', 'delete'] },
       { key: 'admin-permissions', label: '权限管理', permissions: ['view', 'edit', 'delete'] },
     ],
+  },
+  {
+    key: 'system-models',
+    label: '模型管理',
+    permissions: ['view'],
+    children: [
+      { key: 'admin-models-large', label: '大模型', permissions: ['view', 'edit', 'delete'] },
+      { key: 'admin-models-small', label: '小模型', permissions: ['view', 'edit', 'delete'] },
+    ],
+  },
+  {
+    key: 'system-tags',
+    label: '标签管理',
+    permissions: ['view', 'edit', 'delete'],
   },
 ]
 

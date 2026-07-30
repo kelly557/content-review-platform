@@ -1,4 +1,4 @@
-"""Tag management API smoke tests (CRUD-only)."""
+"""Tag management API smoke tests (CRUD + 三级级联)."""
 from __future__ import annotations
 
 import pytest
@@ -12,6 +12,8 @@ EXPECTED_PATHS = (
     "/api/v1/tags/{tag_id}",
     "/api/v1/tags/{tag_id}/activate",
     "/api/v1/tags/{tag_id}/deprecate",
+    "/api/v1/tags/tree",
+    "/api/v1/tags/references",
 )
 
 
@@ -20,6 +22,9 @@ EXPECTED_SCHEMAS = (
     "TagCreate",
     "TagUpdate",
     "TagSummary",
+    "TagTreeNode",
+    "TagReferenceList",
+    "TagReferenceItem",
 )
 
 

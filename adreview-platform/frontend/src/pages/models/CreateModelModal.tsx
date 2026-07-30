@@ -14,15 +14,21 @@ import { providersApi, registeredModelsApi } from '@/api/registered-models'
 import {
   LARGE_MODEL_CATEGORY_OPTIONS,
   REGISTERED_MODEL_PROVIDER_PRESETS,
+  REGISTERED_MODEL_MODALITY_OPTIONS,
   SMALL_MODEL_CATEGORY_OPTIONS,
   SMALL_MODEL_CATEGORY_LABEL,
   type LargeModelCategory,
   type ProviderInitialModel,
+  type RegisteredModelModality,
   type RegisteredModelProvider,
   type RegisteredModelKind,
   type SmallModelCategory,
   type SmallModelModality,
 } from '@/types/domain'
+import {
+  MAINSTREAM_MODEL_GROUPS,
+  findMainstreamPreset,
+} from '@/types/registeredModelPresets'
 import SmallModelFormFields, {
   type SmallFormHandle,
   type SmallModelFormValues,
@@ -342,6 +348,57 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
+  // 当前 Provider 下可用的主流模型分组
+  const currentMainstreamGroup = MAINSTREAM_MODEL_GROUPS.find(
+    (g) => g.vendor === currentPreset,
+  )
+
+  // 每行记录"选了哪个主流模型 key"（仅 UI 状态，控制级联 Select 显隐 + 回填）
+  const [rowPresets, setRowPresets] = useState<Record<number, string>>({})
+
+  const handleRowPresetChange = (
+    fieldName: number,
+    presetKey: string | undefined,
+  ) => {
+    const next = { ...rowPresets }
+    if (presetKey) next[fieldName] = presetKey
+    else delete next[fieldName]
+    setRowPresets(next)
+
+    if (presetKey) {
+      const preset = findMainstreamPreset(presetKey)
+      if (preset) {
+        form.setFieldValue(
+          ['initial_models', fieldName, 'model_name'],
+          preset.defaultModelName,
+        )
+        form.setFieldValue(
+          ['initial_models', fieldName, 'large_category'],
+          preset.largeCategory,
+        )
+        setRowModalities((s) => ({ ...s, [fieldName]: preset.modality }))
+      }
+    } else {
+      setRowModalities((s) => {
+        const n = { ...s }
+        delete n[fieldName]
+        return n
+      })
+    }
+  }
+
+  // 仅显示用，标识这一行的 modality（中文）
+  const [rowModalities, setRowModalities] = useState<
+    Record<number, RegisteredModelModality>
+  >({})
+
+  const modalityLabel = (m: RegisteredModelModality | undefined) => {
+    if (!m) return null
+    return (
+      REGISTERED_MODEL_MODALITY_OPTIONS.find((o) => o.value === m)?.label ?? m
+    )
+  }
+
   const handleTest = async () => {
     const endpointUrl = form.getFieldValue('endpoint_url')?.trim()
     const apiKey = form.getFieldValue('api_key')
@@ -450,56 +507,104 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
         <Form.List name="initial_models">
           {(fields, { add, remove }) => (
             <>
-              {fields.map((field) => (
-                <div
-                  key={field.key}
-                  style={{
-                    border: '1px dashed #d9d9d9',
-                    borderRadius: 6,
-                    padding: 12,
-                    marginBottom: 12,
-                  }}
-                >
-                  <Space.Compact block style={{ marginBottom: 8 }}>
-                    <Form.Item
-                      name={[field.name, 'model_name']}
-                      noStyle
-                      rules={[{ required: true, message: '请填写 model_id' }]}
-                    >
-                      <Input
-                        style={{ width: 'calc(50% - 24px)' }}
-                        placeholder="model_id：gpt-4o-mini"
-                      />
-                    </Form.Item>
-                    <Form.Item name={[field.name, 'name']} noStyle>
-                      <Input
-                        style={{ width: 'calc(50% - 24px)' }}
-                        placeholder="显示名（可选）：用于策略下拉展示"
-                      />
-                    </Form.Item>
-                    <Button
-                      type="text"
-                      danger
-                      icon={<MinusCircleOutlined />}
-                      onClick={() => remove(field.name)}
-                    />
-                  </Space.Compact>
-                  <Form.Item
-                    name={[field.name, 'large_category']}
-                    noStyle
-                    rules={[{ required: true, message: '请选择能力类型' }]}
+              {fields.map((field) => {
+                const rowPreset = rowPresets[field.name]
+                return (
+                  <div
+                    key={field.key}
+                    style={{
+                      border: '1px dashed #d9d9d9',
+                      borderRadius: 6,
+                      padding: 12,
+                      marginBottom: 12,
+                    }}
                   >
-                    <Select
-                      style={{ width: '100%' }}
-                      placeholder="能力类型"
-                      options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
-                        value: o.value,
-                        label: o.label,
-                      }))}
-                    />
-                  </Form.Item>
-                </div>
-              ))}
+                    <Space.Compact block style={{ marginBottom: 8 }}>
+                      <Form.Item
+                        name={[field.name, 'model_name']}
+                        noStyle
+                        rules={[{ required: true, message: '请填写 model_id' }]}
+                      >
+                        <Input
+                          style={{ width: 'calc(50% - 24px)' }}
+                          placeholder="model_id：gpt-4o-mini"
+                        />
+                      </Form.Item>
+                      <Form.Item name={[field.name, 'name']} noStyle>
+                        <Input
+                          style={{ width: 'calc(50% - 24px)' }}
+                          placeholder="显示名（可选）：用于策略下拉展示"
+                        />
+                      </Form.Item>
+                      <Button
+                        type="text"
+                        danger
+                        icon={<MinusCircleOutlined />}
+                        onClick={() => {
+                          handleRowPresetChange(field.name, undefined)
+                          remove(field.name)
+                        }}
+                      />
+                    </Space.Compact>
+                    <Space.Compact block>
+                      <Form.Item
+                        name={[field.name, 'large_category']}
+                        noStyle
+                        rules={[{ required: true, message: '请选择能力类型' }]}
+                      >
+                        <Select
+                          style={{ width: 'calc(50% - 24px)' }}
+                          placeholder="能力类型"
+                          options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
+                            value: o.value,
+                            label: o.label,
+                          }))}
+                        />
+                      </Form.Item>
+                      {currentMainstreamGroup ? (
+                        <Select
+                          style={{ width: 'calc(50% - 24px)' }}
+                          placeholder="从主流模型选择（可选）"
+                          allowClear
+                          showSearch
+                          optionFilterProp="label"
+                          value={rowPreset}
+                          onChange={(v) =>
+                            handleRowPresetChange(
+                              field.name,
+                              v as string | undefined,
+                            )
+                          }
+                          options={currentMainstreamGroup.models.map((m) => ({
+                            value: m.key,
+                            label: `${m.label}（${m.defaultModelName}）`,
+                          }))}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: 'calc(50% - 24px)',
+                            padding: '0 12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            color: '#94A3B8',
+                            fontSize: 12,
+                          }}
+                        >
+                          自建 / 自定义 Provider，请手动填写 model_id
+                        </div>
+                      )}
+                    </Space.Compact>
+                    {rowModalities[field.name] && (
+                      <div style={{ marginTop: 6 }}>
+                        <Tag color="cyan">
+                          模态：{modalityLabel(rowModalities[field.name])}
+                        </Tag>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
               <Button
                 type="dashed"
                 block

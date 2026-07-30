@@ -77,13 +77,6 @@ def derive_content_media(
     return None
 
 
-class AdvancedCondition(BaseModel):
-    """A single ``contains`` / ``not_contains`` predicate for ``machine_result`` JSON."""
-
-    op: str = Field(pattern="^(contains|not_contains)$")
-    value: str = Field(min_length=1, max_length=128)
-
-
 class MachineHitOut(BaseModel):
     """Single hit entry within ``machine_result.hits``."""
 
@@ -93,6 +86,33 @@ class MachineHitOut(BaseModel):
     label_cn: Optional[str] = None
     score: Optional[float] = None
     quote: Optional[str] = None
+    risk_category_code: Optional[str] = None
+    risk_category_label: Optional[str] = None
+    audit_item_code: Optional[str] = None
+    audit_item_label: Optional[str] = None
+    audit_point_code: Optional[str] = None
+
+
+class RiskTaxonomyNode(BaseModel):
+    """Tree node used by ``GET /query/risk-taxonomy``.
+
+    Each level of the three-level tree (risk type → audit item → audit point)
+    exposes ``code`` (wire identifier) and ``label`` (display). The leaf level
+    also carries ``path`` which is the slash-joined path of codes; this is the
+    value sent back in ``risk_label_paths`` query filter.
+    """
+
+    code: str
+    label: str
+    path: str
+    children: List["RiskTaxonomyNode"] = Field(default_factory=list)
+
+
+RiskTaxonomyNode.model_rebuild()
+
+
+class RiskTaxonomyOut(BaseModel):
+    items: List[RiskTaxonomyNode]
 
 
 class MachineReviewRecordOut(ORMBase):
@@ -123,6 +143,7 @@ class MachineReviewRecordOut(ORMBase):
     bailian_request_id: Optional[str] = None
     ip: Optional[str] = None
     account_id: Optional[str] = None
+    channel: Optional[str] = None
 
     submitter_id: Optional[int] = None
     submitter_name: Optional[str] = None
@@ -138,11 +159,17 @@ class MachineReviewRecordOut(ORMBase):
     requested_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
+    machine_result: Optional[Dict[str, Any]] = None
+
 
 class QueryLabelsOut(BaseModel):
     """Distinct labels aggregated from ``machine_result.hits``."""
 
     labels: List[str]
+
+
+# 操作列反馈的 kind 与数据查询页"反馈结果"筛选保持一致。
+MachineReviewFeedbackKind = Literal["false_positive", "false_negative"]
 
 
 class ReviewRecordOut(ORMBase):
@@ -191,9 +218,11 @@ class ReviewRecordOut(ORMBase):
 
     last_feedback: Optional["MachineReviewFeedbackOut"] = None
 
+    machine_result: Optional[Dict[str, Any]] = None
+
 
 class MachineReviewFeedbackIn(BaseModel):
-    kind: Literal["false_positive", "false_negative"] = Field(description="false_positive=未违规误报，false_negative=违规漏过")
+    kind: Literal["false_positive", "false_negative"] = Field(description="false_positive=未违规误报，false_negative=违规漏报")
     note: Optional[str] = Field(default=None, max_length=500)
 
 

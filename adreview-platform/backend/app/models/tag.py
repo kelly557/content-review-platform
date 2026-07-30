@@ -1,9 +1,10 @@
-"""Tag management model — flat multi-dimensional tag (metadata-only).
+"""Tag management model — 三级级联标签体系。
 
-P0 scope: the Tag record itself is the only persistent entity. The
-hit-engine tables (TagHitRule / TagHit / TagNegativeSample) and the
-risk/action/stats columns (which only made sense with an execution
-engine) have all been removed.
+P0+P2 scope:
+  - P0: Tag 记录本身仍是核心持久化实体，hit-engine 表已清理。
+  - P2: 支持 3 级级联 (level=1/2/3) + 自引用 parent_id + 三级标签绑定模型
+        (bound_model_id, bound_model_kind)。模型删除时 FK ON DELETE SET NULL
+        自动清理引用，不会阻断模型删除。
 """
 from __future__ import annotations
 
@@ -13,15 +14,18 @@ from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import (
+    BigInteger,
     DateTime,
     Enum,
+    ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, TypeDecorator
 
 from app.db.session import Base
@@ -77,6 +81,14 @@ class TagStatus(str, enum.Enum):
     DEPRECATED = "deprecated"
 
 
+# 标签层级常量（与前端 Drawer 逻辑一致）
+TAG_LEVEL_TOP = 1     # 顶级（一级）
+TAG_LEVEL_MID = 2     # 中间级（二级）
+TAG_LEVEL_LEAF = 3    # 叶子级（三级，必绑模型）
+
+VALID_TAG_LEVELS = (TAG_LEVEL_TOP, TAG_LEVEL_MID, TAG_LEVEL_LEAF)
+
+
 class Tag(Base):
     __tablename__ = "tags"
 
@@ -102,6 +114,39 @@ class Tag(Base):
     )
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
+    # ── 三级级联字段 ────────────────────────────────────────────────
+    level: Mapped[int] = mapped_column(
+        SmallInteger,
+        nullable=False,
+        default=TAG_LEVEL_TOP,
+        server_default=str(TAG_LEVEL_TOP),
+        index=True,
+    )
+    parent_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("tags.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    parent = relationship(
+        "Tag",
+        remote_side="Tag.id",
+        backref="children",
+        foreign_keys=[parent_id],
+    )
+
+    # 三级标签绑定模型（FK → registered_models.id, ON DELETE SET NULL）
+    # 只有 level=3 才允许设置；业务校验放在 service 层
+    bound_model_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("registered_models.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    bound_model_kind: Mapped[Optional[str]] = mapped_column(
+        String(8), nullable=True
+    )  # 'large'|'small'|null — 冗余便于过滤
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), nullable=False
     )
@@ -119,3 +164,13 @@ class Tag(Base):
     @property
     def is_deleted(self) -> bool:
         return self.deleted_at is not None
+
+    @property
+    def path(self) -> str:
+        """顶级→自身的完整路径字符串（仅在已加载 parent 链时有效）。"""
+        names: list[str] = []
+        node: Optional["Tag"] = self
+        while node is not None:
+            names.append(node.name)
+            node = node.parent
+        return "/".join(reversed(names))

@@ -6,6 +6,7 @@ import type {
   QueryFilters,
   ReviewFilters,
   ReviewRecord,
+  RiskTaxonomy,
 } from '@/types/domain'
 
 export interface QueryPage<T> {
@@ -20,15 +21,16 @@ function buildParams(filters: QueryFilters) {
   if (filters.start) params.start = filters.start
   if (filters.end) params.end = filters.end
   if (filters.material_types?.length) params.material_types = filters.material_types as string[]
-  if (filters.content_medias?.length) params.content_medias = filters.content_medias as string[]
   if (filters.strategy_code) params.strategy_code = filters.strategy_code
   if (filters.machine_decision) params.machine_decision = filters.machine_decision
   if (filters.request_ids?.length) params.request_ids = filters.request_ids.join(',')
   if (filters.task_ids?.length) params.task_ids = filters.task_ids.join(',')
-  if (filters.text_contains) params.text_contains = filters.text_contains
-  if (filters.labels?.length) params.labels = filters.labels
+  if (filters.risk_label_paths?.length)
+    params.risk_label_paths = filters.risk_label_paths as string[]
   if (filters.feedback) params.feedback = filters.feedback
-  if (filters.conditions?.length) params.conditions = JSON.stringify(filters.conditions)
+  if (filters.channels?.length) params.channels = filters.channels
+  if (filters.ips?.length) params.ips = filters.ips
+  if (filters.account_ids?.length) params.account_ids = filters.account_ids
   if (filters.page) params.page = filters.page
   if (filters.size) params.size = filters.size
   return params
@@ -47,23 +49,32 @@ export const queryApi = {
     if (filters.material_types?.length) {
       filters.material_types.forEach((v) => qs.append('material_types', v))
     }
-    if (filters.content_medias?.length) {
-      filters.content_medias.forEach((v) => qs.append('content_medias', v))
-    }
     if (filters.strategy_code) qs.set('strategy_code', filters.strategy_code)
     if (filters.machine_decision) qs.set('machine_decision', filters.machine_decision)
     if (filters.request_ids?.length) qs.set('request_ids', filters.request_ids.join(','))
     if (filters.task_ids?.length) qs.set('task_ids', filters.task_ids.join(','))
-    if (filters.text_contains) qs.set('text_contains', filters.text_contains)
-    if (filters.labels?.length) {
-      filters.labels.forEach((v) => qs.append('labels', v))
+    if (filters.risk_label_paths?.length) {
+      filters.risk_label_paths.forEach((v) => qs.append('risk_label_paths', v))
     }
     if (filters.feedback) qs.set('feedback', filters.feedback)
-    if (filters.conditions?.length) qs.set('conditions', JSON.stringify(filters.conditions))
+    if (filters.channels?.length) filters.channels.forEach((v) => qs.append('channels', v))
+    if (filters.ips?.length) filters.ips.forEach((v) => qs.append('ips', v))
+    if (filters.account_ids?.length)
+      filters.account_ids.forEach((v) => qs.append('account_ids', v))
     return `${api.defaults.baseURL}/query/results/export.csv?${qs.toString()}`
+  },
+  filterOptions() {
+    return api
+      .get<{ channels: string[]; ips: string[]; account_ids: string[] }>(
+        '/query/filter-options',
+      )
+      .then((r) => r.data)
   },
   labels() {
     return api.get<{ labels: string[] }>('/query/labels').then((r) => r.data)
+  },
+  riskTaxonomy() {
+    return api.get<RiskTaxonomy>('/query/risk-taxonomy').then((r) => r.data)
   },
   strategies() {
     return api

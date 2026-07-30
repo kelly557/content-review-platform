@@ -24,23 +24,23 @@ import { queryApi } from '@/api/query'
 import {
   DECISION_LABELS,
   DETECTION_MODALITIES,
-  FEEDBACK_OPTIONS,
   MACHINE_DECISION_OPTIONS,
+  MACHINE_REVIEW_FEEDBACK_OPTIONS,
   QUERY_COLUMNS,
+  type MachineHit,
+  type MachineReviewFeedbackKind,
   type MachineReviewRecord,
   type QueryColumnKey,
   type QueryFilters,
+  type RiskTaxonomyNode,
 } from '@/types/domain'
 import { loadVisibleColumns, saveVisibleColumns } from '@/lib/queryColumnPrefs'
 import FilterBar from '@/components/query/FilterBar'
-import AdvancedFilters from '@/components/query/AdvancedFilters'
 import ColumnSettingsMenu from '@/components/query/ColumnSettingsMenu'
 import RecordDetailDrawer from '@/components/query/RecordDetailDrawer'
 import ContentPreviewCell from '@/components/query/ContentPreviewCell'
 
 const decisionMeta = (v?: string | null) => MACHINE_DECISION_OPTIONS.find((m) => m.value === v)
-const feedbackMeta = (v?: string | null) =>
-  FEEDBACK_OPTIONS.find((f) => f.value === v)?.label
 
 function ColumnTitle({ text, tip }: { text: string; tip?: string }) {
   if (!tip) return text
@@ -67,6 +67,28 @@ function renderUuidCell(uuid: string | null | undefined, fallback?: string | num
   return fallback != null ? String(fallback) : '-'
 }
 
+const FEEDBACK_LABEL: Record<MachineReviewFeedbackKind, string> = {
+  false_positive: '未违规误报',
+  false_negative: '违规漏报',
+}
+
+const FEEDBACK_COLOR: Record<MachineReviewFeedbackKind, string> = {
+  false_positive: 'orange',
+  false_negative: 'purple',
+}
+
+function feedbackLabel(v?: string | null) {
+  if (!v) return ''
+  return FEEDBACK_LABEL[v as MachineReviewFeedbackKind] ?? ''
+}
+
+function riskLabelPath(h: MachineHit): string {
+  const cat = h.risk_category_label || ''
+  const item = h.audit_item_label || ''
+  const point = h.label_cn || h.label || ''
+  return [cat, item, point].filter(Boolean).join(' / ')
+}
+
 export default function QueryPage() {
   const { message } = App.useApp()
 
@@ -79,7 +101,7 @@ export default function QueryPage() {
   const [size, setSize] = useState(20)
 
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [labelOptions, setLabelOptions] = useState<string[]>([])
+  const [riskTaxonomy, setRiskTaxonomy] = useState<RiskTaxonomyNode[]>([])
   const [visibleColumns, setVisibleColumns] = useState<QueryColumnKey[]>(() =>
     loadVisibleColumns(),
   )
@@ -89,18 +111,18 @@ export default function QueryPage() {
     saveVisibleColumns(visibleColumns)
   }, [visibleColumns])
 
-  const fetchLabels = useCallback(async () => {
+  const fetchTaxonomy = useCallback(async () => {
     try {
-      const res = await queryApi.labels()
-      setLabelOptions(res.labels)
+      const res = await queryApi.riskTaxonomy()
+      setRiskTaxonomy(res.items ?? [])
     } catch {
-      setLabelOptions([])
+      setRiskTaxonomy([])
     }
   }, [])
 
   useEffect(() => {
-    fetchLabels()
-  }, [fetchLabels])
+    fetchTaxonomy()
+  }, [fetchTaxonomy])
 
   const fetchResults = useCallback(async () => {
     setLoading(true)
@@ -138,10 +160,11 @@ export default function QueryPage() {
 
   const columnsAll: TableColumnsType<MachineReviewRecord> = [
     {
-      title: '任务名称',
-      key: 'task_title',
-      width: 220,
-      render: (_, r) => r.title || '-',
+      title: <ColumnTitle text="素材内容" tip="素材内容预览：文本摘要 / 图片缩略图 / 音视频入口，点击查看完整" />,
+      key: 'content_preview',
+      width: 280,
+      fixed: 'left',
+      render: (_, r) => <ContentPreviewCell record={r} onPreview={setDetailRecord} />,
     },
     {
       title: '策略名称',
@@ -150,7 +173,7 @@ export default function QueryPage() {
       render: (_, r) => r.strategy_name || r.strategy_code || '-',
     },
     {
-      title: '检测结果',
+      title: <ColumnTitle text="审核结果" tip="机审最终判定：阻断 / 复核 / 通过" />,
       key: 'machine_decision',
       width: 110,
       render: (_, r) => {
@@ -160,13 +183,17 @@ export default function QueryPage() {
       },
     },
     {
-      title: '反馈结果',
+      title: <ColumnTitle text="反馈结果" tip="最近一次反馈：违规漏报 / 未违规误报；无反馈时为空" />,
       key: 'feedback',
-      width: 110,
-      render: (_, r) => feedbackMeta(r.final_decision) || r.final_decision || '-',
+      width: 130,
+      render: (_, r) => {
+        const fb = r.last_feedback
+        if (!fb) return '-'
+        return <Tag color={FEEDBACK_COLOR[fb.kind]}>{feedbackLabel(fb.kind)}</Tag>
+      },
     },
     {
-      title: <ColumnTitle text="审核类型" tip="审核通道类型：指请求走的是文本/图片/视频/文件哪条审核链路" />,
+      title: <ColumnTitle text="审核模态" tip="审核通道类型：指请求走的是文本/图片/视频/文件哪条审核链路" />,
       key: 'material_type',
       width: 110,
       render: (_, r) => {
@@ -176,10 +203,10 @@ export default function QueryPage() {
       },
     },
     {
-      title: <ColumnTitle text="素材内容" tip="素材内容预览：文本摘要 / 图片缩略图 / 音视频入口，点击查看完整" />,
-      key: 'content_preview',
-      width: 280,
-      render: (_, r) => <ContentPreviewCell record={r} onPreview={setDetailRecord} />,
+      title: <ColumnTitle text="渠道" tip="业务侧写入的渠道标识" />,
+      key: 'channel',
+      width: 110,
+      render: (_, r) => r.channel || '-',
     },
     {
       title: 'Request ID',
@@ -194,7 +221,7 @@ export default function QueryPage() {
       render: (_, r) => renderUuidCell(r.material_version_public_id, r.material_version_id),
     },
     {
-      title: '命中审核点及置信度',
+      title: <ColumnTitle text="风险标签" tip="三级路径：风险类型 / 审核项 / 审核点" />,
       key: 'labels',
       render: (_, r) => {
         if (!r.hits?.length) return '-'
@@ -202,8 +229,7 @@ export default function QueryPage() {
           <Space wrap size={[4, 4]}>
             {r.hits.slice(0, 5).map((h, idx) => (
               <Tag key={idx} color="blue">
-                {h.label_cn || h.label || '-'}
-                {h.score != null && ` ${(h.score * 100).toFixed(0)}%`}
+                {riskLabelPath(h) || '-'}
               </Tag>
             ))}
           </Space>
@@ -232,21 +258,19 @@ export default function QueryPage() {
       fixed: 'right',
       render: (_, r) => {
         const last = r.last_feedback
-        const feedbackItems: MenuProps['items'] = [
-          { key: 'false_positive', label: '未违规误报' },
-          { key: 'false_negative', label: '违规漏过' },
-        ]
+        const feedbackItems: MenuProps['items'] = MACHINE_REVIEW_FEEDBACK_OPTIONS.map((o) => ({
+          key: o.value,
+          label: o.label,
+        }))
         const onFeedbackClick: MenuProps['onClick'] = async ({ key }) => {
           if (!r.public_id) {
             message.error('该记录缺少 Request ID，无法反馈')
             return
           }
-          const kind = key as 'false_positive' | 'false_negative'
+          const kind = key as MachineReviewFeedbackKind
           try {
             await queryApi.submitFeedback(r.public_id, kind)
-            message.success(
-              kind === 'false_positive' ? '已记录：未违规误报' : '已记录：违规漏过',
-            )
+            message.success(`已记录：${feedbackLabel(kind)}`)
             fetchResults()
           } catch {
             message.error('反馈提交失败')
@@ -275,16 +299,16 @@ export default function QueryPage() {
               <Tooltip
                 title={
                   (last.created_by_name
-                    ? `由 ${last.created_by_name} 标记为 ${last.kind === 'false_positive' ? '未违规误报' : '违规漏过'}`
-                    : `已标记为 ${last.kind === 'false_positive' ? '未违规误报' : '违规漏过'}`)
-                    + ` · ${new Date(last.created_at).toLocaleString('zh-CN')}`
+                    ? `由 ${last.created_by_name} 标记为 ${feedbackLabel(last.kind)}`
+                    : `已标记为 ${feedbackLabel(last.kind)}`) +
+                  ` · ${new Date(last.created_at).toLocaleString('zh-CN')}`
                 }
               >
                 <Tag
-                  color={last.kind === 'false_positive' ? 'orange' : 'purple'}
+                  color={FEEDBACK_COLOR[last.kind]}
                   style={{ marginInlineEnd: 0, fontSize: 11 }}
                 >
-                  {last.kind === 'false_positive' ? '误报' : '漏过'}
+                  {feedbackLabel(last.kind)}
                 </Tag>
               </Tooltip>
             )}
@@ -302,9 +326,13 @@ export default function QueryPage() {
     [columnsAll, visibleSet],
   )
 
-  const handleConditionsChange = (next: import('@/types/domain').AdvancedCondition[]) => {
-    setFilters((f) => ({ ...f, conditions: next.length ? next : undefined }))
-    setSubmittedFilters((f) => ({ ...f, conditions: next.length ? next : undefined }))
+  const handleAdvancedChange = (patch: {
+    channels?: string[]
+    ips?: string[]
+    account_ids?: string[]
+  }) => {
+    setFilters((f) => ({ ...f, ...patch }))
+    setSubmittedFilters((f) => ({ ...f, ...patch }))
   }
 
   return (
@@ -328,7 +356,18 @@ export default function QueryPage() {
       />
 
       <div style={{ marginBottom: 12 }}>
-        <FilterBar value={filters} onChange={setFilters} labelOptions={labelOptions} />
+        <FilterBar
+          value={filters}
+          onChange={setFilters}
+          riskTaxonomy={riskTaxonomy}
+          advancedOpen={advancedOpen}
+          advancedValues={{
+            channels: filters.channels,
+            ips: filters.ips,
+            account_ids: filters.account_ids,
+          }}
+          onAdvancedChange={handleAdvancedChange}
+        />
       </div>
 
       <div style={{ marginBottom: 12 }}>
@@ -361,16 +400,6 @@ export default function QueryPage() {
         </Space>
       </div>
 
-      {advancedOpen && (
-        <div style={{ marginBottom: 12 }}>
-          <AdvancedFilters
-            value={filters.conditions ?? []}
-            onChange={handleConditionsChange}
-            labelOptions={labelOptions}
-          />
-        </div>
-      )}
-
       <Table
         rowKey="id"
         loading={loading}
@@ -396,6 +425,5 @@ export default function QueryPage() {
   )
 }
 
-// keep QUERY_COLUMNS / DECISION_LABELS imports referenced for tree-shake safety
-void QUERY_COLUMNS
 void DECISION_LABELS
+void QUERY_COLUMNS

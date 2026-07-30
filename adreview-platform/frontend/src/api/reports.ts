@@ -2,26 +2,50 @@ import { api } from './client'
 import type {
   AlertEventOut,
   AlertPage,
+  AlertRootCauseResponse,
+  AlertsListQuery,
+  AnomalyAppliedFilters,
+  AnomalyQuery,
   AnomalyResponse,
   OverviewStats,
   QualityResponse,
   RiskDistributionBucket,
   RiskTimeseriesPoint,
+  RiskTrendAppliedFilters,
+  RiskTrendGranularity,
+  RiskTrendOptionsResponse,
   TopRiskLabelItem,
   TrendMetric,
   TrendResponse,
 } from '@/types/domain'
 import {
   buildAnomalyResponse,
+  buildMockRootCause,
   buildRiskTrend,
+  buildRiskTrendOptions,
   buildTrend,
   getMockAlerts,
-  pickGranularity,
 } from '@/lib/reportsMock'
 
 export interface RiskTrendResponse {
-  days: number
+  granularity: RiskTrendGranularity
+  window_start: string
+  window_end: string
+  applied: RiskTrendAppliedFilters
   points: RiskTimeseriesPoint[]
+}
+
+export interface RiskTrendQuery {
+  window?: string
+  start?: string
+  end?: string
+  granularity?: RiskTrendGranularity
+  modalities?: string[]
+  strategy_codes?: string[]
+  account_ids?: string[]
+  ips?: string[]
+  channels?: string[]
+  risk_label_paths?: string[]
 }
 
 export interface RiskDistributionResponse {
@@ -57,7 +81,7 @@ function resolveWindowBounds(opts: WindowOpts | string): { startMs: number; endM
   const endMs = o.end ? Date.parse(o.end) : Date.now()
   if (o.start && o.end) {
     const startMs = Date.parse(o.start)
-    return { startMs, endMs, granularity: pickGranularity(endMs - startMs) }
+    return { startMs, endMs, granularity: '5min' }
   }
   const w = o.window ?? '7d'
   if (w === '1h') {
@@ -74,6 +98,7 @@ function resolveWindowBounds(opts: WindowOpts | string): { startMs: number; endM
   const days = w === '30d' ? 30 : 7
   return { startMs: endMs - days * 24 * 60 * 60 * 1000, endMs, granularity: 'day' }
 }
+void resolveWindowBounds
 
 export const reportsApi = {
   overview(opts: WindowOpts | string = '7d', mock?: MockMode) {
@@ -138,21 +163,69 @@ export const reportsApi = {
     if (opts.granularity) params.granularity = opts.granularity
     return api.get<TrendResponse>('/reports/trend', { params }).then((r) => r.data)
   },
-  anomaly(opts: WindowOpts | string = '1h', mock?: MockMode) {
+  anomaly(opts: AnomalyQuery | string = {}, mock?: MockMode) {
+    const q: AnomalyQuery = typeof opts === 'string' ? { window: '1h' } : opts
     if (mock?.enabled) {
-      const { startMs, endMs, granularity } = resolveWindowBounds(opts)
-      return Promise.resolve(
-        buildAnomalyResponse({ startMs, endMs, granularity, mockSeed: mock.seed }),
-      )
+      const windowKey = q.window ?? '1h'
+      const spanMs = (() => {
+        if (q.start && q.end) {
+          return Math.max(0, Date.parse(q.end) - Date.parse(q.start))
+        }
+        if (windowKey === '1h') return 60 * 60 * 1000
+        if (windowKey === '24h') return 24 * 60 * 60 * 1000
+        return 7 * 24 * 60 * 60 * 1000
+      })()
+      const granularity: 'hour' | 'day' =
+        q.granularity ?? (spanMs <= 6 * 60 * 60 * 1000 ? 'hour' : 'day')
+      const endMs = q.end ? Date.parse(q.end) : Date.now()
+      const startMs = q.start
+        ? Date.parse(q.start)
+        : endMs - (windowKey === '1h' ? 60 * 60 * 1000 : windowKey === '24h' ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000)
+      const filterSeed = JSON.stringify({
+        modalities: q.modalities ?? [],
+        strategy_codes: q.strategy_codes ?? [],
+        channels: q.channels ?? [],
+        account_ids: q.account_ids ?? [],
+        ips: q.ips ?? [],
+        risk_label_paths: q.risk_label_paths ?? [],
+      })
+      const built = buildAnomalyResponse({
+        startMs,
+        endMs,
+        granularity,
+        mockSeed: mock.seed,
+        filterSeed,
+        filtered: filterSeed !== '{}',
+      })
+      const applied: AnomalyAppliedFilters = {
+        modalities: q.modalities ?? [],
+        strategy_codes: q.strategy_codes ?? [],
+        channels: q.channels ?? [],
+        account_ids: q.account_ids ?? [],
+        ips: q.ips ?? [],
+        risk_label_paths: q.risk_label_paths ?? [],
+      }
+      return Promise.resolve({
+        ...built,
+        window_start: new Date(startMs).toISOString(),
+        window_end: new Date(endMs).toISOString(),
+        applied,
+      } satisfies AnomalyResponse)
     }
-    const o: WindowOpts = typeof opts === 'string' ? { window: opts } : opts
-    const params: Record<string, string> = {}
-    if (o.start && o.end) {
-      params.start = o.start
-      params.end = o.end
+    const params: Record<string, unknown> = {}
+    if (q.start && q.end) {
+      params.start = q.start
+      params.end = q.end
     } else {
-      params.window = o.window ?? '1h'
+      params.window = q.window ?? '1h'
     }
+    if (q.granularity) params.granularity = q.granularity
+    if (q.modalities?.length) params.modalities = q.modalities
+    if (q.strategy_codes?.length) params.strategy_codes = q.strategy_codes
+    if (q.channels?.length) params.channels = q.channels
+    if (q.account_ids?.length) params.account_ids = q.account_ids
+    if (q.ips?.length) params.ips = q.ips
+    if (q.risk_label_paths?.length) params.risk_label_paths = q.risk_label_paths
     return api
       .get<AnomalyResponse>('/reports/anomaly', { params })
       .then((r) => r.data)
@@ -175,24 +248,77 @@ export const reportsApi = {
     const qs = params.toString()
     return `/api/v1/reports/quality/export.csv${qs ? `?${qs}` : ''}`
   },
-  riskTrend(opts: { days?: number; material_types?: string[] } = {}, mock?: MockMode) {
+  riskTrend(opts: RiskTrendQuery = {}, mock?: MockMode) {
     if (mock?.enabled) {
-      const days = opts.days ?? 7
-      const filterSeed = (opts.material_types ?? []).join(',')
+      const days = (() => {
+        if (opts.start && opts.end) {
+          return Math.max(
+            Math.ceil(
+              (Date.parse(opts.end) - Date.parse(opts.start)) / (24 * 60 * 60 * 1000),
+            ),
+            1,
+          )
+        }
+        if (opts.window === 'today') return 1
+        if (opts.window === '30d') return 30
+        return 7
+      })()
+      const filterSeed = JSON.stringify({
+        modalities: opts.modalities ?? [],
+        strategy_codes: opts.strategy_codes ?? [],
+        account_ids: opts.account_ids ?? [],
+        ips: opts.ips ?? [],
+        channels: opts.channels ?? [],
+        risk_label_paths: opts.risk_label_paths ?? [],
+      })
+      const granularity: RiskTrendGranularity =
+        opts.granularity ?? (days <= 2 ? 'hour' : days <= 31 ? 'day' : 'month')
       const points = buildRiskTrend({
         days,
-        filtered: !!opts.material_types?.length,
+        filtered: !!filterSeed && filterSeed !== '{}',
         filterSeed,
         mockSeed: mock.seed,
+        granularity,
       })
-      return Promise.resolve({ days, points } satisfies RiskTrendResponse)
+      return Promise.resolve({
+        granularity,
+        window_start: new Date(Date.now() - days * 86400_000).toISOString(),
+        window_end: new Date().toISOString(),
+        applied: {
+          modalities: opts.modalities ?? [],
+          strategy_codes: opts.strategy_codes ?? [],
+          account_ids: opts.account_ids ?? [],
+          ips: opts.ips ?? [],
+          channels: opts.channels ?? [],
+          risk_label_paths: opts.risk_label_paths ?? [],
+        },
+        points,
+      } satisfies RiskTrendResponse)
     }
-    const params: Record<string, unknown> = { days: opts.days ?? 7 }
-    if (opts.material_types && opts.material_types.length) {
-      params.material_types = opts.material_types
+    const params: Record<string, unknown> = {}
+    if (opts.start && opts.end) {
+      params.start = opts.start
+      params.end = opts.end
+    } else {
+      params.window = opts.window ?? '7d'
     }
+    if (opts.granularity) params.granularity = opts.granularity
+    if (opts.modalities?.length) params.modalities = opts.modalities
+    if (opts.strategy_codes?.length) params.strategy_codes = opts.strategy_codes
+    if (opts.account_ids?.length) params.account_ids = opts.account_ids
+    if (opts.ips?.length) params.ips = opts.ips
+    if (opts.channels?.length) params.channels = opts.channels
+    if (opts.risk_label_paths?.length) params.risk_label_paths = opts.risk_label_paths
     return api
       .get<RiskTrendResponse>('/reports/risk/trend', { params })
+      .then((r) => r.data)
+  },
+  riskTrendOptions(mock?: MockMode) {
+    if (mock?.enabled) {
+      return Promise.resolve(buildRiskTrendOptions(mock.seed))
+    }
+    return api
+      .get<RiskTrendOptionsResponse>('/reports/risk-trend/options')
       .then((r) => r.data)
   },
   riskDistribution(days = 7) {
@@ -211,14 +337,28 @@ export const reportsApi = {
 }
 
 export const alertsApi = {
-  list(
-    opts: { status?: 'open' | 'acknowledged' | 'all'; limit?: number; offset?: number } = {},
-    mock?: MockMode,
-  ) {
+  list(opts: AlertsListQuery = {}, mock?: MockMode) {
     if (mock?.enabled) {
       const status = opts.status ?? 'open'
       const limit = opts.limit ?? 50
-      const items = getMockAlerts({ status, limit, mockSeed: mock.seed })
+      const filterSeed = JSON.stringify({
+        window: opts.window ?? null,
+        start: opts.start ?? null,
+        end: opts.end ?? null,
+        modalities: opts.modalities ?? [],
+        strategy_codes: opts.strategy_codes ?? [],
+        channels: opts.channels ?? [],
+        account_ids: opts.account_ids ?? [],
+        ips: opts.ips ?? [],
+        risk_label_paths: opts.risk_label_paths ?? [],
+      })
+      const items = getMockAlerts({
+        status,
+        limit,
+        mockSeed: mock.seed,
+        filterSeed,
+        filtered: filterSeed !== '{}',
+      })
       return Promise.resolve({
         items,
         total: items.length,
@@ -226,14 +366,25 @@ export const alertsApi = {
         size: limit,
       } satisfies AlertPage)
     }
+    const params: Record<string, unknown> = {
+      status: opts.status,
+      limit: opts.limit ?? 50,
+      offset: opts.offset ?? 0,
+    }
+    if (opts.start && opts.end) {
+      params.start = opts.start
+      params.end = opts.end
+    } else if (opts.window) {
+      params.window = opts.window
+    }
+    if (opts.modalities?.length) params.modalities = opts.modalities
+    if (opts.strategy_codes?.length) params.strategy_codes = opts.strategy_codes
+    if (opts.channels?.length) params.channels = opts.channels
+    if (opts.account_ids?.length) params.account_ids = opts.account_ids
+    if (opts.ips?.length) params.ips = opts.ips
+    if (opts.risk_label_paths?.length) params.risk_label_paths = opts.risk_label_paths
     return api
-      .get<AlertPage>('/alerts', {
-        params: {
-          status: opts.status,
-          limit: opts.limit ?? 50,
-          offset: opts.offset ?? 0,
-        },
-      })
+      .get<AlertPage>('/alerts', { params })
       .then((r) => r.data)
   },
   ack(_id: number, _note?: string, mock?: MockMode) {
@@ -261,6 +412,18 @@ export const alertsApi = {
     }
     return api
       .post<AlertEventOut>(`/alerts/${_id}/ack`, { note: _note ?? null })
+      .then((r) => r.data)
+  },
+  detail(alertId: number, opts: { ruleCode?: string } = {}, mock?: MockMode) {
+    if (mock?.enabled) {
+      return Promise.resolve(buildMockRootCause({
+        alertId,
+        ruleCode: opts.ruleCode ?? 'reject_rate_high',
+        mockSeed: mock.seed,
+      }))
+    }
+    return api
+      .get<AlertRootCauseResponse>(`/alerts/${alertId}/root-cause`)
       .then((r) => r.data)
   },
 }

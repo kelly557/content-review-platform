@@ -11,12 +11,17 @@
  */
 import type {
   AlertEventOut,
+  AlertRootCauseAccount,
+  AlertRootCauseAccountIP,
+  AlertRootCauseResponse,
+  AlertRootCauseTopRiskLabel,
   AnomalyAlertSummary,
   AnomalyCurrent,
   AnomalyMetricPoint,
   AnomalyResponse,
   MaterialType,
   RiskTimeseriesPoint,
+  RiskTrendOptionsResponse,
 } from '@/types/domain'
 import type { DetectionModality } from '@/types/domain'
 
@@ -79,25 +84,57 @@ export function pickGranularity(spanMs: number): '5min' | 'hour' | 'day' {
   return 'day'
 }
 
-function buildBuckets(startMs: number, endMs: number, granularity: '5min' | 'hour' | 'day'): TimeBucket[] {
+function buildBuckets(
+  startMs: number,
+  endMs: number,
+  granularity: '5min' | 'hour' | 'day' | 'month',
+): TimeBucket[] {
   const buckets: TimeBucket[] = []
-  const sizeMs =
-    granularity === '5min' ? 5 * 60 * 1000 : granularity === 'hour' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000
   let cur = startMs
+  const advance = (current: number): number => {
+    if (granularity === 'month') {
+      const d = new Date(current)
+      return new Date(Date.UTC(
+        d.getUTCMonth() === 11 ? d.getUTCFullYear() + 1 : d.getUTCFullYear(),
+        (d.getUTCMonth() + 1) % 12,
+        1,
+      )).getTime()
+    }
+    const sizeMs =
+      granularity === '5min'
+        ? 5 * 60 * 1000
+        : granularity === 'hour'
+          ? 60 * 60 * 1000
+          : 24 * 60 * 60 * 1000
+    return current + sizeMs
+  }
+  let floor = startMs
+  if (granularity === 'month') {
+    const d = new Date(startMs)
+    floor = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)
+  } else {
+    const d = new Date(startMs)
+    const hour = granularity === 'day' ? 0 : d.getUTCHours()
+    const min = granularity === '5min' ? Math.floor(d.getUTCMinutes() / 5) * 5 : 0
+    floor = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour, min)
+  }
+  cur = floor
   while (cur < endMs) {
     const d = new Date(cur)
     let key: string
-    if (granularity === 'day') {
+    if (granularity === 'month') {
+      key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01T00:00:00`
+    } else if (granularity === 'day') {
       key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T00:00:00`
     } else if (granularity === 'hour') {
       key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}:00:00`
     } else {
-      // 5min: 用整 5 分钟对齐的 key
       const baseMin = Math.floor(d.getUTCMinutes() / 5) * 5
       key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}:${String(baseMin).padStart(2, '0')}:00`
     }
+    const sizeMs = granularity === 'month' ? 30 * 24 * 60 * 60 * 1000 : (granularity === 'day' ? 24 * 60 * 60 * 1000 : granularity === 'hour' ? 60 * 60 * 1000 : 5 * 60 * 1000)
     buckets.push({ startMs: cur, sizeMs, key })
-    cur += sizeMs
+    cur = advance(cur)
   }
   return buckets
 }
@@ -114,11 +151,15 @@ export function buildRiskTrend(opts: {
   filtered?: boolean
   filterSeed?: string
   mockSeed?: number
+  /** 颗粒度: hour/day/month. 缺省按窗口长度自动估算. */
+  granularity?: 'hour' | 'day' | 'month'
 }): RiskTimeseriesPoint[] {
   const now = Date.now()
   const start = now - opts.days * 24 * 60 * 60 * 1000
-  const buckets = buildBuckets(start, now, 'day')
-  const prng = mulberry32((opts.mockSeed ?? 0xa1b2c3d4) ^ hashString(`riskTrend|${opts.days}|${opts.filtered ? opts.filterSeed ?? '' : ''}`))
+  const granularity: 'hour' | 'day' | 'month' =
+    opts.granularity ?? (opts.days <= 2 ? 'hour' : opts.days <= 31 ? 'day' : 'month')
+  const buckets = buildBuckets(start, now, granularity)
+  const prng = mulberry32((opts.mockSeed ?? 0xa1b2c3d4) ^ hashString(`riskTrend|${opts.days}|${granularity}|${opts.filtered ? opts.filterSeed ?? '' : ''}`))
 
   return buckets.map((b, idx) => {
     // 周末 (周六=6, 周日=0 in JS) 提交量更高; 工作日波动
@@ -135,9 +176,11 @@ export function buildRiskTrend(opts: {
     const none = Math.max(0, baseTotal - high - medium - low)
     void EMPTY_4
     void idx
+    const denominator = high + medium + low + none
     return {
-      date: b.key.slice(0, 10),
-      total: none + low + medium + high,
+      bucket: b.key,
+      total: denominator,
+      denominator,
       high,
       medium,
       low,
@@ -146,6 +189,74 @@ export function buildRiskTrend(opts: {
       none,
     }
   })
+}
+
+export function buildRiskTrendOptions(seed: number): RiskTrendOptionsResponse {
+  const prng = mulberry32(seed ^ 0xfeed_face)
+  const pick = (n: number, alphabet: string) =>
+    Array.from({ length: n }, () => alphabet[Math.floor(prng() * alphabet.length)]).join('')
+  return {
+    modalities: [
+      { value: 'image', label: '图片' },
+      { value: 'text', label: '文本' },
+      { value: 'video', label: '视频' },
+      { value: 'audio', label: '语音' },
+      { value: 'document', label: '文档' },
+    ],
+    strategies: [
+      { value: 'default', label: '默认策略' },
+      { value: 'medical-strict', label: '医药严格策略' },
+      { value: 'finance-strict', label: '金融严格策略' },
+    ],
+    channels: [
+      { value: '模型输入', label: '模型输入' },
+      { value: '模型输出', label: '模型输出' },
+      { value: '小红书', label: '小红书' },
+      { value: '电商', label: '电商' },
+    ],
+    account_ids: [
+      { value: `acc-${pick(4, '0123456789')}`, label: `acc-${pick(4, '0123456789')}` },
+      { value: `acc-${pick(4, '0123456789')}`, label: `acc-${pick(4, '0123456789')}` },
+    ],
+    ips: [
+      { value: '10.0.0.1', label: '10.0.0.1' },
+      { value: '10.0.0.2', label: '10.0.0.2' },
+      { value: '192.168.1.10', label: '192.168.1.10' },
+    ],
+    risk_taxonomy: [
+      {
+        code: 'politics',
+        label: '涉政',
+        path: 'politics',
+        children: [
+          {
+            code: 'politics/sensitive_term',
+            label: '敏感词',
+            path: 'politics/sensitive_term',
+            children: [
+              { code: 'politics/sensitive_term/leader', label: '领导人', path: 'politics/sensitive_term/leader' },
+              { code: 'politics/sensitive_term/event', label: '敏感事件', path: 'politics/sensitive_term/event' },
+            ],
+          },
+        ],
+      },
+      {
+        code: 'porn',
+        label: '涉黄',
+        path: 'porn',
+        children: [
+          {
+            code: 'porn/figure',
+            label: '人物',
+            path: 'porn/figure',
+            children: [
+              { code: 'porn/figure/explicit', label: '明显色情', path: 'porn/figure/explicit' },
+            ],
+          },
+        ],
+      },
+    ],
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -172,9 +283,14 @@ export function buildAnomalyResponse(opts: {
   endMs: number
   granularity: '5min' | 'hour' | 'day'
   mockSeed?: number
+  filterSeed?: string
+  filtered?: boolean
 }): AnomalyResponse {
   const buckets = buildBuckets(opts.startMs, opts.endMs, opts.granularity)
-  const prng = mulberry32((opts.mockSeed ?? 0xb1c2d3e4) ^ hashString(`anomaly|${opts.startMs}|${opts.endMs}`))
+  const filterHash = opts.filterSeed ? hashString(opts.filterSeed) : 0
+  const prng = mulberry32(
+    (opts.mockSeed ?? 0xb1c2d3e4) ^ hashString(`anomaly|${opts.startMs}|${opts.endMs}`) ^ filterHash,
+  )
 
   const series: AnomalyMetricPoint[] = buckets.map((b) => {
     // 拒绝率基线 12-22%, 偶发突跳到 30+% 制造告警
@@ -236,8 +352,20 @@ export function buildAnomalyResponse(opts: {
 
   void SEVERITY_COLOR
 
+  const exposedGranularity: 'hour' | 'day' = opts.granularity === '5min' ? 'hour' : opts.granularity
   return {
     window: bucketLabel(opts.granularity),
+    granularity: exposedGranularity,
+    window_start: new Date(opts.startMs).toISOString(),
+    window_end: new Date(opts.endMs).toISOString(),
+    applied: {
+      modalities: [],
+      strategy_codes: [],
+      channels: [],
+      account_ids: [],
+      ips: [],
+      risk_label_paths: [],
+    },
     current,
     series,
     alerts,
@@ -264,7 +392,7 @@ function buildAnomalyAlert(
   })
   return {
     id,
-    public_id: `mock-${id}`,
+    public_id: formatPublicId(id, startMs),
     rule_code: ruleCode,
     severity,
     metric: RULE_LABEL[ruleCode] ?? ruleCode,
@@ -276,6 +404,14 @@ function buildAnomalyAlert(
     created_at: new Date(startMs + 30_000).toISOString(),
     detail: { generated: detailStr },
   }
+}
+
+function formatPublicId(id: number, atMs: number): string {
+  const d = new Date(atMs)
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `ALERT-${y}${m}${day}-${String(id).padStart(4, '0')}`
 }
 
 function bucketLabel(g: '5min' | 'hour' | 'day'): string {
@@ -292,6 +428,8 @@ export function getMockAlerts(opts: {
   status: 'open' | 'acknowledged' | 'all'
   limit: number
   mockSeed?: number
+  filterSeed?: string
+  filtered?: boolean
 }): AlertEventOut[] {
   const seed = opts.mockSeed ?? 0xc1d2e3f4
   let pool = _alertPool[seed]
@@ -372,7 +510,7 @@ function buildFullAlert(
   void mockSeed
   return {
     id,
-    public_id: `mock-${id}`,
+    public_id: formatPublicId(id, startMs),
     rule_code: ruleCode,
     severity,
     metric: RULE_LABEL[ruleCode] ?? ruleCode,
@@ -436,6 +574,137 @@ export function buildTrend(metric: 'reject_rate' | 'review_rate' | 'approve_rate
     points: buckets,
     delta_pct: delta,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Alert root cause — mock per-rule drill-down content.
+// ---------------------------------------------------------------------------
+
+const ROOT_CAUSE_RULE_LABELS: Record<string, string> = {
+  reject_rate_high: '拒绝率异常',
+  high_risk_content_high: '账号高风险阻断异常',
+  high_risk_account_concentration: '高风险账号聚集异常',
+  reject_rate_spike: '拒绝率突升',
+  high_risk_concentration: '高风险账号聚集',
+  submit_drop: '提交量骤降',
+}
+
+const TOP_RISK_LABELS_POOL = [
+  '政治敏感',
+  '暴恐',
+  '低俗',
+  '广告',
+  '辱骂',
+  '涉政',
+  '诱导分享',
+  '未成年人',
+  '虚假宣传',
+  '版权',
+  '色情',
+  '违禁',
+]
+
+const TOP_ACCOUNTS_POOL = [
+  'acct-A',
+  'acct-B',
+  'acct-C',
+  'acct-D',
+  'acct-E',
+  'acct-F',
+  'acct-G',
+  'acct-H',
+]
+
+const TOP_IPS_POOL = [
+  '10.0.0.1',
+  '10.0.0.2',
+  '10.0.0.3',
+  '10.0.0.4',
+  '10.0.0.5',
+  '192.168.1.1',
+  '192.168.1.2',
+  '192.168.1.3',
+]
+
+export function buildMockRootCause(opts: {
+  alertId: number
+  ruleCode?: string
+  mockSeed?: number
+}): AlertRootCauseResponse {
+  const seed = (opts.mockSeed ?? 0xc1d2e3f4) ^ opts.alertId
+  const prng = mulberry32(seed)
+  const ruleCode = opts.ruleCode ?? 'reject_rate_high'
+  const ruleLabel = ROOT_CAUSE_RULE_LABELS[ruleCode] ?? ruleCode
+
+  // 1h window ending now
+  const endMs = Date.now()
+  const startMs = endMs - 60 * 60 * 1000
+  const dimension = {
+    modality: prng() < 0.5 ? 'image' : 'text',
+    strategy_code: 'qa-strategy-anomaly',
+    channel: '模型输入',
+  }
+
+  let top_risk_labels: AlertRootCauseTopRiskLabel[] = []
+  let top_accounts: AlertRootCauseAccount[] = []
+  let top_account_ips: AlertRootCauseAccountIP[] = []
+
+  if (ruleCode === 'reject_rate_high') {
+    const n = 5 + Math.floor(prng() * 4)
+    const labels = pickN(TOP_RISK_LABELS_POOL, n, prng)
+    top_risk_labels = labels.map((label) => ({
+      label,
+      count: 12 + Math.floor(prng() * 200),
+      last_hit_at: new Date(endMs - Math.floor(prng() * 60 * 60 * 1000)).toISOString(),
+    }))
+    top_risk_labels.sort((a, b) => b.count - a.count)
+  } else if (ruleCode === 'high_risk_content_high') {
+    const n = 3 + Math.floor(prng() * 4)
+    const accts = pickN(TOP_ACCOUNTS_POOL, n, prng)
+    top_accounts = accts.map((account_id) => {
+      const submitted = 20 + Math.floor(prng() * 200)
+      const rejected = Math.floor(submitted * (0.4 + prng() * 0.5))
+      return { account_id, submitted, rejected }
+    })
+    top_accounts.sort((a, b) => b.rejected - a.rejected)
+  } else if (ruleCode === 'high_risk_account_concentration') {
+    const n = 3 + Math.floor(prng() * 3)
+    const accts = pickN(TOP_ACCOUNTS_POOL, n, prng)
+    top_account_ips = []
+    for (const account_id of accts) {
+      const ipN = 1 + Math.floor(prng() * 2)
+      const ips = pickN(TOP_IPS_POOL, ipN, prng)
+      for (const ip of ips) {
+        const submitted = 5 + Math.floor(prng() * 50)
+        const rejected = Math.floor(submitted * (0.5 + prng() * 0.4))
+        top_account_ips.push({ account_id, ip, submitted, rejected })
+      }
+    }
+  }
+
+  return {
+    alert_id: opts.alertId,
+    rule_code: ruleCode,
+    rule_label: ruleLabel,
+    window: {
+      start: new Date(startMs).toISOString(),
+      end: new Date(endMs).toISOString(),
+      size_min: 60,
+    },
+    dimension,
+    top_risk_labels,
+    top_accounts,
+    top_account_ips,
+  }
+}
+
+function pickN<T>(pool: T[], n: number, prng: () => number): T[] {
+  const arr = [...pool]
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(prng() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr.slice(0, Math.min(n, arr.length))
 }
 
 // ---------------------------------------------------------------------------

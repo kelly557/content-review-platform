@@ -9,7 +9,7 @@ from __future__ import annotations
 import csv
 from datetime import datetime, timedelta
 from io import StringIO
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -32,14 +32,20 @@ from app.schemas.analytics import (
     TrendResponse,
 )
 from app.services.report_metrics import (
+    AUDIT_MODALITIES,
     SUPPORTED_WINDOWS,
     anomaly as anomaly_metric,
     bucket_granularity,
+    distinct_account_ids,
+    distinct_channels,
+    distinct_ips,
     overview as overview_metric,
+    pick_risk_trend_granularity,
     quality as quality_metric,
     resolve_custom_window,
     resolve_window,
     risk_distribution as risk_distribution_metric,
+    risk_label_taxonomy,
     risk_trend as risk_trend_metric,
     top_risk_labels as top_risk_labels_metric,
     trend as trend_metric,
@@ -132,12 +138,36 @@ async def trend(
 async def anomaly(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("reviewer", "mlr", "admin")),
-    window: str = Query("1h", description="监控时间窗, e.g. 1h, 24h"),
+    window: str = Query("1h", description="监控时间窗, e.g. 1h, 24h, 7d"),
     start: Optional[datetime] = Query(
         None, description="自定义窗口起点 (ISO 8601), 与 end 一起使用"
     ),
     end: Optional[datetime] = Query(
         None, description="自定义窗口终点 (ISO 8601), 与 start 一起使用"
+    ),
+    granularity: Optional[str] = Query(
+        None,
+        description="横轴粒度: hour|day. 缺省时按窗口跨度自动选取 (≤6h→hour, 否则→day).",
+    ),
+    modalities: Optional[List[str]] = Query(
+        None,
+        description="审核模态过滤 (image/text/video/audio/document), 可重复. 5 选.",
+    ),
+    strategy_codes: Optional[List[str]] = Query(
+        None, description="策略 code, 可重复"
+    ),
+    account_ids: Optional[List[str]] = Query(
+        None, description="业务账号 (material.metadata.account_id), 可重复"
+    ),
+    ips: Optional[List[str]] = Query(
+        None, description="IP (material.metadata.ip), 可重复"
+    ),
+    channels: Optional[List[str]] = Query(
+        None, description="渠道 (material.metadata.channel), 可重复. 业务自由填写值。"
+    ),
+    risk_label_paths: Optional[List[str]] = Query(
+        None,
+        description="风险标签路径 (一级/二级/三级 code, 用 '/' 拼接), 可重复. 支持前缀匹配.",
     ),
 ) -> AnomalyResponse:
     custom = _resolve_optional_range(start, end)
@@ -147,8 +177,30 @@ async def anomaly(
         w = resolve_window(window)
     else:
         w = custom
-    gran = bucket_granularity(w)
-    data = await anomaly_metric(db, window=w, granularity=gran)
+    if granularity not in (None, "hour", "day"):
+        raise HTTPException(
+            status_code=400, detail=f"unsupported granularity: {granularity}"
+        )
+    if granularity is None:
+        # 异常分析只支持 1h / 24h / 7d: 6h 以内走 hour, 否则走 day.
+        hours = w.duration.total_seconds() / 3600
+        gran = "hour" if hours <= 6 else "day"
+    else:
+        gran = granularity
+    try:
+        data = await anomaly_metric(
+            db,
+            window=w,
+            granularity=gran,
+            modalities=modalities,
+            strategy_codes=strategy_codes,
+            account_ids=account_ids,
+            ips=ips,
+            channels=channels,
+            risk_label_paths=risk_label_paths,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return AnomalyResponse(**data)
 
 
@@ -231,14 +283,101 @@ async def export_quality(
 async def risk_trend(
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
-    days: int = Query(7, ge=1, le=90),
-    material_types: Optional[list[str]] = Query(
+    window: str = Query("7d", description="时间窗: today|7d|30d"),
+    start: Optional[datetime] = Query(
+        None, description="自定义窗口起点 (ISO 8601), 与 end 一起使用"
+    ),
+    end: Optional[datetime] = Query(
+        None, description="自定义窗口终点 (ISO 8601), 与 start 一起使用"
+    ),
+    granularity: Optional[str] = Query(
         None,
-        description="素材类型过滤 (text/image/video/pdf), 可重复",
+        description="横轴粒度: hour|day|month. 缺省时按窗口跨度自动选取.",
+    ),
+    modalities: Optional[List[str]] = Query(
+        None,
+        description="审核模态过滤 (image/text/video/audio/document), 可重复. 5 选.",
+    ),
+    strategy_codes: Optional[List[str]] = Query(
+        None, description="策略 code, 可重复"
+    ),
+    account_ids: Optional[List[str]] = Query(
+        None, description="业务账号 (material.metadata.account_id), 可重复"
+    ),
+    ips: Optional[List[str]] = Query(
+        None, description="IP (material.metadata.ip), 可重复"
+    ),
+    channels: Optional[List[str]] = Query(
+        None, description="渠道 (material.metadata.channel), 可重复. 业务自由填写值。"
+    ),
+    risk_label_paths: Optional[List[str]] = Query(
+        None,
+        description="风险标签路径 (一级/二级/三级 code, 用 '/' 拼接), 可重复. 支持前缀匹配.",
     ),
 ) -> RiskTrendResponse:
-    data = await risk_trend_metric(db, days=days, material_types=material_types)
+    custom = _resolve_optional_range(start, end)
+    w = custom or resolve_window(window)
+    if granularity not in (None, "hour", "day", "month"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported granularity: {granularity}",
+        )
+    gran = granularity or pick_risk_trend_granularity(w)
+    try:
+        data = await risk_trend_metric(
+            db,
+            window=w,
+            granularity=gran,
+            modalities=modalities,
+            strategy_codes=strategy_codes,
+            account_ids=account_ids,
+            ips=ips,
+            channels=channels,
+            risk_label_paths=risk_label_paths,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return RiskTrendResponse(**data)
+
+
+@router.get("/risk-trend/options")
+async def risk_trend_options(
+    db: AsyncSession = Depends(get_db),
+    _current: User = Depends(get_current_user),
+):
+    """返回趋势分析页的过滤选项: 模态 / 策略 / 渠道 / 账号 / IP / 风险标签树."""
+    channels = await distinct_channels(db)
+    account_ids = await distinct_account_ids(db)
+    ips = await distinct_ips(db)
+    taxonomy = await risk_label_taxonomy(db)
+    return {
+        "modalities": [{"value": m, "label": _MODALITY_LABELS[m]} for m in AUDIT_MODALITIES],
+        "strategies": [{"value": s.code, "label": s.name or s.code} for s in (await _active_strategies(db))],
+        "channels": [{"value": c, "label": c} for c in channels],
+        "account_ids": [{"value": a, "label": a} for a in account_ids],
+        "ips": [{"value": i, "label": i} for i in ips],
+        "risk_taxonomy": taxonomy,
+    }
+
+
+_MODALITY_LABELS = {
+    "image": "图片",
+    "text": "文本",
+    "video": "视频",
+    "audio": "语音",
+    "document": "文档",
+}
+
+
+async def _active_strategies(db: AsyncSession):
+    from app.models.strategy import Strategy
+
+    rows = await db.execute(
+        select(Strategy)
+        .where(Strategy.is_active.is_(True))
+        .order_by(Strategy.scope.asc(), Strategy.id.asc())
+    )
+    return rows.scalars().all()
 
 
 @router.get("/risk/distribution", response_model=RiskDistributionResponse)

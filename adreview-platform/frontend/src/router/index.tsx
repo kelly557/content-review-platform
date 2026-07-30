@@ -73,7 +73,9 @@ const CreateAuditItemPage = lazy(() => import('@/pages/packages/CreateAuditItemP
 const AuditPointsPage = lazy(() => import('@/pages/packages/AuditPointsPage'))
 const CreateAuditPointPage = lazy(() => import('@/pages/packages/CreateAuditPointPage'))
 const EditAuditPointPage = lazy(() => import('@/pages/packages/EditAuditPointPage'))
-const TagsPage = lazy(() => import('@/pages/tags/TagsPage'))
+const TagsAdminPage = lazy(() => import('@/pages/admin/TagsAdminPage'))
+const ModelsAdminLargePage = lazy(() => import('@/pages/admin/ModelsAdminLargePage'))
+const ModelsAdminSmallPage = lazy(() => import('@/pages/admin/ModelsAdminSmallPage'))
 const HumanReviewRulesPage = lazy(() => import('@/pages/strategy/HumanReviewRulesPage'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 const TriggersListPage = lazy(() => import('@/pages/triggers/TriggersListPage'))
@@ -268,9 +270,19 @@ export default function AppRoutes() {
               <Route path="/admin/users" element={<UsersAdminPage />} />
               <Route path="/admin/permissions" element={<PermissionsAdminPage />} />
               <Route path="/admin/roles" element={<RolesMetaAdminPage />} />
+              <Route path="/admin/tags" element={<TagsAdminPage />} />
+              <Route path="/admin/models/large" element={<ModelsAdminLargePage />} />
+              <Route path="/admin/models/small" element={<ModelsAdminSmallPage />} />
               <Route path="/triggers" element={<TriggersListPage />} />
               <Route path="/triggers/new" element={<CreateTriggerPage />} />
               <Route path="/triggers/:id" element={<TriggerDetailPage />} />
+
+              {/* 老路径兼容 — 旧 /tags、/resources/models 跳到新入口 */}
+              <Route path="/tags" element={<Navigate to="/admin/tags" replace />} />
+              <Route
+                path="/resources/models"
+                element={<Navigate to="/admin/models/large" replace />}
+              />
             </Route>
 
             <Route element={<ProtectedRoute allow={['superadmin', 'root_admin']} />}>
@@ -285,7 +297,6 @@ export default function AppRoutes() {
             </Route>
 
             <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin', 'root_admin']} />}>
-              <Route path="/tags" element={<TagsPage />} />
               <Route path="/human-review-rules" element={<HumanReviewRulesPage />} />
             </Route>
           </Route>

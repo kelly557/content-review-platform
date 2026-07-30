@@ -7,11 +7,11 @@ import {
 const COL_STORAGE_KEY = 'adreview.query.visibleColumns'
 const VALID_KEYS = new Set<string>(
   Object.keys({
-    task_title: 1,
     strategy_name: 1,
     machine_decision: 1,
     feedback: 1,
     material_type: 1,
+    channel: 1,
     request_id: 1,
     task_id: 1,
     labels: 1,

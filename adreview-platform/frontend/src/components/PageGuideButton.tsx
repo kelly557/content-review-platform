@@ -84,6 +84,32 @@ function renderBlock(block: string, idx: number): ReactNode {
       </Text>
     )
   }
+
+  const fenceMatch = trimmed.match(/^```([^\n]*)\n([\s\S]*?)\n```\s*$/)
+  if (fenceMatch) {
+    return (
+      <pre
+        key={idx}
+        style={{
+          margin: '0 0 12px',
+          padding: '10px 12px',
+          background: '#F8FAFC',
+          border: '1px solid #E2E8F0',
+          borderRadius: 4,
+          fontFamily:
+            'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+          fontSize: 12,
+          lineHeight: 1.55,
+          color: 'rgba(0,0,0,0.85)',
+          overflowX: 'auto',
+          whiteSpace: 'pre',
+        }}
+      >
+        {fenceMatch[2]}
+      </pre>
+    )
+  }
+
   const lines = trimmed.split('\n')
   if (lines.every((l) => /^(\s*)\d+\.\s+/.test(l))) {
     return (
@@ -315,7 +341,7 @@ export function PageGuideButton() {
       <Drawer
         title={effective?.title ?? '原型说明'}
         placement="right"
-        width={isMobile ? '100%' : '50vw'}
+        width={isMobile ? '100%' : '55vw'}
         open={open}
         onClose={() => setOpen(false)}
         destroyOnClose

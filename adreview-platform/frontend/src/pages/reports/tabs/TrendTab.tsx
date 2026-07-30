@@ -13,12 +13,13 @@ import {
 import dayjs, { type Dayjs } from 'dayjs'
 import { reportsApi, type MockMode } from '@/api/reports'
 import type {
-  DetectionModality,
-  MaterialType,
+  AuditModality,
   RiskTimeseriesPoint,
+  RiskTrendGranularity,
+  RiskTrendOptionsResponse,
 } from '@/types/domain'
-import { DETECTION_MODALITIES } from '@/types/domain'
-import { MATERIAL_TYPE_OPTIONS } from '@/lib/reportsFilterOptions'
+import { AUDIT_MODALITIES } from '@/types/domain'
+import RiskLabelCascade from '@/components/query/RiskLabelCascade'
 import { RiskTrendChart } from '../charts'
 
 const { Text } = Typography
@@ -32,13 +33,19 @@ const WINDOW_SEGMENTS: { value: Exclude<WindowKey, 'custom'>; label: string }[] 
   { value: '30d', label: '近 30 天' },
 ]
 
+const GRANULARITY_SEGMENTS: { value: RiskTrendGranularity; label: string }[] = [
+  { value: 'hour', label: '小时' },
+  { value: 'day', label: '天' },
+  { value: 'month', label: '月' },
+]
+
 // Match the backend cap (see app.services.report_metrics.MAX_CUSTOM_WINDOW).
 const MAX_RANGE_DAYS = 90
 
 // 4 张 Statistic 卡片的固定顺序（按风险等级由低到高）。
 const RISK_LEVEL_CARDS = [
   { key: 'none', label: '无风险', color: '#94A3B8' },
-  { key: 'low', label: '低风险', color: '#16A34A' },
+  { key: 'low', label: '低风险', color: '#2563EB' },
   { key: 'medium', label: '中风险', color: '#D97706' },
   { key: 'high', label: '高风险', color: '#DC2626' },
 ] as const
@@ -50,42 +57,60 @@ function shortDay(d: Dayjs): string {
 export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
   const [windowKey, setWindowKey] = useState<WindowKey>('7d')
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
-  const [mediaTypes, setMediaTypes] = useState<DetectionModality[]>([])
-  const [materialTypes, setMaterialTypes] = useState<MaterialType[]>([])
-  // 审核项 filter — UI 占位，后端聚合尚未接入。
-  const [auditItemIds] = useState<number[]>([])
+  const [modalities, setModalities] = useState<AuditModality[]>([])
+  const [strategyCodes, setStrategyCodes] = useState<string[]>([])
+  const [ips, setIps] = useState<string[]>([])
+  const [accountIds, setAccountIds] = useState<string[]>([])
+  const [channels, setChannels] = useState<string[]>([])
+  const [riskLabelPaths, setRiskLabelPaths] = useState<string[]>([])
+  const [granularity, setGranularity] = useState<RiskTrendGranularity | null>(null)
   const [riskPoints, setRiskPoints] = useState<RiskTimeseriesPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [options, setOptions] = useState<RiskTrendOptionsResponse | null>(null)
 
   const isCustom = windowKey === 'custom'
   const rangeValid = !!customRange && customRange[1].isAfter(customRange[0])
 
-  // 媒体类型 与 素材类型 共用后端 material_types 入参（同一 enum，同一字段）。
-  const combinedMaterialTypes = useMemo(() => {
-    const set = new Set<string>([...mediaTypes, ...materialTypes])
-    return Array.from(set)
-  }, [mediaTypes, materialTypes])
-
-  // 自定义窗口天数（用于风险趋势的 days 参数）。
-  const days = useMemo(() => {
-    if (isCustom && rangeValid && customRange) {
-      return Math.max(customRange[1].diff(customRange[0], 'day') + 1, 1)
+  // 拉取筛选项（每个会话拉一次）.
+  useEffect(() => {
+    let alive = true
+    reportsApi
+      .riskTrendOptions(mock?.enabled ? mock : undefined)
+      .then((opt) => {
+        if (alive) setOptions(opt)
+      })
+      .catch(() => {
+        if (alive) setOptions(null)
+      })
+    return () => {
+      alive = false
     }
-    return windowKey === 'today' ? 1 : windowKey === '30d' ? 30 : 7
-  }, [windowKey, customRange, isCustom, rangeValid])
+  }, [mock?.enabled, mock?.seed])
 
   useEffect(() => {
     let alive = true
     setLoading(true)
     setErr(null)
 
-    const materialTypesParam = combinedMaterialTypes.length
-      ? combinedMaterialTypes
-      : undefined
+    const base: Parameters<typeof reportsApi.riskTrend>[0] = {
+      modalities: modalities.length ? modalities : undefined,
+      strategy_codes: strategyCodes.length ? strategyCodes : undefined,
+      ips: ips.length ? ips : undefined,
+      account_ids: accountIds.length ? accountIds : undefined,
+      channels: channels.length ? channels : undefined,
+      risk_label_paths: riskLabelPaths.length ? riskLabelPaths : undefined,
+      granularity: granularity ?? undefined,
+    }
+    if (isCustom && rangeValid && customRange) {
+      base.start = customRange[0].startOf('day').toISOString()
+      base.end = customRange[1].endOf('day').toISOString()
+    } else {
+      base.window = windowKey === 'today' ? 'today' : windowKey === '30d' ? '30d' : '7d'
+    }
 
     reportsApi
-      .riskTrend({ days, material_types: materialTypesParam }, mock?.enabled ? mock : undefined)
+      .riskTrend(base, mock?.enabled ? mock : undefined)
       .then((rt) => {
         if (!alive) return
         setRiskPoints(rt.points)
@@ -98,9 +123,23 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
     return () => {
       alive = false
     }
-  }, [days, combinedMaterialTypes, mock?.enabled, mock?.seed])
+  }, [
+    windowKey,
+    customRange,
+    isCustom,
+    rangeValid,
+    modalities,
+    strategyCodes,
+    ips,
+    accountIds,
+    channels,
+    riskLabelPaths,
+    granularity,
+    mock?.enabled,
+    mock?.seed,
+  ])
 
-  // 4 张风险等级卡片：在窗口内把 4 个 level 的 count 求和，占比 = level_count / sum_of_4。
+  // 4 张风险等级卡片：占比 = 该等级条数 / sum_of_4 (denominator).
   const riskTotals = useMemo(() => {
     return riskPoints.reduce(
       (acc, p) => {
@@ -113,6 +152,8 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
       { none: 0, low: 0, medium: 0, high: 0 },
     )
   }, [riskPoints])
+
+  const denominator = riskTotals.none + riskTotals.low + riskTotals.medium + riskTotals.high
 
   const rangeLabel = useMemo(() => {
     if (isCustom && rangeValid && customRange) {
@@ -127,6 +168,18 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
     const span = current.diff(anchor, 'day')
     return current.isAfter(dayjs().endOf('day')) || span > MAX_RANGE_DAYS
   }
+
+  const effectiveGranularity = useMemo<RiskTrendGranularity>(() => {
+    if (granularity) return granularity
+    if (windowKey === 'today') return 'hour'
+    if (windowKey === '30d') return 'day'
+    return 'day'
+  }, [granularity, windowKey])
+
+  const sensitivityCount = useMemo(
+    () => riskPoints.reduce((s, p) => s + p.sensitive, 0),
+    [riskPoints],
+  )
 
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
@@ -154,46 +207,72 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
             allowClear
             placeholder={['开始日期', '结束日期']}
           />
-          <Space size="small" align="center">
-            <Text type="secondary">审核媒体类型</Text>
-            <Select
-              mode="multiple"
-              allowClear
-              value={mediaTypes}
-              onChange={(v) => setMediaTypes(v as DetectionModality[])}
-              options={DETECTION_MODALITIES}
-              placeholder="全部"
-              style={{ minWidth: 160 }}
-              maxTagCount="responsive"
-            />
-          </Space>
           <Select
             mode="multiple"
             allowClear
-            value={materialTypes}
-            onChange={(v) => setMaterialTypes(v as MaterialType[])}
-            options={MATERIAL_TYPE_OPTIONS}
-            placeholder="素材类型"
+            value={modalities}
+            onChange={(v) => setModalities(v as AuditModality[])}
+            options={AUDIT_MODALITIES}
+            placeholder="审核模态"
+            style={{ minWidth: 180 }}
+            maxTagCount="responsive"
+          />
+          <Select
+            mode="multiple"
+            allowClear
+            value={strategyCodes}
+            onChange={(v) => setStrategyCodes(v as string[])}
+            options={options?.strategies ?? []}
+            placeholder="策略名称"
             style={{ minWidth: 160 }}
             maxTagCount="responsive"
           />
-          <Tooltip title="审核项维度后端聚合规划中">
-            <Space size="small" align="center">
-              <Text type="secondary">审核项</Text>
-              <Select
-                mode="multiple"
-                disabled
-                value={auditItemIds}
-                options={[]}
-                placeholder="规划中"
-                style={{ minWidth: 120 }}
-              />
-            </Space>
-          </Tooltip>
+          <Select
+            mode="tags"
+            allowClear
+            value={ips}
+            onChange={(v) => setIps(v as string[])}
+            options={options?.ips ?? []}
+            placeholder="IP"
+            style={{ minWidth: 160 }}
+            maxTagCount="responsive"
+          />
+          <Select
+            mode="multiple"
+            allowClear
+            value={accountIds}
+            onChange={(v) => setAccountIds(v as string[])}
+            options={options?.account_ids ?? []}
+            placeholder="账号"
+            style={{ minWidth: 140 }}
+            maxTagCount="responsive"
+          />
+          <Select
+            mode="tags"
+            allowClear
+            value={channels}
+            onChange={(v) => setChannels(v as string[])}
+            options={options?.channels ?? []}
+            placeholder="渠道"
+            style={{ minWidth: 140 }}
+            maxTagCount="responsive"
+          />
+          <div style={{ minWidth: 220 }}>
+            <RiskLabelCascade
+              taxonomy={options?.risk_taxonomy ?? []}
+              value={riskLabelPaths}
+              onChange={setRiskLabelPaths}
+              placeholder="风险类型 / 审核项 / 审核点"
+            />
+          </div>
         </Space>
-        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-          口径: 占比 = 该风险等级条数 / 4 个等级条数之和; 自定义区间最长 {MAX_RANGE_DAYS} 天。
-        </Text>
+        <div style={{ marginTop: 8 }}>
+          <Tooltip title="某风险占比 = 该风险等级条数 / 所有风险等级条数之和; 敏感单独展示，不进入占比分母。">
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              某风险占比 = 该风险等级条数 / 所有风险等级条数之和；自定义区间最长 {MAX_RANGE_DAYS} 天。
+            </Text>
+          </Tooltip>
+        </div>
       </Card>
 
       {err && <Text type="danger">{err}</Text>}
@@ -201,8 +280,7 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
       <Row gutter={[16, 16]}>
         {RISK_LEVEL_CARDS.map((c) => {
           const count = riskTotals[c.key]
-          const sum = riskTotals.none + riskTotals.low + riskTotals.medium + riskTotals.high
-          const ratio = sum > 0 ? (count / sum) * 100 : 0
+          const ratio = denominator > 0 ? (count / denominator) * 100 : 0
           return (
             <Col xs={12} md={6} key={c.key}>
               <Card size="small">
@@ -231,10 +309,30 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
         })}
       </Row>
 
+      {sensitivityCount > 0 && (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          敏感 PII: {sensitivityCount} 条（不计入占比分母）
+        </Text>
+      )}
+
       <Card
         size="small"
         title={`风险等级分布 · ${rangeLabel}`}
-        extra={<Text type="secondary">粒度: day</Text>}
+        extra={
+          <Space size="small" align="center">
+            <Text type="secondary">颗粒度</Text>
+            <Segmented
+              value={granularity ?? '__auto'}
+              onChange={(v) =>
+                setGranularity(v === '__auto' ? null : (v as RiskTrendGranularity))
+              }
+              options={[
+                { value: '__auto', label: '自动' },
+                ...GRANULARITY_SEGMENTS,
+              ]}
+            />
+          </Space>
+        }
       >
         <div style={{ height: 320 }}>
           <RiskTrendChart
@@ -242,6 +340,7 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
             loading={loading}
             error={err}
             height={320}
+            granularity={effectiveGranularity}
           />
         </div>
       </Card>
