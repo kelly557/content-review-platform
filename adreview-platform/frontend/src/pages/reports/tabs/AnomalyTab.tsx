@@ -413,7 +413,7 @@ export default function AnomalyTab({ mock }: { mock?: MockMode } = {}) {
             taxonomy={options?.risk_taxonomy ?? []}
             value={riskLabelPaths}
             onChange={setRiskLabelPaths}
-            placeholder="风险类型 / 审核项 / 审核点"
+            placeholder="审核项 / 审核点 / sub 审核点"
           />
         </div>
         <Button onClick={() => void refresh()}>刷新</Button>

@@ -165,7 +165,7 @@ export default function FilterBar({
           onChange={(paths) =>
             onChange({ ...value, risk_label_paths: paths.length ? paths : undefined })
           }
-          placeholder="选择风险标签"
+          placeholder="选择审核项 / 审核点 / sub 审核点"
         />
       </div>
 

@@ -17,10 +17,11 @@ import type {
   RiskTimeseriesPoint,
   RiskTrendGranularity,
   RiskTrendOptionsResponse,
+  TopRiskLabelItem,
 } from '@/types/domain'
 import { AUDIT_MODALITIES } from '@/types/domain'
 import RiskLabelCascade from '@/components/query/RiskLabelCascade'
-import { RiskTrendChart } from '../charts'
+import { RiskTrendChart, TopRiskBarChart, TopRiskTable } from '../charts'
 
 const { Text } = Typography
 const { RangePicker } = DatePicker
@@ -32,6 +33,12 @@ const WINDOW_SEGMENTS: { value: Exclude<WindowKey, 'custom'>; label: string }[] 
   { value: '7d', label: '近 7 天' },
   { value: '30d', label: '近 30 天' },
 ]
+
+const DIMENSION_LABEL: Record<'category' | 'item' | 'point', string> = {
+  category: '一级标签',
+  item: '二级标签',
+  point: '三级标签',
+}
 
 const GRANULARITY_SEGMENTS: { value: RiskTrendGranularity; label: string }[] = [
   { value: 'hour', label: '小时' },
@@ -50,9 +57,7 @@ const RISK_LEVEL_CARDS = [
   { key: 'high', label: '高风险', color: '#DC2626' },
 ] as const
 
-function shortDay(d: Dayjs): string {
-  return d.format('MM.DD')
-}
+
 
 export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
   const [windowKey, setWindowKey] = useState<WindowKey>('7d')
@@ -65,6 +70,9 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
   const [riskLabelPaths, setRiskLabelPaths] = useState<string[]>([])
   const [granularity, setGranularity] = useState<RiskTrendGranularity | null>(null)
   const [riskPoints, setRiskPoints] = useState<RiskTimeseriesPoint[]>([])
+  const [topRiskItems, setTopRiskItems] = useState<TopRiskLabelItem[]>([])
+  const [topRiskView, setTopRiskView] = useState<'chart' | 'list'>('chart')
+  const [topRiskDimension, setTopRiskDimension] = useState<'category' | 'item' | 'point'>('point')
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [options, setOptions] = useState<RiskTrendOptionsResponse | null>(null)
@@ -108,12 +116,16 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
     } else {
       base.window = windowKey === 'today' ? 'today' : windowKey === '30d' ? '30d' : '7d'
     }
+    const mockArg = mock?.enabled ? mock : undefined
 
-    reportsApi
-      .riskTrend(base, mock?.enabled ? mock : undefined)
-      .then((rt) => {
+    Promise.all([
+      reportsApi.riskTrend(base, mockArg),
+      reportsApi.riskTopLabels({ ...base, limit: 5, dimension: topRiskDimension }, mockArg),
+    ])
+      .then(([rt, top]) => {
         if (!alive) return
         setRiskPoints(rt.points)
+        setTopRiskItems(top.items)
       })
       .catch((e: unknown) => {
         if (!alive) return
@@ -135,6 +147,7 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
     channels,
     riskLabelPaths,
     granularity,
+    topRiskDimension,
     mock?.enabled,
     mock?.seed,
   ])
@@ -154,13 +167,6 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
   }, [riskPoints])
 
   const denominator = riskTotals.none + riskTotals.low + riskTotals.medium + riskTotals.high
-
-  const rangeLabel = useMemo(() => {
-    if (isCustom && rangeValid && customRange) {
-      return `${shortDay(customRange[0])} ~ ${shortDay(customRange[1])}`
-    }
-    return WINDOW_SEGMENTS.find((s) => s.value === windowKey)?.label ?? ''
-  }, [isCustom, rangeValid, customRange, windowKey])
 
   const disabledDate = (current: Dayjs) => {
     const anchor = customRange?.[0]
@@ -262,7 +268,7 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
               taxonomy={options?.risk_taxonomy ?? []}
               value={riskLabelPaths}
               onChange={setRiskLabelPaths}
-              placeholder="风险类型 / 审核项 / 审核点"
+              placeholder="审核项 / 审核点 / sub 审核点"
             />
           </div>
         </Space>
@@ -315,35 +321,81 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
         </Text>
       )}
 
-      <Card
-        size="small"
-        title={`风险等级分布 · ${rangeLabel}`}
-        extra={
-          <Space size="small" align="center">
-            <Text type="secondary">颗粒度</Text>
-            <Segmented
-              value={granularity ?? '__auto'}
-              onChange={(v) =>
-                setGranularity(v === '__auto' ? null : (v as RiskTrendGranularity))
-              }
-              options={[
-                { value: '__auto', label: '自动' },
-                ...GRANULARITY_SEGMENTS,
-              ]}
-            />
-          </Space>
-        }
-      >
-        <div style={{ height: 320 }}>
-          <RiskTrendChart
-            points={riskPoints}
-            loading={loading}
-            error={err}
-            height={320}
-            granularity={effectiveGranularity}
-          />
-        </div>
-      </Card>
+      <Row gutter={16}>
+        <Col xs={24} md={14}>
+          <Card
+            size="small"
+            title="趋势统计"
+            extra={
+              <Space size="small" align="center">
+                <Text type="secondary">颗粒度</Text>
+                <Segmented
+                  value={granularity ?? '__auto'}
+                  onChange={(v) =>
+                    setGranularity(v === '__auto' ? null : (v as RiskTrendGranularity))
+                  }
+                  options={[
+                    { value: '__auto', label: '自动' },
+                    ...GRANULARITY_SEGMENTS,
+                  ]}
+                />
+              </Space>
+            }
+          >
+            <div style={{ height: 360 }}>
+              <RiskTrendChart
+                points={riskPoints}
+                loading={loading}
+                error={err}
+                height={360}
+                granularity={effectiveGranularity}
+              />
+            </div>
+          </Card>
+        </Col>
+        <Col xs={24} md={10}>
+          <Card
+            size="small"
+            title="风险分布"
+            extra={
+              <Segmented
+                value={topRiskView}
+                onChange={(v) => setTopRiskView(v as 'chart' | 'list')}
+                options={[
+                  { value: 'chart', label: 'Top 5高风险' },
+                  { value: 'list', label: '全量列表' },
+                ]}
+              />
+            }
+          >
+            <div style={{ height: 360, display: 'flex', flexDirection: 'column' }}>
+              <Space size={8} style={{ marginBottom: 8, flexShrink: 0 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  维度
+                </Text>
+                <Segmented
+                  value={topRiskDimension}
+                  onChange={(v) =>
+                    setTopRiskDimension(v as 'category' | 'item' | 'point')
+                  }
+                  options={[
+                    { value: 'category', label: '一级标签' },
+                    { value: 'item', label: '二级标签' },
+                    { value: 'point', label: '三级标签' },
+                  ]}
+                />
+              </Space>
+              <div style={{ flex: 1, minHeight: 0 }}>
+                {topRiskView === 'chart' ? (
+                  <TopRiskBarChart items={topRiskItems} loading={loading} />
+                ) : (
+                  <TopRiskTable items={topRiskItems} loading={loading} columnTitle={DIMENSION_LABEL[topRiskDimension]} />
+                )}
+              </div>
+            </div>
+          </Card>
+        </Col>
+      </Row>
     </Space>
   )
 }
