@@ -39,3 +39,6 @@ adreview-platform/backend/docs/sql/
 /content-safety-sales-enablement.html
 /.workbuddy/
 /mvp-sprint-plan/
+
+# Tech review scratch notes (not part of adreview-platform source)
+/second-tech-review-*.md
