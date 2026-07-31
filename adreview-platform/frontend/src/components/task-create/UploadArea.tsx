@@ -15,19 +15,26 @@ const ACCEPT_MAP: Record<MaterialType, string | undefined> = {
 
 const AUDIO_ACCEPT = 'audio/mpeg,audio/mp4,audio/wav,audio/x-wav'
 
-type HintKey = Exclude<MaterialType, 'text'> | 'audio'
-
-const HINT_MAP: Record<HintKey, string> = {
-  image: '支持PNG、JPG、JPEG，小于10M，最长边不超过6000px的图',
-  video: '支持MP4、AVI、FLV、MOV格式，小于30MB、5分钟的视频',
-  pdf: '支持.txt，.doc，.docx，.pdf格式、小于5MB的文档',
-  audio: '支持MP3、WAV、AAC、AMR、M4A格式，小于10MB、5分钟的音频',
-}
-
-const TEXT_HINT_SINGLE =
-  '请输入需要审核的文本内容，单条文本，最多可以输入600字'
-const TEXT_HINT_BULK =
-  '请输入需要审核的文本，多个文本可以以换行分割，每行文本不超过600字，最多可输入100行文本内容。'
+const SINGLE_TEXT_HINT =
+  '支持单条文本内容审核，每条文本不超过600字。测试中请勿离开该页面或切换Tab页，否则会清空测试内容。'
+const SINGLE_IMAGE_HINT =
+  '支持本地图片文件测试。支持格式：PNG、JPG、JPEG、BMP、WEBP、TIFF、SVG、HEIC、GIF、ICO。单张图片大小不超过20MB，最长边不超过16,384px，总像素不超过1.67亿px。测试中请勿离开该页面或切换Tab页，否则会清空测试内容。'
+const SINGLE_VIDEO_HINT =
+  '支持本地视频文件测试。支持格式：AVI、FLV、MP4、MPG、ASF、WMV、MOV、WMA、RMVB、RM、FLASH、TS。单个视频文件大小不超过500MB。测试中请勿离开该页面或切换Tab页，否则会清空测试内容。'
+const SINGLE_PDF_HINT =
+  '支持本地文档文件测试。支持格式：DOC、DOCX、PPT、PPTX、PPS、PPSX、PDF、XLS、XLSX、XLTX、XLTM、HTML、TXT（UTF-8编码）。单个文档大小不超过200MB。测试中请勿离开该页面或切换Tab页，否则会清空测试内容。'
+const SINGLE_AUDIO_HINT =
+  '支持本地音频文件测试。支持格式：MP3、WAV、AAC、WMA、OGG、M4A、AMR。单个音频文件大小不超过500MB。测试中请勿离开该页面或切换Tab页，否则会清空测试内容。'
+const BULK_TEXT_HINT =
+  '支持多条文本批量审核，最多同时测试100条文本。多个文本以换行分割，每行文本不超过600字，最多可输入100行文本内容。测试中请勿离开该页面或切换Tab页，否则会清空测试内容。'
+const BULK_IMAGE_HINT =
+  '支持批量图片审核，最多同时测试100张图片。支持本地图片文件。支持格式：PNG、JPG、JPEG、BMP、WEBP、TIFF、SVG、HEIC、GIF、ICO。单张图片大小不超过20MB，最长边不超过16,384px，总像素不超过1.67亿px。测试中请勿离开该页面或切换Tab页，否则会清空测试内容。'
+const BULK_VIDEO_HINT =
+  '支持批量视频审核，最多同时测试10个视频文件。支持本地视频文件。支持格式：AVI、FLV、MP4、MPG、ASF、WMV、MOV、WMA、RMVB、RM、FLASH、TS。单个视频文件大小不超过500MB。测试中请勿离开该页面或切换Tab页，否则会清空测试内容。'
+const BULK_PDF_HINT =
+  '支持批量文档审核，最多同时测试10个文档文件。支持本地文档文件。支持格式：DOC、DOCX、PPT、PPTX、PPS、PPSX、PDF、XLS、XLSX、XLTX、XLTM、HTML、TXT（UTF-8编码）。单个文档大小不超过200MB。测试中请勿离开该页面或切换Tab页，否则会清空测试内容。'
+const BULK_AUDIO_HINT =
+  '支持批量语音审核，最多同时测试10个音频文件。支持本地音频文件。支持格式：MP3、WAV、AAC、WMA、OGG、M4A、AMR。单个音频文件大小不超过500MB。测试中请勿离开该页面或切换Tab页，否则会清空测试内容。'
 
 function HintText({ children }: { children: React.ReactNode }) {
   return (
@@ -45,10 +52,17 @@ function HintText({ children }: { children: React.ReactNode }) {
 }
 
 function hintFor(type: MaterialType, allowAudio: boolean, multiple: boolean): string {
-  if (type === 'text') return ''
-  const base = HINT_MAP[allowAudio ? 'audio' : type]
-  if (multiple) return `${base}，单次最多10张/个`
-  return base
+  if (allowAudio) return multiple ? BULK_AUDIO_HINT : SINGLE_AUDIO_HINT
+  switch (type) {
+    case 'text':
+      return multiple ? BULK_TEXT_HINT : SINGLE_TEXT_HINT
+    case 'image':
+      return multiple ? BULK_IMAGE_HINT : SINGLE_IMAGE_HINT
+    case 'video':
+      return multiple ? BULK_VIDEO_HINT : SINGLE_VIDEO_HINT
+    case 'pdf':
+      return multiple ? BULK_PDF_HINT : SINGLE_PDF_HINT
+  }
 }
 
 export interface UploadItem {
@@ -115,7 +129,7 @@ export default function UploadArea({
   if (type === 'text') {
     return (
       <div>
-        <HintText>{multiple ? TEXT_HINT_BULK : TEXT_HINT_SINGLE}</HintText>
+        <HintText>{multiple ? BULK_TEXT_HINT : SINGLE_TEXT_HINT}</HintText>
         {value.map((item) => (
           <div key={item.key} style={{ marginBottom: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -187,7 +201,7 @@ export default function UploadArea({
               marginBottom: 6,
             }}
           >
-            点击或上传文件
+            上传文件
           </div>
         </div>
       </div>
