@@ -1,4 +1,4 @@
-import { Card, Empty, Space, Spin } from 'antd'
+import { Card, Empty, Progress, Space, Spin, Table, Typography } from 'antd'
 import { Line, Column, Pie, Area } from '@ant-design/charts'
 import type {
   ReasonCount,
@@ -6,7 +6,10 @@ import type {
   RiskTimeseriesPoint,
   RiskDistributionBucket,
   RiskLevel,
+  TopRiskLabelItem,
 } from '@/types/domain'
+
+const { Text } = Typography
 
 const REJECT_COLOR = '#DC2626'
 const REVIEW_COLOR = '#D97706'
@@ -465,6 +468,157 @@ export function RiskTrendChart({
         </>
       )}
     </>
+  )
+  return <Spin spinning={!!loading}>{body}</Spin>
+}
+
+// ---------------------------------------------------------------------------
+// Top N 风险标签 (趋势分析右侧栏) — 一级 / 二级 / 三级 标签维度
+// ---------------------------------------------------------------------------
+
+const RISK_LEVEL_COLOR: Record<RiskLevel, string> = {
+  // 低饱和度: Top N 柱状图统一走 slate-600 (5 条都是高风险, 用中性灰区分条与条)
+  高风险: '#475569',
+  中风险: '#64748B',
+  低风险: '#94A3B8',
+  敏感: '#CBD5E1',
+  无风险: '#E2E8F0',
+}
+
+interface TopRiskChartProps {
+  items: TopRiskLabelItem[]
+  loading?: boolean
+  emptyText?: string
+  /** 列表视图列名 (随维度切换: 一级标签 / 二级标签 / 三级标签) */
+  columnTitle?: string
+}
+
+export function TopRiskBarChart({ items, loading, emptyText = '暂无数据' }: TopRiskChartProps) {
+  // 硬约束: 柱状图永远只展示前 5 条.
+  const top5 = items.slice(0, 5)
+  const body = (
+    <>
+      {top5.length === 0 ? (
+        <Empty description={emptyText} />
+      ) : (
+        (() => {
+          // 进度条按 percentage 绝对值 (0-100) 渲染, 首条拉满视觉.
+          const maxPct = Math.max(...top5.map((it) => it.percentage ?? 0), 1)
+          return (
+            // flex 拉伸填满父容器 (360px), 5 条均分空间 — 与左栏趋势图上下水平对齐
+            <div
+              style={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-around',
+                minHeight: 0,
+              }}
+            >
+              {top5.map((it, idx) => {
+                const pctAbs = it.percentage ?? 0
+                const pct = Math.max(2, Math.round((pctAbs / maxPct) * 100))
+                return (
+                  <div
+                    key={`${it.label}-${idx}`}
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      minHeight: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: 4,
+                      }}
+                    >
+                      <Space size={6} style={{ minWidth: 0, overflow: 'hidden' }}>
+                        <Text type="secondary" style={{ fontSize: 12, minWidth: 18 }}>
+                          {idx + 1}.
+                        </Text>
+                        <Text strong style={{ fontSize: 13 }} ellipsis>
+                          {it.label}
+                        </Text>
+                      </Space>
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          fontVariantNumeric: 'tabular-nums',
+                          flexShrink: 0,
+                          marginLeft: 8,
+                        }}
+                      >
+                        {pctAbs.toFixed(2)}%
+                      </Text>
+                    </div>
+                    <Progress
+                      percent={pct}
+                      showInfo={false}
+                      strokeColor={RISK_LEVEL_COLOR['高风险']}
+                      size="small"
+                      style={{ marginBottom: 0 }}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()
+      )}
+    </>
+  )
+  return <Spin spinning={!!loading}>{body}</Spin>
+}
+
+export function TopRiskTable({ items, loading, emptyText = '暂无数据', columnTitle = '标签' }: TopRiskChartProps) {
+  // 列表视图: 全量展示 + 翻页. 柱状图 (TopRiskBarChart) 仍硬限 5 条.
+  const columns = [
+    {
+      title: '#',
+      width: 50,
+      render: (_v: unknown, _r: TopRiskLabelItem, idx: number) => (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {idx + 1}
+        </Text>
+      ),
+    },
+    {
+      title: columnTitle,
+      dataIndex: 'label',
+      render: (v: string) => <Text strong>{v}</Text>,
+    },
+    {
+      title: '占比',
+      dataIndex: 'percentage',
+      width: 100,
+      render: (v: number | undefined) => (
+        <Text style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {(v ?? 0).toFixed(2)}%
+        </Text>
+      ),
+    },
+  ]
+  const dataSource = items.map((it, i) => ({ ...it, key: `${it.label}-${i}` }))
+  const body = items.length === 0 ? (
+    <Empty description={emptyText} />
+  ) : (
+    <Table
+      dataSource={dataSource}
+      columns={columns}
+      size="small"
+      pagination={{
+        pageSize: 5,
+        showSizeChanger: false,
+        showTotal: (total) => `共 ${total} 条`,
+        size: 'small',
+      }}
+      showHeader
+    />
   )
   return <Spin spinning={!!loading}>{body}</Spin>
 }

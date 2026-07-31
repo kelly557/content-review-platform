@@ -221,7 +221,7 @@ export default function QueryPage() {
       render: (_, r) => renderUuidCell(r.material_version_public_id, r.material_version_id),
     },
     {
-      title: <ColumnTitle text="风险标签" tip="三级路径：风险类型 / 审核项 / 审核点" />,
+      title: <ColumnTitle text="风险标签" tip="三级路径：审核项 / 审核点 / sub 审核点" />,
       key: 'labels',
       render: (_, r) => {
         if (!r.hits?.length) return '-'

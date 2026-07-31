@@ -582,6 +582,8 @@ export interface TopRiskLabelItem {
   count: number
   risk_level: RiskLevel
   last_hit_at: string
+  /** 占比 0-100, 仅前端 mock 填充; 后端字段可选 */
+  percentage?: number
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -1551,10 +1553,10 @@ export interface AuditPointBatchResult {
 }
 
 /**
- * sub-审核点（三级风险标签）展示型类型 — 2026-07-30 新增
+ * sub 审核点（三级标签）展示型类型 — 2026-07-30 新增
  *
  * - 仅前端 mock，不参与后端 schema
- * - 挂在 AuditPoint（审核点，二级风险标签）之下
+ * - 挂在 AuditPoint（审核点，二级标签）之下
  * - 每个 sub 自带 3 档风险分阈值（low/medium/high）
  * - 风险分阈值由 Box A「平台内置规则」表格的 sub 块内 RangeMinOnlyInput 编辑
  */

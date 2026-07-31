@@ -21,6 +21,7 @@ import type {
 import {
   buildAnomalyResponse,
   buildMockRootCause,
+  buildMockTopRiskLabels,
   buildRiskTrend,
   buildRiskTrendOptions,
   buildTrend,
@@ -326,9 +327,56 @@ export const reportsApi = {
       .get<RiskDistributionResponse>('/reports/risk/distribution', { params: { days } })
       .then((r) => r.data)
   },
-  riskTopLabels(days = 7, limit = 5) {
+  riskTopLabels(
+    opts:
+      | number
+      | {
+          window?: string
+          start?: string
+          end?: string
+          granularity?: RiskTrendGranularity
+          modalities?: string[]
+          strategy_codes?: string[]
+          channels?: string[]
+          account_ids?: string[]
+          ips?: string[]
+          risk_label_paths?: string[]
+          dimension?: 'category' | 'item' | 'point'
+          limit?: number
+        },
+    mockOrLimit?: MockMode | number,
+  ): Promise<TopRiskLabelsResponse> {
+    // Backward-compatible form: riskTopLabels(days, limit) — used by RiskProfileTab.
+    if (typeof opts === 'number') {
+      const days = opts
+      const limit = typeof mockOrLimit === 'number' ? mockOrLimit : 5
+      return api
+        .get<TopRiskLabelsResponse>('/reports/risk/top-labels', { params: { days, limit } })
+        .then((r) => r.data)
+    }
+    const objOpts = opts
+    const mock = mockOrLimit && typeof mockOrLimit !== 'number' ? mockOrLimit : undefined
+    if (mock?.enabled) {
+      return Promise.resolve(buildMockTopRiskLabels({ ...objOpts, mockSeed: mock.seed }))
+    }
+    const params: Record<string, unknown> = {}
+    if (objOpts.start && objOpts.end) {
+      params.start = objOpts.start
+      params.end = objOpts.end
+    } else if (objOpts.window) {
+      params.window = objOpts.window
+    }
+    if (objOpts.granularity) params.granularity = objOpts.granularity
+    if (objOpts.modalities?.length) params.modalities = objOpts.modalities
+    if (objOpts.strategy_codes?.length) params.strategy_codes = objOpts.strategy_codes
+    if (objOpts.channels?.length) params.channels = objOpts.channels
+    if (objOpts.account_ids?.length) params.account_ids = objOpts.account_ids
+    if (objOpts.ips?.length) params.ips = objOpts.ips
+    if (objOpts.risk_label_paths?.length) params.risk_label_paths = objOpts.risk_label_paths
+    if (objOpts.dimension) params.dimension = objOpts.dimension
+    if (objOpts.limit) params.limit = objOpts.limit
     return api
-      .get<TopRiskLabelsResponse>('/reports/risk/top-labels', { params: { days, limit } })
+      .get<TopRiskLabelsResponse>('/reports/risk/top-labels', { params })
       .then((r) => r.data)
   },
   exportAuditUrl() {

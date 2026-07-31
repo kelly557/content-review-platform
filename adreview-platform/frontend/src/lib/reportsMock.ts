@@ -21,7 +21,9 @@ import type {
   AnomalyResponse,
   MaterialType,
   RiskTimeseriesPoint,
+  RiskTrendGranularity,
   RiskTrendOptionsResponse,
+  TopRiskLabelItem,
 } from '@/types/domain'
 import type { DetectionModality } from '@/types/domain'
 
@@ -708,6 +710,130 @@ function pickN<T>(pool: T[], n: number, prng: () => number): T[] {
 }
 
 // ---------------------------------------------------------------------------
+// Top N 风险标签 (mock, 用于趋势分析页右侧栏).
+// ---------------------------------------------------------------------------
+
+export interface BuildMockTopRiskLabelsOpts {
+  window?: string
+  start?: string
+  end?: string
+  granularity?: RiskTrendGranularity
+  modalities?: string[]
+  strategy_codes?: string[]
+  channels?: string[]
+  account_ids?: string[]
+  ips?: string[]
+  risk_label_paths?: string[]
+  limit?: number
+  mockSeed?: number
+  /** 维度: category(审核项-一级标签) / item(审核点-二级标签) / point(sub 审核点-三级标签) */
+  dimension?: TopRiskDimension
+}
+
+// 三个维度各自的标签池 (mock).
+// category = 审核项 (一级标签), item = 审核点 (二级标签), point = sub 审核点 (三级标签).
+const TOP_RISK_DIMENSION_POOLS = {
+  category: [
+    '政治敏感',
+    '暴恐',
+    '色情',
+    '广告',
+    '辱骂',
+    '低俗',
+    '诱导分享',
+    '未成年人',
+  ],
+  item: [
+    '涉政人物',
+    '反政府',
+    '恐怖组织',
+    '持械袭击',
+    '低俗内容',
+    '广告标识',
+    '辱骂词汇',
+    '未成年人保护',
+  ],
+  point: [
+    '现任领导',
+    '历史人物',
+    '示威游行',
+    'ISIS',
+    '武器识别',
+    '色情裸露',
+    '广告关键词',
+    '仇恨言论',
+  ],
+} as const
+
+export type TopRiskDimension = keyof typeof TOP_RISK_DIMENSION_POOLS
+
+function daysFromWindow(window: string): number {
+  if (window === '1h') return 1
+  if (window === '24h') return 1
+  if (window === 'today') return 1
+  if (window === '30d') return 30
+  return 7
+}
+
+export function buildMockTopRiskLabels(
+  opts: BuildMockTopRiskLabelsOpts = {},
+): { days: number; items: TopRiskLabelItem[] } {
+  const dimension: TopRiskDimension = opts.dimension ?? 'point'
+  const filterSeed = JSON.stringify({
+    modalities: opts.modalities ?? [],
+    strategy_codes: opts.strategy_codes ?? [],
+    channels: opts.channels ?? [],
+    account_ids: opts.account_ids ?? [],
+    ips: opts.ips ?? [],
+    risk_label_paths: opts.risk_label_paths ?? [],
+    dimension,
+  })
+  const seed =
+    (opts.mockSeed ?? 0xb1c2d3e4) ^
+    hashString(`top-risk-labels|${opts.window ?? '7d'}|${opts.granularity ?? 'day'}|${filterSeed}`)
+  const prng = mulberry32(seed)
+
+  // 全量高风险标签: 不再受 opts.limit 约束, 上限 20 (翻页友好).
+  // 旧 opts.limit 仍生效以便兼容, 但默认 > 20 即可视为"全量".
+  const hardMax = opts.limit && opts.limit > 0 ? Math.max(opts.limit, 20) : 20
+  const pool = [...TOP_RISK_DIMENSION_POOLS[dimension]]
+  // Fisher-Yates shuffle
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(prng() * (i + 1))
+    ;[pool[i], pool[j]] = [pool[j], pool[i]]
+  }
+  const labels = pool.slice(0, Math.min(pool.length, hardMax))
+
+  // 全部生成高风险 (按用户决策 1), 计算 percentage.
+  const raw = labels.map((label, idx) => {
+    // 衰减: count[idx] = 1200 * 0.6^idx + jitter
+    const base = 1200 * Math.pow(0.6, idx)
+    const jitter = prng() * 80 - 40
+    const count = Math.max(20, Math.round(base + jitter))
+    const hoursAgo = Math.floor(prng() * 24)
+    return {
+      label,
+      count,
+      risk_level: '高风险' as const,
+      last_hit_at: new Date(Date.now() - hoursAgo * 60 * 60 * 1000).toISOString(),
+    }
+  })
+
+  const total = raw.reduce((s, x) => s + x.count, 0) || 1
+  const items: TopRiskLabelItem[] = raw.map((it) => ({
+    ...it,
+    percentage: Number(((it.count / total) * 100).toFixed(2)),
+  }))
+  // 排序: count 降序 (用户决策 1A)
+  items.sort((a, b) => b.count - a.count)
+
+  return {
+    days: daysFromWindow(opts.window ?? '7d'),
+    items,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 类型守卫 — 公共导出
 // ---------------------------------------------------------------------------
 
@@ -717,6 +843,7 @@ export const __testing = {
   buildBuckets,
   pickGranularity,
   RULE_LABEL,
+  buildMockTopRiskLabels,
 }
 
 /** 防止 unused import 报错 */

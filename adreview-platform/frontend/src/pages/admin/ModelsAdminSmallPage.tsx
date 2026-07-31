@@ -620,6 +620,8 @@ export default function ModelsAdminSmallPage() {
   const [draftMid, setDraftMid] = useState<[number, number]>([0, 0])
   const [draftHigh, setDraftHigh] = useState<[number, number]>([0, 1])
 
+  // ── 设计说明卡（折叠子节）──────────────────────
+
   const startEdit = (key: ThresholdKey) => {
     if (!selected) return
     if (!selected.riskThreshold) return
