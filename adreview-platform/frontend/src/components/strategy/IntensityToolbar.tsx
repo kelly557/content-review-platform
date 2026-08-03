@@ -1,17 +1,23 @@
-import { Button, Radio, Tooltip, Typography } from 'antd'
+import { Button, Radio, Switch, Tooltip, Typography } from 'antd'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 import type { ReactNode } from 'react'
-import { DEFAULT_INTENSITY, type Intensity } from '@/lib/threshold'
+import { type Intensity } from '@/lib/threshold'
 
 const { Text } = Typography
 
 interface Props {
+  /** 检测强度开关状态 */
+  enabled: boolean
+  /** 开关切换回调 */
+  onToggleEnabled: (v: boolean) => void
   /** 当前强度档，受控 */
   value: Intensity
-  /** 切换强度档时回调（不含应用动作） */
+  /** 切换强度档时回调 */
   onChange: (v: Intensity) => void
-  /** 点击「恢复默认」按钮：回退到中档并应用预设 */
+  /** 点击「恢复默认」按钮：回退到页面加载快照 */
   onRestoreDefault: () => void
+  /** 当前阈值是否有改动（控制恢复默认 disabled） */
+  dirty: boolean
 }
 
 const HELP_TITLE = '检测强度说明'
@@ -39,9 +45,12 @@ const HELP_CONTENT: ReactNode = (
 )
 
 export default function IntensityToolbar({
+  enabled,
+  onToggleEnabled,
   value,
   onChange,
   onRestoreDefault,
+  dirty,
 }: Props) {
   return (
     <div
@@ -55,26 +64,37 @@ export default function IntensityToolbar({
         flexWrap: 'wrap',
       }}
     >
+      <Switch
+        checked={enabled}
+        onChange={onToggleEnabled}
+        checkedChildren="开"
+        unCheckedChildren="关"
+        aria-label="启用检测强度"
+      />
       <Text strong style={{ color: '#0F172A' }}>
         检测强度
       </Text>
-      <Radio.Group
-        value={value}
-        onChange={(e) => onChange(e.target.value as Intensity)}
-        optionType="button"
-        buttonStyle="solid"
-        aria-label="检测强度档位"
-      >
-        <Radio.Button value="low">低</Radio.Button>
-        <Radio.Button value="medium">中</Radio.Button>
-        <Radio.Button value="high">高</Radio.Button>
-      </Radio.Group>
-      <Button onClick={onRestoreDefault} disabled={value === DEFAULT_INTENSITY}>
-        恢复默认（中档）
+      {enabled && (
+        <>
+          <Radio.Group
+            value={value}
+            onChange={(e) => onChange(e.target.value as Intensity)}
+            optionType="button"
+            buttonStyle="solid"
+            aria-label="检测强度档位"
+          >
+            <Radio.Button value="low">低</Radio.Button>
+            <Radio.Button value="medium">中</Radio.Button>
+            <Radio.Button value="high">高</Radio.Button>
+          </Radio.Group>
+          <Tooltip title={HELP_CONTENT} placement="topLeft" overlayStyle={{ maxWidth: 380 }}>
+            <QuestionCircleOutlined style={{ color: '#64748B', cursor: 'help' }} />
+          </Tooltip>
+        </>
+      )}
+      <Button onClick={onRestoreDefault} disabled={!dirty}>
+        恢复默认
       </Button>
-      <Tooltip title={HELP_CONTENT} placement="topLeft" overlayStyle={{ maxWidth: 380 }}>
-        <QuestionCircleOutlined style={{ color: '#64748B', cursor: 'help' }} />
-      </Tooltip>
     </div>
   )
 }

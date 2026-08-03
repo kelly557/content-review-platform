@@ -156,6 +156,13 @@ export default function CreateStrategyForm({
   )
   /** 检测强度档位：低/中/高。默认中档。仅记录选择，不主动改写阈值，需点应用/恢复才生效。 */
   const [intensity, setIntensity] = useState<Intensity>(DEFAULT_INTENSITY)
+  /** 检测强度开关：默认关闭。关闭时隐藏 Radio/恢复按钮；开启后才可选档应用预设。 */
+  const [intensityEnabled, setIntensityEnabled] = useState(false)
+  /** 页面加载时的 pointOverrides 快照，用于「恢复默认」回退。创建模式为空 map。 */
+  const [initialOverridesSnapshot, setInitialOverridesSnapshot] =
+    useState<MediaPointOverrideMap | null>(mode === 'create' ? EMPTY_MEDIA_OVERRIDES : null)
+  /** 阈值是否有改动（手动编辑或应用预设后置 true，恢复默认后置 false）。 */
+  const [overridesDirty, setOverridesDirty] = useState(false)
   const [voiceRuleMode, setVoiceRuleMode] = useState<VoiceRuleMode>('reuse_text')
   const [audioFeatures, setAudioFeatures] = useState<AudioFeatures>(DEFAULT_AUDIO_FEATURES)
   const [docComposeModes, setDocComposeModes] = useState<DocComposeModes>(DEFAULT_DOC_COMPOSE_MODES)
@@ -267,6 +274,7 @@ export default function CreateStrategyForm({
       durationMode: useRange ? 'range' : 'always',
       range: useRange ? ([from, until] as [Dayjs, Dayjs]) : undefined,
     })
+    setInitialOverridesSnapshot(overridesFromBackend)
     setHydrated(true)
   }, [mode, initial, form])
 
@@ -374,6 +382,7 @@ export default function CreateStrategyForm({
    * 将当前选中的检测强度档位应用到所有已启用审核点的风险阈值。
    * - 始终更新 intensity 状态，驱动 RulesTreeView 的 sub 阈值显示回退
    * - 仅当有启用 point 时才写入 pointOverrides（保存语义：未启用的 point 不提交阈值）
+   * - 应用预设 = 整体覆盖（含用户已手动改的 point 也重置为新档预设）
    */
   const applyPreset = (preset: Intensity) => {
     setIntensity(preset)
@@ -381,22 +390,46 @@ export default function CreateStrategyForm({
     const enabledCount = countEnabledPoints(pointMap)
     if (enabledCount === 0) {
       // 无启用点：仅更新 intensity，sub 显示通过 fallback 机制响应
+      setOverridesDirty(true)
       message.success(`已将所有风险阈值重置为${label}档默认值`)
       return
     }
     const next = applyIntensityPreset(pointMap, preset)
     setPointOverrides(next)
+    setOverridesDirty(true)
     message.success(`已将所有风险阈值重置为${label}档默认值`)
   }
 
-  /** 检测强度切换：切换即应用（更新 intensity + 写 override） */
+  /** 检测强度档位切换：切换即应用（更新 intensity + 写 override） */
   const handleIntensityChange = (v: Intensity) => {
     applyPreset(v)
   }
 
-  /** 恢复默认（中档）：档位回中 + 应用中档预设 */
+  /**
+   * 检测强度开关切换。
+   * - 开启：显示 Radio，不主动改阈值（等用户选档位）
+   * - 关闭：隐藏 Radio，恢复到页面加载快照（档位回中 + overrides 回快照 + 清 dirty）
+   */
+  const handleIntensityToggle = (checked: boolean) => {
+    setIntensityEnabled(checked)
+    if (!checked && initialOverridesSnapshot) {
+      setIntensity(DEFAULT_INTENSITY)
+      setPointOverrides(initialOverridesSnapshot)
+      setOverridesDirty(false)
+    }
+  }
+
+  /**
+   * 恢复默认：回退到页面加载快照（撤销检测强度改动 + 手动自定义改动）。
+   * - 档位回中（但开关状态不变——用户可能仍想用检测强度）
+   * - overrides 回快照
+   * - 清 dirty
+   */
   const handleRestoreDefault = () => {
-    applyPreset(DEFAULT_INTENSITY)
+    if (!initialOverridesSnapshot) return
+    setIntensity(DEFAULT_INTENSITY)
+    setPointOverrides(initialOverridesSnapshot)
+    setOverridesDirty(false)
   }
 
   const buildDefinitionPayload = (): Record<string, unknown> | undefined => {
@@ -662,11 +695,14 @@ export default function CreateStrategyForm({
           >
             {/* 大模型审核能力：单一开关，置于通用规则上方。needs_multimodal_hint 由后端按 enabled_items 回填 */}
             <LlmReviewCard value={llmReview} onChange={setLlmReview} />
-            {/* 检测强度：低/中/高三档，控制全部启用点的风险阈值默认值 */}
+            {/* 检测强度：开关控制是否启用；恢复默认独立于开关，回退到加载快照 */}
             <IntensityToolbar
+              enabled={intensityEnabled}
+              onToggleEnabled={handleIntensityToggle}
               value={intensity}
               onChange={handleIntensityChange}
               onRestoreDefault={handleRestoreDefault}
+              dirty={overridesDirty}
             />
             <StrategyTypeTabs
               enabledItemIds={enabledItems}
@@ -676,7 +712,7 @@ export default function CreateStrategyForm({
               onItemLibraryLink={onItemLibraryLink}
               libraryRefreshTick={libraryRefreshTick}
               onPointMapChange={setPointMap}
-              onPointOverrideChange={(media, itemId, pointId, override) =>
+              onPointOverrideChange={(media, itemId, pointId, override) => {
                 setPointOverrides((prev) => {
                   const next: MediaPointOverrideMap = { ...prev, [media]: { ...prev[media] } }
                   const itemBucket = { ...(next[media][itemId] ?? {}) }
@@ -689,6 +725,8 @@ export default function CreateStrategyForm({
                   if (merged.medium_threshold_max === null) delete merged.medium_threshold_max
                   if (merged.high_threshold_min === null) delete merged.high_threshold_min
                   if (merged.high_threshold_max === null) delete merged.high_threshold_max
+                  if (merged.low_threshold_min === null) delete merged.low_threshold_min
+                  if (merged.low_threshold_max === null) delete merged.low_threshold_max
                   if (Object.keys(merged).length === 0) {
                     delete itemBucket[pointId]
                   } else {
@@ -704,7 +742,8 @@ export default function CreateStrategyForm({
                   }
                   return next
                 })
-              }
+                setOverridesDirty(true)
+              }}
               onPointToggle={(media, itemId, pointId, checked) => {
                 // 同步 enabledItems 集合：point 勾选 → item 加入；point 取消 → 若 item 下无勾选 point 则移除
                 setEnabledItems((prev) => {

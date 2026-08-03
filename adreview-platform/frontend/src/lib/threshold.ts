@@ -22,8 +22,9 @@ export interface IntensityPreset {
  * - 低等级（高召回）：highMin=50，风险分 >50 即判高风险，覆盖最广，少漏报。
  * - 中等级（默认/平衡）：highMin=70，三段均衡切分。
  * - 高等级（高精确）：highMin=90，仅风险分 >90 才判高风险，置信度门槛最高，少误报。
+ *   风险分 <30 视为安全（无风险），低风险段从 30 起算。
  *
- * 三段以 0.01 间隔不重叠，覆盖 [0, 100]（与 RulesTreeView 高风险段上限 100 一致）。
+ * 三段以 0.01 间隔不重叠，覆盖 [lowMin, 100]（与 RulesTreeView 高风险段上限 100 一致）。
  */
 export const INTENSITY_PRESETS: Record<Intensity, IntensityPreset> = {
   low: {
@@ -37,7 +38,7 @@ export const INTENSITY_PRESETS: Record<Intensity, IntensityPreset> = {
     high: [70.01, 100],
   },
   high: {
-    low: [0, 45],
+    low: [30, 45],
     medium: [45.01, 90],
     high: [90.01, 100],
   },
