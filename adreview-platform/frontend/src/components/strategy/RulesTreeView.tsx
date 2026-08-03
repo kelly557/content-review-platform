@@ -19,9 +19,9 @@ import { auditPointsApi } from '@/api/auditPoints'
 import type {
   AuditItem,
   AuditPoint,
-  SubAuditPointOverride,
 } from '@/types/domain'
 import { getMockSubAuditPoints } from '@/lib/riskPointMock'
+import { getIntensityFallback, DEFAULT_INTENSITY, type Intensity } from '@/lib/threshold'
 import type { ImageTextMode } from '@/types/domain'
 import { type CategoryKey } from './constants'
 import {
@@ -80,6 +80,8 @@ interface Props {
     pointMap: ItemPointMap
     onPointMapChange: (itemId: number, next: PointMap) => void
   }
+  /** 当前检测强度档位：用于 sub 阈值在没有用户 override 时作为显示回退 */
+  intensity?: Intensity
 }
 
 const PACKAGE_TO_MEDIA: Record<string, CategoryKey> = {
@@ -96,12 +98,13 @@ export default function RulesTreeView({
   getPointMap,
   onPointMapChange,
   pointOverrides,
-  onPointOverrideChange: _onPointOverrideChange,
+  onPointOverrideChange,
   onPointToggle: _onPointToggle,
   refreshKey,
   imageTextBar,
   onSelectedItemChange,
   imageTextConfig,
+  intensity = DEFAULT_INTENSITY,
 }: Props) {
   const [items, setItems] = useState<AuditItem[]>([])
   const [pointsByItem, setPointsByItem] = useState<Record<number, AuditPoint[]>>(
@@ -283,9 +286,11 @@ export default function RulesTreeView({
                   getPointMap={getPointMap}
                   pointOverrides={pointOverrides}
                   onPointMapChange={onPointMapChange}
+                  onPointOverrideChange={onPointOverrideChange}
                   highlightItemId={highlightItemId}
                   mediaKey={mediaKey}
                   imageTextBar={imageTextBar}
+                  intensity={intensity}
                 />
               ) : (
                 <Empty
@@ -501,19 +506,33 @@ function PointsColumn({
   getPointMap,
   pointOverrides,
   onPointMapChange,
+  onPointOverrideChange,
   highlightItemId,
   mediaKey,
   imageTextBar,
+  intensity,
 }: {
   items: AuditItem[]
   pointsByItem: Record<number, AuditPoint[]>
   getPointMap: (itemId: number) => PointMap
   pointOverrides: MediaPointOverrideMap
   onPointMapChange: (itemId: number, next: PointMap) => void
+  onPointOverrideChange: (itemId: number, pointId: number, override: {
+    medium_threshold?: number | null
+    high_threshold?: number | null
+    low_threshold_min?: number | null
+    low_threshold_max?: number | null
+    medium_threshold_min?: number | null
+    medium_threshold_max?: number | null
+    high_threshold_min?: number | null
+    high_threshold_max?: number | null
+  }) => void
   highlightItemId: number | null
   mediaKey: CategoryKey
   /** 「图文」bar;当 record.item.name_cn === '图文' 时,在 section header 位置渲染 */
   imageTextBar?: ReactNode
+  /** 当前检测强度档位：sub 阈值无 override 时的显示回退 */
+  intensity: Intensity
 }) {
   const dataSource: FlatRowRecord[] = []
   items.forEach((it) => {
@@ -544,16 +563,6 @@ function PointsColumn({
 
 const COL_TOTAL = 2
   const [subEnabledMap, setSubEnabledMap] = useState<Record<number, boolean>>({})
-  const [subOverrides, setSubOverrides] = useState<
-    Record<number, SubAuditPointOverride>
-  >({})
-
-  const onSubOverrideChange = (
-    subId: number,
-    patch: Partial<SubAuditPointOverride>,
-  ) => {
-    setSubOverrides((m) => ({ ...m, [subId]: { ...m[subId], ...patch } }))
-  }
 
   // 2026-07-30 新增：每个父审核点下的 sub 列表(供 ☑ 三态 + label 列共享)
   const subsByPointId = useMemo(() => {
@@ -737,12 +746,14 @@ const COL_TOTAL = 2
                 <Space direction="vertical" size={10} style={{ width: '100%' }}>
                   {subs.map((sub) => {
                     const enabled = subEnabledMap[sub.id] ?? sub.is_enabled
-                    const ov = subOverrides[sub.id] ?? {}
-                    const lowMin = ov.low_threshold_min ?? sub.low_threshold
+                    const fallback = getIntensityFallback(intensity)
+                    const parentOv =
+                      pointOverrides[mediaKey]?.[record.item.id]?.[record.point.id] ?? {}
+                    const lowMin = parentOv.low_threshold_min ?? fallback.low_min
                     const medMin =
-                      ov.medium_threshold_min ?? sub.medium_threshold
+                      parentOv.medium_threshold_min ?? fallback.medium_min
                     const highMin =
-                      ov.high_threshold_min ?? sub.high_threshold
+                      parentOv.high_threshold_min ?? fallback.high_min
                     const lowMaxDisplay =
                       typeof medMin === 'number'
                         ? Math.max(0, medMin - 0.01)
@@ -758,9 +769,9 @@ const COL_TOTAL = 2
                         : 99.99
                     const warning = checkThresholdConsistency(
                       medMin,
-                      ov.medium_threshold_max,
+                      parentOv.medium_threshold_max,
                       highMin,
-                      ov.high_threshold_max,
+                      parentOv.high_threshold_max,
                     )
                     return (
                       <div
@@ -796,7 +807,7 @@ const COL_TOTAL = 2
                             maxDisplay={lowMaxDisplay}
                             maxConstraint={lowMaxConstraint}
                             onMinChange={(v) =>
-                              onSubOverrideChange(sub.id, {
+                              onPointOverrideChange(record.item.id, record.point.id, {
                                 low_threshold_min: v ?? undefined,
                                 low_threshold_max: undefined,
                               })
@@ -809,7 +820,7 @@ const COL_TOTAL = 2
                             maxDisplay={mediumMaxDisplay}
                             maxConstraint={mediumMaxConstraint}
                             onMinChange={(v) =>
-                              onSubOverrideChange(sub.id, {
+                              onPointOverrideChange(record.item.id, record.point.id, {
                                 medium_threshold_min: v ?? undefined,
                                 medium_threshold_max: undefined,
                               })
@@ -822,7 +833,7 @@ const COL_TOTAL = 2
                             maxDisplay={100}
                             maxConstraint={100}
                             onMinChange={(v) =>
-                              onSubOverrideChange(sub.id, {
+                              onPointOverrideChange(record.item.id, record.point.id, {
                                 high_threshold_min: v ?? undefined,
                                 high_threshold_max: undefined,
                               })
@@ -988,8 +999,12 @@ function IndependentTextRulesBlock({
         getPointMap={(itemId) => pointMap[itemId] ?? {}}
         pointOverrides={EMPTY_MEDIA_OVERRIDES}
         onPointMapChange={onPointMapChange}
+        onPointOverrideChange={() => {
+          /* 图文独立规则暂不支持阈值 override，no-op */
+        }}
         highlightItemId={null}
         mediaKey="text"
+        intensity={DEFAULT_INTENSITY}
       />
     </div>
   )

@@ -27,6 +27,7 @@ import {
   type MediaPointOverrideMap,
   type PointMap,
 } from './pointLevel'
+import type { Intensity } from '@/lib/threshold'
 
 const PACKAGE_BY_MEDIA: Record<CategoryKey, string> = {
   image: 'image_audit_pro',
@@ -103,6 +104,8 @@ interface Props {
    * 重新拉 items 让左栏 badge 同步刷新。
    */
   libraryRefreshTick?: number
+  /** 当前检测强度档位：透传给 RulesTreeView 用于 sub 阈值显示回退 */
+  intensity?: Intensity
 }
 
 export default function StrategyTypeTabs({
@@ -128,6 +131,7 @@ export default function StrategyTypeTabs({
   imageTextConfig,
   onItemLibraryLink,
   libraryRefreshTick,
+  intensity,
 }: Props) {
   const [activeCategory, setActiveCategory] = useState<CategoryKey>(defaultActiveKey)
 
@@ -327,6 +331,7 @@ export default function StrategyTypeTabs({
               }
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
+              intensity={intensity}
             />
           )}
           {cat.key === 'doc' && showDocRulesTree && (
@@ -345,6 +350,7 @@ export default function StrategyTypeTabs({
               }
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
+              intensity={intensity}
             />
           )}
           {cat.key === 'video' && showVideoRulesTree && (
@@ -363,6 +369,7 @@ export default function StrategyTypeTabs({
               }
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
+              intensity={intensity}
             />
           )}
           {/* 普通 tab（非合成类）的规则树 */}
@@ -388,6 +395,7 @@ export default function StrategyTypeTabs({
                 imageTextBar={cat.key === 'image' ? imageTextBar : undefined}
                 onSelectedItemChange={cat.key === 'image' ? onSelectedItemChange : undefined}
                 imageTextConfig={cat.key === 'image' ? imageTextConfig : undefined}
+                intensity={intensity}
               />
             </>
           )}

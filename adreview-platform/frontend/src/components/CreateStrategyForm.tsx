@@ -56,6 +56,12 @@ import {
   type PointOverride,
 } from './strategy/pointLevel'
 import { LlmReviewCard } from './strategy/LlmReviewCard'
+import IntensityToolbar from './strategy/IntensityToolbar'
+import {
+  applyIntensityPreset,
+  DEFAULT_INTENSITY,
+  type Intensity,
+} from '@/lib/threshold'
 
 type DurationMode = 'always' | 'range'
 
@@ -148,6 +154,8 @@ export default function CreateStrategyForm({
   const [pointOverrides, setPointOverrides] = useState<MediaPointOverrideMap>(
     EMPTY_MEDIA_OVERRIDES,
   )
+  /** 检测强度档位：低/中/高。默认中档。仅记录选择，不主动改写阈值，需点应用/恢复才生效。 */
+  const [intensity, setIntensity] = useState<Intensity>(DEFAULT_INTENSITY)
   const [voiceRuleMode, setVoiceRuleMode] = useState<VoiceRuleMode>('reuse_text')
   const [audioFeatures, setAudioFeatures] = useState<AudioFeatures>(DEFAULT_AUDIO_FEATURES)
   const [docComposeModes, setDocComposeModes] = useState<DocComposeModes>(DEFAULT_DOC_COMPOSE_MODES)
@@ -361,6 +369,35 @@ export default function CreateStrategyForm({
 
   /** modal 取消/关闭 */
   const onLibraryCancel = () => setLinkLibraryItem(null)
+
+  /**
+   * 将当前选中的检测强度档位应用到所有已启用审核点的风险阈值。
+   * - 始终更新 intensity 状态，驱动 RulesTreeView 的 sub 阈值显示回退
+   * - 仅当有启用 point 时才写入 pointOverrides（保存语义：未启用的 point 不提交阈值）
+   */
+  const applyPreset = (preset: Intensity) => {
+    setIntensity(preset)
+    const label = preset === 'low' ? '低' : preset === 'high' ? '高' : '中'
+    const enabledCount = countEnabledPoints(pointMap)
+    if (enabledCount === 0) {
+      // 无启用点：仅更新 intensity，sub 显示通过 fallback 机制响应
+      message.success(`已将所有风险阈值重置为${label}档默认值`)
+      return
+    }
+    const next = applyIntensityPreset(pointMap, preset)
+    setPointOverrides(next)
+    message.success(`已将所有风险阈值重置为${label}档默认值`)
+  }
+
+  /** 检测强度切换：切换即应用（更新 intensity + 写 override） */
+  const handleIntensityChange = (v: Intensity) => {
+    applyPreset(v)
+  }
+
+  /** 恢复默认（中档）：档位回中 + 应用中档预设 */
+  const handleRestoreDefault = () => {
+    applyPreset(DEFAULT_INTENSITY)
+  }
 
   const buildDefinitionPayload = (): Record<string, unknown> | undefined => {
     const out: Record<string, unknown> = {}
@@ -625,10 +662,17 @@ export default function CreateStrategyForm({
           >
             {/* 大模型审核能力：单一开关，置于通用规则上方。needs_multimodal_hint 由后端按 enabled_items 回填 */}
             <LlmReviewCard value={llmReview} onChange={setLlmReview} />
+            {/* 检测强度：低/中/高三档，控制全部启用点的风险阈值默认值 */}
+            <IntensityToolbar
+              value={intensity}
+              onChange={handleIntensityChange}
+              onRestoreDefault={handleRestoreDefault}
+            />
             <StrategyTypeTabs
               enabledItemIds={enabledItems}
               pointMap={pointMap}
               pointOverrides={pointOverrides}
+              intensity={intensity}
               onItemLibraryLink={onItemLibraryLink}
               libraryRefreshTick={libraryRefreshTick}
               onPointMapChange={setPointMap}
