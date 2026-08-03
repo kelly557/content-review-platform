@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   App,
@@ -7,7 +7,6 @@ import {
   Form,
   Input,
   Popconfirm,
-  Select,
   Space,
   Table,
   Tabs,
@@ -27,40 +26,23 @@ import {
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { librariesApi } from '@/api/libraries'
-import { auditItemsApi } from '@/api/auditItems'
-import { auditPointsApi } from '@/api/auditPoints'
-import { isMockRiskPointId } from '@/lib/riskPointMock'
-import type {
-  AuditItem,
-  AuditPoint,
-  Library,
-  LibraryCreate,
-  LibraryListItem,
-} from '@/types/domain'
+import type { Library, LibraryCreate, LibraryListItem } from '@/types/domain'
 import { parseReplyFile } from '@/lib/libraryImport'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
+import LibraryTagPicker from '@/components/library/LibraryTagPicker'
 import PlatformToggle from '@/components/library/PlatformToggle'
 import { useAuthStore } from '@/store'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 
 const MAX_PAIRS = 1000
-const TEXT_PACKAGE = 'text_audit_pro'
-
-interface RiskPointOption {
-  value: number
-  label: string
-  itemId: number
-  itemName: string
-  isMock: boolean
-}
 
 interface CreateFormValues {
   name: string
   description?: string
   pairsText?: string
   is_platform?: boolean
-  risk_point_id?: number
+  tag_id?: string | null
 }
 
 export default function ReplyLibraryListPage() {
@@ -71,16 +53,11 @@ export default function ReplyLibraryListPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [q, setQ] = useState('')
-  const [riskPointFilter, setRiskPointFilter] = useState<number | undefined>(
-    undefined,
-  )
 
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [creatingImport, setImporting] = useState(false)
   const [createForm] = Form.useForm<CreateFormValues>()
-  const [riskPointOptions, setRiskPointOptions] = useState<RiskPointOption[]>([])
-  const [riskPointsLoading, setRiskPointsLoading] = useState(false)
 
   const [deleteTarget, setDeleteTarget] = useState<Library | null>(null)
 
@@ -90,7 +67,6 @@ export default function ReplyLibraryListPage() {
       const data = await librariesApi.list({
         type: 'reply',
         q: q || undefined,
-        risk_point_id: riskPointFilter,
         size: 50,
       })
       setItems(data.items)
@@ -100,54 +76,19 @@ export default function ReplyLibraryListPage() {
     }
   }
 
-  const fetchRiskPoints = async () => {
-    setRiskPointsLoading(true)
-    try {
-      const [aiList, pointList] = await Promise.all([
-        auditItemsApi.list(TEXT_PACKAGE).catch(() => [] as AuditItem[]),
-        auditPointsApi.list(TEXT_PACKAGE).catch(() => [] as AuditPoint[]),
-      ])
-      const itemNameById = new Map<number, string>()
-      aiList.forEach((it) => itemNameById.set(it.id, it.name_cn))
-      const opts: RiskPointOption[] = pointList.map((p) => ({
-        value: p.id,
-        label: p.label_cn || p.label || p.code,
-        itemId: p.item_id,
-        itemName: itemNameById.get(p.item_id) ?? `审核项 ${p.item_id}`,
-        isMock: p.is_mock === true || isMockRiskPointId(p.id),
-      }))
-      opts.sort((a, b) => {
-        if (a.itemId !== b.itemId) return a.itemId - b.itemId
-        return a.label.localeCompare(b.label, 'zh-CN')
-      })
-      setRiskPointOptions(opts)
-    } finally {
-      setRiskPointsLoading(false)
-    }
-  }
-
   useEffect(() => {
     void fetchLibraries()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [riskPointFilter])
+  }, [])
 
   const openCreate = () => {
     createForm.resetFields()
     setCreateOpen(true)
-    void fetchRiskPoints()
   }
 
   const submitCreate = async () => {
     const v = await createForm.validateFields().catch(() => null)
     if (!v) return
-    if (!v.risk_point_id) {
-      message.error('请选择二级风险标签（审核点）')
-      return
-    }
-    if (isMockRiskPointId(v.risk_point_id)) {
-      message.error('所选风险标签为演示数据,不可提交,请等待后端恢复后重试')
-      return
-    }
     const pairsText: string = v.pairsText ?? ''
     const words: string[] = pairsText
       .split(/\r?\n/)
@@ -159,7 +100,7 @@ export default function ReplyLibraryListPage() {
       description: v.description,
       words,
       is_platform: v.is_platform ?? false,
-      risk_point_id: v.risk_point_id,
+      tag_id: v.tag_id ?? null,
     }
     setCreating(true)
     try {
@@ -179,16 +120,11 @@ export default function ReplyLibraryListPage() {
     }
   }
 
-  const filterOptions = useMemo<RiskPointOption[]>(
-    () => riskPointOptions,
-    [riskPointOptions],
-  )
-
   const cols: TableColumnsType<LibraryListItem> = [
     {
       title: '名称',
       dataIndex: 'name',
-      width: '22%',
+      width: '24%',
       render: (v: string, row) => (
         <Space size={6}>
           <Link
@@ -203,31 +139,20 @@ export default function ReplyLibraryListPage() {
     },
     {
       title: '风险标签',
-      dataIndex: 'risk_point',
-      width: '22%',
-      render: (v: LibraryListItem['risk_point']) => {
-        if (!v) {
-          return (
-            <Tooltip title="存量代答库,未指定二级风险标签">
-              <Tag color="default" style={{ margin: 0 }}>
-                未指定
-              </Tag>
-            </Tooltip>
-          )
-        }
-        return (
-          <Space size={4} wrap>
-            {v.item_name && (
-              <Tag color="blue" style={{ margin: 0 }}>
-                {v.item_name}
-              </Tag>
-            )}
-            <Tag color="geekblue" style={{ margin: 0 }}>
-              {v.label_cn || v.label}
+      dataIndex: 'tag',
+      width: '24%',
+      render: (tag: LibraryListItem['tag']) =>
+        tag ? (
+          <Tooltip title={tag.path}>
+            <Tag color={tag.level === 1 ? 'geekblue' : 'blue'} style={{ margin: 0 }}>
+              {tag.path}
             </Tag>
-          </Space>
-        )
-      },
+          </Tooltip>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            —
+          </Text>
+        ),
     },
     { title: '条数', dataIndex: 'item_count', width: '10%', align: 'right' },
     {
@@ -343,23 +268,6 @@ export default function ReplyLibraryListPage() {
           </span>
         </Space>
         <Space wrap>
-          <Select
-            allowClear
-            placeholder="按风险标签筛选"
-            style={{ width: 240 }}
-            loading={riskPointsLoading}
-            value={riskPointFilter}
-            onChange={(v) => setRiskPointFilter(v ?? undefined)}
-            onClear={() => setRiskPointFilter(undefined)}
-            notFoundContent={
-              riskPointsLoading ? '加载中…' : '暂无可用风险标签'
-            }
-            options={filterOptions.map((o) => ({
-              value: o.value,
-              label: `${o.itemName} / ${o.label}${o.isMock ? ' (演示)' : ''}`,
-              disabled: o.isMock,
-            }))}
-          />
           <Input.Search
             placeholder="搜索代答库名称"
             allowClear
@@ -419,38 +327,11 @@ export default function ReplyLibraryListPage() {
           </Form.Item>
           <PlatformToggle />
           <Form.Item
-            name="risk_point_id"
-            label="二级风险标签（审核点）"
-            extra={
-              <span style={{ color: '#64748B', fontSize: 12 }}>
-                选择该代答库在策略编辑「文本审核」中的使用位置
-              </span>
-            }
-            rules={[{ required: true, message: '请选择二级风险标签' }]}
+            name="tag_id"
+            label="风险标签"
+            tooltip="可选:绑定一级或二级风险标签后,代答命中会在审核结果中以「标签路径/自定义黑名单库:命中词」展示"
           >
-            <Select
-              placeholder={
-                riskPointsLoading
-                  ? '加载中…'
-                  : riskPointOptions.length === 0
-                    ? '后端暂不可用,正在加载演示数据'
-                    : '请选择文本审核下的二级风险标签'
-              }
-              loading={riskPointsLoading}
-              showSearch
-              optionFilterProp="label"
-              notFoundContent={
-                riskPointsLoading ? '加载中…' : '暂无可用风险标签'
-              }
-              options={riskPointOptions.map((o) => ({
-                value: o.value,
-                label: `${o.itemName} / ${o.label}${o.isMock ? ' (演示,不可提交)' : ''}`,
-                disabled: o.isMock,
-              }))}
-              onFocus={() => {
-                if (riskPointOptions.length === 0) void fetchRiskPoints()
-              }}
-            />
+            <LibraryTagPicker />
           </Form.Item>
           <div style={{ marginBottom: 24 }}>
             <div

@@ -145,7 +145,7 @@ class Library(Base):
     )
     risk_point: Mapped[Optional["AuditPoint"]] = relationship(
         "AuditPoint",
-        lazy="joined",
+        lazy="select",
         foreign_keys=[risk_point_id],
     )
     back_audit_points: Mapped[list["AuditPoint"]] = relationship(
@@ -161,6 +161,17 @@ class Library(Base):
         viewonly=True,
         lazy="selectin",
         overlaps="linked_libraries",
+    )
+    # 库标签 (level 1/2): 一/二级风险标签,可绑定一个,命中命中文案前缀拼接来源。
+    # 使用 M2M 表 (library_tags) 而非单 FK,便于后续扩展为多标签。
+    # lazy="select" 而非 selectin:matcher 走单独 raw SQL CTE 一次性算 path,
+    # 不依赖 ORM 自动 selectinload (后者在跨测试 schema 场景下会触发 column
+    # compile cache 串号)。前端用 lib.tags 读出 binding 也是按需 query。
+    tags: Mapped[list["Tag"]] = relationship(
+        "Tag",
+        secondary="library_tags",
+        viewonly=True,
+        lazy="select",
     )
 
     __table_args__ = (

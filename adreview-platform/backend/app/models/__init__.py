@@ -13,6 +13,7 @@ from app.models.imageset import ImageSet, ImageSetItem, ImageSetKind  # noqa: F4
 from app.models.library import Library, LibraryType, LibraryKind  # noqa: F401
 from app.models.library_item import LibraryItem  # noqa: F401
 from app.models.library_item_reference import LibraryItemReference  # noqa: F401
+from app.models.library_tag import LibraryTag  # noqa: F401
 from app.models.detection_rule import DetectionRule  # noqa: F401
 from app.models.audit_item import AuditItem  # noqa: F401
 from app.models.audit_item_library import AuditItemLibrary  # noqa: F401

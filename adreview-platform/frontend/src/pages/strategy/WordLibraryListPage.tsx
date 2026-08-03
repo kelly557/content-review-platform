@@ -34,6 +34,7 @@ import type {
 import { LIBRARY_KIND_OPTIONS } from '@/types/domain'
 import { deriveEffectiveMeta } from '@/lib/libraryEffective'
 import DeleteLibraryDialog from '@/components/library/DeleteLibraryDialog'
+import LibraryTagPicker from '@/components/library/LibraryTagPicker'
 import PlatformToggle from '@/components/library/PlatformToggle'
 import WordsInputPanel, { MAX_WORDS, type WordsMode } from '@/components/library/WordsInputPanel'
 import { useAuthStore } from '@/store'
@@ -45,6 +46,7 @@ interface CreateFormValues {
   durationMode: 'permanent' | 'range'
   effectiveRange?: [Dayjs, Dayjs]
   is_platform?: boolean
+  tag_id?: string | null
 }
 
 export default function WordLibraryListPage() {
@@ -122,6 +124,7 @@ export default function WordLibraryListPage() {
       effective_from: hasRange ? v.effectiveRange![0].toISOString() : null,
       effective_until: hasRange ? v.effectiveRange![1].toISOString() : null,
       is_platform: v.is_platform ?? false,
+      tag_id: v.tag_id ?? null,
     }
     setCreating(true)
     try {
@@ -195,6 +198,23 @@ export default function WordLibraryListPage() {
       width: '8%',
       align: 'right',
     }
+    const tagCol: TableColumnsType<LibraryListItem>[number] = {
+      title: '风险标签',
+      dataIndex: 'tag',
+      width: '14%',
+      render: (tag: LibraryListItem['tag']) =>
+        tag ? (
+          <Tooltip title={tag.path}>
+            <Tag color={tag.level === 1 ? 'geekblue' : 'blue'} style={{ margin: 0 }}>
+              {tag.path}
+            </Tag>
+          </Tooltip>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            —
+          </Text>
+        ),
+    }
     const updatedCol: TableColumnsType<LibraryListItem>[number] = {
       title: '更新时间',
       dataIndex: 'updated_at',
@@ -260,6 +280,7 @@ export default function WordLibraryListPage() {
       nameCol,
       effectiveCol,
       countCol,
+      tagCol,
       updatedCol,
       createdCol,
       actionCol,
@@ -467,6 +488,14 @@ export default function WordLibraryListPage() {
                 </Text>
               )
             }}
+          </Form.Item>
+
+          <Form.Item
+            name="tag_id"
+            label="风险标签"
+            tooltip="可选:绑定一级或二级风险标签后,词条命中会在审核结果中以「标签路径/自定义黑名单库:命中词」展示"
+          >
+            <LibraryTagPicker />
           </Form.Item>
 
           <div style={{ marginTop: 12 }}>

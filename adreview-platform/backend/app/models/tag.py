@@ -134,6 +134,13 @@ class Tag(Base):
         backref="children",
         foreign_keys=[parent_id],
     )
+    # 反向：哪些 library 绑定了本标签 (level 1/2 才允许被 library 绑定)
+    # 与 Library.tags 同样用 viewonly;反向查询走 LibraryTag 关联对象。
+    libraries: Mapped[list["Library"]] = relationship(
+        "Library",
+        secondary="library_tags",
+        viewonly=True,
+    )
 
     # 三级标签绑定模型（FK → registered_models.id, ON DELETE SET NULL）
     # 只有 level=3 才允许设置；业务校验放在 service 层

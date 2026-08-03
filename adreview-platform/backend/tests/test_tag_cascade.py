@@ -135,7 +135,7 @@ async def test_create_l2_parent_must_be_l1(admin_client: AsyncClient) -> None:
     assert "二级标签的父级必须是一级" in r.text
 
 
-async def test_create_l3_requires_bound_model(
+async def test_create_l3_allows_no_bound_model(
     admin_client: AsyncClient, db_session_factory
 ) -> None:
     model_id = await _make_small_model(db_session_factory)
@@ -158,7 +158,7 @@ async def test_create_l3_requires_bound_model(
     )
     mid_id = mid.json()["id"]
 
-    # 不传 bound_model_id
+    # 三级标签允许不绑模型（v2 业务规则）
     r = await admin_client.post(
         "/api/v1/tags",
         json=await _make_tag_payload(
@@ -168,8 +168,11 @@ async def test_create_l3_requires_bound_model(
             parent_id=mid_id,
         ),
     )
-    assert r.status_code == 400
-    assert "三级标签必须绑定一个模型" in r.text
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["level"] == TAG_LEVEL_LEAF
+    assert body["bound_model_id"] is None
+    assert body["bound_model_kind"] is None
 
     # 正确路径
     r2 = await admin_client.post(

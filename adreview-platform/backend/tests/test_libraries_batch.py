@@ -54,3 +54,36 @@ async def test_batch_create_reply_omits_kind(monkeypatch):
     )
     assert body.libraries[0].kind is None
     assert body.libraries[0].risk_point_id == 42
+
+
+@pytest.mark.asyncio
+async def test_batch_create_reply_without_risk_point_id(monkeypatch):
+    """代答库 risk_point_id 改为可选 — 不传也能过 schema 校验。"""
+    from app.schemas.library import LibraryBatchCreateRequest, LibraryBatchItem
+
+    body = LibraryBatchCreateRequest(
+        libraries=[
+            LibraryBatchItem(
+                code="lib_r99002",
+                name="批量回复2-无risk_point",
+                library_type="reply",
+            ),
+        ],
+    )
+    assert body.libraries[0].kind is None
+    assert body.libraries[0].risk_point_id is None
+
+
+@pytest.mark.asyncio
+async def test_create_reply_without_risk_point_id(monkeypatch):
+    """LibraryCreate (单条创建) 代答库不传 risk_point_id 也接受。"""
+    from app.schemas.library import LibraryCreate
+
+    body = LibraryCreate(
+        name="无risk_point的代答库",
+        library_type="reply",
+    )
+    assert body.kind is None
+    assert body.risk_point_id is None
+    assert body.effective_from is None
+    assert body.effective_until is None

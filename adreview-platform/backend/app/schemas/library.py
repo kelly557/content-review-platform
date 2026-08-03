@@ -10,6 +10,20 @@ from app.models.library import LibraryKind, LibraryType
 from app.schemas.common import ORMBase
 
 
+class TagRefBrief(BaseModel):
+    """Library 绑定的标签简要引用 (一级/二级标签)。
+
+    - 字段: id / name / level / path
+    - path: 「顶级/中间级/...」用 / 拼接的完整路径,供前端展示与本地匹配
+            hit.label_cn 前缀拼接。
+    """
+
+    id: str
+    name: str
+    level: int
+    path: str
+
+
 # ────────── helpers ──────────
 
 
@@ -95,6 +109,8 @@ class LibraryOut(ORMBase):
     # 二级风险标签 (审核点)：代答库使用位置定位。reply 库必填（新增时），
     # word / image 库始终为 None。
     risk_point: Optional[RiskPointRef] = None
+    # 一/二级标签绑定 (可选)：命中 label_cn 前缀来源。
+    tag: Optional[TagRefBrief] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -115,6 +131,8 @@ class LibraryListItem(ORMBase):
     is_effective: bool = True
     # 列表页只需展示使用位置；与 LibraryOut.risk_point 形态一致。
     risk_point: Optional[RiskPointRef] = None
+    # 一/二级标签绑定 (可选)
+    tag: Optional[TagRefBrief] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -149,6 +167,10 @@ class LibraryCreate(BaseModel):
     # - 新建 reply 库必填；存量 reply 库允许为 null (向后兼容)。
     # - word / image 库不传。
     risk_point_id: Optional[int] = None
+    # 一/二级风险标签绑定 (可选): 词库/代答库命中时, 把 tag.path 作为
+    # hit.label_cn 的前缀;不传表示不绑,沿用「自定义黑/白名单库」默认文案。
+    # 服务端会校验: tag 存在、未软删除、level ∈ {1, 2}。
+    tag_id: Optional[str] = None
 
     @field_validator("words")
     @classmethod
@@ -173,9 +195,8 @@ class LibraryCreate(BaseModel):
             # 代答库强制不存有效时间（命中即触发，不该有"过期"概念）
             self.effective_from = None
             self.effective_until = None
-            # 新建代答库必须指定二级风险标签（审核点）— 仅有助"按审核点定位使用位置"。
-            if self.risk_point_id is None:
-                raise ValueError("新建代答库必须指定二级风险标签 (risk_point_id)")
+            # 代答库的 risk_point_id 改为可选 — 仅作"使用位置"标注,不再必填。
+            # 存量 reply 库允许 risk_point_id 为 null (向后兼容)。
         _validate_effective_range(self.effective_from, self.effective_until)
         return self
 
@@ -194,6 +215,10 @@ class LibraryUpdate(BaseModel):
     is_platform: Optional[bool] = None
     # 代答库可指定/清空二级风险标签。word / image 库不接该字段（router 兜底 422）。
     risk_point_id: Optional[int] = None
+    # 一/二级风险标签绑定 (可选): 仅当 key 显式传进 body 时才落库;
+    # 传 null 表示解绑。允许 word / image / reply 库都设置。
+    # 服务端会校验 tag 存在、未软删除、level ∈ {1, 2}。
+    tag_id: Optional[str] = None
 
     @model_validator(mode="after")
     def _v_kind(self) -> "LibraryUpdate":
@@ -309,6 +334,7 @@ class LibraryBatchItem(BaseModel):
     effective_until: Optional[datetime] = None
     is_platform: bool = False
     risk_point_id: Optional[int] = None
+    tag_id: Optional[str] = None
 
     @field_validator("words")
     @classmethod
@@ -331,8 +357,7 @@ class LibraryBatchItem(BaseModel):
             self.kind = None
             self.effective_from = None
             self.effective_until = None
-            if self.risk_point_id is None:
-                raise ValueError("批量创建代答库必须指定二级风险标签 (risk_point_id)")
+            # 代答库的 risk_point_id 改为可选 — 仅作"使用位置"标注,不再必填。
         _validate_effective_range(self.effective_from, self.effective_until)
         return self
 

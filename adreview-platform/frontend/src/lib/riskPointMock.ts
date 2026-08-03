@@ -1141,3 +1141,153 @@ export function getMockSubAuditPoints(
     },
   ]
 }
+
+/**
+ * ----------------------------------------------------------------
+ * 资源库 / 词库 / 代答库 「风险标签」picker 的 mock 兜底数据
+ * ----------------------------------------------------------------
+ *
+ * 触发条件: ``LibraryTagPicker`` 调用 ``tagsApi.tree()`` 5xx / 网络失败时。
+ *
+ * 用户口径（2026-08-03）：
+ *   - L1 (5 个): 涉政 / 暴恐 / 辱骂 / 广告法 / 广告
+ *   - L2 (9 个): 涉政3 + 暴恐2 + 辱骂2 + 广告法1 + 广告1
+ *
+ * id 用 ``mock-l1-*`` / ``mock-l2-*`` 前缀字符串,与后端真实 tag id 隔离。
+ * 提交时 ``_resolve_library_tag`` 会返回 404,前端按现有 mock 兜底行为处理。
+ */
+import type { TagTreeNode } from '@/types/domain'
+
+export const MOCK_TAG_TREE: TagTreeNode[] = [
+  {
+    id: 'mock-l1-politics',
+    name: '涉政',
+    code: 'mock_l1_politics',
+    level: 1,
+    status: 'active',
+    domain: 'politics',
+    children: [
+      {
+        id: 'mock-l2-politics-top-leader',
+        name: '一级领导人',
+        code: 'mock_l2_politics_top_leader',
+        level: 2,
+        status: 'active',
+        domain: 'politics',
+        children: [],
+      },
+      {
+        id: 'mock-l2-politics-former-leader',
+        name: '历任领导人',
+        code: 'mock_l2_politics_former_leader',
+        level: 2,
+        status: 'active',
+        domain: 'politics',
+        children: [],
+      },
+      {
+        id: 'mock-l2-politics-symbol',
+        name: '政治象征',
+        code: 'mock_l2_politics_symbol',
+        level: 2,
+        status: 'active',
+        domain: 'politics',
+        children: [],
+      },
+    ],
+  },
+  {
+    id: 'mock-l1-terror',
+    name: '暴恐',
+    code: 'mock_l1_terror',
+    level: 1,
+    status: 'active',
+    domain: 'violence',
+    children: [
+      {
+        id: 'mock-l2-terror-org',
+        name: '恐怖组织',
+        code: 'mock_l2_terror_org',
+        level: 2,
+        status: 'active',
+        domain: 'violence',
+        children: [],
+      },
+      {
+        id: 'mock-l2-terror-org-figure',
+        name: '恐怖组织人物',
+        code: 'mock_l2_terror_org_figure',
+        level: 2,
+        status: 'active',
+        domain: 'violence',
+        children: [],
+      },
+    ],
+  },
+  {
+    id: 'mock-l1-insult',
+    name: '辱骂',
+    code: 'mock_l1_insult',
+    level: 1,
+    status: 'active',
+    domain: 'custom',
+    children: [
+      {
+        id: 'mock-l2-insult-regional',
+        name: '地域歧视',
+        code: 'mock_l2_insult_regional',
+        level: 2,
+        status: 'active',
+        domain: 'custom',
+        children: [],
+      },
+      {
+        id: 'mock-l2-insult-person',
+        name: '人格侮辱',
+        code: 'mock_l2_insult_person',
+        level: 2,
+        status: 'active',
+        domain: 'custom',
+        children: [],
+      },
+    ],
+  },
+  {
+    id: 'mock-l1-ads-law',
+    name: '广告法',
+    code: 'mock_l1_ads_law',
+    level: 1,
+    status: 'active',
+    domain: 'ads_law',
+    children: [
+      {
+        id: 'mock-l2-ads-law-misleading',
+        name: '误导性虚假广告',
+        code: 'mock_l2_ads_law_misleading',
+        level: 2,
+        status: 'active',
+        domain: 'ads_law',
+        children: [],
+      },
+    ],
+  },
+  {
+    id: 'mock-l1-ads',
+    name: '广告',
+    code: 'mock_l1_ads',
+    level: 1,
+    status: 'active',
+    domain: 'ads_law',
+    children: [
+      {
+        id: 'mock-l2-ads-contact',
+        name: '联系方式',
+        code: 'mock_l2_ads_contact',
+        level: 2,
+        status: 'active',
+        domain: 'ads_law',
+        children: [],
+      },
+    ],
+  },
+]

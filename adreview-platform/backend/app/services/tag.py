@@ -200,13 +200,16 @@ async def _validate_hierarchy_on_create(db: AsyncSession, body: TagCreate) -> No
             )
 
     if body.level == TAG_LEVEL_LEAF:
-        if not body.bound_model_id:
-            raise TagValidationError("三级标签必须绑定一个模型")
-        if body.bound_model_kind not in {"large", "small"}:
-            raise TagValidationError("三级标签必须指定 bound_model_kind（large/small）")
-        await _check_model_exists_and_kind(
-            db, body.bound_model_id, body.bound_model_kind
-        )
+        if body.bound_model_id is None and body.bound_model_kind is None:
+            pass
+        else:
+            if body.bound_model_id is None or body.bound_model_kind not in {"large", "small"}:
+                raise TagValidationError(
+                    "三级标签绑定模型时必须同时提供 bound_model_id 与 bound_model_kind（large/small）"
+                )
+            await _check_model_exists_and_kind(
+                db, body.bound_model_id, body.bound_model_kind
+            )
     else:
         if body.bound_model_id is not None or body.bound_model_kind is not None:
             raise TagValidationError(f"{_cn_level(body.level)}标签不允许绑定模型")
@@ -220,14 +223,12 @@ async def _validate_bound_model_on_update(
     target_kind = model_kind if model_kind is not None else tag.bound_model_kind
 
     if target_id is None and target_kind is None:
-        if tag.level == TAG_LEVEL_LEAF:
-            raise TagValidationError("三级标签必须绑定一个模型")
         return
 
     if tag.level != TAG_LEVEL_LEAF:
         raise TagValidationError(f"{_cn_level(tag.level)}标签不允许绑定模型")
     if not target_id or target_kind not in {"large", "small"}:
-        raise TagValidationError("三级标签必须绑定模型 id 且 kind 必须为 large/small")
+        raise TagValidationError("三级标签绑定模型时必须同时提供 id 且 kind 必须为 large/small")
     await _check_model_exists_and_kind(db, target_id, target_kind)
 
 

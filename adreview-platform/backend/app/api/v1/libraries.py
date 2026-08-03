@@ -67,6 +67,7 @@ from app.schemas.library import (
     LibraryOut,
     LibraryUpdate,
     RiskPointRef,
+    TagRefBrief,
 )
 from app.services import storage
 
@@ -85,7 +86,15 @@ GENERIC_CODE_RE = _re.compile(r"^lib_[a-z]?\d+$")
 # 通用平台库允许修改的字段白名单（与 AuditItem.is_builtin 的保护模式一致）。
 # 超级管理员不受此白名单限制,可任意修改甚至删除。
 PLATFORM_LIBRARY_WRITABLE_FIELDS = frozenset(
-    {"is_active", "description", "ignored_services", "effective_from", "effective_until"}
+    {
+        "is_active",
+        "description",
+        "ignored_services",
+        "effective_from",
+        "effective_until",
+        # 一/二级标签绑定属于业务配置(非结构变更),允许非超管修改。
+        "tag_id",
+    }
 )
 
 
@@ -205,6 +214,132 @@ async def _risk_point_ref_for_id(
     return await _risk_point_to_ref(db, point)
 
 
+# ─── tag helpers ─────────────────────────────────────────────────────────
+
+
+def _tag_to_brief(tag: dict) -> "TagRefBrief":
+    """把 ``_resolve_library_tag`` 返回的 dict (id/name/level/path) 构造成 TagRefBrief。
+
+    避免任何 ORM 对象的 lazy 访问 (Tag.path 走 parent 链会触发 N+1), 也不
+    需要 selectinload 嵌套 (后者在 SA 2.x 接受 string 形式会抛 ArgumentError)。
+    """
+    from app.schemas.library import TagRefBrief
+
+    return TagRefBrief(
+        id=tag["id"],
+        name=tag["name"],
+        level=int(tag["level"]),
+        path=tag["path"] or tag["name"],
+    )
+
+
+def _tag_path_cte_sql() -> str:
+    """返回拼好的递归 CTE 计算 tag 完整 path 的 SQL 片段。
+
+    该 CTE 给出每条 (id, name, level, path) 行,path 用 / 拼接顶级→自身。
+    调用方负责按 lib/tag 维度 join。
+    """
+    return """
+        WITH RECURSIVE tag_path AS (
+            SELECT id, name, level, parent_id, name::text AS path
+              FROM tags
+             WHERE parent_id IS NULL
+            UNION ALL
+            SELECT t.id, t.name, t.level, t.parent_id,
+                   (tp.path || '/' || t.name) AS path
+              FROM tags t
+              JOIN tag_path tp ON t.parent_id = tp.id
+        )
+    """
+
+
+async def _resolve_library_tag(db: AsyncSession, tag_id: Optional[str]):
+    """校验并返回 library 准备绑定的 tag (返回 dict 含 path, 供 _tag_to_brief 用)。
+
+    - tag_id 为 None → 直接返回 None (允许不绑)
+    - 找不到 / 已软删除 → 404
+    - level ∉ {1, 2} → 422 (三级标签保留给模型绑定)
+
+    返回值: 形如 ``{"id", "name", "level", "path"}`` 的 dict,或者 None。
+    直接给 _tag_to_brief 用,免去 ORM 对象的 lazy 访问。
+    """
+    from sqlalchemy import text
+
+    from app.models.tag import (
+        TAG_LEVEL_MID,
+        TAG_LEVEL_TOP,
+    )
+
+    if tag_id is None:
+        return None
+    sql = text(
+        _tag_path_cte_sql()
+        + """
+        SELECT tp.id, tp.name, tp.level, tp.path
+          FROM tag_path tp
+         WHERE tp.id = :tag_id
+        """
+    )
+    row = (await db.execute(sql, {"tag_id": tag_id})).first()
+    if row is None:
+        # 进一步区分:tag 是否存在但被软删除 / 完全不存在
+        from app.models.tag import Tag
+
+        exists = (await db.execute(select(Tag.id).where(Tag.id == tag_id))).first()
+        if exists is None or (await db.get(Tag, tag_id)).deleted_at is not None:
+            raise HTTPException(status_code=404, detail="风险标签不存在")
+        # 理论不会到这里;兜底
+        raise HTTPException(status_code=404, detail="风险标签不存在")
+    tag_id_v, name, level, path = row
+    if int(level) not in (TAG_LEVEL_TOP, TAG_LEVEL_MID):
+        raise HTTPException(
+            status_code=422,
+            detail="词库/代答库只能绑定一级或二级风险标签",
+        )
+    return {
+        "id": tag_id_v,
+        "name": name,
+        "level": int(level),
+        "path": path or name,
+    }
+
+
+async def _tags_brief_for_libraries(
+    db: AsyncSession, libs: List[Library]
+) -> dict[int, "TagRefBrief"]:
+    """批量取每个 library 已绑定的第一个 tag (level 1/2, 未软删除) 的简要信息。
+
+    走 raw SQL CTE 一次性拿到 (library_id, id, name, level, path),避免:
+      1. selectinload(Tag.parent) 在 SA 2.x 不接受 string 参数 → 500
+      2. Tag.path lazy property 在 parent 未加载时 N+1 触发 query
+    """
+    from sqlalchemy import text
+
+    if not libs:
+        return {}
+    lib_ids = [l.id for l in libs]
+    sql = text(
+        _tag_path_cte_sql()
+        + """
+        SELECT lt.library_id, tp.id, tp.name, tp.level, tp.path
+          FROM library_tags lt
+          JOIN tag_path tp ON tp.id = lt.tag_id
+          JOIN tags t ON t.id = lt.tag_id
+         WHERE lt.library_id = ANY(:lib_ids)
+           AND t.deleted_at IS NULL
+           AND tp.level IN (1, 2)
+         ORDER BY lt.created_at ASC
+        """
+    )
+    rows = (await db.execute(sql, {"lib_ids": lib_ids})).all()
+    by_lib: dict[int, "TagRefBrief"] = {}
+    for lib_id, tag_id, name, level, path in rows:
+        if lib_id in by_lib:
+            continue  # 一库一标签 (取 created_at 最早)
+        by_lib[lib_id] = _tag_brief_from_row((tag_id, name, level, path))
+    return by_lib
+
+
 def _is_valid_code(code: str, library_type: LibraryType) -> bool:
     if not code or len(code) > 64:
         return False
@@ -243,7 +378,10 @@ async def _next_code(db: AsyncSession, prefix: str) -> str:
 
 
 def _to_out(
-    lib: Library, item_count: int, risk_point: Optional[RiskPointRef] = None
+    lib: Library,
+    item_count: int,
+    risk_point: Optional[RiskPointRef] = None,
+    tag: Optional["TagRefBrief"] = None,
 ) -> LibraryOut:
     return LibraryOut.model_validate(
         {
@@ -265,6 +403,7 @@ def _to_out(
                 lib.is_active, lib.effective_from, lib.effective_until
             ),
             "risk_point": risk_point,
+            "tag": tag,
             "created_at": lib.created_at,
             "updated_at": lib.updated_at,
         }
@@ -272,7 +411,10 @@ def _to_out(
 
 
 def _to_list(
-    lib: Library, item_count: int, risk_point: Optional[RiskPointRef] = None
+    lib: Library,
+    item_count: int,
+    risk_point: Optional[RiskPointRef] = None,
+    tag: Optional["TagRefBrief"] = None,
 ) -> LibraryListItem:
     return LibraryListItem.model_validate(
         {
@@ -292,6 +434,7 @@ def _to_list(
                 lib.is_active, lib.effective_from, lib.effective_until
             ),
             "risk_point": risk_point,
+            "tag": tag,
             "created_at": lib.created_at,
             "updated_at": lib.updated_at,
         }
@@ -429,11 +572,13 @@ async def list_libraries(
     libs = list((await db.execute(stmt)).scalars())
     counts = await _counts_for_libraries(db, [l.id for l in libs])
     risk_refs = await _risk_point_refs_for_libraries(db, libs)
+    tag_briefs = await _tags_brief_for_libraries(db, libs)
     items = [
         _to_list(
             l,
             counts.get(l.id, 0),
             risk_refs.get(l.risk_point_id) if l.risk_point_id is not None else None,
+            tag_briefs.get(l.id),
         )
         for l in libs
     ]
@@ -454,7 +599,8 @@ async def get_library(
         raise HTTPException(status_code=404, detail="库不存在")
     counts = await _counts_for_libraries(db, [lib.id])
     risk_ref = await _risk_point_ref_for_id(db, lib.risk_point_id)
-    return _to_out(lib, counts.get(lib.id, 0), risk_ref)
+    tag_briefs = await _tags_brief_for_libraries(db, [lib])
+    return _to_out(lib, counts.get(lib.id, 0), risk_ref, tag_briefs.get(lib.id))
 
 
 @router.get("/{library_id}/references", response_model=List[AuditPointRef])
@@ -527,16 +673,24 @@ async def create_library(
         ignored_services=[],
         effective_from=body.effective_from,
         effective_until=body.effective_until,
-        # 二级风险标签 (审核点)：reply 库必填 (schema 已校验)；word/image 一律 None。
+        # 二级风险标签 (审核点) 可选 — reply 库用作"使用位置"标注,
+        # word/image 库一律 None。schema 校验:reply 不传也可,通过时存 NULL。
         risk_point_id=body.risk_point_id
         if body.library_type == LibraryType.REPLY
         else None,
     )
-    # 代答库：服务端兜底校验审核点存在 + 属于文本审核包
+    # 代答库：若指定了 risk_point_id,服务端兜底校验存在 + 属于文本审核包
     if body.library_type == LibraryType.REPLY and body.risk_point_id is not None:
         await _resolve_risk_point(db, body.risk_point_id)
     db.add(lib)
     await db.flush()
+
+    # 一/二级风险标签绑定 (可选): 词库/图片库/代答库都可设置。
+    bound_tag = await _resolve_library_tag(db, body.tag_id)
+    if bound_tag is not None:
+        from app.models.library_tag import LibraryTag
+
+        db.add(LibraryTag(library_id=lib.id, tag_id=bound_tag.id))
 
     if body.library_type == LibraryType.WORD and body.words:
         seen: set[str] = set()
@@ -566,8 +720,9 @@ async def create_library(
     await db.refresh(lib)
     counts = await _counts_for_libraries(db, [lib.id])
     risk_ref = await _risk_point_ref_for_id(db, lib.risk_point_id)
+    tag_brief = _tag_to_brief(bound_tag) if bound_tag is not None else None
     await db.commit()
-    return _to_out(lib, counts.get(lib.id, 0), risk_ref)
+    return _to_out(lib, counts.get(lib.id, 0), risk_ref, tag_brief)
 
 
 @router.post(
@@ -632,6 +787,12 @@ async def batch_create_libraries(
             db.add(lib)
             await db.flush()
 
+            bound_tag = await _resolve_library_tag(db, item.tag_id)
+            if bound_tag is not None:
+                from app.models.library_tag import LibraryTag
+
+                db.add(LibraryTag(library_id=lib.id, tag_id=bound_tag.id))
+
             if item.library_type in (LibraryType.WORD, LibraryType.REPLY) and item.words:
                 seen: set[str] = set()
                 for w in item.words:
@@ -658,8 +819,9 @@ async def batch_create_libraries(
             await db.refresh(lib)
             counts = await _counts_for_libraries(db, [lib.id])
             risk_ref = await _risk_point_ref_for_id(db, lib.risk_point_id)
+            tag_brief = _tag_to_brief(bound_tag) if bound_tag is not None else None
             await db.commit()
-            created.append(_to_out(lib, counts.get(lib.id, 0), risk_ref))
+            created.append(_to_out(lib, counts.get(lib.id, 0), risk_ref, tag_brief))
         except Exception as e:  # noqa: BLE001
             await db.rollback()
             errors.append(
@@ -741,12 +903,35 @@ async def update_library(
         await _resolve_risk_point(db, body.risk_point_id)
         lib.risk_point_id = body.risk_point_id
 
+    # 一/二级风险标签绑定 (可选): 词库/图片库/代答库都可设置。
+    # - 客户端显式把 tag_id 放进 body 时才落库;
+    # - 传 null 表示解绑;
+    # - 传新值表示换绑 (覆盖前一个,因 M2M 表暂约定一库一标签)。
+    if "tag_id" in sent:
+        from app.models.library_tag import LibraryTag
+
+        if body.tag_id is None:
+            await db.execute(
+                LibraryTag.__table__.delete().where(
+                    LibraryTag.library_id == lib.id
+                )
+            )
+        else:
+            new_tag = await _resolve_library_tag(db, body.tag_id)
+            await db.execute(
+                LibraryTag.__table__.delete().where(
+                    LibraryTag.library_id == lib.id
+                )
+            )
+            db.add(LibraryTag(library_id=lib.id, tag_id=new_tag.id))
+
     await db.flush()
     await db.refresh(lib)
     counts = await _counts_for_libraries(db, [lib.id])
     risk_ref = await _risk_point_ref_for_id(db, lib.risk_point_id)
+    tag_briefs = await _tags_brief_for_libraries(db, [lib])
     await db.commit()
-    return _to_out(lib, counts.get(lib.id, 0), risk_ref)
+    return _to_out(lib, counts.get(lib.id, 0), risk_ref, tag_briefs.get(lib.id))
 
 
 @router.delete("/{library_id}", response_model=LibraryDeleteResponse)

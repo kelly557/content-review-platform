@@ -209,7 +209,7 @@ async def test_match_active_words_ignored_service(make_word_library, db_engine):
 
 @pytest.mark.asyncio
 async def test_match_active_words_whitelist_label(make_word_library, db_engine):
-    """白名单命中的词 label 应标记 '白名单:'."""
+    """白名单命中的词 label 应标记 '自定义白名单库:'."""
     from app.db.session import async_sessionmaker
     await make_word_library(words=["咖啡"], kind="白名单")
     maker = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -218,7 +218,7 @@ async def test_match_active_words_whitelist_label(make_word_library, db_engine):
             session, "我喝咖啡", ["text_detection_pro"]
         )
     assert len(hits) == 1
-    assert hits[0]["label_cn"].startswith("白名单:")
+    assert hits[0]["label_cn"].startswith("自定义白名单库:")
     assert hits[0]["risk"] == RiskLevel.LOW.value
 
 
@@ -232,3 +232,8 @@ async def test_match_active_words_dedupe(make_word_library, db_engine):
             session, "我骂你", ["text_detection_pro"]
         )
     assert len(hits) == 1
+
+
+# ─── 标签绑定 / hit.label_cn 前缀 (DB 集成) ──────────────────────────────
+# 这些测试在 test_wordset_matcher_with_tag.py 中单独跑,避免与既有 db_engine
+# fixture 的 selectinload(Tag) 跨测试 schema 串号问题。

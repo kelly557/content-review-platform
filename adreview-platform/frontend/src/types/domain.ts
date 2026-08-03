@@ -157,6 +157,8 @@ export interface AgentHit {
   risk?: string | null
   /** "llm" or "local_wordset" */
   source?: 'llm' | 'local_wordset' | string
+  /** 本地词库命中时, 该词库绑定的 1/2 级标签简要引用 (id/name/level/path) */
+  tag?: { id: string; name: string; level: number; path: string } | null
 }
 
 export interface AgentStrategyRef {
@@ -988,6 +990,15 @@ export const LIBRARY_KIND_OPTIONS: { value: LibraryKind; label: string; color: s
   { value: '白名单', label: '白名单', color: 'green' },
 ]
 
+/** 词库/代答库绑定的标签简要引用 (一级或二级)。path = 顶级→自身 / 拼接。 */
+export interface TagRefBrief {
+  id: string
+  name: string
+  /** 1 = 顶级, 2 = 中间级 */
+  level: number
+  path: string
+}
+
 export type LibraryEffectiveStatus = '已停用' | '未生效' | '生效中' | '已过期' | '永久'
 
 export interface Library {
@@ -1013,6 +1024,8 @@ export interface Library {
   is_effective: boolean
   /** 二级风险标签 (审核点) — 代答库使用位置定位 */
   risk_point: RiskPointRef | null
+  /** 一/二级风险标签绑定 (可选) — 命中后用作 label_cn 前缀 */
+  tag: TagRefBrief | null
   created_at: string
   updated_at: string | null
 }
@@ -1045,6 +1058,8 @@ export interface LibraryListItem {
   is_effective: boolean
   /** 二级风险标签 (审核点) — 代答库使用位置定位 */
   risk_point: RiskPointRef | null
+  /** 一/二级风险标签绑定 (可选) */
+  tag: TagRefBrief | null
   created_at: string
   updated_at: string | null
 }
@@ -1064,6 +1079,8 @@ export interface LibraryCreate {
   is_platform?: boolean
   /** 二级风险标签 (审核点 ID)：代答库必填（仅 reply 库有意义） */
   risk_point_id?: number | null
+  /** 一/二级风险标签绑定 (可选)。命中 label_cn 前缀 = tag.path */
+  tag_id?: string | null
 }
 
 export interface LibraryUpdate {
@@ -1078,6 +1095,8 @@ export interface LibraryUpdate {
   is_platform?: boolean | null
   /** 二级风险标签 (审核点 ID)：仅 reply 库支持；传 null 清空 */
   risk_point_id?: number | null
+  /** 一/二级风险标签绑定 (可选)。传 null 解绑,缺省不动 */
+  tag_id?: string | null
 }
 
 export interface LibraryDeletePayload {
@@ -1235,6 +1254,22 @@ export type TagStatus = 'draft' | 'active' | 'deprecated'
 
 export type TagLevel = 1 | 2 | 3
 export type BoundModelKind = 'large' | 'small'
+
+export type TagModality = 'text' | 'image' | 'audio' | 'video'
+
+export const TAG_MODALITY_OPTIONS: { value: TagModality; label: string; emoji: string }[] = [
+  { value: 'text', label: '文本', emoji: '📝' },
+  { value: 'image', label: '图像', emoji: '🖼' },
+  { value: 'audio', label: '音频', emoji: '🎵' },
+  { value: 'video', label: '视频', emoji: '🎬' },
+]
+
+export interface ModalityModelBinding {
+  enabled: boolean
+  model_id?: number | null
+  model_kind?: BoundModelKind | null
+  model_label?: string | null
+}
 
 export interface Tag {
   id: string
@@ -1598,6 +1633,9 @@ export interface LibraryBatchItemPayload {
   words?: string[]
   /** 「通用平台库」标记：仅超级管理员可设为 true。 */
   is_platform?: boolean
+  risk_point_id?: number | null
+  /** 一/二级风险标签绑定 (可选) */
+  tag_id?: string | null
 }
 
 export interface LibraryBatchCreateRequest {

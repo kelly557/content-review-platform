@@ -243,18 +243,19 @@ def test_update_library_pydantic_fields_for_effective_distinguishes_omit_vs_null
 
 
 # ─── risk_point_id tests (代答库使用位置定位) ──────────
+# 旧版要求代答库必须指定 risk_point_id;新规则 risk_point_id 改为可选,
+# 仅作"使用位置"标注用,缺省时为 None (向后兼容存量 null 记录)。
 
 
-def test_create_reply_library_requires_risk_point_id():
-    from pydantic import ValidationError
+def test_create_reply_library_without_risk_point_id_is_optional():
+    """代答库 risk_point_id 现在可选 — 不传也能通过 schema。"""
     from app.schemas.library import LibraryCreate
 
-    try:
-        LibraryCreate(name="x", library_type="reply")
-    except ValidationError as e:
-        assert "risk_point_id" in str(e)
-    else:
-        raise AssertionError("expected ValidationError for missing risk_point_id")
+    body = LibraryCreate(name="x", library_type="reply")
+    assert body.risk_point_id is None
+    assert body.kind is None
+    assert body.effective_from is None
+    assert body.effective_until is None
 
 
 def test_create_reply_library_accepts_risk_point_id():

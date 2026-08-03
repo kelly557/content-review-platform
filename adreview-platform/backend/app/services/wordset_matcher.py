@@ -9,6 +9,11 @@
 输出: hit dict 列表, 形态与 LLM hits 一致 (label/label_cn/quote/score/...) ,
     额外带 ``source="local_wordset"`` + ``library_id`` 供下游区分.
 
+绑定标签: 一个词库/代答库允许绑定 1 个一级或二级风险标签 (level 1/2).
+  - 没绑时: label_cn = "自定义黑名单库:<word>" / "自定义白名单库:<word>"
+  - 绑了时: label_cn = "<tag.path>/自定义黑名单库:<word>" (例: "涉政/一级领导人/自定义黑名单库:xx")
+  - hit dict 额外带 tag = {id, name, level, path} 供前端结构化处理.
+
 调用: run_machine_review 在 call_llm_detection 之前先调 match_active_words,
     把 local_hits 合并到 llm_hits 之后, 再走 aggregate / suggest_action.
 """
@@ -31,6 +36,14 @@ _ACTION_TO_RISK: Dict[str, str] = {
     "黑名单": RiskLevel.HIGH.value,
     "需复审": RiskLevel.MEDIUM.value,
     "标签": RiskLevel.LOW.value,
+}
+
+
+# 不绑 tag 时使用的固定库类型文案 (用于 label_cn 的 "类型" 段)。
+# 注意: 与 Library.kind 1:1 — 词库/图片库才有 kind,代答库无 kind 但走黑名单语义。
+_LIBRARY_KIND_LABEL: Dict[str, str] = {
+    LibraryKind.BLACKLIST.value: "自定义黑名单库",
+    LibraryKind.WHITELIST.value: "自定义白名单库",
 }
 
 
@@ -69,7 +82,12 @@ def _service_applies(
 async def _load_active_word_libraries(
     db: AsyncSession,
 ) -> List[Library]:
-    """拉取所有启用的 word 库 (is_active=True, is_deleted=False)."""
+    """拉取所有启用的 word 库 (is_active=True, is_deleted=False).
+
+    标签链 (含 parent) 走单独一条 query 批量加载, 避免 selectinload 嵌套触发的
+    跨测试 schema 串号 (per-test schema isolation 已经在 conftest 处理;但
+    loader cache 的失效时机不覆盖 selectinload 嵌套情况, 改用单独 query 更稳)。
+    """
     stmt = select(Library).where(
         and_(
             Library.library_type == LibraryType.WORD.value,
@@ -102,6 +120,59 @@ async def _load_words_for_libraries(
     return grouped
 
 
+async def _load_tag_briefs_for_libraries(
+    db: AsyncSession, library_ids: List[int]
+) -> Dict[int, Dict[str, Any]]:
+    """批量拉取每个 library 绑定的首个有效 tag (level 1/2, 未软删除)。
+
+    返回: {library_id: {id, name, level, path}}
+
+    实现: 用一次自连接 (CTE) 一次性取出每个 tag 的完整 path,避免
+    ORM lazy property 触发额外 query。同时绕开 selectinload 嵌套
+    在某些 SA 缓存场景下跨测试 schema 串号的问题。
+    """
+    if not library_ids:
+        return {}
+    from sqlalchemy import text
+
+    sql = text(
+        """
+        WITH RECURSIVE tag_path AS (
+            SELECT id, name, level, parent_id, name::text AS path
+              FROM tags
+             WHERE parent_id IS NULL
+            UNION ALL
+            SELECT t.id, t.name, t.level, t.parent_id,
+                   (tp.path || '/' || t.name) AS path
+              FROM tags t
+              JOIN tag_path tp ON t.parent_id = tp.id
+        )
+        SELECT lt.library_id, tp.id, tp.name, tp.level, tp.path
+          FROM library_tags lt
+          JOIN tag_path tp ON tp.id = lt.tag_id
+         WHERE lt.library_id = ANY(:lib_ids)
+           AND tp.level IN (1, 2)
+           AND NOT EXISTS (
+                SELECT 1 FROM tags t
+                 WHERE t.id = lt.tag_id AND t.deleted_at IS NOT NULL
+           )
+         ORDER BY lt.created_at ASC
+        """
+    )
+    rows = (await db.execute(sql, {"lib_ids": library_ids})).all()
+    by_lib: Dict[int, Dict[str, Any]] = {}
+    for lib_id, tag_id, name, level, path in rows:
+        if lib_id in by_lib:
+            continue  # 一库一标签 (取 created_at 最早)
+        by_lib[lib_id] = {
+            "id": tag_id,
+            "name": name,
+            "level": int(level),
+            "path": path or name,
+        }
+    return by_lib
+
+
 def _find_quote(text: str, word: str) -> Optional[str]:
     """定位 word 在 text 中的真实子串, 返回第一次出现的位置切片 (≤60 字).
 
@@ -123,19 +194,28 @@ def _build_hit(
     library: Library,
     word: str,
     quote: str,
+    tag: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """根据 Library.kind 构造一条 hit dict.
 
     黑名单 -> 高风险; 白名单 -> 低风险 (语义上仅打标, 不参与升档);
     其它无 kind 视为黑名单处理.
+
+    label_cn 拼接规则:
+      - 不绑 tag  → "{库类型}:{word}" — 例: "自定义黑名单库:暴恐"
+      - 绑了 tag  → "{tag.path}/{库类型}:{word}" — 例: "涉政/一级领导人/自定义黑名单库:暴恐"
+
+    ``tag`` 是 dict (id/name/level/path),由 match_active_words 从
+    library.tags 第一个未软删的 tag 派生;这里只读字段不操作 ORM。
     """
     if library.kind == LibraryKind.WHITELIST.value:
-        label_cn = f"白名单:{word}"
+        kind_label = _LIBRARY_KIND_LABEL[LibraryKind.WHITELIST.value]
         risk = RiskLevel.LOW.value
     else:
-        label_cn = f"自定义黑名单:{word}"
+        kind_label = _LIBRARY_KIND_LABEL[LibraryKind.BLACKLIST.value]
         risk = RiskLevel.HIGH.value
-    return {
+    label_cn = f"{tag['path']}/{kind_label}:{word}" if tag else f"{kind_label}:{word}"
+    hit: Dict[str, Any] = {
         "service_code": "local_wordset",
         "service_name": library.name or "本地词库",
         "label": f"local_wordset_{library.id}",
@@ -152,6 +232,9 @@ def _build_hit(
         "library_code": library.code,
         "matched_word": word,
     }
+    if tag is not None:
+        hit["tag"] = tag
+    return hit
 
 
 async def match_active_words(
@@ -181,9 +264,13 @@ async def match_active_words(
     words_by_lib = await _load_words_for_libraries(
         db, [lib.id for lib in active_libs]
     )
+    tag_by_lib = await _load_tag_briefs_for_libraries(
+        db, [lib.id for lib in active_libs]
+    )
     hits: List[Dict[str, Any]] = []
     seen: set[tuple[int, str]] = set()  # 防止同库同词重复
     for lib in active_libs:
+        tag = tag_by_lib.get(lib.id)
         for word in words_by_lib.get(lib.id, []):
             key = (lib.id, word)
             if key in seen:
@@ -192,5 +279,7 @@ async def match_active_words(
             if quote is None:
                 continue
             seen.add(key)
-            hits.append(_build_hit(library=lib, word=word, quote=quote))
+            hits.append(
+                _build_hit(library=lib, word=word, quote=quote, tag=tag)
+            )
     return hits

@@ -71,8 +71,9 @@ class TagCreate(TagBase):
     业务约束（service 层校验）：
       - level=1 时 parent_id 必须为 null
       - level>1 时 parent_id 必填，且 parent.level = level-1
-      - level=3 时 bound_model_id 必填
+      - level=3 时 bound_model_id 可选（可创建未绑定模型的三级标签）
       - level<3 时 bound_model_id 必须为 null
+      - level=3 一旦提供 bound_model_id，则必须同时提供 bound_model_kind=large|small
     """
 
 

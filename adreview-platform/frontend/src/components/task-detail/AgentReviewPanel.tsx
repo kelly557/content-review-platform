@@ -147,6 +147,16 @@ export default function AgentReviewPanel({
                           {h.source === 'local_wordset' && (
                             <Tag color="volcano">本地词库</Tag>
                           )}
+                          {h.tag && (
+                            <Tooltip title={`该词库绑定的风险标签: ${h.tag.path}`}>
+                              <Tag
+                                color={h.tag.level === 1 ? 'geekblue' : 'blue'}
+                                icon={<TagOutlined />}
+                              >
+                                {h.tag.path}
+                              </Tag>
+                            </Tooltip>
+                          )}
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {h.service_name || h.service_code}
                           </Text>
