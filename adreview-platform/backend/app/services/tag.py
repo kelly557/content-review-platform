@@ -1,4 +1,4 @@
-"""Tag service — CRUD + 三级级联校验 + 树查询 + 模型反查。"""
+"""Tag service — CRUD + 三级级联校验 + 树查询 + 模型反查 + 引用清单。"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -20,6 +20,9 @@ from app.schemas.tag import (
     TagCreate,
     TagReferenceItem,
     TagReferenceList,
+    TagReferenceModel,
+    TagReferencesResponse,
+    TagReferenceStrategy,
     TagTreeNode,
     TagUpdate,
 )
@@ -27,6 +30,53 @@ from app.schemas.tag import (
 
 class TagValidationError(ValueError):
     """Raised when a tag payload fails validation."""
+
+
+class TagReferenceBlockError(Exception):
+    """停用/删除被引用阻止时抛出,携带完整 references 供前端弹窗。"""
+
+    def __init__(self, message: str, references: TagReferencesResponse):
+        super().__init__(message)
+        self.message = message
+        self.references = references
+
+
+# ── mock 阶段：策略引用清单 ──
+# TODO: 替换为 strategy_tag_refs 关联表 + JOIN 查询
+# 当前 mock 模拟"哪些 tag 被启用中的策略 / 已停用的策略引用",
+# 仅用于演示前端 TagReferenceConfirmModal;真实接入后删除。
+_MOCK_STRATEGY_REFS: dict[str, list[TagReferenceStrategy]] = {
+    "l3-leader1-cartoon": [
+        TagReferenceStrategy(
+            strategy_id="st-001",
+            strategy_name="图文审核主策略",
+            status="active",
+            services=["text-image"],
+        ),
+        TagReferenceStrategy(
+            strategy_id="st-002",
+            strategy_name="备用策略·视频",
+            status="deprecated",
+            services=["video"],
+        ),
+    ],
+    "l3-nude-face": [
+        TagReferenceStrategy(
+            strategy_id="st-003",
+            strategy_name="人脸审核策略",
+            status="active",
+            services=["image"],
+        ),
+    ],
+    "l3-absolute-text": [
+        TagReferenceStrategy(
+            strategy_id="st-004",
+            strategy_name="广告法词库",
+            status="deprecated",
+            services=["text"],
+        ),
+    ],
+}
 
 
 # ───────────────────────── CRUD ─────────────────────────
@@ -149,7 +199,17 @@ async def update_tag(db: AsyncSession, tag: Tag, body: TagUpdate) -> Tag:
 
 
 async def delete_tag(db: AsyncSession, tag: Tag) -> None:
-    """软删除标签：自身 + 全部后代一并软删除（保持树结构无孤儿）。"""
+    """软删除标签：自身 + 全部后代一并软删除（保持树结构无孤儿）。
+
+    删除前先查引用清单:任何引用(strategies / models)都禁止删除,
+    抛 TagReferenceBlockError 让前端弹窗展示。
+    """
+    refs = await build_references_for_tag(db, tag.id)
+    if not refs.can_delete:
+        raise TagReferenceBlockError(
+            "该标签被策略或模型引用,无法删除", refs
+        )
+
     now = datetime.utcnow()
     # 先递归收集所有后代 id
     to_delete: list[Tag] = [tag]
@@ -364,3 +424,96 @@ async def list_references_by_model(db: AsyncSession, model_id: int) -> TagRefere
         )
 
     return TagReferenceList(model_id=model_id, total=len(items), items=items)
+
+
+# ───────────────────── 标签被引用清单(启用/删除前检查) ─────────────────────
+
+
+async def _build_tag_path(db: AsyncSession, tag: Tag) -> str:
+    """构造该 tag 到根的完整路径字符串:涉政 / 一号领导 / 漫画"""
+    parts = [tag.name]
+    cur_parent_id = tag.parent_id
+    seen: set[str] = {tag.id}
+    while cur_parent_id and cur_parent_id not in seen:
+        seen.add(cur_parent_id)
+        parent = await db.scalar(
+            select(Tag).where(Tag.id == cur_parent_id, Tag.deleted_at.is_(None))
+        )
+        if parent is None:
+            break
+        parts.insert(0, parent.name)
+        cur_parent_id = parent.parent_id
+    return " / ".join(parts)
+
+
+async def build_references_for_tag(
+    db: AsyncSession, tag_id: str
+) -> TagReferencesResponse:
+    """聚合查询:哪些审核策略 / 模型在引用本 tag。
+
+    用于「停用 / 删除」前的二次确认;返回的 can_* 字段已
+    按当前业务规则计算好:
+      can_deactivate = 没有 active 策略引用
+      can_delete     = 任何引用都没有
+    """
+    tag = await db.scalar(
+        select(Tag).where(Tag.id == tag_id, Tag.deleted_at.is_(None))
+    )
+    if tag is None:
+        raise TagValidationError(f"标签不存在: {tag_id}")
+
+    # 1) 模型引用:通过 bound_model_id 反查
+    models: list[TagReferenceModel] = []
+    if tag.bound_model_id:
+        m = await db.scalar(
+            select(RegisteredModel).where(
+                RegisteredModel.id == tag.bound_model_id,
+                RegisteredModel.is_deleted.is_(False),
+            )
+        )
+        if m is not None:
+            models.append(
+                TagReferenceModel(
+                    model_id=m.id,
+                    model_name=m.name,
+                    model_version=m.version or "",
+                )
+            )
+
+    # 2) 策略引用:mock 阶段读固定映射
+    # TODO: 替换为关联表查询
+    strategies: list[TagReferenceStrategy] = list(
+        _MOCK_STRATEGY_REFS.get(tag_id, [])
+    )
+
+    # 3) 路径
+    path = await _build_tag_path(db, tag)
+
+    total = len(strategies) + len(models)
+    has_active_strategy = any(s.status == "active" for s in strategies)
+
+    return TagReferencesResponse(
+        tag_id=tag.id,
+        tag_name=tag.name,
+        tag_level=tag.level,
+        tag_path=path,
+        strategies=strategies,
+        models=models,
+        can_deactivate=not has_active_strategy,
+        can_delete=total == 0,
+        total_references=total,
+    )
+
+
+async def deprecate_tag(db: AsyncSession, tag: Tag) -> Tag:
+    """停用标签:被 active 策略引用时阻止;否则翻 status=deprecated。"""
+    refs = await build_references_for_tag(db, tag.id)
+    if not refs.can_deactivate:
+        raise TagReferenceBlockError(
+            "该标签被启用的审核策略引用,无法停用", refs
+        )
+    tag.status = TagStatus.DEPRECATED
+    tag.version = (tag.version or 1) + 1
+    await db.commit()
+    await db.refresh(tag)
+    return tag

@@ -35,12 +35,13 @@ from app.schemas.tag import (
     TagCreate,
     TagOut,
     TagReferenceList,
+    TagReferencesResponse,
     TagSummary,
     TagTreeNode,
     TagUpdate,
 )
 from app.services import tag as tag_service
-from app.services.tag import TagValidationError
+from app.services.tag import TagReferenceBlockError, TagValidationError
 
 router = APIRouter(prefix="/tags", tags=["tags"])
 
@@ -201,7 +202,13 @@ async def delete_tag(
     tag = await tag_service.get_tag(db, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="标签不存在")
-    await tag_service.delete_tag(db, tag)
+    try:
+        await tag_service.delete_tag(db, tag)
+    except TagReferenceBlockError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": e.message, "references": e.references.model_dump(mode="json")},
+        )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -231,8 +238,25 @@ async def deprecate_tag(
     tag = await tag_service.get_tag(db, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="标签不存在")
-    tag.status = TagStatus.DEPRECATED
-    tag.version = (tag.version or 1) + 1
-    await db.commit()
-    await db.refresh(tag)
-    return _to_out(tag)
+    try:
+        return await tag_service.deprecate_tag(db, tag)
+    except TagReferenceBlockError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": e.message, "references": e.references.model_dump(mode="json")},
+        )
+
+
+@router.get("/{tag_id}/references", response_model=TagReferencesResponse)
+async def get_tag_references(
+    tag_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """查询标签被哪些审核策略 / 模型引用,供「停用/删除」前的二次确认使用。
+
+    返回:
+      - strategies / models 清单
+      - can_deactivate / can_delete:前端根据这两个布尔决定是直接放行还是弹窗
+    """
+    return await tag_service.build_references_for_tag(db, tag_id)

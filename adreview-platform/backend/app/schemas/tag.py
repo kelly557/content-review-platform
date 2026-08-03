@@ -181,5 +181,44 @@ class TagReferenceList(BaseModel):
     items: List[TagReferenceItem]
 
 
+# ───────────────────── 标签被引用清单（启用/删除前检查） ─────────────────────
+
+
+class TagReferenceStrategy(BaseModel):
+    """标签被某条审核策略引用的一条记录。"""
+
+    strategy_id: str
+    strategy_name: str
+    status: str  # 'active' / 'deprecated'
+    services: List[str] = Field(default_factory=list)
+
+
+class TagReferenceModel(BaseModel):
+    """标签被某个模型绑定的一条记录。"""
+
+    model_id: int
+    model_name: str
+    model_version: str = ""
+
+
+class TagReferencesResponse(BaseModel):
+    """GET /tags/{id}/references 响应。
+
+    用于「启用/删除」前的二次确认:前端拿到 references 后展示给用户,
+    若 total_references > 0 且对应操作不允许(can_deactivate/can_delete=false)
+    则阻止该操作。
+    """
+
+    tag_id: str
+    tag_name: str
+    tag_level: int
+    tag_path: str  # 例:涉政 / 一号领导 / 漫画
+    strategies: List[TagReferenceStrategy] = Field(default_factory=list)
+    models: List[TagReferenceModel] = Field(default_factory=list)
+    can_deactivate: bool  # 没有 active 策略引用时可停用
+    can_delete: bool  # 任何引用都没有时才可删除
+    total_references: int
+
+
 # 前向引用解析（递归 Pydantic 模型）
 TagTreeNode.model_rebuild()

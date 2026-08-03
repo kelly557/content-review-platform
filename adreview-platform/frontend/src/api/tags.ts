@@ -6,6 +6,7 @@ import type {
   TagCreate,
   TagDomain,
   TagLevel,
+  TagReferences,
   TagReferenceList,
   TagStatus,
   TagSummary,
@@ -62,5 +63,8 @@ export const tagsApi = {
     return api
       .get<TagReferenceList>('/tags/references', { params: { model_id: modelId } })
       .then((r) => r.data)
+  },
+  getReferences(id: string) {
+    return api.get<TagReferences>(`/tags/${id}/references`).then((r) => r.data)
   },
 }

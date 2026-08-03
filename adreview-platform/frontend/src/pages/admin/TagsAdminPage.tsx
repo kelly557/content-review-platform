@@ -1,34 +1,30 @@
 // 标签管理（系统管理 → 标签管理）
-// 设计要点（v2）：
-//   - 所有新增标签均为三级（叶子）；一级 / 二级仅作历史数据展示
-//   - Drawer 字段平铺展示（无多步向导）：
-//       基础信息 + 模态选择 + 模型绑定配置 + 状态
-//   - 三级标签可"绑定模型 / 不绑定模型"开关：
-//       · 关闭 → 保存后该标签无 bound_model_id / bound_model_kind
-//       · 开启 → 按所选模态渲染卡片，每张卡片可独立决定是否绑定模型
-//   - 未绑定模型的三级标签没有阈值入口（后续审核规则页提供阈值，本页不渲染）
-//   - 列表行为：每个 {模态, 模型} 组合占一行（一级 / 二级无三级子节点时单独成行）
+// 设计要点（v3）：
+//   - 用户可自由选择创建一级 / 二级 / 三级标签（编辑模式层级只读）
+//   - 标签页面只做标签 CRUD + 模型绑定展示，不提供绑定 / 解绑模型的操作
+//     （绑定关系由其他模块维护；此处只展示已绑定模型与「未绑定 → 无阈值」状态）
+//   - 停用 / 删除前先调 getReferences 查引用清单：
+//     · 停用被 active 策略引用 → 阻止
+//     · 删除任何引用 → 阻止
+//     阻止时弹出顶层 TagReferenceConfirmModal 展示引用详情
+//   - 列表行：一级 / 二级没有下挂子标签时单独成行；三级按 {模态, 模型} 组合拆行
 import { useEffect, useMemo, useState } from 'react'
 import {
   App,
-  Alert,
   Button,
-  Card,
-  Checkbox,
   Drawer,
   Empty,
   Form,
   Input,
-  Popconfirm,
   Radio,
   Select,
   Space,
-  Switch,
   Table,
   Tag as AntdTag,
   Typography,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import axios from 'axios'
 import {
   PlusOutlined,
   SearchOutlined,
@@ -38,6 +34,9 @@ import {
   CheckOutlined,
   CloseOutlined,
 } from '@ant-design/icons'
+import { tagsApi } from '@/api/tags'
+import type { TagReferences } from '@/types/domain'
+import { TagReferenceConfirmModal } from '@/components/TagReferenceConfirmModal'
 
 const { Text, Title } = Typography
 
@@ -46,14 +45,12 @@ type Status = 'active' | 'inactive'
 type Modality = 'text' | 'image' | 'audio' | 'video'
 type ModelKind = 'large' | 'small'
 
-const MODALITY_META: Record<Modality, { label: string }> = {
-  text: { label: '文本' },
-  image: { label: '图像' },
-  audio: { label: '音频' },
-  video: { label: '视频' },
+const MODALITY_LABELS: Record<Modality, string> = {
+  text: '文本',
+  image: '图像',
+  audio: '音频',
+  video: '视频',
 }
-
-const MODALITY_ORDER: Modality[] = ['text', 'image', 'audio', 'video']
 
 interface MockModel {
   id: number
@@ -69,6 +66,7 @@ interface MockTag {
   name: string
   status: Status
   parentId: string | null
+  /** 仅展示用途：模态与模型绑定关系由其他模块维护 */
   modality?: Modality
   boundModelId?: number
 }
@@ -125,23 +123,9 @@ const INITIAL_MOCK_TAGS: MockTag[] = [
   { id: 'l3-weapon-toy', level: 3, name: '仿真玩具', status: 'active', parentId: 'l2-weapon', modality: 'image', boundModelId: 3 },
 ]
 
-interface ModalityBinding {
-  enabled: boolean
-  modelId?: number
-}
-
 interface DrawerState {
   open: boolean
   editing: MockTag | null
-  modalities: Modality[]
-  bindings: Record<Modality, ModalityBinding>
-}
-
-const EMPTY_BINDINGS: Record<Modality, ModalityBinding> = {
-  text: { enabled: false },
-  image: { enabled: false },
-  audio: { enabled: false },
-  video: { enabled: false },
 }
 
 interface FlatRow {
@@ -157,26 +141,6 @@ function findById(list: MockTag[], id: string | null | undefined): MockTag | nul
   return list.find((t) => t.id === id) ?? null
 }
 
-function getModelsByModality(modality: Modality): MockModel[] {
-  return MOCK_MODELS.filter((m) => m.modality === modality)
-}
-
-function buildInitialBindings(
-  modalities: Modality[],
-  editingModality: Modality | undefined,
-  editingModelId: number | undefined,
-): Record<Modality, ModalityBinding> {
-  const next = { ...EMPTY_BINDINGS }
-  for (const mod of modalities) {
-    if (editingModality === mod && editingModelId != null) {
-      next[mod] = { enabled: true, modelId: editingModelId }
-    } else {
-      next[mod] = { enabled: false }
-    }
-  }
-  return next
-}
-
 export default function TagsAdminPage() {
   const { message } = App.useApp()
 
@@ -189,10 +153,9 @@ export default function TagsAdminPage() {
   const [drawer, setDrawer] = useState<DrawerState>({
     open: false,
     editing: null,
-    modalities: [],
-    bindings: EMPTY_BINDINGS,
   })
   const [saving, setSaving] = useState(false)
+  const [checkingRefs, setCheckingRefs] = useState(false)
   const [form] = Form.useForm()
 
   // ── 派生：扁平行 ──
@@ -238,7 +201,6 @@ export default function TagsAdminPage() {
     [tags, form],
   )
 
-  // 过滤选项
   const l1FilterOptions = useMemo(
     () => tags.filter((t) => t.level === 1).map((t) => ({ value: t.id, label: t.name })),
     [tags],
@@ -275,7 +237,6 @@ export default function TagsAdminPage() {
         l2?.name ?? '',
         l3?.name ?? '',
         model?.name ?? '',
-        model?.version ?? '',
         l3?.modality ?? '',
       ]
         .join(' ')
@@ -287,13 +248,8 @@ export default function TagsAdminPage() {
   // ── Drawer 操作 ──
   const openCreate = () => {
     form.resetFields()
-    form.setFieldsValue({ level: 1, status: 'active', bind_model: true })
-    setDrawer({
-      open: true,
-      editing: null,
-      modalities: [],
-      bindings: EMPTY_BINDINGS,
-    })
+    form.setFieldsValue({ level: 1, status: 'active' })
+    setDrawer({ open: true, editing: null })
   }
 
   const openEdit = (row: MockTag) => {
@@ -316,58 +272,20 @@ export default function TagsAdminPage() {
       status: row.status,
       parent_l1,
       parent_l2,
-      bind_model: row.boundModelId != null,
     })
-    const modalities = row.level === 3 && row.modality ? [row.modality] : []
-    setDrawer({
-      open: true,
-      editing: row,
-      modalities,
-      bindings: buildInitialBindings(modalities, row.modality, row.boundModelId),
-    })
+    setDrawer({ open: true, editing: row })
   }
 
   const closeDrawer = () => {
-    setDrawer({
-      open: false,
-      editing: null,
-      modalities: [],
-      bindings: EMPTY_BINDINGS,
-    })
+    setDrawer({ open: false, editing: null })
     form.resetFields()
   }
 
   const handleSave = async () => {
     try {
       const v = await form.validateFields()
-      const level = v.level as Level
-      const bindModel = v.bind_model as boolean | undefined
-
-      if (level === 3) {
-        if (drawer.modalities.length === 0) {
-          message.warning('请至少选择 1 个模态')
-          return
-        }
-        if (bindModel) {
-          const anyEnabled = drawer.modalities.some(
-            (m) => drawer.bindings[m].enabled,
-          )
-          if (!anyEnabled) {
-            message.warning('请为至少一个模态启用模型绑定')
-            return
-          }
-          const missing = drawer.modalities.find(
-            (m) => drawer.bindings[m].enabled && drawer.bindings[m].modelId == null,
-          )
-          if (missing) {
-            message.warning(`请为「${MODALITY_META[missing].label}」模态选择模型`)
-            return
-          }
-        }
-      }
-
       setSaving(true)
-
+      const level = v.level as Level
       const parentId: string | null =
         level === 1
           ? null
@@ -377,53 +295,29 @@ export default function TagsAdminPage() {
       const editing = drawer.editing
       const timestamp = Date.now()
 
-      const buildBaseRecord = (id: string, idx: number): MockTag => {
-        if (level !== 3) {
-          return {
-            id,
-            level,
-            name: v.name,
-            status: v.status,
-            parentId,
-          }
-        }
-        const mod = drawer.modalities[idx]
-        const b = drawer.bindings[mod]
-        return {
+      const buildRecord = (id: string): MockTag => {
+        const base: MockTag = {
           id,
-          level: 3,
+          level,
           name: v.name,
           status: v.status,
           parentId,
-          modality: mod,
-          boundModelId: b.enabled ? b.modelId : undefined,
         }
+        // 三级标签:编辑时保留原 modality / boundModelId(本页不修改绑定关系)
+        if (level === 3 && editing) {
+          base.modality = editing.modality
+          base.boundModelId = editing.boundModelId
+        }
+        return base
       }
 
       if (editing) {
-        setTags((prev) => {
-          const filtered = prev.filter((t) => t.id !== editing.id)
-          if (level === 3 && bindModel) {
-            const records = drawer.modalities.map<MockTag>((_mod, idx) =>
-              buildBaseRecord(idx === 0 ? editing.id : `${editing.id}-${_mod}`, idx),
-            )
-            return [...records, ...filtered]
-          }
-          return [buildBaseRecord(editing.id, 0), ...filtered]
-        })
+        setTags((prev) =>
+          prev.map((t) => (t.id === editing.id ? buildRecord(editing.id) : t)),
+        )
         message.success('已保存')
       } else {
-        if (level === 3 && bindModel) {
-          const created = drawer.modalities.map<MockTag>((mod, idx) =>
-            buildBaseRecord(
-              idx === 0 ? `t-${timestamp}` : `t-${timestamp}-${mod}`,
-              idx,
-            ),
-          )
-          setTags((prev) => [...created, ...prev])
-        } else {
-          setTags((prev) => [buildBaseRecord(`t-${timestamp}`, 0), ...prev])
-        }
+        setTags((prev) => [buildRecord(`t-${timestamp}`), ...prev])
         message.success('已新增')
       }
       closeDrawer()
@@ -434,7 +328,44 @@ export default function TagsAdminPage() {
     }
   }
 
-  const handleDelete = (id: string) => {
+  // ── 引用检查 + 停用 ──
+  const handleToggleStatus = async (row: MockTag) => {
+    if (row.status === 'active') {
+      // 准备停用 → 先查引用
+      setCheckingRefs(true)
+      try {
+        const refs = await tagsApi.getReferences(row.id)
+        if (!refs.can_deactivate) {
+          await TagReferenceConfirmModal.open({ refs })
+          return
+        }
+      } catch (err) {
+        // 后端 409 兜底(并发新增引用):捕获并弹窗
+        if (axios.isAxiosError(err) && err.response?.status === 409) {
+          const refs = (err.response.data as { detail?: { references?: TagReferences } })
+            .detail?.references
+          if (refs) {
+            await TagReferenceConfirmModal.open({ refs })
+            return
+          }
+        }
+        // 其他错误 → 静默放行,让 toggle 继续
+      } finally {
+        setCheckingRefs(false)
+      }
+    }
+    setTags((prev) =>
+      prev.map((t) =>
+        t.id === row.id
+          ? { ...t, status: t.status === 'active' ? 'inactive' : 'active' }
+          : t,
+      ),
+    )
+    message.success(row.status === 'active' ? '已停用' : '已启用')
+  }
+
+  // ── 引用检查 + 删除(cascade) ──
+  const performCascadeDelete = (id: string): number => {
     const toDelete = new Set<string>([id])
     let frontier: string[] = [id]
     while (frontier.length) {
@@ -446,21 +377,38 @@ export default function TagsAdminPage() {
       frontier = children
     }
     setTags((prev) => prev.filter((t) => !toDelete.has(t.id)))
-    message.success(`已删除（${toDelete.size} 个）`)
+    return toDelete.size
   }
 
-  const toggleStatus = (row: MockTag) => {
-    setTags((prev) =>
-      prev.map((t) =>
-        t.id === row.id
-          ? { ...t, status: t.status === 'active' ? 'inactive' : 'active' }
-          : t,
-      ),
-    )
-    message.success(row.status === 'active' ? '已停用' : '已启用')
+  const handleDelete = async (id: string) => {
+    setCheckingRefs(true)
+    try {
+      const refs = await tagsApi.getReferences(id)
+      if (!refs.can_delete) {
+        await TagReferenceConfirmModal.open({ refs })
+        return
+      }
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 409) {
+        const refs = (err.response.data as { detail?: { references?: TagReferences } })
+          .detail?.references
+        if (refs) {
+          await TagReferenceConfirmModal.open({ refs })
+          return
+        }
+      }
+      // 其他错误(网络/404/500)→ 静默放过,让用户重试
+      message.error('无法检查引用,请稍后再试')
+      return
+    } finally {
+      setCheckingRefs(false)
+    }
+
+    const count = performCascadeDelete(id)
+    message.success(`已删除（${count} 个）`)
   }
 
-  // ── 父级联动:一级变更时清空二级 ──
+  // 父级联动:一级变更时清空二级
   const watchL1 = Form.useWatch('parent_l1', form)
   useEffect(() => {
     const currentL2 = form.getFieldValue('parent_l2') as string | undefined
@@ -471,16 +419,6 @@ export default function TagsAdminPage() {
       if (!stillValid) form.setFieldValue('parent_l2', undefined)
     }
   }, [watchL1, tags, form])
-
-  const setBinding = (mod: Modality, patch: Partial<ModalityBinding>) => {
-    setDrawer((s) => ({
-      ...s,
-      bindings: {
-        ...s.bindings,
-        [mod]: { ...s.bindings[mod], ...patch },
-      },
-    }))
-  }
 
   // ── 列定义 ──
   const columns: ColumnsType<FlatRow> = [
@@ -524,8 +462,7 @@ export default function TagsAdminPage() {
       render: (_, row) => {
         const m = row.l3?.modality
         if (!m) return <Text type="secondary">—</Text>
-        const meta = MODALITY_META[m]
-        return <AntdTag color="cyan">{meta.label}</AntdTag>
+        return <AntdTag color="cyan">{MODALITY_LABELS[m]}</AntdTag>
       },
     },
     {
@@ -552,8 +489,8 @@ export default function TagsAdminPage() {
       minWidth: 96,
       render: (_, row) => (
         <a
-          onClick={() => toggleStatus(row.rowTag)}
-          style={{ cursor: 'pointer' }}
+          onClick={() => handleToggleStatus(row.rowTag)}
+          style={{ cursor: checkingRefs ? 'wait' : 'pointer' }}
         >
           {row.rowTag.status === 'active' ? (
             <AntdTag color="green">已启用</AntdTag>
@@ -577,28 +514,21 @@ export default function TagsAdminPage() {
           >
             编辑
           </Button>
-          <Popconfirm
-            title={`确认删除「${row.rowTag.name}」？`}
-            description={
-              row.rowTag.level < 3
-                ? '将连同子标签一并删除'
-                : '删除后三级标签的模型绑定将解除'
-            }
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => handleDelete(row.rowTag.id)}
+          <Button
+            type="link"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            disabled={checkingRefs}
+            onClick={() => handleDelete(row.rowTag.id)}
           >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
+            删除
+          </Button>
         </Space>
       ),
     },
   ]
 
-  const watchBindModel = Form.useWatch('bind_model', form) as boolean | undefined
   const watchLevel = Form.useWatch('level', form) as Level | undefined
   const watchEditing = drawer.editing
 
@@ -615,11 +545,6 @@ export default function TagsAdminPage() {
           onChange={() => {
             form.setFieldValue('parent_l1', undefined)
             form.setFieldValue('parent_l2', undefined)
-            setDrawer((s) => ({
-              ...s,
-              modalities: [],
-              bindings: { ...EMPTY_BINDINGS },
-            }))
           }}
         >
           <Radio.Button value={1}>一级</Radio.Button>
@@ -681,138 +606,6 @@ export default function TagsAdminPage() {
           <Radio.Button value="inactive">已停用</Radio.Button>
         </Radio.Group>
       </Form.Item>
-
-      {watchLevel === 3 && (
-        <Form.Item
-          label="适用模态"
-          required
-          tooltip="至少选择 1 个模态;选择多个模态时,可分别为每个模态独立决定是否绑定模型"
-        >
-          <Checkbox.Group
-            value={drawer.modalities}
-            onChange={(vals) => {
-              const next = vals as Modality[]
-              setDrawer((s) => {
-                const nextBindings = { ...s.bindings }
-                MODALITY_ORDER.forEach((m) => {
-                  if (!next.includes(m)) {
-                    nextBindings[m] = { enabled: false }
-                  }
-                })
-                return { ...s, modalities: next, bindings: nextBindings }
-              })
-            }}
-            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}
-          >
-            {MODALITY_ORDER.map((mod) => {
-              const meta = MODALITY_META[mod]
-              return (
-                <Checkbox key={mod} value={mod} style={{ marginLeft: 0 }}>
-                  <span style={{ fontSize: 14 }}>{meta.label}</span>
-                </Checkbox>
-              )
-            })}
-          </Checkbox.Group>
-          {drawer.modalities.length === 0 && (
-            <div style={{ marginTop: 4, color: '#ff4d4f', fontSize: 12 }}>
-              请至少选择 1 个模态
-            </div>
-          )}
-        </Form.Item>
-      )}
-
-      {watchLevel === 3 && (
-        <Form.Item
-          label="绑定模型"
-          name="bind_model"
-          valuePropName="checked"
-          tooltip="关闭后,该三级标签不会绑定任何模型,后续也不会出现阈值配置入口"
-        >
-          <Switch disabled={!!watchEditing} />
-        </Form.Item>
-      )}
-
-      {watchLevel === 3 && watchBindModel && drawer.modalities.length > 0 && (
-        <>
-          <div style={{ marginBottom: 16 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              为每个模态独立选择是否绑定模型。关闭开关表示该模态不绑定模型;开启后必须选择具体模型。
-            </Text>
-          </div>
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            {drawer.modalities.map((mod) => {
-              const binding = drawer.bindings[mod]
-              const meta = MODALITY_META[mod]
-              const candidates = getModelsByModality(mod)
-              return (
-                <Card
-                  key={mod}
-                  size="small"
-                  title={
-                    <Space>
-                      <span>{meta.label}模态</span>
-                      <AntdTag color="cyan">{candidates.length} 个候选模型</AntdTag>
-                    </Space>
-                  }
-                  extra={
-                    <Space>
-                      <Text type="secondary">{binding.enabled ? '绑定' : '不绑定'}</Text>
-                      <Switch
-                        checked={binding.enabled}
-                        onChange={(checked) =>
-                          setBinding(mod, {
-                            enabled: checked,
-                            modelId: checked ? binding.modelId : undefined,
-                          })
-                        }
-                      />
-                    </Space>
-                  }
-                >
-                  {binding.enabled ? (
-                    <Form.Item
-                      label="模型"
-                      required
-                      style={{ marginBottom: 0 }}
-                      validateStatus={binding.modelId ? 'success' : 'error'}
-                      help={binding.modelId ? undefined : '请选择模型'}
-                    >
-                      <Select
-                        placeholder="搜索并选择模型"
-                        value={binding.modelId}
-                        onChange={(v) => setBinding(mod, { modelId: v })}
-                        showSearch
-                        optionFilterProp="label"
-                        filterOption={(input, option) =>
-                          ((option?.label ?? '') as string)
-                            .toLowerCase()
-                            .includes(input.trim().toLowerCase())
-                        }
-                        options={candidates.map((m) => ({
-                          value: m.id,
-                          label: `${m.name} · ${m.version} (${m.kind === 'large' ? '大模型' : '小模型'})`,
-                        }))}
-                      />
-                    </Form.Item>
-                  ) : (
-                    <Text type="secondary">该模态暂不绑定模型</Text>
-                  )}
-                </Card>
-              )
-            })}
-          </Space>
-        </>
-      )}
-
-      {watchLevel === 3 && !watchBindModel && (
-        <Alert
-          type="warning"
-          showIcon
-          message="该标签将不绑定模型"
-          description="保存后,该标签在审核规则中不会出现阈值配置选项。"
-          style={{ marginBottom: 16 }}
-        />
-      )}
     </Form>
   )
 
@@ -873,7 +666,7 @@ export default function TagsAdminPage() {
       >
         <Input
           prefix={<SearchOutlined />}
-          placeholder="搜索标签 / 模型 / 版本 / 模态"
+          placeholder="搜索标签 / 模型 / 模态"
           allowClear
           value={q}
           onChange={(e) => setQ(e.target.value)}

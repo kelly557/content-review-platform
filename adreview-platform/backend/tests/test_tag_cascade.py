@@ -361,3 +361,145 @@ async def test_delete_cascades_children(
 
     tree = (await admin_client.get("/api/v1/tags/tree")).json()
     assert tree == []
+
+
+# ───────────────────── 引用清单 + 启用/删除二次确认 ─────────────────────
+
+
+async def _make_tag_chain_with_bound_model(
+    admin_client: AsyncClient, db_session_factory, *, prefix: str
+) -> tuple[str, str, int]:
+    """建一条 一级/二级/三级 的链,叶子绑定一个小模型。返回 (top_id, mid_id, leaf_id, model_id) 错误 — 返回 3 个"""
+    model_id = await _make_small_model(db_session_factory)
+    top = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(
+            code=f"{prefix}_t1", name=f"{prefix}涉政", level=TAG_LEVEL_TOP
+        ),
+    )
+    assert top.status_code == 201, top.text
+    top_id = top.json()["id"]
+    mid = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(
+            code=f"{prefix}_t2",
+            name=f"{prefix}一号领导",
+            level=TAG_LEVEL_MID,
+            parent_id=top_id,
+        ),
+    )
+    assert mid.status_code == 201, mid.text
+    mid_id = mid.json()["id"]
+    leaf = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(
+            code=f"{prefix}_t3",
+            name=f"{prefix}漫画",
+            level=TAG_LEVEL_LEAF,
+            parent_id=mid_id,
+            bound_model_id=model_id,
+            bound_model_kind="small",
+        ),
+    )
+    assert leaf.status_code == 201, leaf.text
+    leaf_id = leaf.json()["id"]
+    return top_id, mid_id, leaf_id, model_id
+
+
+async def test_get_references_endpoint_with_bound_model(
+    admin_client: AsyncClient, db_session_factory
+) -> None:
+    """GET /tags/{id}/references:返回 model 引用 + can_delete=false / can_deactivate=true。"""
+    _top, _mid, leaf_id, _ = await _make_tag_chain_with_bound_model(
+        admin_client, db_session_factory, prefix="refs1"
+    )
+
+    r = await admin_client.get(f"/api/v1/tags/{leaf_id}/references")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["tag_id"] == leaf_id
+    assert body["tag_level"] == TAG_LEVEL_LEAF
+    assert "/" in body["tag_path"]  # 含完整路径
+    assert len(body["models"]) == 1
+    assert body["models"][0]["model_name"] == "test_small_1"
+    assert body["total_references"] == 1
+    # 模型绑定 → can_delete=false,但 can_deactivate=true(无 active 策略引用)
+    assert body["can_delete"] is False
+    assert body["can_deactivate"] is True
+
+
+async def test_get_references_endpoint_no_refs(
+    admin_client: AsyncClient
+) -> None:
+    """无任何引用:can_delete=true / can_deactivate=true。"""
+    top = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(
+            code="no_refs_top", name="no_refs", level=TAG_LEVEL_TOP
+        ),
+    )
+    assert top.status_code == 201, top.text
+    top_id = top.json()["id"]
+
+    r = await admin_client.get(f"/api/v1/tags/{top_id}/references")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["strategies"] == []
+    assert body["models"] == []
+    assert body["can_delete"] is True
+    assert body["can_deactivate"] is True
+    assert body["total_references"] == 0
+
+
+async def test_delete_blocked_by_model_binding(
+    admin_client: AsyncClient, db_session_factory
+) -> None:
+    """DELETE 触发 409:模型绑定未解除 → 返回 references 清单。"""
+    _top, _mid, leaf_id, _ = await _make_tag_chain_with_bound_model(
+        admin_client, db_session_factory, prefix="del_blocked"
+    )
+
+    r = await admin_client.delete(f"/api/v1/tags/{leaf_id}")
+    assert r.status_code == 409, r.text
+    detail = r.json()["detail"]
+    assert detail["message"]
+    assert detail["references"]["tag_id"] == leaf_id
+    assert len(detail["references"]["models"]) == 1
+
+
+async def test_delete_allowed_when_no_references(
+    admin_client: AsyncClient
+) -> None:
+    """无任何引用 → DELETE 204。"""
+    top = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(
+            code="del_ok_top", name="del_ok", level=TAG_LEVEL_TOP
+        ),
+    )
+    top_id = top.json()["id"]
+
+    r = await admin_client.delete(f"/api/v1/tags/{top_id}")
+    assert r.status_code == 204, r.text
+
+    # 验证已软删除
+    g = await admin_client.get(f"/api/v1/tags/{top_id}", params={"include_deleted": "true"})
+    assert g.status_code == 200
+    assert g.json()["status"] == "deprecated"
+
+
+async def test_deprecate_allowed_when_no_active_strategy(
+    admin_client: AsyncClient
+) -> None:
+    """无 active 策略引用 → deprecate 200。"""
+    top = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(
+            code="dep_ok", name="dep_ok", level=TAG_LEVEL_TOP
+        ),
+    )
+    top_id = top.json()["id"]
+
+    r = await admin_client.post(f"/api/v1/tags/{top_id}/deprecate")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "deprecated"

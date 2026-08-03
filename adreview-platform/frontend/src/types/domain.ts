@@ -1373,6 +1373,31 @@ export interface TagReferenceList {
   items: TagReferenceItem[]
 }
 
+export interface TagReferenceStrategy {
+  strategy_id: string
+  strategy_name: string
+  status: 'active' | 'deprecated' | string
+  services: string[]
+}
+
+export interface TagReferenceModel {
+  model_id: number
+  model_name: string
+  model_version: string
+}
+
+export interface TagReferences {
+  tag_id: string
+  tag_name: string
+  tag_level: TagLevel
+  tag_path: string
+  strategies: TagReferenceStrategy[]
+  models: TagReferenceModel[]
+  can_deactivate: boolean
+  can_delete: boolean
+  total_references: number
+}
+
 export const TAG_DOMAIN_OPTIONS: { value: TagDomain; label: string; cn: string }[] = [
   { value: 'politics', label: 'politics', cn: '涉政' },
   { value: 'porn', label: 'porn', cn: '涉黄' },
