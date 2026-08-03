@@ -22,6 +22,7 @@ import {
   Radio,
   Select,
   Space,
+  Switch,
   Table,
   Tag as AntdTag,
   Typography,
@@ -77,9 +78,11 @@ interface MockTag {
   level: Level
   name: string
   status: Status
+  /** 可被审核策略引用(true)/未启用 false;缺模型时强制 false */
+  enabled: boolean
   parentId: string | null
-  /** 仅展示用途：标签适用的输入模态(可多选);模型绑定关系由其他模块维护 */
-  modalities?: Modality[]
+  /** 仅展示用途:三级标签单条记录对应一个模态;模型绑定关系由其他模块维护 */
+  modality?: Modality
   boundModelId?: number
 }
 
@@ -97,46 +100,58 @@ const MOCK_MODELS: MockModel[] = [
 ]
 
 const INITIAL_MOCK_TAGS: MockTag[] = [
-  { id: 'l1-politics', level: 1, name: '涉政', status: 'active', parentId: null },
-  { id: 'l1-ads_law', level: 1, name: '广告法', status: 'active', parentId: null },
-  { id: 'l1-porn', level: 1, name: '涉黄', status: 'active', parentId: null },
-  { id: 'l1-medical', level: 1, name: '医药', status: 'active', parentId: null },
-  { id: 'l1-violence', level: 1, name: '涉暴', status: 'active', parentId: null },
-  { id: 'l1-custom', level: 1, name: '自定义', status: 'inactive', parentId: null },
+  // 一级
+  { id: 'l1-politics', level: 1, name: '涉政', status: 'active', enabled: true, parentId: null },
+  { id: 'l1-ads_law', level: 1, name: '广告法', status: 'active', enabled: true, parentId: null },
+  { id: 'l1-porn', level: 1, name: '涉黄', status: 'active', enabled: true, parentId: null },
+  { id: 'l1-medical', level: 1, name: '医药', status: 'active', enabled: true, parentId: null },
+  { id: 'l1-violence', level: 1, name: '涉暴', status: 'active', enabled: true, parentId: null },
+  { id: 'l1-custom', level: 1, name: '自定义', status: 'inactive', enabled: false, parentId: null },
 
-  { id: 'l2-leader1', level: 2, name: '一号领导', status: 'active', parentId: 'l1-politics' },
-  { id: 'l2-leader2', level: 2, name: '二号领导', status: 'active', parentId: 'l1-politics' },
-  { id: 'l2-flag', level: 2, name: '国旗国徽', status: 'active', parentId: 'l1-politics' },
-  { id: 'l2-cartoon_pol', level: 2, name: '政治讽刺', status: 'active', parentId: 'l1-politics' },
-  { id: 'l2-absolute', level: 2, name: '极限词', status: 'active', parentId: 'l1-ads_law' },
-  { id: 'l2-fake_claim', level: 2, name: '虚假宣传', status: 'active', parentId: 'l1-ads_law' },
-  { id: 'l2-nude', level: 2, name: '成人内容', status: 'active', parentId: 'l1-porn' },
-  { id: 'l2-cartoon_porn', level: 2, name: '色情漫画', status: 'inactive', parentId: 'l1-porn' },
-  { id: 'l2-medical_claim', level: 2, name: '医药宣传', status: 'active', parentId: 'l1-medical' },
-  { id: 'l2-weapon', level: 2, name: '武器', status: 'active', parentId: 'l1-violence' },
+  // 二级
+  { id: 'l2-leader1', level: 2, name: '一号领导', status: 'active', enabled: true, parentId: 'l1-politics' },
+  { id: 'l2-leader2', level: 2, name: '二号领导', status: 'active', enabled: true, parentId: 'l1-politics' },
+  { id: 'l2-flag', level: 2, name: '国旗国徽', status: 'active', enabled: true, parentId: 'l1-politics' },
+  { id: 'l2-cartoon_pol', level: 2, name: '政治讽刺', status: 'active', enabled: true, parentId: 'l1-politics' },
+  { id: 'l2-absolute', level: 2, name: '极限词', status: 'active', enabled: true, parentId: 'l1-ads_law' },
+  { id: 'l2-fake_claim', level: 2, name: '虚假宣传', status: 'active', enabled: true, parentId: 'l1-ads_law' },
+  { id: 'l2-nude', level: 2, name: '成人内容', status: 'active', enabled: true, parentId: 'l1-porn' },
+  { id: 'l2-cartoon_porn', level: 2, name: '色情漫画', status: 'inactive', enabled: false, parentId: 'l1-porn' },
+  { id: 'l2-medical_claim', level: 2, name: '医药宣传', status: 'active', enabled: true, parentId: 'l1-medical' },
+  { id: 'l2-weapon', level: 2, name: '武器', status: 'active', enabled: true, parentId: 'l1-violence' },
 
-  { id: 'l3-leader1-write', level: 3, name: '写实', status: 'active', parentId: 'l2-leader1', modalities: ['image'], boundModelId: 4 },
-  // 多模态演示:漫画·一号领导 适用「图像 + 视频」
-  { id: 'l3-leader1-cartoon', level: 3, name: '漫画', status: 'active', parentId: 'l2-leader1', modalities: ['image', 'video'], boundModelId: 5 },
-  { id: 'l3-leader2-cartoon', level: 3, name: '漫画', status: 'active', parentId: 'l2-leader2', modalities: ['image'], boundModelId: 5 },
-  // 多模态演示:文本描述 适用「文本 + 图像」(含配图)
-  { id: 'l3-leader2-text', level: 3, name: '文本描述', status: 'active', parentId: 'l2-leader2', modalities: ['text', 'image'], boundModelId: 1 },
-  { id: 'l3-flag-vandalize', level: 3, name: '篡改', status: 'active', parentId: 'l2-flag', modalities: ['image'], boundModelId: 6 },
-  { id: 'l3-flag-graffiti', level: 3, name: '涂鸦', status: 'active', parentId: 'l2-flag', modalities: ['image'], boundModelId: 6 },
-  { id: 'l3-cartoon_pol-latest', level: 3, name: '时政讽刺', status: 'active', parentId: 'l2-cartoon_pol', modalities: ['image'], boundModelId: 5 },
-  { id: 'l3-cartoon_pol-history', level: 3, name: '历史讽刺', status: 'active', parentId: 'l2-cartoon_pol', modalities: ['image'], boundModelId: 5 },
-  // 多模态演示:极限用语 适用「文本 + 图像」
-  { id: 'l3-absolute-text', level: 3, name: '极限用语', status: 'active', parentId: 'l2-absolute', modalities: ['text', 'image'], boundModelId: 7 },
-  { id: 'l3-absolute-image', level: 3, name: '极限标语', status: 'active', parentId: 'l2-absolute', modalities: ['image'], boundModelId: 7 },
-  { id: 'l3-fake_claim-text', level: 3, name: '夸大疗效', status: 'active', parentId: 'l2-fake_claim', modalities: ['text'], boundModelId: 1 },
-  { id: 'l3-nude-face', level: 3, name: '成人面部', status: 'active', parentId: 'l2-nude', modalities: ['image'], boundModelId: 8 },
-  { id: 'l3-nude-body', level: 3, name: '成人裸露', status: 'active', parentId: 'l2-nude', modalities: ['image'], boundModelId: 9 },
-  // 多模态演示:音频呻吟 适用「音频 + 视频」
-  { id: 'l3-nude-voice', level: 3, name: '音频呻吟', status: 'active', parentId: 'l2-nude', modalities: ['audio', 'video'], boundModelId: 10 },
-  { id: 'l3-cartoon_porn-anime', level: 3, name: '动漫色情', status: 'inactive', parentId: 'l2-cartoon_porn', modalities: ['image'], boundModelId: 5 },
-  { id: 'l3-medical_claim-text', level: 3, name: '包治百病', status: 'active', parentId: 'l2-medical_claim', modalities: ['text'], boundModelId: 1 },
-  { id: 'l3-weapon-real', level: 3, name: '真实武器', status: 'active', parentId: 'l2-weapon', modalities: ['image'], boundModelId: 3 },
-  { id: 'l3-weapon-toy', level: 3, name: '仿真玩具', status: 'active', parentId: 'l2-weapon', modalities: ['image'], boundModelId: 3 },
+  // 三级 — 每个模态一行独立记录
+  // 漫画·一号领导 (图像 + 视频) → 拆成 2 行
+  { id: 'l3-leader1-write', level: 3, name: '写实', status: 'active', enabled: true, parentId: 'l2-leader1', modality: 'image', boundModelId: 4 },
+  { id: 'l3-leader1-cartoon-image', level: 3, name: '漫画', status: 'active', enabled: true, parentId: 'l2-leader1', modality: 'image', boundModelId: 5 },
+  { id: 'l3-leader1-cartoon-video', level: 3, name: '漫画', status: 'active', enabled: false, parentId: 'l2-leader1', modality: 'video' },
+  // 二号领导·漫画 → 单行
+  { id: 'l3-leader2-cartoon', level: 3, name: '漫画', status: 'active', enabled: true, parentId: 'l2-leader2', modality: 'image', boundModelId: 5 },
+  // 文本描述 (文本 + 图像) → 拆成 2 行
+  { id: 'l3-leader2-text-text', level: 3, name: '文本描述', status: 'active', enabled: true, parentId: 'l2-leader2', modality: 'text', boundModelId: 1 },
+  { id: 'l3-leader2-text-image', level: 3, name: '文本描述', status: 'active', enabled: false, parentId: 'l2-leader2', modality: 'image' },
+  // 国旗国徽
+  { id: 'l3-flag-vandalize', level: 3, name: '篡改', status: 'active', enabled: true, parentId: 'l2-flag', modality: 'image', boundModelId: 6 },
+  { id: 'l3-flag-graffiti', level: 3, name: '涂鸦', status: 'active', enabled: true, parentId: 'l2-flag', modality: 'image', boundModelId: 6 },
+  // 政治讽刺
+  { id: 'l3-cartoon_pol-latest', level: 3, name: '时政讽刺', status: 'active', enabled: true, parentId: 'l2-cartoon_pol', modality: 'image', boundModelId: 5 },
+  { id: 'l3-cartoon_pol-history', level: 3, name: '历史讽刺', status: 'active', enabled: true, parentId: 'l2-cartoon_pol', modality: 'image', boundModelId: 5 },
+  // 极限用语 (文本 + 图像) → 拆成 2 行
+  { id: 'l3-absolute-text', level: 3, name: '极限用语', status: 'active', enabled: true, parentId: 'l2-absolute', modality: 'text', boundModelId: 7 },
+  { id: 'l3-absolute-image-text', level: 3, name: '极限用语', status: 'active', enabled: false, parentId: 'l2-absolute', modality: 'image' },
+  { id: 'l3-absolute-image-banner', level: 3, name: '极限标语', status: 'active', enabled: true, parentId: 'l2-absolute', modality: 'image', boundModelId: 7 },
+  // 虚假宣传
+  { id: 'l3-fake_claim-text', level: 3, name: '夸大疗效', status: 'active', enabled: true, parentId: 'l2-fake_claim', modality: 'text', boundModelId: 1 },
+  // 成人内容
+  { id: 'l3-nude-face', level: 3, name: '成人面部', status: 'active', enabled: true, parentId: 'l2-nude', modality: 'image', boundModelId: 8 },
+  { id: 'l3-nude-body', level: 3, name: '成人裸露', status: 'active', enabled: true, parentId: 'l2-nude', modality: 'image', boundModelId: 9 },
+  // 音频呻吟 (音频 + 视频) → 拆成 2 行
+  { id: 'l3-nude-voice-audio', level: 3, name: '音频呻吟', status: 'active', enabled: true, parentId: 'l2-nude', modality: 'audio', boundModelId: 10 },
+  { id: 'l3-nude-voice-video', level: 3, name: '音频呻吟', status: 'active', enabled: false, parentId: 'l2-nude', modality: 'video' },
+  { id: 'l3-cartoon_porn-anime', level: 3, name: '动漫色情', status: 'inactive', enabled: false, parentId: 'l2-cartoon_porn', modality: 'image', boundModelId: 5 },
+  { id: 'l3-medical_claim-text', level: 3, name: '包治百病', status: 'active', enabled: true, parentId: 'l2-medical_claim', modality: 'text', boundModelId: 1 },
+  { id: 'l3-weapon-real', level: 3, name: '真实武器', status: 'active', enabled: true, parentId: 'l2-weapon', modality: 'image', boundModelId: 3 },
+  { id: 'l3-weapon-toy', level: 3, name: '仿真玩具', status: 'active', enabled: true, parentId: 'l2-weapon', modality: 'image', boundModelId: 3 },
 ]
 
 interface DrawerState {
@@ -345,7 +360,7 @@ export default function TagsAdminPage() {
         l2?.name ?? '',
         l3?.name ?? '',
         model?.name ?? '',
-        (l3?.modalities ?? []).join(' '),
+        l3?.modality ?? '',
       ]
         .join(' ')
         .toLowerCase()
@@ -380,7 +395,8 @@ export default function TagsAdminPage() {
       status: row.status,
       parent_l1,
       parent_l2,
-      modalities: row.modalities,
+      modalities: row.modality ? [row.modality] : [],
+      enabled: row.enabled,
     })
     setDrawer({ open: true, editing: row })
   }
@@ -403,33 +419,73 @@ export default function TagsAdminPage() {
             : (v.parent_l2 as string | undefined) ?? null
       const editing = drawer.editing
       const timestamp = Date.now()
+      const status = v.status as Status
+      // 三级标签:未绑定模型时强制 enabled=false (α 规则)
+      const formEnabled = !!v.enabled
+      const willHaveModel =
+        level === 3 && editing ? editing.boundModelId != null : false
 
-      const buildRecord = (id: string): MockTag => {
-        const base: MockTag = {
-          id,
-          level,
-          name: v.name,
-          status: v.status,
-          parentId,
+      // 一级/二级:单条记录,无 modality
+      // 三级:按 modalities 数组展开为 N 条独立记录(Q2 不合并)
+      const buildRecords = (baseId: string): MockTag[] => {
+        if (level !== 3) {
+          return [
+            {
+              id: baseId,
+              level,
+              name: v.name,
+              status,
+              enabled: formEnabled,
+              parentId,
+            },
+          ]
         }
-        // 三级标签:模态来自表单(多选);boundModelId 不在本页修改
-        if (level === 3) {
-          base.modalities = (v.modalities as Modality[] | undefined) ?? []
-          if (editing) {
-            base.boundModelId = editing.boundModelId
+        const mods = (v.modalities as Modality[] | undefined) ?? []
+        return mods.map((mod, idx) => {
+          const id = idx === 0 ? baseId : `${baseId}-${mod}-${timestamp}`
+          return {
+            id,
+            level: 3,
+            name: v.name,
+            status,
+            enabled: formEnabled,
+            parentId,
+            modality: mod,
+            boundModelId: idx === 0 && editing ? editing.boundModelId : undefined,
           }
-        }
-        return base
+        })
       }
 
       if (editing) {
+        // Q2 不合并:只改当前记录
+        const updated: MockTag = (() => {
+          if (level !== 3) {
+            return {
+              ...editing,
+              name: v.name,
+              status,
+              enabled: formEnabled,
+              parentId,
+            }
+          }
+          return {
+            ...editing,
+            name: v.name,
+            status,
+            enabled: formEnabled,
+            parentId,
+            modality: ((v.modalities as Modality[] | undefined) ?? [])[0],
+          }
+        })()
+        void willHaveModel // 备用变量占位避免 lint
         setTags((prev) =>
-          prev.map((t) => (t.id === editing.id ? buildRecord(editing.id) : t)),
+          prev.map((t) => (t.id === editing.id ? updated : t)),
         )
         message.success('已保存')
       } else {
-        setTags((prev) => [buildRecord(`t-${timestamp}`), ...prev])
-        message.success('已新增')
+        const records = buildRecords(`t-${timestamp}`)
+        setTags((prev) => [...records, ...prev])
+        message.success(`已新增 ${records.length} 条记录`)
       }
       closeDrawer()
     } catch {
@@ -549,19 +605,11 @@ export default function TagsAdminPage() {
     },
     {
       title: '模态',
-      minWidth: 160,
+      minWidth: 100,
       render: (_, row) => {
-        const ms = row.l3?.modalities
-        if (!ms || ms.length === 0) return <Text type="secondary">—</Text>
-        return (
-          <Space size={4} wrap>
-            {ms.map((m) => (
-              <AntdTag key={m} color="cyan">
-                {MODALITY_LABELS[m]}
-              </AntdTag>
-            ))}
-          </Space>
-        )
+        const m = row.l3?.modality
+        if (!m) return <Text type="secondary">—</Text>
+        return <AntdTag color="cyan">{MODALITY_LABELS[m]}</AntdTag>
       },
     },
     {
@@ -585,19 +633,30 @@ export default function TagsAdminPage() {
     },
     {
       title: '状态',
-      minWidth: 96,
-      render: (_, row) => (
-        <a
-          onClick={() => handleToggleStatus(row.rowTag)}
-          style={{ cursor: checkingRefs ? 'wait' : 'pointer' }}
-        >
-          {row.rowTag.status === 'active' ? (
-            <AntdTag color="green">已启用</AntdTag>
-          ) : (
-            <AntdTag>已停用</AntdTag>
-          )}
-        </a>
-      ),
+      minWidth: 140,
+      render: (_, row) => {
+        const t = row.rowTag
+        const isL3NoModel = t.level === 3 && t.boundModelId == null
+        if (isL3NoModel) {
+          return (
+            <Space size={4}>
+              <AntdTag color="default">未启用(缺模型)</AntdTag>
+            </Space>
+          )
+        }
+        return (
+          <a
+            onClick={() => handleToggleStatus(t)}
+            style={{ cursor: checkingRefs ? 'wait' : 'pointer' }}
+          >
+            {t.status === 'active' ? (
+              <AntdTag color="green">{t.enabled ? '已启用' : '未启用'}</AntdTag>
+            ) : (
+              <AntdTag>已停用</AntdTag>
+            )}
+          </a>
+        )
+      },
     },
     {
       title: '操作',
@@ -686,6 +745,32 @@ export default function TagsAdminPage() {
 
       {watchLevel === 3 && (
         <Form.Item
+          label="三级标签名称"
+          name="name"
+          rules={[
+            { required: true, message: '请输入三级标签名称' },
+            { max: 32, message: '标签名称最多 32 字' },
+          ]}
+        >
+          <Input placeholder="请输入三级标签名称" maxLength={32} showCount />
+        </Form.Item>
+      )}
+
+      {watchLevel !== 3 && (
+        <Form.Item
+          label="标签名称"
+          name="name"
+          rules={[
+            { required: true, message: '请输入标签名称' },
+            { max: 32, message: '标签名称最多 32 字' },
+          ]}
+        >
+          <Input placeholder="请输入标签名称" maxLength={32} showCount />
+        </Form.Item>
+      )}
+
+      {watchLevel === 3 && (
+        <Form.Item
           label="适用模态"
           name="modalities"
           rules={[
@@ -698,7 +783,7 @@ export default function TagsAdminPage() {
               },
             },
           ]}
-          tooltip="该标签适用的输入模态(可多选);模型绑定由其他模块维护"
+          tooltip="该标签适用的输入模态(可多选);每个模态生成一行独立记录,模型绑定由其他模块维护"
         >
           <Select
             mode="multiple"
@@ -713,17 +798,6 @@ export default function TagsAdminPage() {
       )}
 
       <Form.Item
-        label="标签名称"
-        name="name"
-        rules={[
-          { required: true, message: '请输入标签名称' },
-          { max: 32, message: '标签名称最多 32 字' },
-        ]}
-      >
-        <Input placeholder="请输入标签名称" maxLength={32} showCount />
-      </Form.Item>
-
-      <Form.Item
         label="状态"
         name="status"
         rules={[{ required: true, message: '请选择状态' }]}
@@ -732,6 +806,15 @@ export default function TagsAdminPage() {
           <Radio.Button value="active">已启用</Radio.Button>
           <Radio.Button value="inactive">已停用</Radio.Button>
         </Radio.Group>
+      </Form.Item>
+
+      <Form.Item
+        label="可启用"
+        name="enabled"
+        valuePropName="checked"
+        tooltip="开启后,该标签可被审核策略引用;若未绑定模型,保存时会强制为关闭状态"
+      >
+        <Switch disabled={!!watchEditing} />
       </Form.Item>
     </Form>
   )
