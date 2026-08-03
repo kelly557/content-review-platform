@@ -5,6 +5,11 @@ export interface ModelTestInput {
   inputText?: string
   imageFile?: File
   auditPoints: { label: string }[]
+  /**
+   * 模型已配置的业务三级标签映射 (discoveredTag → tagPath)。
+   * 若提供,rawOutput.triggered_points 中的每个元素会带上 business_tag。
+   */
+  configuredTags?: { discoveredTag: string; tagPath: string }[]
 }
 
 export interface ModelTestOutput {
@@ -71,12 +76,26 @@ export async function runModelTest(req: ModelTestInput): Promise<ModelTestRespon
         .filter(Boolean)
     : []
 
+  const businessTagMap = new Map<string, string>()
+  for (const c of req.configuredTags ?? []) {
+    businessTagMap.set(c.discoveredTag, c.tagPath)
+  }
+
+  const triggered_points = results
+    .filter((r) => r.triggered)
+    .map((r) => {
+      const tagPath = businessTagMap.get(r.point)
+      return tagPath
+        ? { point: r.point, business_tag: tagPath }
+        : { point: r.point }
+    })
+
   const raw = {
     decision,
     modality: req.modality,
     segments,
     image_provided: Boolean(req.imageFile),
-    triggered_points: results.filter((r) => r.triggered).map((r) => r.point),
+    triggered_points,
     latency_ms: latencyMs,
   }
 

@@ -1,7 +1,7 @@
 // 模型管理 / 小模型（mock 数据版本）
-// 按 ASCII 设计稿实现：左 280px 列表 + 右详情（版本历史、引用标签、操作）。
+// 按 ASCII 设计稿实现：左 280px 列表 + 右详情（版本历史、模型标签、推荐风险阈值、引用标签、模型测试）。
 // 数据来源：当前为前端 mock（无后端依赖），后续接 API 时替换 fetchList / fetchVersions / fetchRefs。
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import {
   App,
@@ -27,6 +27,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import type { UploadFile } from 'antd/es/upload/interface'
 import {
+  ApiOutlined,
   DownOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -37,6 +38,13 @@ import {
 } from '@ant-design/icons'
 import { useAuthStore } from '@/store'
 import { runModelTest, type ModelTestResponse } from '@/api/modelTest'
+import {
+  runAccessCheck,
+  type AccessCheckResult,
+} from '@/api/modelAccessCheck'
+import ModelConfigTagModal from '@/pages/admin/ModelConfigTagModal'
+import type { ConfiguredTagEntry } from '@/pages/admin/configuredTagTypes'
+import { findStrategiesByDiscoveredTag } from '@/lib/auditStrategyRefMock'
 
 const { Text, Title } = Typography
 
@@ -89,6 +97,8 @@ interface MockModel {
   refs: MockRef[]
   testHistory?: MockModelTestRecord[]
   riskThreshold?: RiskThresholdRange
+  discoveredTags?: string[]
+  configuredTags?: ConfiguredTagEntry[]
 }
 
 const MOCK_MODELS: MockModel[] = [
@@ -117,6 +127,29 @@ const MOCK_MODELS: MockModel[] = [
     refs: [
       { id: 'r1', path: '涉政 / 一号领导 / 写实' },
       { id: 'r2', path: '涉政 / 二号领导 / 写实' },
+    ],
+    discoveredTags: [
+      '涉政敏感人物',
+      '公众人物',
+      '暴恐血腥',
+      '违规水印',
+    ],
+    configuredTags: [
+      {
+        discoveredTag: '涉政敏感人物',
+        tagId: 'mock-l3-politics-top-leader-real',
+        tagPath: '涉政 / 一号领导 / 写实',
+      },
+      {
+        discoveredTag: '公众人物',
+        tagId: 'mock-l3-politics-former-leader-figure',
+        tagPath: '涉政 / 历任领导 / 人像',
+      },
+      {
+        discoveredTag: '暴恐血腥',
+        tagId: 'mock-l3-terror-org-image',
+        tagPath: '暴恐 / 恐怖组织 / 画面',
+      },
     ],
     testHistory: [
       {
@@ -183,6 +216,24 @@ const MOCK_MODELS: MockModel[] = [
       { id: 'r11', path: '涉政 / 政治讽刺 / 漫画' },
       { id: 'r12', path: '涉政 / 政治讽刺 / 配图' },
     ],
+    discoveredTags: ['涉政敏感人物', '色情低俗', '青少年不良', '商标侵权'],
+    configuredTags: [
+      {
+        discoveredTag: '涉政敏感人物',
+        tagId: 'mock-l3-politics-top-leader-cartoon',
+        tagPath: '涉政 / 一号领导 / 漫画',
+      },
+      {
+        discoveredTag: '色情低俗',
+        tagId: 'mock-l3-politics-former-leader-cartoon',
+        tagPath: '涉政 / 历任领导 / 漫画',
+      },
+      {
+        discoveredTag: '青少年不良',
+        tagId: 'mock-l3-politics-symbol-graffiti',
+        tagPath: '涉政 / 政治象征 / 涂鸦',
+      },
+    ],
     testHistory: [
       {
         decision: 'pass',
@@ -238,6 +289,19 @@ const MOCK_MODELS: MockModel[] = [
     refs: [
       { id: 'r20', path: '涉政 / 国旗国徽 / 篡改' },
       { id: 'r21', path: '涉政 / 国旗国徽 / 涂鸦' },
+    ],
+    discoveredTags: ['涉政敏感人物', '违规水印', '公众人物'],
+    configuredTags: [
+      {
+        discoveredTag: '涉政敏感人物',
+        tagId: 'mock-l3-politics-top-leader-illust',
+        tagPath: '涉政 / 一号领导 / 配图',
+      },
+      {
+        discoveredTag: '违规水印',
+        tagId: 'mock-l3-politics-symbol-tamper',
+        tagPath: '涉政 / 政治象征 / 篡改',
+      },
     ],
     testHistory: [
       {
@@ -313,6 +377,29 @@ const MOCK_MODELS: MockModel[] = [
       { id: 'r30', path: '广告法 / 极限词 / 识别' },
       { id: 'r31', path: '广告法 / 虚假宣传 / OCR' },
     ],
+    discoveredTags: ['广告营销', '虚假宣传', '辱骂攻击', '隐私信息', '涉政敏感'],
+    configuredTags: [
+      {
+        discoveredTag: '广告营销',
+        tagId: 'mock-l3-ads-law-misleading-extreme',
+        tagPath: '广告法 / 误导性虚假广告 / 极限词',
+      },
+      {
+        discoveredTag: '虚假宣传',
+        tagId: 'mock-l3-ads-law-misleading-promise',
+        tagPath: '广告法 / 误导性虚假广告 / 虚假承诺',
+      },
+      {
+        discoveredTag: '辱骂攻击',
+        tagId: 'mock-l3-insult-regional-text',
+        tagPath: '辱骂 / 地域歧视 / 文字',
+      },
+      {
+        discoveredTag: '隐私信息',
+        tagId: 'mock-l3-insult-person-text',
+        tagPath: '辱骂 / 人格侮辱 / 文字',
+      },
+    ],
     testHistory: [
       {
         decision: 'pass',
@@ -376,6 +463,24 @@ const MOCK_MODELS: MockModel[] = [
     refs: [
       { id: 'r40', path: '涉黄 / 成人内容 / 面部' },
       { id: 'r41', path: '涉黄 / 表情包 / 露骨' },
+    ],
+    discoveredTags: ['色情低俗', '暴恐血腥', '青少年不良', '公众人物'],
+    configuredTags: [
+      {
+        discoveredTag: '色情低俗',
+        tagId: 'mock-l3-insult-regional-emoji',
+        tagPath: '辱骂 / 地域歧视 / 表情包',
+      },
+      {
+        discoveredTag: '暴恐血腥',
+        tagId: 'mock-l3-insult-person-cartoon',
+        tagPath: '辱骂 / 人格侮辱 / 卡通',
+      },
+      {
+        discoveredTag: '青少年不良',
+        tagId: 'mock-l3-terror-org-figure-avatar',
+        tagPath: '暴恐 / 恐怖组织人物 / 头像',
+      },
     ],
     testHistory: [
       {
@@ -533,6 +638,82 @@ function checkRiskThreshold(r: RiskThresholdRange): string | null {
   return null
 }
 
+// ── 配置标签表格（行 = discoveredTag → 业务三级标签） ──────────────────────
+function ConfigTagTable({
+  configuredTags,
+  discoveredTags,
+  onRemove,
+}: {
+  configuredTags: ConfiguredTagEntry[]
+  discoveredTags: string[]
+  onRemove: (tagId: string) => void
+}) {
+  if (discoveredTags.length === 0) {
+    return (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description={
+          <Text type="secondary">
+            该模型尚未执行接入校验,无模型标签可配置
+          </Text>
+        }
+      />
+    )
+  }
+  const configuredByDiscovered = new Map<string, ConfiguredTagEntry>()
+  for (const e of configuredTags) {
+    configuredByDiscovered.set(e.discoveredTag, e)
+  }
+
+  return (
+    <Table<{ discoveredTag: string; entry: ConfiguredTagEntry | null }>
+      rowKey="discoveredTag"
+      size="middle"
+      pagination={false}
+      dataSource={discoveredTags.map((dt) => ({
+        discoveredTag: dt,
+        entry: configuredByDiscovered.get(dt) ?? null,
+      }))}
+      columns={[
+        {
+          title: '模型标签',
+          dataIndex: 'discoveredTag',
+          width: 160,
+          render: (v: string) => <Tag color="blue">{v}</Tag>,
+        },
+        {
+          title: '业务标签(三级)',
+          dataIndex: 'entry',
+          render: (_: unknown, row) =>
+            row.entry ? (
+              <Tag color="blue">{row.entry.tagPath}</Tag>
+            ) : (
+              <Text type="secondary">未配置</Text>
+            ),
+        },
+        {
+          title: '操作',
+          width: 80,
+          align: 'center',
+          render: (_: unknown, row) =>
+            row.entry ? (
+              <Button
+                size="small"
+                type="link"
+                danger
+                onClick={() => onRemove(row.entry!.tagId)}
+              >
+                移除
+              </Button>
+            ) : (
+              <Text type="secondary">—</Text>
+            ),
+        },
+      ]}
+    />
+  )
+}
+
 export default function ModelsAdminSmallPage() {
   const { message } = App.useApp()
   const { user } = useAuthStore()
@@ -573,19 +754,28 @@ export default function ModelsAdminSmallPage() {
     }
     setTestRunning(true)
     try {
+      const auditPoints = (selected.discoveredTags ?? []).map((label) => ({
+        label,
+      }))
+      const configuredTags = (selected.configuredTags ?? []).map((c) => ({
+        discoveredTag: c.discoveredTag,
+        tagPath: c.tagPath,
+      }))
       const r =
         selected.modality === 'text'
           ? await runModelTest({
               modality: 'text',
               inputText: testText,
-              auditPoints: [],
+              auditPoints,
+              configuredTags,
             })
           : await runModelTest({
               modality: 'image',
               imageFile:
                 (testImage?.originFileObj as File | undefined) ??
                 new File([new Blob()], testImage?.name ?? 'mock.png'),
-              auditPoints: [],
+              auditPoints,
+              configuredTags,
             })
       // 将测试结果写入当前模型的 testHistory
       setModels((prev) =>
@@ -684,6 +874,11 @@ export default function ModelsAdminSmallPage() {
     modality: Modality4
     endpoint_url: string
   }>()
+  const [accessRunning, setAccessRunning] = useState(false)
+  const [accessChecked, setAccessChecked] = useState(false)
+  const [accessResult, setAccessResult] = useState<AccessCheckResult | null>(
+    null,
+  )
 
   // 从 models[].refs 动态推导三级标签树（Cascader 用）
   const refTagTree = useMemo(() => {
@@ -862,10 +1057,40 @@ export default function ModelsAdminSmallPage() {
     setNewVersionOpen(false)
   }
 
+  // ── 操作：接入校验 ──────────────────────
+  const handleAccessCheck = async () => {
+    const v = await addForm.validateFields().catch(() => null)
+    if (!v) return
+    setAccessRunning(true)
+    setAccessChecked(false)
+    setAccessResult(null)
+    try {
+      const result = await runAccessCheck({
+        modality: v.modality,
+        endpoint_url: v.endpoint_url.trim(),
+        name: v.name?.trim(),
+      })
+      setAccessResult(result)
+      if (result.ok) {
+        setAccessChecked(true)
+        message.success(`接入校验通过,发现 ${result.discoveredTags.length} 个模型标签`)
+      } else {
+        setAccessChecked(false)
+        message.error(result.message ?? '接入校验失败')
+      }
+    } finally {
+      setAccessRunning(false)
+    }
+  }
+
   // ── 操作：新增模型 ──────────────────────
   const handleAddModel = async () => {
     const v = await addForm.validateFields().catch(() => null)
     if (!v) return
+    if (!accessChecked) {
+      message.warning('请先完成接入校验')
+      return
+    }
     setAddSubmitting(true)
     try {
       const today = dayjs().format('YYYY-MM-DD')
@@ -888,10 +1113,12 @@ export default function ModelsAdminSmallPage() {
         currentVersion: v1,
         history: [v1],
         refs: [],
+        discoveredTags: accessResult?.discoveredTags ?? [],
       }
       setModels((prev) => [...prev, newModel])
       setSelectedId(newId)
       addForm.resetFields()
+      resetAccessState()
       setAddOpen(false)
       message.success('已新增模型')
     } finally {
@@ -899,9 +1126,132 @@ export default function ModelsAdminSmallPage() {
     }
   }
 
+  const resetAccessState = () => {
+    setAccessRunning(false)
+    setAccessChecked(false)
+    setAccessResult(null)
+  }
+
   const closeAddModal = () => {
     setAddOpen(false)
     addForm.resetFields()
+    resetAccessState()
+  }
+
+  // ── 操作：配置标签 ──────────────────────
+  const [configModalOpen, setConfigModalOpen] = useState(false)
+  const openConfigModal = () => {
+    if (!selected) return
+    setConfigModalOpen(true)
+  }
+  const closeConfigModal = () => {
+    setConfigModalOpen(false)
+  }
+  const handleSaveConfigTag = (entry: ConfiguredTagEntry) => {
+    if (!selected) return
+    setModels((prev) =>
+      prev.map((m) =>
+        m.id === selected.id
+          ? {
+              ...m,
+              configuredTags: [...(m.configuredTags ?? []), entry],
+            }
+          : m,
+      ),
+    )
+    message.success(
+      `已配置:${entry.discoveredTag} → ${entry.tagPath}`,
+    )
+  }
+  const handleRemoveConfigTag = (tagId: string) => {
+    if (!selected) return
+    const target = (selected.configuredTags ?? []).find(
+      (e) => e.tagId === tagId,
+    )
+    if (!target) return
+
+    const refStrategies = findStrategiesByDiscoveredTag(
+      target.discoveredTag,
+    )
+    const isPublished = selected.status === 'active'
+    const isRefByStrategy = refStrategies.length > 0
+
+    const performRemove = () => {
+      setModels((prev) =>
+        prev.map((m) =>
+          m.id === selected.id
+            ? {
+                ...m,
+                configuredTags: (m.configuredTags ?? []).filter(
+                  (e) => e.tagId !== tagId,
+                ),
+              }
+            : m,
+        ),
+      )
+      message.success('已移除配置')
+    }
+
+    // 无任何阻塞项 → 直接移除
+    if (!isPublished && !isRefByStrategy) {
+      performRemove()
+      return
+    }
+
+    // 有阻塞项 → 弹窗告知,无"确认移除"按钮(必须先解除限制)
+    const blockerBullets: React.ReactNode[] = []
+    if (isPublished) {
+      blockerBullets.push(
+        <li key="published">
+          模型当前状态为「已发布」,需先取消发布后才能移除。
+        </li>,
+      )
+    }
+    if (isRefByStrategy) {
+      blockerBullets.push(
+        <li key="strategy">
+          模型标签「<Text strong>{target.discoveredTag}</Text>」
+          当前被 {refStrategies.length} 个审核策略引用,需先解除引用后才能移除:
+          <ul style={{ marginTop: 4, marginBottom: 4 }}>
+            {refStrategies.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ul>
+        </li>,
+      )
+    }
+
+    Modal.info({
+      title: '无法移除 — 存在以下阻塞项',
+      width: 520,
+      centered: true,
+      okText: '关闭',
+      content: (
+        <>
+          <div>将移除映射:</div>
+          <div
+            style={{
+              marginTop: 8,
+              marginBottom: 12,
+              padding: 8,
+              background: '#F8FAFC',
+              borderRadius: 6,
+            }}
+          >
+            <Text strong>{target.discoveredTag}</Text>
+            <Text type="secondary"> → </Text>
+            <Text strong>{target.tagPath}</Text>
+          </div>
+          <div>需先解除以下限制:</div>
+          <ul style={{ marginTop: 4, paddingLeft: 20, marginBottom: 0 }}>
+            {blockerBullets}
+          </ul>
+          <div style={{ marginTop: 8 }}>
+            请在对应页面解除以上限制后,再返回此处移除该配置。
+          </div>
+        </>
+      ),
+    })
   }
 
   // ── 操作：切换版本（pending / inactive → current，带二次确认） ──────────────────────
@@ -1298,6 +1648,281 @@ export default function ModelsAdminSmallPage() {
                 </div>
               </div>
 
+              <div
+                style={{
+                  border: '1px solid #E2E8F0',
+                  borderRadius: 8,
+                  background: '#FFFFFF',
+                  padding: '16px 24px 20px',
+                  marginBottom: 16,
+                }}
+              >
+                <div
+                  style={{
+                    marginBottom: 16,
+                    paddingLeft: 12,
+                    borderLeft: '3px solid #1677ff',
+                  }}
+                >
+                  <Space size={8} align="center">
+                    <Text strong style={{ fontSize: 15 }}>
+                      【模型标签】
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      ({selected.discoveredTags?.length ?? 0})
+                    </Text>
+                  </Space>
+                </div>
+
+                {selected.discoveredTags &&
+                selected.discoveredTags.length > 0 ? (
+                  <Space size={6} wrap>
+                    {selected.discoveredTags.map((tag) => (
+                      <Tag key={tag} color="blue">
+                        {tag}
+                      </Tag>
+                    ))}
+                  </Space>
+                ) : (
+                  <Empty
+                    description={
+                      <Text type="secondary">
+                        未发现任何模型标签
+                      </Text>
+                    }
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  />
+                )}
+              </div>
+
+              {/* 推荐风险阈值 */}
+              <div
+                style={{
+                  border: '1px solid #E2E8F0',
+                  borderRadius: 8,
+                  background: '#FFFFFF',
+                  padding: '16px 24px 20px',
+                  marginBottom: 16,
+                }}
+              >
+                <div
+                  style={{
+                    marginBottom: 16,
+                    paddingLeft: 12,
+                    borderLeft: '3px solid #1677ff',
+                  }}
+                >
+                  <Text strong style={{ fontSize: 15 }}>
+                    推荐风险阈值
+                  </Text>
+                </div>
+
+                {selected.riskThreshold ? (
+                  <div>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr 1fr',
+                        gap: 16,
+                        marginBottom: 12,
+                      }}
+                    >
+                      {(
+                        [
+                          { key: 'low', label: '低风险', color: '#2563EB' },
+                          { key: 'mid', label: '中风险', color: '#D97706' },
+                          { key: 'high', label: '高风险', color: '#DC2626' },
+                        ] as const
+                      ).map(({ key, label, color }) => {
+                        const [a, b] = selected.riskThreshold![key]
+                        const isEditing = editingKey === key
+                        const draft =
+                          key === 'low'
+                            ? draftLow
+                            : key === 'mid'
+                              ? draftMid
+                              : draftHigh
+                        return (
+                          <div key={key}>
+                            <div style={{ marginBottom: 8 }}>
+                              <Tag
+                                style={{
+                                  background: `${color}14`,
+                                  borderColor: `${color}40`,
+                                  color,
+                                  margin: 0,
+                                  minWidth: 56,
+                                  textAlign: 'center',
+                                }}
+                              >
+                                {label}
+                              </Tag>
+                            </div>
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              {isEditing ? (
+                                <>
+                                  <InputNumber
+                                    size="small"
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    precision={2}
+                                    value={draft[0]}
+                                    onChange={(v) => {
+                                      const nv =
+                                        typeof v === 'number' ? v : 0
+                                      if (key === 'low')
+                                        setDraftLow([nv, draft[1]])
+                                      if (key === 'mid')
+                                        setDraftMid([nv, draft[1]])
+                                      if (key === 'high')
+                                        setDraftHigh([nv, draft[1]])
+                                    }}
+                                    onBlur={() => commitEdit(key)}
+                                    onPressEnter={() => commitEdit(key)}
+                                    autoFocus
+                                    style={{ width: 64 }}
+                                  />
+                                  <span
+                                    style={{
+                                      color: '#94A3B8',
+                                      fontSize: 12,
+                                    }}
+                                  >
+                                    ~
+                                  </span>
+                                  <InputNumber
+                                    size="small"
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    precision={2}
+                                    value={key === 'high' ? 1 : draft[1]}
+                                    disabled={key === 'high'}
+                                    onChange={(v) => {
+                                      const nv =
+                                        typeof v === 'number' ? v : 0
+                                      if (key === 'low')
+                                        setDraftLow([draft[0], nv])
+                                      if (key === 'mid')
+                                        setDraftMid([draft[0], nv])
+                                    }}
+                                    onBlur={() => commitEdit(key)}
+                                    onPressEnter={() => commitEdit(key)}
+                                    style={{ width: 64 }}
+                                  />
+                                </>
+                              ) : (
+                                <span
+                                  onClick={() => startEdit(key)}
+                                  style={{
+                                    cursor: 'pointer',
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  {a.toFixed(2)} ~ {b.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <Text
+                      type="secondary"
+                      style={{ fontSize: 12, display: 'block' }}
+                    >
+                      用于策略管理初始化配置
+                    </Text>
+                  </div>
+                ) : (
+                  <div
+                    onClick={handleUnconfiguredClick}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '8px 0',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Tag
+                      style={{
+                        background: '#FFF7ED',
+                        borderColor: '#FED7AA',
+                        color: '#C2410C',
+                        margin: 0,
+                      }}
+                    >
+                      未配置
+                    </Tag>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      点击「未配置」或此处即可配置推荐风险阈值
+                    </Text>
+                  </div>
+                )}
+              </div>
+
+              <div
+                style={{
+                  border: '1px solid #E2E8F0',
+                  borderRadius: 8,
+                  background: '#FFFFFF',
+                  padding: '16px 24px 20px',
+                  marginBottom: 16,
+                }}
+              >
+                <div
+                  style={{
+                    marginBottom: 16,
+                    paddingLeft: 12,
+                    borderLeft: '3px solid #1677ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}
+                >
+                  <Space size={8} align="center">
+                    <Text strong style={{ fontSize: 15 }}>
+                      【配置标签】
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      ({selected.configuredTags?.length ?? 0})
+                    </Text>
+                  </Space>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    disabled={
+                      !canWrite ||
+                      (selected.discoveredTags?.length ?? 0) === 0 ||
+                      (selected.discoveredTags ?? []).every((t) =>
+                        (selected.configuredTags ?? []).some(
+                          (c) => c.discoveredTag === t,
+                        ),
+                      )
+                    }
+                    onClick={openConfigModal}
+                  >
+                    添加配置
+                  </Button>
+                </div>
+
+                <ConfigTagTable
+                  configuredTags={selected.configuredTags ?? []}
+                  discoveredTags={selected.discoveredTags ?? []}
+                  onRemove={handleRemoveConfigTag}
+                />
+              </div>
+
               {/* 模型测试 */}
               <div
                 style={{
@@ -1495,7 +2120,7 @@ export default function ModelsAdminSmallPage() {
                           strong
                           style={{ display: 'block', marginBottom: 8 }}
                         >
-                          返回模型原始结果
+                          返回测试结果
                         </Text>
                         <pre
                           style={{
@@ -1511,264 +2136,6 @@ export default function ModelsAdminSmallPage() {
                         </pre>
                       </>
                     )}
-                  </div>
-                )}
-              </div>
-
-              {/* 推荐风险阈值 */}
-              <div
-                style={{
-                  border: '1px solid #E2E8F0',
-                  borderRadius: 8,
-                  background: '#FFFFFF',
-                  padding: '16px 24px 20px',
-                  marginBottom: 16,
-                }}
-              >
-                <div
-                  style={{
-                    marginBottom: 16,
-                    paddingLeft: 12,
-                    borderLeft: '3px solid #1677ff',
-                  }}
-                >
-                  <Text strong style={{ fontSize: 15 }}>
-                    推荐风险阈值
-                  </Text>
-                </div>
-
-                {selected.riskThreshold ? (
-                  <div>
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1fr 1fr',
-                        gap: 16,
-                        marginBottom: 12,
-                      }}
-                    >
-                      {(
-                        [
-                          { key: 'low', label: '低风险', color: '#2563EB' },
-                          { key: 'mid', label: '中风险', color: '#D97706' },
-                          { key: 'high', label: '高风险', color: '#DC2626' },
-                        ] as const
-                      ).map(({ key, label, color }) => {
-                        const [a, b] = selected.riskThreshold![key]
-                        const isEditing = editingKey === key
-                        const draft =
-                          key === 'low'
-                            ? draftLow
-                            : key === 'mid'
-                              ? draftMid
-                              : draftHigh
-                        return (
-                          <div key={key}>
-                            <div style={{ marginBottom: 8 }}>
-                              <Tag
-                                style={{
-                                  background: `${color}14`,
-                                  borderColor: `${color}40`,
-                                  color,
-                                  margin: 0,
-                                  minWidth: 56,
-                                  textAlign: 'center',
-                                }}
-                              >
-                                {label}
-                              </Tag>
-                            </div>
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 4,
-                              }}
-                            >
-                              {isEditing ? (
-                                <>
-                                  <InputNumber
-                                    size="small"
-                                    min={0}
-                                    max={1}
-                                    step={0.01}
-                                    precision={2}
-                                    value={draft[0]}
-                                    onChange={(v) => {
-                                      const nv =
-                                        typeof v === 'number' ? v : 0
-                                      if (key === 'low')
-                                        setDraftLow([nv, draft[1]])
-                                      if (key === 'mid')
-                                        setDraftMid([nv, draft[1]])
-                                      if (key === 'high')
-                                        setDraftHigh([nv, draft[1]])
-                                    }}
-                                    onBlur={() => commitEdit(key)}
-                                    onPressEnter={() => commitEdit(key)}
-                                    autoFocus
-                                    style={{ width: 64 }}
-                                  />
-                                  <span
-                                    style={{
-                                      color: '#94A3B8',
-                                      fontSize: 12,
-                                    }}
-                                  >
-                                    ~
-                                  </span>
-                                  <InputNumber
-                                    size="small"
-                                    min={0}
-                                    max={1}
-                                    step={0.01}
-                                    precision={2}
-                                    value={key === 'high' ? 1 : draft[1]}
-                                    disabled={key === 'high'}
-                                    onChange={(v) => {
-                                      const nv =
-                                        typeof v === 'number' ? v : 0
-                                      if (key === 'low')
-                                        setDraftLow([draft[0], nv])
-                                      if (key === 'mid')
-                                        setDraftMid([draft[0], nv])
-                                    }}
-                                    onBlur={() => commitEdit(key)}
-                                    onPressEnter={() => commitEdit(key)}
-                                    style={{ width: 64 }}
-                                  />
-                                </>
-                              ) : (
-                                <span
-                                  onClick={() => startEdit(key)}
-                                  style={{
-                                    cursor: 'pointer',
-                                    fontWeight: 500,
-                                  }}
-                                >
-                                  {a.toFixed(2)} ~ {b.toFixed(2)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    <Text
-                      type="secondary"
-                      style={{ fontSize: 12, display: 'block' }}
-                    >
-                      用于策略管理初始化配置
-                    </Text>
-                  </div>
-                ) : (
-                  <div
-                    onClick={handleUnconfiguredClick}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      padding: '8px 0',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <Tag
-                      style={{
-                        background: '#FFF7ED',
-                        borderColor: '#FED7AA',
-                        color: '#C2410C',
-                        margin: 0,
-                      }}
-                    >
-                      未配置
-                    </Tag>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      点击「未配置」或此处即可配置推荐风险阈值
-                    </Text>
-                  </div>
-                )}
-              </div>
-
-              <div
-                style={{
-                  border: '1px solid #E2E8F0',
-                  borderRadius: 8,
-                  background: '#FFFFFF',
-                  padding: '16px 24px 20px',
-                  marginBottom: 16,
-                }}
-              >
-                <div
-                  style={{
-                    marginBottom: 16,
-                    paddingLeft: 12,
-                    borderLeft: '3px solid #1677ff',
-                  }}
-                >
-                  <Text strong style={{ fontSize: 15 }}>
-                    【引用标签】
-                  </Text>
-                  <Text type="secondary" style={{ marginLeft: 12 }}>
-                    ({selected.refs.length})
-                  </Text>
-                </div>
-
-                {selected.refs.length === 0 ? (
-                  <Empty description="暂无三级标签引用该模型" />
-                ) : (
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(2, 1fr)',
-                      gap: '12px 32px',
-                    }}
-                  >
-                    {selected.refs.map((r) => {
-                      const parts = r.path
-                        .split('/')
-                        .map((s) => s.trim())
-                        .filter(Boolean)
-                      return (
-                        <div
-                          key={r.id}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            padding: '4px 0',
-                          }}
-                        >
-                          {parts.map((p, i) => (
-                            <Fragment key={i}>
-                              {i === 0 ? (
-                                <Tag
-                                  style={{
-                                    background: '#F1F5F9',
-                                    borderColor: '#E2E8F0',
-                                    color: '#475569',
-                                    margin: 0,
-                                  }}
-                                >
-                                  {p}
-                                </Tag>
-                              ) : (
-                                <Text strong={i === parts.length - 1}>
-                                  {p}
-                                </Text>
-                              )}
-                              {i < parts.length - 1 && (
-                                <Text
-                                  type="secondary"
-                                  style={{ margin: '0 2px' }}
-                                >
-                                  /
-                                </Text>
-                              )}
-                            </Fragment>
-                          ))}
-                        </div>
-                      )
-                    })}
                   </div>
                 )}
               </div>
@@ -1929,6 +2296,9 @@ export default function ModelsAdminSmallPage() {
         onOk={handleAddModel}
         okText="保存"
         cancelText="取消"
+        okButtonProps={{
+          disabled: !accessChecked || addSubmitting || !canWrite,
+        }}
         confirmLoading={addSubmitting}
         width={520}
         destroyOnClose
@@ -1953,6 +2323,11 @@ export default function ModelsAdminSmallPage() {
           initialValues={{ modality: 'image', name: '', endpoint_url: '' }}
           requiredMark
           style={{ marginTop: 8 }}
+          onValuesChange={() => {
+            if (accessChecked) {
+              setAccessChecked(false)
+            }
+          }}
         >
           <Form.Item
             label="模型名称"
@@ -1962,7 +2337,10 @@ export default function ModelsAdminSmallPage() {
               { max: 64, message: '最长 64 个字符' },
             ]}
           >
-            <Input placeholder="请输入模型名称" />
+            <Input
+              placeholder="请输入模型名称"
+              disabled={accessRunning}
+            />
           </Form.Item>
 
           <Form.Item
@@ -1972,6 +2350,7 @@ export default function ModelsAdminSmallPage() {
           >
             <Select
               placeholder="请选择模态"
+              disabled={accessRunning}
               options={MODALITY_OPTIONS_4.map((o) => ({
                 value: o.value,
                 label: o.label,
@@ -1987,10 +2366,57 @@ export default function ModelsAdminSmallPage() {
               { type: 'url', message: '请输入有效的 URL' },
             ]}
           >
-            <Input placeholder="请输入 API 地址，例如 https://api.example.com/v1" />
+            <Input
+              placeholder="请输入 API 地址，例如 https://api.example.com/v1"
+              disabled={accessRunning}
+            />
           </Form.Item>
+
+          <Form.Item
+            label="接入校验"
+            style={{ marginBottom: 12 }}
+          >
+            <Button
+              block
+              icon={<ApiOutlined />}
+              loading={accessRunning}
+              onClick={handleAccessCheck}
+              disabled={!canWrite}
+            >
+              {accessRunning
+                ? '校验中…'
+                : accessChecked
+                  ? '重新校验'
+                  : accessResult && !accessResult.ok
+                    ? '重新校验 (上次失败,请重试)'
+                    : accessResult
+                      ? '重新接入校验'
+                      : '接入校验'}
+            </Button>
+          </Form.Item>
+
+          {accessResult?.ok && accessResult.discoveredTags.length > 0 && (
+            <Form.Item label="已发现模型标签" style={{ marginBottom: 0 }}>
+              <Space size={6} wrap>
+                {accessResult.discoveredTags.map((tag) => (
+                  <Tag key={tag} color="blue">
+                    {tag}
+                  </Tag>
+                ))}
+              </Space>
+            </Form.Item>
+          )}
         </Form>
       </Modal>
+
+      {/* 配置业务标签 */}
+      <ModelConfigTagModal
+        open={configModalOpen}
+        onClose={closeConfigModal}
+        model={selected}
+        allModels={models}
+        onSave={handleSaveConfigTag}
+      />
     </div>
   )
 }
