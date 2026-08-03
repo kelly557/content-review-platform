@@ -1,12 +1,15 @@
 // 标签管理（系统管理 → 标签管理）
-// 设计要点（v3）：
+// 设计要点（v4）：
 //   - 用户可自由选择创建一级 / 二级 / 三级标签（编辑模式层级只读）
+//   - 三级标签可设置「适用模态」（仅标签属性，不绑定模型）
 //   - 标签页面只做标签 CRUD + 模型绑定展示，不提供绑定 / 解绑模型的操作
 //     （绑定关系由其他模块维护；此处只展示已绑定模型与「未绑定 → 无阈值」状态）
-//   - 停用 / 删除前先调 getReferences 查引用清单：
+//   - 停用 / 删除前先查引用清单：
 //     · 停用被 active 策略引用 → 阻止
 //     · 删除任何引用 → 阻止
 //     阻止时弹出顶层 TagReferenceConfirmModal 展示引用详情
+//   - 当前 mock 阶段：引用清单走本地 mockGetReferences（与 backend _MOCK_STRATEGY_REFS 对齐）
+//     TODO: 真实接入后改回 tagsApi.getReferences + axios 409 兜底
 //   - 列表行：一级 / 二级没有下挂子标签时单独成行；三级按 {模态, 模型} 组合拆行
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -24,7 +27,6 @@ import {
   Typography,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import axios from 'axios'
 import {
   PlusOutlined,
   SearchOutlined,
@@ -34,8 +36,11 @@ import {
   CheckOutlined,
   CloseOutlined,
 } from '@ant-design/icons'
-import { tagsApi } from '@/api/tags'
-import type { TagReferences } from '@/types/domain'
+import type {
+  TagReferenceModel,
+  TagReferences,
+  TagReferenceStrategy,
+} from '@/types/domain'
 import { TagReferenceConfirmModal } from '@/components/TagReferenceConfirmModal'
 
 const { Text, Title } = Typography
@@ -51,6 +56,13 @@ const MODALITY_LABELS: Record<Modality, string> = {
   audio: '音频',
   video: '视频',
 }
+
+const MODALITY_OPTIONS: { value: Modality; label: string }[] = [
+  { value: 'text', label: '文本' },
+  { value: 'image', label: '图像' },
+  { value: 'audio', label: '音频' },
+  { value: 'video', label: '视频' },
+]
 
 interface MockModel {
   id: number
@@ -139,6 +151,98 @@ interface FlatRow {
 function findById(list: MockTag[], id: string | null | undefined): MockTag | null {
   if (!id) return null
   return list.find((t) => t.id === id) ?? null
+}
+
+// ── mock 阶段:本地引用清单(与 backend _MOCK_STRATEGY_REFS 对齐) ──
+// TODO: 后端真实接入后,改回调 tagsApi.getReferences
+const MOCK_STRATEGY_REFS: Record<string, TagReferenceStrategy[]> = {
+  'l3-leader1-cartoon': [
+    {
+      strategy_id: 'st-001',
+      strategy_name: '图文审核主策略',
+      status: 'active',
+      services: ['text-image'],
+    },
+    {
+      strategy_id: 'st-002',
+      strategy_name: '备用策略·视频',
+      status: 'deprecated',
+      services: ['video'],
+    },
+  ],
+  'l3-nude-face': [
+    {
+      strategy_id: 'st-003',
+      strategy_name: '人脸审核策略',
+      status: 'active',
+      services: ['image'],
+    },
+  ],
+  'l3-absolute-text': [
+    {
+      strategy_id: 'st-004',
+      strategy_name: '广告法词库',
+      status: 'deprecated',
+      services: ['text'],
+    },
+  ],
+}
+
+function mockGetReferences(tagId: string, allTags: MockTag[]): TagReferences {
+  const tag = allTags.find((t) => t.id === tagId)
+  if (!tag) {
+    // mock 阶段不会发生;若发生,直接放行避免阻塞操作
+    return {
+      tag_id: tagId,
+      tag_name: '',
+      tag_level: 1,
+      tag_path: '',
+      strategies: [],
+      models: [],
+      can_deactivate: true,
+      can_delete: true,
+      total_references: 0,
+    }
+  }
+  // 构建路径
+  const parts = [tag.name]
+  let cur = allTags.find((t) => t.id === tag.parentId)
+  while (cur) {
+    parts.unshift(cur.name)
+    cur = allTags.find((t) => t.id === cur?.parentId)
+  }
+  const path = parts.join(' / ')
+
+  // 模型引用
+  const models: TagReferenceModel[] = []
+  if (tag.boundModelId) {
+    const m = MOCK_MODELS.find((mm) => mm.id === tag.boundModelId)
+    if (m) {
+      models.push({
+        model_id: m.id,
+        model_name: m.name,
+        model_version: m.version,
+      })
+    }
+  }
+
+  // 策略引用(mock)
+  const strategies = MOCK_STRATEGY_REFS[tagId] ?? []
+
+  const total = strategies.length + models.length
+  const hasActiveStrategy = strategies.some((s) => s.status === 'active')
+
+  return {
+    tag_id: tag.id,
+    tag_name: tag.name,
+    tag_level: tag.level,
+    tag_path: path,
+    strategies,
+    models,
+    can_deactivate: !hasActiveStrategy,
+    can_delete: total === 0,
+    total_references: total,
+  }
 }
 
 export default function TagsAdminPage() {
@@ -272,6 +376,7 @@ export default function TagsAdminPage() {
       status: row.status,
       parent_l1,
       parent_l2,
+      modality: row.modality,
     })
     setDrawer({ open: true, editing: row })
   }
@@ -303,10 +408,14 @@ export default function TagsAdminPage() {
           status: v.status,
           parentId,
         }
-        // 三级标签:编辑时保留原 modality / boundModelId(本页不修改绑定关系)
-        if (level === 3 && editing) {
-          base.modality = editing.modality
-          base.boundModelId = editing.boundModelId
+        // 三级标签:模态来自表单(可编辑);boundModelId 不在本页修改
+        if (level === 3) {
+          if (editing) {
+            base.modality = (v.modality as Modality | undefined) ?? editing.modality
+            base.boundModelId = editing.boundModelId
+          } else {
+            base.modality = v.modality as Modality | undefined
+          }
         }
         return base
       }
@@ -331,25 +440,16 @@ export default function TagsAdminPage() {
   // ── 引用检查 + 停用 ──
   const handleToggleStatus = async (row: MockTag) => {
     if (row.status === 'active') {
-      // 准备停用 → 先查引用
+      // mock 阶段:用本地 mockGetReferences;真实接入后改回 tagsApi.getReferences
       setCheckingRefs(true)
       try {
-        const refs = await tagsApi.getReferences(row.id)
+        const refs = mockGetReferences(row.id, tags)
         if (!refs.can_deactivate) {
           await TagReferenceConfirmModal.open({ refs })
           return
         }
-      } catch (err) {
-        // 后端 409 兜底(并发新增引用):捕获并弹窗
-        if (axios.isAxiosError(err) && err.response?.status === 409) {
-          const refs = (err.response.data as { detail?: { references?: TagReferences } })
-            .detail?.references
-          if (refs) {
-            await TagReferenceConfirmModal.open({ refs })
-            return
-          }
-        }
-        // 其他错误 → 静默放行,让 toggle 继续
+      } catch {
+        // mock 阶段不应该出错,真接入后改为 409 兜底
       } finally {
         setCheckingRefs(false)
       }
@@ -383,23 +483,12 @@ export default function TagsAdminPage() {
   const handleDelete = async (id: string) => {
     setCheckingRefs(true)
     try {
-      const refs = await tagsApi.getReferences(id)
+      // mock 阶段:用本地 mockGetReferences;真实接入后改回 tagsApi.getReferences
+      const refs = mockGetReferences(id, tags)
       if (!refs.can_delete) {
         await TagReferenceConfirmModal.open({ refs })
         return
       }
-    } catch (err) {
-      if (axios.isAxiosError(err) && err.response?.status === 409) {
-        const refs = (err.response.data as { detail?: { references?: TagReferences } })
-          .detail?.references
-        if (refs) {
-          await TagReferenceConfirmModal.open({ refs })
-          return
-        }
-      }
-      // 其他错误(网络/404/500)→ 静默放过,让用户重试
-      message.error('无法检查引用,请稍后再试')
-      return
     } finally {
       setCheckingRefs(false)
     }
@@ -581,6 +670,23 @@ export default function TagsAdminPage() {
             showSearch
             optionFilterProp="label"
             disabled={!!watchEditing}
+          />
+        </Form.Item>
+      )}
+
+      {watchLevel === 3 && (
+        <Form.Item
+          label="适用模态"
+          name="modality"
+          rules={[{ required: true, message: '请选择适用模态' }]}
+          tooltip="该标签适用的输入模态;模型绑定由其他模块维护"
+        >
+          <Select
+            placeholder="请选择模态"
+            options={MODALITY_OPTIONS}
+            showSearch
+            optionFilterProp="label"
+            allowClear
           />
         </Form.Item>
       )}
