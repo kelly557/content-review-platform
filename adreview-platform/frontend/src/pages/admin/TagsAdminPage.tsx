@@ -78,8 +78,8 @@ interface MockTag {
   name: string
   status: Status
   parentId: string | null
-  /** 仅展示用途：模态与模型绑定关系由其他模块维护 */
-  modality?: Modality
+  /** 仅展示用途：标签适用的输入模态(可多选);模型绑定关系由其他模块维护 */
+  modalities?: Modality[]
   boundModelId?: number
 }
 
@@ -115,24 +115,28 @@ const INITIAL_MOCK_TAGS: MockTag[] = [
   { id: 'l2-medical_claim', level: 2, name: '医药宣传', status: 'active', parentId: 'l1-medical' },
   { id: 'l2-weapon', level: 2, name: '武器', status: 'active', parentId: 'l1-violence' },
 
-  { id: 'l3-leader1-write', level: 3, name: '写实', status: 'active', parentId: 'l2-leader1', modality: 'image', boundModelId: 4 },
-  { id: 'l3-leader1-cartoon', level: 3, name: '漫画', status: 'active', parentId: 'l2-leader1', modality: 'image', boundModelId: 5 },
-  { id: 'l3-leader2-cartoon', level: 3, name: '漫画', status: 'active', parentId: 'l2-leader2', modality: 'image', boundModelId: 5 },
-  { id: 'l3-leader2-text', level: 3, name: '文本描述', status: 'active', parentId: 'l2-leader2', modality: 'text', boundModelId: 1 },
-  { id: 'l3-flag-vandalize', level: 3, name: '篡改', status: 'active', parentId: 'l2-flag', modality: 'image', boundModelId: 6 },
-  { id: 'l3-flag-graffiti', level: 3, name: '涂鸦', status: 'active', parentId: 'l2-flag', modality: 'image', boundModelId: 6 },
-  { id: 'l3-cartoon_pol-latest', level: 3, name: '时政讽刺', status: 'active', parentId: 'l2-cartoon_pol', modality: 'image', boundModelId: 5 },
-  { id: 'l3-cartoon_pol-history', level: 3, name: '历史讽刺', status: 'active', parentId: 'l2-cartoon_pol', modality: 'image', boundModelId: 5 },
-  { id: 'l3-absolute-text', level: 3, name: '极限用语', status: 'active', parentId: 'l2-absolute', modality: 'text', boundModelId: 7 },
-  { id: 'l3-absolute-image', level: 3, name: '极限标语', status: 'active', parentId: 'l2-absolute', modality: 'image', boundModelId: 7 },
-  { id: 'l3-fake_claim-text', level: 3, name: '夸大疗效', status: 'active', parentId: 'l2-fake_claim', modality: 'text', boundModelId: 1 },
-  { id: 'l3-nude-face', level: 3, name: '成人面部', status: 'active', parentId: 'l2-nude', modality: 'image', boundModelId: 8 },
-  { id: 'l3-nude-body', level: 3, name: '成人裸露', status: 'active', parentId: 'l2-nude', modality: 'image', boundModelId: 9 },
-  { id: 'l3-nude-voice', level: 3, name: '音频呻吟', status: 'active', parentId: 'l2-nude', modality: 'audio', boundModelId: 10 },
-  { id: 'l3-cartoon_porn-anime', level: 3, name: '动漫色情', status: 'inactive', parentId: 'l2-cartoon_porn', modality: 'image', boundModelId: 5 },
-  { id: 'l3-medical_claim-text', level: 3, name: '包治百病', status: 'active', parentId: 'l2-medical_claim', modality: 'text', boundModelId: 1 },
-  { id: 'l3-weapon-real', level: 3, name: '真实武器', status: 'active', parentId: 'l2-weapon', modality: 'image', boundModelId: 3 },
-  { id: 'l3-weapon-toy', level: 3, name: '仿真玩具', status: 'active', parentId: 'l2-weapon', modality: 'image', boundModelId: 3 },
+  { id: 'l3-leader1-write', level: 3, name: '写实', status: 'active', parentId: 'l2-leader1', modalities: ['image'], boundModelId: 4 },
+  // 多模态演示:漫画·一号领导 适用「图像 + 视频」
+  { id: 'l3-leader1-cartoon', level: 3, name: '漫画', status: 'active', parentId: 'l2-leader1', modalities: ['image', 'video'], boundModelId: 5 },
+  { id: 'l3-leader2-cartoon', level: 3, name: '漫画', status: 'active', parentId: 'l2-leader2', modalities: ['image'], boundModelId: 5 },
+  // 多模态演示:文本描述 适用「文本 + 图像」(含配图)
+  { id: 'l3-leader2-text', level: 3, name: '文本描述', status: 'active', parentId: 'l2-leader2', modalities: ['text', 'image'], boundModelId: 1 },
+  { id: 'l3-flag-vandalize', level: 3, name: '篡改', status: 'active', parentId: 'l2-flag', modalities: ['image'], boundModelId: 6 },
+  { id: 'l3-flag-graffiti', level: 3, name: '涂鸦', status: 'active', parentId: 'l2-flag', modalities: ['image'], boundModelId: 6 },
+  { id: 'l3-cartoon_pol-latest', level: 3, name: '时政讽刺', status: 'active', parentId: 'l2-cartoon_pol', modalities: ['image'], boundModelId: 5 },
+  { id: 'l3-cartoon_pol-history', level: 3, name: '历史讽刺', status: 'active', parentId: 'l2-cartoon_pol', modalities: ['image'], boundModelId: 5 },
+  // 多模态演示:极限用语 适用「文本 + 图像」
+  { id: 'l3-absolute-text', level: 3, name: '极限用语', status: 'active', parentId: 'l2-absolute', modalities: ['text', 'image'], boundModelId: 7 },
+  { id: 'l3-absolute-image', level: 3, name: '极限标语', status: 'active', parentId: 'l2-absolute', modalities: ['image'], boundModelId: 7 },
+  { id: 'l3-fake_claim-text', level: 3, name: '夸大疗效', status: 'active', parentId: 'l2-fake_claim', modalities: ['text'], boundModelId: 1 },
+  { id: 'l3-nude-face', level: 3, name: '成人面部', status: 'active', parentId: 'l2-nude', modalities: ['image'], boundModelId: 8 },
+  { id: 'l3-nude-body', level: 3, name: '成人裸露', status: 'active', parentId: 'l2-nude', modalities: ['image'], boundModelId: 9 },
+  // 多模态演示:音频呻吟 适用「音频 + 视频」
+  { id: 'l3-nude-voice', level: 3, name: '音频呻吟', status: 'active', parentId: 'l2-nude', modalities: ['audio', 'video'], boundModelId: 10 },
+  { id: 'l3-cartoon_porn-anime', level: 3, name: '动漫色情', status: 'inactive', parentId: 'l2-cartoon_porn', modalities: ['image'], boundModelId: 5 },
+  { id: 'l3-medical_claim-text', level: 3, name: '包治百病', status: 'active', parentId: 'l2-medical_claim', modalities: ['text'], boundModelId: 1 },
+  { id: 'l3-weapon-real', level: 3, name: '真实武器', status: 'active', parentId: 'l2-weapon', modalities: ['image'], boundModelId: 3 },
+  { id: 'l3-weapon-toy', level: 3, name: '仿真玩具', status: 'active', parentId: 'l2-weapon', modalities: ['image'], boundModelId: 3 },
 ]
 
 interface DrawerState {
@@ -341,7 +345,7 @@ export default function TagsAdminPage() {
         l2?.name ?? '',
         l3?.name ?? '',
         model?.name ?? '',
-        l3?.modality ?? '',
+        (l3?.modalities ?? []).join(' '),
       ]
         .join(' ')
         .toLowerCase()
@@ -376,7 +380,7 @@ export default function TagsAdminPage() {
       status: row.status,
       parent_l1,
       parent_l2,
-      modality: row.modality,
+      modalities: row.modalities,
     })
     setDrawer({ open: true, editing: row })
   }
@@ -408,13 +412,11 @@ export default function TagsAdminPage() {
           status: v.status,
           parentId,
         }
-        // 三级标签:模态来自表单(可编辑);boundModelId 不在本页修改
+        // 三级标签:模态来自表单(多选);boundModelId 不在本页修改
         if (level === 3) {
+          base.modalities = (v.modalities as Modality[] | undefined) ?? []
           if (editing) {
-            base.modality = (v.modality as Modality | undefined) ?? editing.modality
             base.boundModelId = editing.boundModelId
-          } else {
-            base.modality = v.modality as Modality | undefined
           }
         }
         return base
@@ -547,11 +549,19 @@ export default function TagsAdminPage() {
     },
     {
       title: '模态',
-      minWidth: 120,
+      minWidth: 160,
       render: (_, row) => {
-        const m = row.l3?.modality
-        if (!m) return <Text type="secondary">—</Text>
-        return <AntdTag color="cyan">{MODALITY_LABELS[m]}</AntdTag>
+        const ms = row.l3?.modalities
+        if (!ms || ms.length === 0) return <Text type="secondary">—</Text>
+        return (
+          <Space size={4} wrap>
+            {ms.map((m) => (
+              <AntdTag key={m} color="cyan">
+                {MODALITY_LABELS[m]}
+              </AntdTag>
+            ))}
+          </Space>
+        )
       },
     },
     {
@@ -677,16 +687,27 @@ export default function TagsAdminPage() {
       {watchLevel === 3 && (
         <Form.Item
           label="适用模态"
-          name="modality"
-          rules={[{ required: true, message: '请选择适用模态' }]}
-          tooltip="该标签适用的输入模态;模型绑定由其他模块维护"
+          name="modalities"
+          rules={[
+            { required: true, message: '请选择适用模态' },
+            {
+              validator: async (_rule, value) => {
+                if (!Array.isArray(value) || value.length === 0) {
+                  throw new Error('至少选择 1 个模态')
+                }
+              },
+            },
+          ]}
+          tooltip="该标签适用的输入模态(可多选);模型绑定由其他模块维护"
         >
           <Select
-            placeholder="请选择模态"
+            mode="multiple"
+            placeholder="请选择模态(可多选)"
             options={MODALITY_OPTIONS}
             showSearch
             optionFilterProp="label"
             allowClear
+            maxTagCount="responsive"
           />
         </Form.Item>
       )}
