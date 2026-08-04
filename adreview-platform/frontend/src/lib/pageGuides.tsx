@@ -479,6 +479,13 @@ const tagsAdminGuide: PageGuide = {
         + '6. 标签管理页面只负责启用和新增业务标签\n'
         + '7. 启用标签后，审核策略的策略编辑页面将可以使用这个标签能力',
     },
+    {
+      heading: '标签启用逻辑',
+      markdown:
+        'active → inactive，无任何引用（active / deprecated 策略）\t允许\n'
+        + 'active → inactive，仅有 deprecated 策略引用\t允许\n'
+        + 'active → inactive，有 active 策略引用\t阻止 + 弹 Modal',
+    },
   ],
 }
 

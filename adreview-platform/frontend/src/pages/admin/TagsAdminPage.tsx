@@ -175,7 +175,7 @@ function findById(list: MockTag[], id: string | null | undefined): MockTag | nul
 // ── mock 阶段:本地引用清单(与 backend _MOCK_STRATEGY_REFS 对齐) ──
 // TODO: 后端真实接入后,改回调 tagsApi.getReferences
 const MOCK_STRATEGY_REFS: Record<string, TagReferenceStrategy[]> = {
-  'l3-leader1-cartoon': [
+  'l3-leader1-cartoon-image': [
     {
       strategy_id: 'st-001',
       strategy_name: '图文审核主策略',
@@ -189,9 +189,17 @@ const MOCK_STRATEGY_REFS: Record<string, TagReferenceStrategy[]> = {
       services: ['video'],
     },
   ],
-  'l3-nude-face': [
+  'l3-leader2-text-text': [
     {
       strategy_id: 'st-003',
+      strategy_name: '文本-图像混合策略',
+      status: 'active',
+      services: ['text-image'],
+    },
+  ],
+  'l3-nude-face': [
+    {
+      strategy_id: 'st-004',
       strategy_name: '人脸审核策略',
       status: 'active',
       services: ['image'],
@@ -199,7 +207,7 @@ const MOCK_STRATEGY_REFS: Record<string, TagReferenceStrategy[]> = {
   ],
   'l3-absolute-text': [
     {
-      strategy_id: 'st-004',
+      strategy_id: 'st-005',
       strategy_name: '广告法词库',
       status: 'deprecated',
       services: ['text'],
