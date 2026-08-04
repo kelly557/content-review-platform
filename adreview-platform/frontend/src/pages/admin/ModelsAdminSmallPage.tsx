@@ -620,24 +620,6 @@ function healthErrorTag(time: string) {
   )
 }
 
-function checkRiskThreshold(r: RiskThresholdRange): string | null {
-  const [loMin, loMax] = r.low
-  const [mdMin, mdMax] = r.mid
-  const [hiMin, hiMax] = r.high
-  if (loMin < 0 || loMin > 1 || loMax < 0 || loMax > 1)
-    return '低风险分必须在 0~1 之间'
-  if (mdMin < 0 || mdMin > 1 || mdMax < 0 || mdMax > 1)
-    return '中风险分必须在 0~1 之间'
-  if (hiMin < 0 || hiMin > 1 || hiMax < 0 || hiMax > 1)
-    return '高风险分必须在 0~1 之间'
-  if (loMin > loMax) return '低风险分下限不能大于上限'
-  if (mdMin > mdMax) return '中风险分下限不能大于上限'
-  if (hiMin > hiMax) return '高风险分下限不能大于上限'
-  if (loMax >= mdMin) return '低风险上限必须小于中风险下限'
-  if (mdMax >= hiMin) return '中风险上限必须小于高风险下限'
-  return null
-}
-
 // ── 配置标签表格（行 = discoveredTag → 业务三级标签） ──────────────────────
 function ConfigTagTable({
   configuredTags,
@@ -822,19 +804,19 @@ export default function ModelsAdminSmallPage() {
   }
 
   const commitEdit = (key: ThresholdKey) => {
-    if (!selected || !selected.riskThreshold) return
+    if (!selected) return
     const current = selected.riskThreshold
-    const next: RiskThresholdRange = {
-      low: key === 'low' ? draftLow : current.low,
-      mid: key === 'mid' ? draftMid : current.mid,
-      high: key === 'high' ? [draftHigh[0], 1] : current.high,
-    }
-    const err = checkRiskThreshold(next)
-    if (err) {
-      message.error(err)
-      setEditingKey(null)
-      return
-    }
+    const next: RiskThresholdRange = current
+      ? {
+          low: key === 'low' ? draftLow : current.low,
+          mid: key === 'mid' ? draftMid : current.mid,
+          high: key === 'high' ? [draftHigh[0], 1] : current.high,
+        }
+      : {
+          low: draftLow,
+          mid: draftMid,
+          high: [draftHigh[0], 1],
+        }
     setModels((prev) =>
       prev.map((m) =>
         m.id === selected.id ? { ...m, riskThreshold: next } : m,
@@ -846,18 +828,14 @@ export default function ModelsAdminSmallPage() {
 
   const handleUnconfiguredClick = () => {
     if (!selected) return
-    const defaults: RiskThresholdRange = {
-      low: [0, 0.35],
-      mid: [0.36, 0.75],
-      high: [0.76, 1.0],
-    }
-    setModels((prev) =>
-      prev.map((m) =>
-        m.id === selected.id ? { ...m, riskThreshold: defaults } : m,
-      ),
-    )
     setDraftLow([0, 0.35])
+    setDraftMid([0.36, 0.75])
+    setDraftHigh([0.76, 1])
     setEditingKey('low')
+  }
+
+  const handleCancelDraft = () => {
+    setEditingKey(null)
   }
 
   useEffect(() => {
@@ -867,6 +845,13 @@ export default function ModelsAdminSmallPage() {
     const id = setInterval(tick, POLL_MS)
     return () => clearInterval(id)
   }, [])
+
+  // 切换模型时,丢弃未保存的阈值草稿
+  useEffect(() => {
+    return () => {
+      setEditingKey(null)
+    }
+  }, [selectedId])
   const [addOpen, setAddOpen] = useState(false)
   const [addSubmitting, setAddSubmitting] = useState(false)
   const [addForm] = Form.useForm<{
@@ -1710,6 +1695,9 @@ export default function ModelsAdminSmallPage() {
                     marginBottom: 16,
                     paddingLeft: 12,
                     borderLeft: '3px solid #1677ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
                   }}
                 >
                   <Text strong style={{ fontSize: 15 }}>
@@ -1717,7 +1705,7 @@ export default function ModelsAdminSmallPage() {
                   </Text>
                 </div>
 
-                {selected.riskThreshold ? (
+                {selected.riskThreshold || editingKey !== null ? (
                   <div>
                     <div
                       style={{
@@ -1734,7 +1722,6 @@ export default function ModelsAdminSmallPage() {
                           { key: 'high', label: '高风险', color: '#DC2626' },
                         ] as const
                       ).map(({ key, label, color }) => {
-                        const [a, b] = selected.riskThreshold![key]
                         const isEditing = editingKey === key
                         const draft =
                           key === 'low'
@@ -1742,6 +1729,9 @@ export default function ModelsAdminSmallPage() {
                             : key === 'mid'
                               ? draftMid
                               : draftHigh
+                        const [a, b] = isEditing
+                          ? draft
+                          : (selected.riskThreshold?.[key] ?? draft)
                         return (
                           <div key={key}>
                             <div style={{ marginBottom: 8 }}>
@@ -1763,6 +1753,7 @@ export default function ModelsAdminSmallPage() {
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: 4,
+                                flexWrap: 'wrap',
                               }}
                             >
                               {isEditing ? (
@@ -1784,8 +1775,6 @@ export default function ModelsAdminSmallPage() {
                                       if (key === 'high')
                                         setDraftHigh([nv, draft[1]])
                                     }}
-                                    onBlur={() => commitEdit(key)}
-                                    onPressEnter={() => commitEdit(key)}
                                     autoFocus
                                     style={{ width: 64 }}
                                   />
@@ -1813,8 +1802,6 @@ export default function ModelsAdminSmallPage() {
                                       if (key === 'mid')
                                         setDraftMid([draft[0], nv])
                                     }}
-                                    onBlur={() => commitEdit(key)}
-                                    onPressEnter={() => commitEdit(key)}
                                     style={{ width: 64 }}
                                   />
                                 </>
@@ -1833,13 +1820,39 @@ export default function ModelsAdminSmallPage() {
                           </div>
                         )
                       })}
-                    </div>
-                    <Text
-                      type="secondary"
-                      style={{ fontSize: 12, display: 'block' }}
-                    >
-                      用于策略管理初始化配置
-                    </Text>
+</div>
+                    {editingKey !== null && (
+                      <div
+                        style={{
+                          marginTop: 16,
+                          display: 'flex',
+                          gap: 8,
+                          justifyContent: 'flex-end',
+                        }}
+                      >
+                        <Button
+                          size="small"
+                          onClick={handleCancelDraft}
+                        >
+                          取消配置
+                        </Button>
+                        <Button
+                          size="small"
+                          type="primary"
+                          onClick={() => commitEdit(editingKey)}
+                        >
+                          保存
+                        </Button>
+                      </div>
+                    )}
+                    {selected.riskThreshold && (
+                      <Text
+                        type="secondary"
+                        style={{ fontSize: 12, display: 'block', marginTop: 8 }}
+                      >
+                        用于策略管理初始化配置
+                      </Text>
+                    )}
                   </div>
                 ) : (
                   <div
