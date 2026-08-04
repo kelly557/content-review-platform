@@ -355,6 +355,14 @@ export default function TagsAdminPage() {
     () => tags.filter((t) => t.level === 2).map((t) => ({ id: t.id, value: t.name, label: t.name })),
     [tags],
   )
+  // 二级标签按一级标签过滤: 一级空 → 空;一级已选 → 仅该一级下;一级输入新值 → 空
+  const filteredLevel2Options = useMemo(() => {
+    if (!parentL1Input?.id) return []
+    return level2Options.filter((o) => {
+      const t = tags.find((tt) => tt.id === o.id)
+      return t?.parentId === parentL1Input.id
+    })
+  }, [level2Options, tags, parentL1Input?.id])
 
   const l1FilterOptions = useMemo(
     () => tags.filter((t) => t.level === 1).map((t) => ({ value: t.id, label: t.name })),
@@ -714,7 +722,16 @@ export default function TagsAdminPage() {
           value={parentL1Input?.name ?? ''}
           onChange={(value, option) => {
             const opt = option as { id?: string } | undefined
-            setParentL1Input({ id: opt?.id, name: value })
+            const newL1 = { id: opt?.id, name: value }
+            setParentL1Input(newL1)
+            // 切换一级时,如果已选的二级不在新一级下,清空二级
+            setParentL2Input((prev) => {
+              if (!prev?.id) return prev
+              const stillValid = tags.some(
+                (t) => t.id === prev.id && t.parentId === newL1.id,
+              )
+              return stillValid ? prev : null
+            })
           }}
           filterOption={(input, option) =>
             (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
@@ -725,11 +742,11 @@ export default function TagsAdminPage() {
       <Form.Item
         label="二级标签"
         required
-        tooltip={watchEditing ? '编辑三级标签时,二级标签不可改' : '可选择已有,或输入新二级标签名称'}
+        tooltip={watchEditing ? '编辑三级标签时,二级标签不可改' : '从一级标签下属二级标签中选择,或输入新二级标签'}
       >
         <AutoComplete
-          placeholder="请选择或输入新标签"
-          options={level2Options}
+          placeholder={parentL1Input?.id ? '请选择或输入新二级标签' : parentL1Input?.name ? '一级标签为新建值,二级标签请直接输入' : '请先选择一级标签'}
+          options={filteredLevel2Options}
           disabled={!!watchEditing}
           value={parentL2Input?.name ?? ''}
           onChange={(value, option) => {
