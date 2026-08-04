@@ -640,7 +640,7 @@ export default function TagsAdminPage() {
         if (isL3NoModel) {
           return (
             <Space size={4}>
-              <AntdTag color="default">未启用(缺模型)</AntdTag>
+              <AntdTag color="default">未启用</AntdTag>
             </Space>
           )
         }
