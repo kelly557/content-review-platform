@@ -486,6 +486,14 @@ const tagsAdminGuide: PageGuide = {
         + '- active → inactive，仅有 deprecated 策略引用：允许\n'
         + '- active → inactive，有 active 策略引用：阻止 + 弹 Modal',
     },
+    {
+      heading: '标签删除逻辑',
+      markdown:
+        '- 任意状态，无任何引用（active / deprecated 策略 + 模型绑定）：允许\n'
+        + '- 任意状态，仅有模型绑定：阻止 + 弹 Modal\n'
+        + '- 任意状态，仅有 deprecated 策略引用：阻止 + 弹 Modal\n'
+        + '- 任意状态，有 active 策略引用：阻止 + 弹 Modal',
+    },
   ],
 }
 

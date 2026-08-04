@@ -196,7 +196,7 @@ function Dialog({ opts, onClose }: DialogProps) {
           </div>
         )}
 
-        {refs.models.length > 0 && (
+        {scope === 'all' && refs.models.length > 0 && (
           <div>
             <Space style={{ marginBottom: 8 }}>
               <ApiOutlined />
