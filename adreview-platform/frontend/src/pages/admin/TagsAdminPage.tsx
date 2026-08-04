@@ -511,7 +511,7 @@ export default function TagsAdminPage() {
       try {
         const refs = mockGetReferences(row.id, tags)
         if (!refs.can_deactivate) {
-          await TagReferenceConfirmModal.open({ refs })
+          await TagReferenceConfirmModal.open({ refs, scope: 'strategy' })
           return
         }
       } catch {
@@ -552,7 +552,7 @@ export default function TagsAdminPage() {
       // mock 阶段:用本地 mockGetReferences;真实接入后改回 tagsApi.getReferences
       const refs = mockGetReferences(id, tags)
       if (!refs.can_delete) {
-        await TagReferenceConfirmModal.open({ refs })
+        await TagReferenceConfirmModal.open({ refs, scope: 'all' })
         return
       }
     } finally {

@@ -18,8 +18,15 @@ type Opts = {
   refs: TagReferences
   /** 当 can_delete=true(理论上不触发此弹窗)时提供强删入口;默认无 */
   onForceDelete?: () => Promise<void>
-  /** 弹窗标题后缀;默认 "该标签存在引用,无法直接操作" */
+  /** 弹窗标题;默认根据 scope 推断 */
   title?: string
+  /**
+   * 引用范围决定底部提示文案与默认标题:
+   * - 'strategy':只检查审核策略引用(关闭启用场景),提示文案只提"审核策略"
+   * - 'all':检查所有引用(删除场景),提示文案"审核策略"+"模型管理"
+   * 默认 'all'
+   */
+  scope?: 'strategy' | 'all'
 }
 
 interface OpenState {
@@ -82,7 +89,7 @@ interface DialogProps {
 }
 
 function Dialog({ opts, onClose }: DialogProps) {
-  const { refs, onForceDelete, title } = opts
+  const { refs, onForceDelete, title, scope = 'all' } = opts
   const [confirming, setConfirming] = useState(false)
   const [forceVisible, setForceVisible] = useState(false)
 
@@ -108,13 +115,22 @@ function Dialog({ opts, onClose }: DialogProps) {
     }
   }
 
+  const defaultTitle =
+    scope === 'strategy'
+      ? '该标签被启用的审核策略引用,无法停用'
+      : '该标签存在引用,无法删除'
+  const hintMessage =
+    scope === 'strategy'
+      ? '请先在「审核策略」中解除对本标签的引用,然后再回来执行此操作。'
+      : '请先在「审核策略」或「模型管理」中解除对本标签的引用,然后再回来执行此操作。'
+
   return (
     <Modal
       open
       title={
         <Space>
           <ExclamationCircleOutlined style={{ color: '#faad14' }} />
-          {title ?? '该标签存在引用,无法直接操作'}
+          {title ?? defaultTitle}
         </Space>
       }
       onCancel={onClose}
@@ -210,7 +226,7 @@ function Dialog({ opts, onClose }: DialogProps) {
         <Alert
           type="info"
           showIcon
-          message="请先在「审核策略」或「模型管理」中解除对本标签的引用,然后再回来执行此操作。"
+          message={hintMessage}
         />
       </Space>
     </Modal>

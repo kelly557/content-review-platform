@@ -482,9 +482,9 @@ const tagsAdminGuide: PageGuide = {
     {
       heading: '标签启用逻辑',
       markdown:
-        'active → inactive，无任何引用（active / deprecated 策略）\t允许\n'
-        + 'active → inactive，仅有 deprecated 策略引用\t允许\n'
-        + 'active → inactive，有 active 策略引用\t阻止 + 弹 Modal',
+        '- active → inactive，无任何引用（active / deprecated 策略）：允许\n'
+        + '- active → inactive，仅有 deprecated 策略引用：允许\n'
+        + '- active → inactive，有 active 策略引用：阻止 + 弹 Modal',
     },
   ],
 }
