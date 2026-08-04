@@ -416,8 +416,9 @@ const onlineReviewGuide: PageGuide = {
         '当前「在线审核结果」卡片展示的是 mock 数据,真实结果会基于技术方案中的接口进行渲染。',
     },
     {
-      heading: '当前原型页面仅做功能说明， 实际页面请参考保婷设计',
-      markdown: '',
+      heading: '参考说明',
+      markdown:
+        '当前原型页面仅做功能说明， 实际页面请参考保婷设计',
     },
     {
       heading: '数据类型与大小限制',
