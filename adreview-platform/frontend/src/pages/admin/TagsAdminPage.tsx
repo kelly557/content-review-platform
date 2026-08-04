@@ -286,6 +286,10 @@ export default function TagsAdminPage() {
   })
   const [parentL1, setParentL1] = useState<string | undefined>(undefined)
   const [parentL2, setParentL2] = useState<string | undefined>(undefined)
+  // 待应用的表单初始值(Drawer 打开后才 apply,避免 form 未连接导致 setFieldsValue 丢失)
+  const [pendingInit, setPendingInit] = useState<Record<string, unknown> | null>(null)
+  // 最近创建/编辑的一级标签 id(新建二级时自动选中)
+  const [lastL1Id, setLastL1Id] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
   const [checkingRefs, setCheckingRefs] = useState(false)
   const [form] = Form.useForm()
@@ -380,9 +384,9 @@ export default function TagsAdminPage() {
   // ── Drawer 操作 ──
   const openCreate = () => {
     form.resetFields()
-    form.setFieldsValue({ level: 1 })
     setParentL1(undefined)
     setParentL2(undefined)
+    setPendingInit({ level: 1 })
     setDrawer({ open: true, editing: null })
   }
 
@@ -402,7 +406,7 @@ export default function TagsAdminPage() {
     }
     setParentL1(p_l1)
     setParentL2(p_l2)
-    form.setFieldsValue({
+    setPendingInit({
       level: row.level,
       name: row.name,
       modalities: row.modality ? [row.modality] : [],
@@ -414,8 +418,16 @@ export default function TagsAdminPage() {
     setDrawer({ open: false, editing: null })
     setParentL1(undefined)
     setParentL2(undefined)
+    setPendingInit(null)
     form.resetFields()
   }
+
+  // Drawer 打开后,form 已连接,此时 apply pendingInit
+  useEffect(() => {
+    if (!drawer.open || !pendingInit) return
+    form.setFieldsValue(pendingInit)
+    setPendingInit(null)
+  }, [drawer.open, pendingInit, form])
 
   const handleSave = async () => {
     try {
@@ -489,12 +501,16 @@ export default function TagsAdminPage() {
             modality: ((v.modalities as Modality[] | undefined) ?? [])[0],
           }
         })()
+        // 编辑一级标签时,更新 lastL1Id,以便下次新建二级时自动选中
+        if (level === 1) setLastL1Id(updated.id)
         setTags((prev) =>
           prev.map((t) => (t.id === editing.id ? updated : t)),
         )
         message.success('已保存')
       } else {
         const records = buildRecords(`t-${timestamp}`)
+        // 新建一级标签时,记录其 id,以便下次新建二级时自动选中
+        if (level === 1 && records[0]) setLastL1Id(records[0].id)
         setTags((prev) => [...records, ...prev])
         message.success(`已新增 ${records.length} 条记录`)
       }
@@ -700,6 +716,15 @@ export default function TagsAdminPage() {
 
   const watchLevel = Form.useWatch('level', form) as Level | undefined
   const watchEditing = drawer.editing
+
+  // 新建二级场景:一级 select 自动选中最近一次操作的一级标签
+  // 触发条件:新建模式 + watchLevel 变为 2 + parentL1 为空 + lastL1Id 存在
+  useEffect(() => {
+    if (!drawer.open || drawer.editing) return
+    if (watchLevel === 2 && !parentL1 && lastL1Id) {
+      setParentL1(lastL1Id)
+    }
+  }, [drawer.open, drawer.editing, watchLevel, parentL1, lastL1Id])
 
   // ── Drawer body ──
   const drawerBody = (
