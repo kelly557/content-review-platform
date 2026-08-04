@@ -348,11 +348,11 @@ export default function TagsAdminPage() {
   }, [tags])
 
   const level1Options = useMemo(
-    () => tags.filter((t) => t.level === 1).map((t) => ({ id: t.id, value: t.id, label: t.name })),
+    () => tags.filter((t) => t.level === 1).map((t) => ({ id: t.id, value: t.name, label: t.name })),
     [tags],
   )
   const level2Options = useMemo(
-    () => tags.filter((t) => t.level === 2).map((t) => ({ id: t.id, value: t.id, label: t.name })),
+    () => tags.filter((t) => t.level === 2).map((t) => ({ id: t.id, value: t.name, label: t.name })),
     [tags],
   )
 
@@ -637,15 +637,6 @@ export default function TagsAdminPage() {
         const m = MOCK_MODELS.find((mm) => mm.id === row.l3?.boundModelId)
         if (!m) return <Text type="danger">未绑定</Text>
         return <Text>{m.name}</Text>
-      },
-    },
-    {
-      title: '版本',
-      minWidth: 76,
-      render: (_, row) => {
-        const m = MOCK_MODELS.find((mm) => mm.id === row.l3?.boundModelId)
-        if (!m) return <Text type="secondary">—</Text>
-        return <AntdTag>{m.version}</AntdTag>
       },
     },
     {
