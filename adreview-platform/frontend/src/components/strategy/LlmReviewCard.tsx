@@ -153,7 +153,7 @@ export function LlmReviewCard({ value, onChange }: Props) {
         {value.is_enabled && (
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              选择资源库已激活大模型（单选，含纯文本与多模态）
+              如待审核素材包含图片、音视频等非纯文本内容，请选择多模态模型
             </Text>
             {loading ? (
               <Spin size="small" />
