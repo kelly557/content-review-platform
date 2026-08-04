@@ -14,12 +14,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   App,
+  AutoComplete,
   Button,
   Drawer,
   Empty,
   Form,
   Input,
-  Radio,
   Select,
   Space,
   Table,
@@ -171,6 +171,32 @@ function findById(list: MockTag[], id: string | null | undefined): MockTag | nul
   return list.find((t) => t.id === id) ?? null
 }
 
+// 父级 combobox 输入处理:
+// - 有 id → 选了已有标签,直接返回 id
+// - 仅 name → 自动创建新的一级/二级标签,生成 id,setTags 追加,返回新 id
+// - 空 → 返回 null
+function ensureParentTag(
+  input: { id?: string; name: string } | null,
+  level: 1 | 2,
+  parentId: string | null,
+  setTags: React.Dispatch<React.SetStateAction<MockTag[]>>,
+): string | null {
+  const name = input?.name.trim() ?? ''
+  if (!name) return null
+  if (input?.id) return input.id
+  const newId = `t-${Date.now()}-L${level}-${Math.random().toString(36).slice(2, 6)}`
+  const newTag: MockTag = {
+    id: newId,
+    level,
+    name,
+    status: 'active',
+    enabled: true,
+    parentId,
+  }
+  setTags((prev) => [newTag, ...prev])
+  return newId
+}
+
 // ── mock 阶段:本地引用清单(与 backend _MOCK_STRATEGY_REFS 对齐) ──
 // TODO: 后端真实接入后,改回调 tagsApi.getReferences
 const MOCK_STRATEGY_REFS: Record<string, TagReferenceStrategy[]> = {
@@ -284,12 +310,11 @@ export default function TagsAdminPage() {
     open: false,
     editing: null,
   })
-  const [parentL1, setParentL1] = useState<string | undefined>(undefined)
-  const [parentL2, setParentL2] = useState<string | undefined>(undefined)
+  // 父级标签(combobox): id 存在 = 选了已有;仅 name = 用户输入新值
+  const [parentL1Input, setParentL1Input] = useState<{ id?: string; name: string } | null>(null)
+  const [parentL2Input, setParentL2Input] = useState<{ id?: string; name: string } | null>(null)
   // 待应用的表单初始值(Drawer 打开后才 apply,避免 form 未连接导致 setFieldsValue 丢失)
   const [pendingInit, setPendingInit] = useState<Record<string, unknown> | null>(null)
-  // 最近创建/编辑的一级标签 id(新建二级时自动选中)
-  const [lastL1Id, setLastL1Id] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
   const [checkingRefs, setCheckingRefs] = useState(false)
   const [form] = Form.useForm()
@@ -323,18 +348,12 @@ export default function TagsAdminPage() {
   }, [tags])
 
   const level1Options = useMemo(
-    () => tags.filter((t) => t.level === 1).map((t) => ({ value: t.id, label: t.name })),
+    () => tags.filter((t) => t.level === 1).map((t) => ({ id: t.id, value: t.id, label: t.name })),
     [tags],
   )
   const level2Options = useMemo(
-    () =>
-      (() => {
-        const l1 = form.getFieldValue('parent_l1') as string | undefined
-        return tags
-          .filter((t) => t.level === 2 && (!l1 || t.parentId === l1))
-          .map((t) => ({ value: t.id, label: t.name }))
-      })(),
-    [tags, form],
+    () => tags.filter((t) => t.level === 2).map((t) => ({ id: t.id, value: t.id, label: t.name })),
+    [tags],
   )
 
   const l1FilterOptions = useMemo(
@@ -384,30 +403,32 @@ export default function TagsAdminPage() {
   // ── Drawer 操作 ──
   const openCreate = () => {
     form.resetFields()
-    setParentL1(undefined)
-    setParentL2(undefined)
-    setPendingInit({ level: 1 })
+    setParentL1Input(null)
+    setParentL2Input(null)
+    setPendingInit({})
     setDrawer({ open: true, editing: null })
   }
 
   const openEdit = (row: MockTag) => {
     form.resetFields()
-    let p_l1: string | undefined
-    let p_l2: string | undefined
+    let p_l1: { id?: string; name: string } | null = null
+    let p_l2: { id?: string; name: string } | null = null
     if (row.parentId) {
       const p = findById(tags, row.parentId)
       if (p) {
-        if (p.level === 1) p_l1 = p.id
+        if (p.level === 1) p_l1 = { id: p.id, name: p.name }
         if (p.level === 2) {
-          p_l2 = p.id
-          if (p.parentId) p_l1 = p.parentId
+          p_l2 = { id: p.id, name: p.name }
+          if (p.parentId) {
+            const pp = findById(tags, p.parentId)
+            if (pp) p_l1 = { id: pp.id, name: pp.name }
+          }
         }
       }
     }
-    setParentL1(p_l1)
-    setParentL2(p_l2)
+    setParentL1Input(p_l1)
+    setParentL2Input(p_l2)
     setPendingInit({
-      level: row.level,
       name: row.name,
       modalities: row.modality ? [row.modality] : [],
     })
@@ -416,8 +437,8 @@ export default function TagsAdminPage() {
 
   const closeDrawer = () => {
     setDrawer({ open: false, editing: null })
-    setParentL1(undefined)
-    setParentL2(undefined)
+    setParentL1Input(null)
+    setParentL2Input(null)
     setPendingInit(null)
     form.resetFields()
   }
@@ -433,87 +454,56 @@ export default function TagsAdminPage() {
     try {
       const v = await form.validateFields()
       setSaving(true)
-      const level = v.level as Level
-      const parentId: string | null =
-        level === 1
-          ? null
-          : level === 2
-            ? parentL1 ?? null
-            : parentL2 ?? null
       const editing = drawer.editing
       const timestamp = Date.now()
-      // 新建三级默认 enabled=false(模型未绑定前不可启用);
-      // 新建一/二级默认 enabled=true;
-      // 编辑任何级别保留原 enabled
-      const formEnabled = !editing && level === 3
-        ? false
-        : editing
-          ? editing.enabled
-          : true
 
-      // 一级/二级:单条记录,无 modality
-      // 三级:按 modalities 数组展开为 N 条独立记录(Q2 不合并)
-      const buildRecords = (baseId: string): MockTag[] => {
-        if (level !== 3) {
-          return [
-            {
-              id: baseId,
-              level,
-              name: v.name,
-              status: 'active',
-              enabled: formEnabled,
-              parentId,
-            },
-          ]
-        }
-        const mods = (v.modalities as Modality[] | undefined) ?? []
-        return mods.map((mod, idx) => {
-          const id = idx === 0 ? baseId : `${baseId}-${mod}-${timestamp}`
-          return {
-            id,
-            level: 3,
-            name: v.name,
-            status: 'active',
-            enabled: formEnabled,
-            parentId,
-            modality: mod,
-            boundModelId: idx === 0 && editing ? editing.boundModelId : undefined,
-          }
-        })
-      }
-
+      // ── 编辑场景:只改当前记录(Q2 不合并) ──
       if (editing) {
-        // Q2 不合并:只改当前记录
-        const updated: MockTag = (() => {
-          if (level !== 3) {
-            return {
-              ...editing,
-              name: v.name,
-              enabled: formEnabled,
-              parentId,
-            }
-          }
-          return {
-            ...editing,
-            name: v.name,
-            enabled: formEnabled,
-            parentId,
-            modality: ((v.modalities as Modality[] | undefined) ?? [])[0],
-          }
-        })()
-        // 编辑一级标签时,更新 lastL1Id,以便下次新建二级时自动选中
-        if (level === 1) setLastL1Id(updated.id)
-        setTags((prev) =>
-          prev.map((t) => (t.id === editing.id ? updated : t)),
-        )
+        if (!parentL1Input?.name.trim() || !parentL2Input?.name.trim()) {
+          message.error('一级、二级标签都必须填写')
+          return
+        }
+        const l1Id = await ensureParentTag(parentL1Input, 1, null, setTags)
+        const l2Id = await ensureParentTag(parentL2Input, 2, l1Id, setTags)
+        const updated: MockTag = {
+          ...editing,
+          name: v.name,
+          parentId: l2Id,
+          modality: ((v.modalities as Modality[] | undefined) ?? [])[0],
+          enabled: editing.enabled,
+        }
+        setTags((prev) => prev.map((t) => (t.id === editing.id ? updated : t)))
         message.success('已保存')
-      } else {
-        const records = buildRecords(`t-${timestamp}`)
-        // 新建一级标签时,记录其 id,以便下次新建二级时自动选中
-        if (level === 1 && records[0]) setLastL1Id(records[0].id)
-        setTags((prev) => [...records, ...prev])
-        message.success(`已新增 ${records.length} 条记录`)
+        closeDrawer()
+        return
       }
+
+      // ── 新增场景:Drawer 永远是三级表单 ──
+      const l1Name = parentL1Input?.name.trim() ?? ''
+      const l2Name = parentL2Input?.name.trim() ?? ''
+      const l3Name = (v.name as string | undefined)?.trim() ?? ''
+      const mods = (v.modalities as Modality[] | undefined) ?? []
+      if (!l1Name || !l2Name || !l3Name || mods.length === 0) {
+        message.error('一级、二级、三级标签和适用模态都必须填写')
+        return
+      }
+
+      // ensureParentTag: 有 id 返回;只有 name 创建新条目
+      const l1Id = await ensureParentTag(parentL1Input, 1, null, setTags)
+      const l2Id = await ensureParentTag(parentL2Input, 2, l1Id, setTags)
+
+      // 按 modalities 展开为 N 条三级记录
+      const l3Records: MockTag[] = mods.map((mod, idx) => ({
+        id: idx === 0 ? `t-${timestamp}-L3` : `t-${timestamp}-L3-${mod}`,
+        level: 3,
+        name: l3Name,
+        status: 'active',
+        enabled: false, // α 规则:模型未绑定前不可启用
+        parentId: l2Id,
+        modality: mod,
+      }))
+      setTags((prev) => [...l3Records, ...prev])
+      message.success(`已新增 1 个三级标签 × ${mods.length} 个模态`)
       closeDrawer()
     } catch {
       // 校验失败
@@ -691,14 +681,16 @@ export default function TagsAdminPage() {
       fixed: 'right',
       render: (_, row) => (
         <Space size={4}>
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => openEdit(row.rowTag)}
-          >
-            编辑
-          </Button>
+          {row.rowTag.level === 3 && (
+            <Button
+              type="link"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => openEdit(row.rowTag)}
+            >
+              编辑
+            </Button>
+          )}
           <Button
             type="link"
             size="small"
@@ -714,120 +706,91 @@ export default function TagsAdminPage() {
     },
   ]
 
-  const watchLevel = Form.useWatch('level', form) as Level | undefined
   const watchEditing = drawer.editing
-
-  // 新建二级场景:一级 select 自动选中最近一次操作的一级标签
-  // 触发条件:新建模式 + watchLevel 变为 2 + parentL1 为空 + lastL1Id 存在
-  useEffect(() => {
-    if (!drawer.open || drawer.editing) return
-    if (watchLevel === 2 && !parentL1 && lastL1Id) {
-      setParentL1(lastL1Id)
-    }
-  }, [drawer.open, drawer.editing, watchLevel, parentL1, lastL1Id])
 
   // ── Drawer body ──
   const drawerBody = (
     <Form form={form} layout="vertical" requiredMark={false}>
       <Form.Item
-        label="层级"
-        name="level"
-        rules={[{ required: true, message: '请选择层级' }]}
+        label="一级标签"
+        required
+        tooltip={watchEditing ? '编辑三级标签时,一级标签不可改' : '可选择已有,或输入新一级标签名称'}
       >
-        <Radio.Group
+        <AutoComplete
+          placeholder="请选择或输入新标签"
+          options={level1Options}
           disabled={!!watchEditing}
-          onChange={() => {
-            setParentL1(undefined)
-            setParentL2(undefined)
-            form.setFieldValue('modalities', undefined)
-            form.setFieldValue('name', undefined)
+          value={parentL1Input?.name ?? ''}
+          onChange={(value, option) => {
+            const opt = option as { id?: string } | undefined
+            setParentL1Input({ id: opt?.id, name: value })
           }}
-        >
-          <Radio.Button value={1}>一级</Radio.Button>
-          <Radio.Button value={2}>二级</Radio.Button>
-          <Radio.Button value={3}>三级</Radio.Button>
-        </Radio.Group>
+          filterOption={(input, option) =>
+            (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
+          }
+        />
       </Form.Item>
 
-      {(watchLevel === 2 || watchLevel === 3) && (
-        <Form.Item
-          label="一级标签"
-          required
-        >
-          <Select
-            placeholder="请选择"
-            options={level1Options}
-            showSearch
-            optionFilterProp="label"
-            disabled={!!watchEditing}
-            value={parentL1}
-            onChange={(v) => {
-              setParentL1(v)
-              setParentL2(undefined)
-            }}
-          />
-        </Form.Item>
-      )}
-
-      {watchLevel === 3 && (
-        <Form.Item
-          label="二级标签"
-          required
-        >
-          <Select
-            placeholder="请选择"
-            options={level2Options}
-            showSearch
-            optionFilterProp="label"
-            disabled={!!watchEditing}
-            value={parentL2}
-            onChange={setParentL2}
-          />
-        </Form.Item>
-      )}
+      <Form.Item
+        label="二级标签"
+        required
+        tooltip={watchEditing ? '编辑三级标签时,二级标签不可改' : '可选择已有,或输入新二级标签名称'}
+      >
+        <AutoComplete
+          placeholder="请选择或输入新标签"
+          options={level2Options}
+          disabled={!!watchEditing}
+          value={parentL2Input?.name ?? ''}
+          onChange={(value, option) => {
+            const opt = option as { id?: string } | undefined
+            setParentL2Input({ id: opt?.id, name: value })
+          }}
+          filterOption={(input, option) =>
+            (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
+          }
+        />
+      </Form.Item>
 
       <Form.Item
-        label={`${watchLevel === 1 ? '一级' : watchLevel === 2 ? '二级' : '三级'}标签名称`}
+        label="三级标签名称"
         name="name"
         rules={[
-          { required: true, message: '请输入标签名称' },
+          { required: true, message: '请输入三级标签名称' },
           { max: 32, message: '标签名称最多 32 字' },
         ]}
       >
         <Input
-          placeholder={`请输入${watchLevel === 1 ? '一级' : watchLevel === 2 ? '二级' : '三级'}标签名称`}
+          placeholder="请输入三级标签名称"
           maxLength={32}
           showCount
         />
       </Form.Item>
 
-      {watchLevel === 3 && (
-        <Form.Item
-          label="适用模态"
-          name="modalities"
-          rules={[
-            { required: true, message: '请选择适用模态' },
-            {
-              validator: async (_rule, value) => {
-                if (!Array.isArray(value) || value.length === 0) {
-                  throw new Error('至少选择 1 个模态')
-                }
-              },
+      <Form.Item
+        label="适用模态"
+        name="modalities"
+        rules={[
+          { required: true, message: '请选择适用模态' },
+          {
+            validator: async (_rule, value) => {
+              if (!Array.isArray(value) || value.length === 0) {
+                throw new Error('至少选择 1 个模态')
+              }
             },
-          ]}
-          tooltip="该标签适用的输入模态(可多选);每个模态生成一行独立记录,模型绑定由其他模块维护"
-        >
-          <Select
-            mode="multiple"
-            placeholder="请选择模态(可多选)"
-            options={MODALITY_OPTIONS}
-            showSearch
-            optionFilterProp="label"
-            allowClear
-            maxTagCount="responsive"
-          />
-        </Form.Item>
-      )}
+          },
+        ]}
+        tooltip="该标签适用的输入模态(可多选);每个模态生成一行独立记录,模型绑定由其他模块维护"
+      >
+        <Select
+          mode="multiple"
+          placeholder="请选择模态(可多选)"
+          options={MODALITY_OPTIONS}
+          showSearch
+          optionFilterProp="label"
+          allowClear
+          maxTagCount="responsive"
+        />
+      </Form.Item>
     </Form>
   )
 
