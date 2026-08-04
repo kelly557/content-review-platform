@@ -22,7 +22,6 @@ import {
   Radio,
   Select,
   Space,
-  Switch,
   Table,
   Tag as AntdTag,
   Typography,
@@ -285,6 +284,8 @@ export default function TagsAdminPage() {
     open: false,
     editing: null,
   })
+  const [parentL1, setParentL1] = useState<string | undefined>(undefined)
+  const [parentL2, setParentL2] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
   const [checkingRefs, setCheckingRefs] = useState(false)
   const [form] = Form.useForm()
@@ -379,38 +380,40 @@ export default function TagsAdminPage() {
   // ── Drawer 操作 ──
   const openCreate = () => {
     form.resetFields()
-    form.setFieldsValue({ level: 1, status: 'active' })
+    form.setFieldsValue({ level: 1 })
+    setParentL1(undefined)
+    setParentL2(undefined)
     setDrawer({ open: true, editing: null })
   }
 
   const openEdit = (row: MockTag) => {
     form.resetFields()
-    let parent_l1: string | undefined
-    let parent_l2: string | undefined
+    let p_l1: string | undefined
+    let p_l2: string | undefined
     if (row.parentId) {
       const p = findById(tags, row.parentId)
       if (p) {
-        if (p.level === 1) parent_l1 = p.id
+        if (p.level === 1) p_l1 = p.id
         if (p.level === 2) {
-          parent_l2 = p.id
-          if (p.parentId) parent_l1 = p.parentId
+          p_l2 = p.id
+          if (p.parentId) p_l1 = p.parentId
         }
       }
     }
+    setParentL1(p_l1)
+    setParentL2(p_l2)
     form.setFieldsValue({
       level: row.level,
       name: row.name,
-      status: row.status,
-      parent_l1,
-      parent_l2,
       modalities: row.modality ? [row.modality] : [],
-      enabled: row.enabled,
     })
     setDrawer({ open: true, editing: row })
   }
 
   const closeDrawer = () => {
     setDrawer({ open: false, editing: null })
+    setParentL1(undefined)
+    setParentL2(undefined)
     form.resetFields()
   }
 
@@ -423,15 +426,18 @@ export default function TagsAdminPage() {
         level === 1
           ? null
           : level === 2
-            ? (v.parent_l1 as string | undefined) ?? null
-            : (v.parent_l2 as string | undefined) ?? null
+            ? parentL1 ?? null
+            : parentL2 ?? null
       const editing = drawer.editing
       const timestamp = Date.now()
-      const status = v.status as Status
-      // 三级标签:未绑定模型时强制 enabled=false (α 规则)
-      const formEnabled = !!v.enabled
-      const willHaveModel =
-        level === 3 && editing ? editing.boundModelId != null : false
+      // 新建三级默认 enabled=false(模型未绑定前不可启用);
+      // 新建一/二级默认 enabled=true;
+      // 编辑任何级别保留原 enabled
+      const formEnabled = !editing && level === 3
+        ? false
+        : editing
+          ? editing.enabled
+          : true
 
       // 一级/二级:单条记录,无 modality
       // 三级:按 modalities 数组展开为 N 条独立记录(Q2 不合并)
@@ -442,7 +448,7 @@ export default function TagsAdminPage() {
               id: baseId,
               level,
               name: v.name,
-              status,
+              status: 'active',
               enabled: formEnabled,
               parentId,
             },
@@ -455,7 +461,7 @@ export default function TagsAdminPage() {
             id,
             level: 3,
             name: v.name,
-            status,
+            status: 'active',
             enabled: formEnabled,
             parentId,
             modality: mod,
@@ -471,7 +477,6 @@ export default function TagsAdminPage() {
             return {
               ...editing,
               name: v.name,
-              status,
               enabled: formEnabled,
               parentId,
             }
@@ -479,13 +484,11 @@ export default function TagsAdminPage() {
           return {
             ...editing,
             name: v.name,
-            status,
             enabled: formEnabled,
             parentId,
             modality: ((v.modalities as Modality[] | undefined) ?? [])[0],
           }
         })()
-        void willHaveModel // 备用变量占位避免 lint
         setTags((prev) =>
           prev.map((t) => (t.id === editing.id ? updated : t)),
         )
@@ -709,8 +712,10 @@ export default function TagsAdminPage() {
         <Radio.Group
           disabled={!!watchEditing}
           onChange={() => {
-            form.setFieldValue('parent_l1', undefined)
-            form.setFieldValue('parent_l2', undefined)
+            setParentL1(undefined)
+            setParentL2(undefined)
+            form.setFieldValue('modalities', undefined)
+            form.setFieldValue('name', undefined)
           }}
         >
           <Radio.Button value={1}>一级</Radio.Button>
@@ -722,8 +727,7 @@ export default function TagsAdminPage() {
       {(watchLevel === 2 || watchLevel === 3) && (
         <Form.Item
           label="一级标签"
-          name="parent_l1"
-          rules={[{ required: true, message: '请选择一级标签' }]}
+          required
         >
           <Select
             placeholder="请选择"
@@ -731,6 +735,11 @@ export default function TagsAdminPage() {
             showSearch
             optionFilterProp="label"
             disabled={!!watchEditing}
+            value={parentL1}
+            onChange={(v) => {
+              setParentL1(v)
+              setParentL2(undefined)
+            }}
           />
         </Form.Item>
       )}
@@ -738,8 +747,7 @@ export default function TagsAdminPage() {
       {watchLevel === 3 && (
         <Form.Item
           label="二级标签"
-          name="parent_l2"
-          rules={[{ required: true, message: '请选择二级标签' }]}
+          required
         >
           <Select
             placeholder="请选择"
@@ -747,35 +755,26 @@ export default function TagsAdminPage() {
             showSearch
             optionFilterProp="label"
             disabled={!!watchEditing}
+            value={parentL2}
+            onChange={setParentL2}
           />
         </Form.Item>
       )}
 
-      {watchLevel === 3 && (
-        <Form.Item
-          label="三级标签名称"
-          name="name"
-          rules={[
-            { required: true, message: '请输入三级标签名称' },
-            { max: 32, message: '标签名称最多 32 字' },
-          ]}
-        >
-          <Input placeholder="请输入三级标签名称" maxLength={32} showCount />
-        </Form.Item>
-      )}
-
-      {watchLevel !== 3 && (
-        <Form.Item
-          label="标签名称"
-          name="name"
-          rules={[
-            { required: true, message: '请输入标签名称' },
-            { max: 32, message: '标签名称最多 32 字' },
-          ]}
-        >
-          <Input placeholder="请输入标签名称" maxLength={32} showCount />
-        </Form.Item>
-      )}
+      <Form.Item
+        label={`${watchLevel === 1 ? '一级' : watchLevel === 2 ? '二级' : '三级'}标签名称`}
+        name="name"
+        rules={[
+          { required: true, message: '请输入标签名称' },
+          { max: 32, message: '标签名称最多 32 字' },
+        ]}
+      >
+        <Input
+          placeholder={`请输入${watchLevel === 1 ? '一级' : watchLevel === 2 ? '二级' : '三级'}标签名称`}
+          maxLength={32}
+          showCount
+        />
+      </Form.Item>
 
       {watchLevel === 3 && (
         <Form.Item
@@ -804,26 +803,6 @@ export default function TagsAdminPage() {
           />
         </Form.Item>
       )}
-
-      <Form.Item
-        label="状态"
-        name="status"
-        rules={[{ required: true, message: '请选择状态' }]}
-      >
-        <Radio.Group>
-          <Radio.Button value="active">已启用</Radio.Button>
-          <Radio.Button value="inactive">已停用</Radio.Button>
-        </Radio.Group>
-      </Form.Item>
-
-      <Form.Item
-        label="可启用"
-        name="enabled"
-        valuePropName="checked"
-        tooltip="开启后,该标签可被审核策略引用;若未绑定模型,保存时会强制为关闭状态"
-      >
-        <Switch disabled={!!watchEditing} />
-      </Form.Item>
     </Form>
   )
 
