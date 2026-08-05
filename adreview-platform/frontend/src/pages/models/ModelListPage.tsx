@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
+  DatePicker,
   Drawer,
   Empty,
   Input,
@@ -20,17 +21,19 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
+  DeleteOutlined,
   PictureOutlined,
   PlusOutlined,
   ReloadOutlined,
   TagsOutlined,
 } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
-import dayjs from 'dayjs'
+import dayjs, { type Dayjs } from 'dayjs'
 import { registeredModelsApi, providersApi } from '@/api/registered-models'
 import type {
   AuditPointEntry,
   LargeModelCategory,
+  ModelReferencesResponse,
   RegisteredModelListItem,
   RegisteredModelStatus,
   RegisteredProviderOption,
@@ -45,6 +48,10 @@ import { useRiskCategoryStore } from '@/store/riskCategories'
 import CreateModelModal from './CreateModelModal'
 import ConfirmCascadeActivateModal from './ConfirmCascadeActivateModal'
 import CreateRiskCategoryModal from './CreateRiskCategoryModal'
+import ModelReferencesDrawer from './ModelReferencesDrawer'
+import InlineEditableCell, {
+  type InlineEditableField,
+} from './InlineEditableCell'
 
 const { Text } = Typography
 
@@ -312,6 +319,24 @@ export default function ModelListPage() {
   const [previewPoints, setPreviewPoints] = useState<AuditPointEntry[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
 
+  // —— 行内编辑状态（仅大模型 Tab；单一 cell 一时刻只允许 1 个 editing） ————————
+  const [editing, setEditing] = useState<{
+    rowId: number
+    field: InlineEditableField
+  } | null>(null)
+  const [drafts, setDrafts] = useState<{
+    api_key?: string
+    token_expires_at?: Dayjs | null
+    endpoint_url?: string
+  }>({})
+  const [referencesTarget, setReferencesTarget] = useState<{
+    modelId: number
+    modelName: string
+  } | null>(null)
+  const [referencesData, setReferencesData] = useState<ModelReferencesResponse | null>(null)
+  const [referencesLoading, setReferencesLoading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
   const fetchList = async () => {
     setLoading(true)
     try {
@@ -339,6 +364,119 @@ export default function ModelListPage() {
       setProviderOptions(list)
     } catch {
       setProviderOptions([])
+    }
+  }
+
+  // —— 行内编辑 save handlers ————————
+  // 流程：先 precheck(新值) → 失败 → 返回错误字符串（cell 下方红字，editing 不退出）
+  //       成功 → 真实 API 调用 → 退出 editing → 刷新列表
+  const handleSaveField = async (
+    rowId: number,
+    field: InlineEditableField,
+  ): Promise<string | void> => {
+    const m = items.find((i) => i.id === rowId)
+    if (!m?.provider_id) return '无 Provider 关联'
+
+    try {
+      if (field === 'api_key') {
+        const newKey = drafts.api_key ?? ''
+        if (!newKey.trim()) return '请填写 API Key'
+        const check = await providersApi.validate(m.provider_id, {
+          api_key: newKey,
+          endpoint_url: m.provider_base_url ?? undefined,
+        })
+        if (!check.ok) {
+          return `测试连接失败：${check.message}（HTTP ${check.http_status ?? '-'} · ${check.latency_ms ?? '-'}ms）`
+        }
+        await providersApi.rotateApiKey(m.provider_id, { api_key: newKey })
+        message.success('API Key 已替换')
+      } else if (field === 'token_expires_at') {
+        const newDate = drafts.token_expires_at
+        if (!newDate) return '请选择到期日'
+        const check = await providersApi.validate(m.provider_id, {})
+        if (!check.ok) {
+          return `测试连接失败：${check.message}（HTTP ${check.http_status ?? '-'} · ${check.latency_ms ?? '-'}ms）`
+        }
+        await providersApi.setTokenExpiresAt(m.provider_id, {
+          token_expires_at: newDate.toDate().toISOString(),
+        })
+        message.success('到期日已更新')
+      } else if (field === 'endpoint_url') {
+        const newUrl = drafts.endpoint_url ?? ''
+        if (!newUrl.trim()) return '请填写 Base URL'
+        const check = await providersApi.validate(m.provider_id, {
+          endpoint_url: newUrl,
+        })
+        if (!check.ok) {
+          return `测试连接失败：${check.message}（HTTP ${check.http_status ?? '-'} · ${check.latency_ms ?? '-'}ms）`
+        }
+        await providersApi.update(m.provider_id, { endpoint_url: newUrl })
+        message.success('Base URL 已更新')
+      }
+      await fetchList()
+    } catch (err: unknown) {
+      const detail = (
+        err as { response?: { data?: { detail?: string | { message?: string } } } }
+      )?.response?.data?.detail
+      const text =
+        typeof detail === 'string'
+          ? detail
+          : typeof detail === 'object' && detail && 'message' in detail
+            ? String(detail.message)
+            : '保存失败'
+      return text
+    }
+  }
+
+  const startEdit = (rowId: number, field: InlineEditableField) => {
+    const m = items.find((i) => i.id === rowId)
+    if (!m) return
+    if (field === 'api_key') setDrafts((d) => ({ ...d, api_key: '' }))
+    if (field === 'token_expires_at')
+      setDrafts((d) => ({
+        ...d,
+        token_expires_at: m.token_expires_at ? dayjs(m.token_expires_at) : null,
+      }))
+    if (field === 'endpoint_url')
+      setDrafts((d) => ({ ...d, endpoint_url: m.provider_base_url ?? '' }))
+    setEditing({ rowId, field })
+  }
+
+  const cancelEdit = () => {
+    setEditing(null)
+    setDrafts({})
+  }
+
+  const handleDeleteClick = async (row: RegisteredModelListItem) => {
+    setReferencesTarget({ modelId: row.id, modelName: row.name })
+    setReferencesData(null)
+    setReferencesLoading(true)
+    try {
+      const refs = await registeredModelsApi.references(row.id)
+      setReferencesData(refs)
+    } catch {
+      message.error('查询引用失败')
+      setReferencesTarget(null)
+    } finally {
+      setReferencesLoading(false)
+    }
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!referencesTarget) return
+    setDeleting(true)
+    try {
+      await registeredModelsApi.delete(referencesTarget.modelId)
+      message.success('已删除')
+      setReferencesTarget(null)
+      setReferencesData(null)
+      await fetchList()
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const text = typeof detail === 'string' ? detail : '删除失败'
+      message.error(text)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -534,11 +672,11 @@ export default function ModelListPage() {
 
   const largeColumns = useMemo(
     () => [
-      { title: '名称', dataIndex: 'name', width: '18%' },
+      { title: '名称', dataIndex: 'name', width: '14%' },
       {
         title: '模态',
         dataIndex: 'large_category',
-        width: '10%',
+        width: '8%',
         render: (v: LargeModelCategory | null) => {
           if (!v) return '-'
           const opt = LARGE_MODEL_CATEGORY_OPTIONS.find((o) => o.value === v)
@@ -548,7 +686,7 @@ export default function ModelListPage() {
       {
         title: 'Provider',
         dataIndex: 'provider_label',
-        width: '14%',
+        width: '12%',
         render: (v: string | null, row: RegisteredModelListItem) =>
           row.provider_id ? (
             <Link to={`/resources/providers/${row.provider_id}`}>
@@ -558,18 +696,154 @@ export default function ModelListPage() {
             <Text type="secondary">未挂载</Text>
           ),
       },
-      { title: 'Model ID', dataIndex: 'model_name', width: '16%' },
+      { title: 'Model ID', dataIndex: 'model_name', width: '12%' },
+      {
+        title: 'API Key',
+        key: 'api_key',
+        width: '14%',
+        render: (_v: unknown, row: RegisteredModelListItem) => {
+          if (!row.provider_id) return <Text type="secondary">-</Text>
+          const isEditingThis =
+            editing?.rowId === row.id && editing.field === 'api_key'
+          return (
+            <InlineEditableCell
+              field="api_key"
+              value={row.masked_token}
+              canWrite={canWrite}
+              isEditing={isEditingThis}
+              onStartEdit={() => startEdit(row.id, 'api_key')}
+              onCancelEdit={cancelEdit}
+              onSave={() => handleSaveField(row.id, 'api_key')}
+              renderDisplay={() => (
+                <code style={{ fontSize: 12, color: '#475569' }}>
+                  {row.masked_token ?? '-'}
+                </code>
+              )}
+              renderInput={() => (
+                <Input
+                  size="small"
+                  placeholder="新的 API Key"
+                  value={drafts.api_key ?? ''}
+                  onChange={(e) =>
+                    setDrafts((d) => ({ ...d, api_key: e.target.value }))
+                  }
+                  onPressEnter={() => handleSaveField(row.id, 'api_key')}
+                />
+              )}
+            />
+          )
+        },
+      },
+      {
+        title: '到期日',
+        key: 'token_expires_at',
+        width: '14%',
+        render: (_v: unknown, row: RegisteredModelListItem) => {
+          if (!row.provider_id) return <Text type="secondary">-</Text>
+          const isEditingThis =
+            editing?.rowId === row.id && editing.field === 'token_expires_at'
+          const exp = row.token_expires_at ? dayjs(row.token_expires_at) : null
+          const isExpired = exp ? exp.isBefore(dayjs()) : false
+          return (
+            <InlineEditableCell
+              field="token_expires_at"
+              value={row.token_expires_at}
+              canWrite={canWrite}
+              isEditing={isEditingThis}
+              onStartEdit={() => startEdit(row.id, 'token_expires_at')}
+              onCancelEdit={cancelEdit}
+              onSave={() => handleSaveField(row.id, 'token_expires_at')}
+              renderDisplay={() =>
+                exp ? (
+                  <Space size={4}>
+                    <Text
+                      style={{ fontSize: 12 }}
+                      type={isExpired ? 'danger' : undefined}
+                    >
+                      {exp.format('YYYY-MM-DD HH:mm')}
+                    </Text>
+                    {isExpired && (
+                      <Tag color="red" style={{ marginLeft: 0 }}>已过期</Tag>
+                    )}
+                  </Space>
+                ) : (
+                  <Text type="secondary" style={{ fontSize: 12 }}>未配置</Text>
+                )
+              }
+              renderInput={() => (
+                <DatePicker
+                  size="small"
+                  showTime
+                  style={{ width: '100%' }}
+                  format="YYYY-MM-DD HH:mm:ss"
+                  placeholder="选择到期日"
+                  value={drafts.token_expires_at ?? null}
+                  onChange={(v) =>
+                    setDrafts((d) => ({ ...d, token_expires_at: v }))
+                  }
+                />
+              )}
+            />
+          )
+        },
+      },
+      {
+        title: 'Base URL',
+        key: 'provider_base_url',
+        width: '14%',
+        render: (_v: unknown, row: RegisteredModelListItem) => {
+          if (!row.provider_id) return <Text type="secondary">-</Text>
+          const url = row.provider_base_url ?? ''
+          const isEditingThis =
+            editing?.rowId === row.id && editing.field === 'endpoint_url'
+          return (
+            <InlineEditableCell
+              field="endpoint_url"
+              value={url}
+              canWrite={canWrite}
+              isEditing={isEditingThis}
+              onStartEdit={() => startEdit(row.id, 'endpoint_url')}
+              onCancelEdit={cancelEdit}
+              onSave={() => handleSaveField(row.id, 'endpoint_url')}
+              renderDisplay={() =>
+                url ? (
+                  <Text
+                    ellipsis
+                    style={{ fontSize: 12, maxWidth: 180, color: '#475569' }}
+                    title={url}
+                  >
+                    {url}
+                  </Text>
+                ) : (
+                  <Text type="secondary">-</Text>
+                )
+              }
+              renderInput={() => (
+                <Input
+                  size="small"
+                  placeholder="https://api.openai.com/v1"
+                  value={drafts.endpoint_url ?? ''}
+                  onChange={(e) =>
+                    setDrafts((d) => ({ ...d, endpoint_url: e.target.value }))
+                  }
+                  onPressEnter={() => handleSaveField(row.id, 'endpoint_url')}
+                />
+              )}
+            />
+          )
+        },
+      },
       {
         title: '启用',
         dataIndex: 'status',
-        width: '8%',
+        width: '7%',
         render: (v: RegisteredModelStatus, row: RegisteredModelListItem) =>
           renderEnableSwitch(v, row),
       },
       {
         title: '更新时间',
         dataIndex: 'updated_at',
-        width: '12%',
+        width: '10%',
         render: (v: string | null) =>
           v ? (
             <span style={{ color: '#64748B', fontSize: 12 }}>{dayjs(v).format('YYYY-MM-DD HH:mm')}</span>
@@ -577,9 +851,26 @@ export default function ModelListPage() {
             '-'
           ),
       },
+      {
+        title: '操作',
+        key: 'actions',
+        width: '7%',
+        render: (_v: unknown, row: RegisteredModelListItem) =>
+          canWrite ? (
+            <Tooltip title="删除模型">
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleDeleteClick(row)}
+              />
+            </Tooltip>
+          ) : null,
+      },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canWrite],
+    [canWrite, handleDeleteClick],
   )
 
   const smallGroups = useMemo<ModalityGroup[]>(() => {
@@ -1198,6 +1489,37 @@ export default function ModelListPage() {
         loading={previewLoading}
         onClose={closePreviewModal}
       />
+
+      <ModelReferencesDrawer
+        open={referencesTarget !== null}
+        loading={referencesLoading}
+        data={referencesData}
+        onClose={() => {
+          setReferencesTarget(null)
+          setReferencesData(null)
+        }}
+      />
+
+      <Modal
+        title="确认删除"
+        open={referencesTarget !== null && referencesData?.is_blocked === false}
+        okText="确认删除"
+        okButtonProps={{ danger: true, loading: deleting }}
+        cancelText="取消"
+        onCancel={() => {
+          setReferencesTarget(null)
+          setReferencesData(null)
+        }}
+        onOk={handleConfirmDelete}
+        destroyOnClose
+      >
+        <p>
+          确认删除模型 <Text strong>{referencesTarget?.modelName}</Text> 吗？
+        </p>
+        <p style={{ color: '#94a3b8', fontSize: 12 }}>
+          删除后该模型会被软删除（is_deleted=true），无法恢复。
+        </p>
+      </Modal>
     </div>
   )
 }
