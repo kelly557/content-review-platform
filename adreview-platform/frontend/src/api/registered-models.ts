@@ -3,6 +3,7 @@ import type {
   ArtifactUploadResponse,
   AuditPointEntry,
   LargeModelCategory,
+  ModelReferencesResponse,
   Page,
   RegisteredModel,
   RegisteredModelCreate,
@@ -52,6 +53,11 @@ export const registeredModelsApi = {
   delete(id: number) {
     return api
       .delete<{ id: number; is_deleted: boolean }>(`/registered-models/${id}`)
+      .then((r) => r.data)
+  },
+  references(id: number) {
+    return api
+      .get<ModelReferencesResponse>(`/registered-models/${id}/references`)
       .then((r) => r.data)
   },
   archive(id: number) {
@@ -186,13 +192,24 @@ export const providersApi = {
   rotateApiKey(id: number, body: RegisteredProviderRotateApiKey): Promise<RegisteredProvider> {
     return api.post<RegisteredProvider>(`/providers/${id}/api-key`, body).then((r) => r.data)
   },
-  validate(id: number): Promise<{
+  setTokenExpiresAt(
+    id: number,
+    body: { token_expires_at: string },
+  ): Promise<RegisteredProvider> {
+    return api
+      .post<RegisteredProvider>(`/providers/${id}/token-expires-at`, body)
+      .then((r) => r.data)
+  },
+  validate(
+    id: number,
+    options?: { endpoint_url?: string; api_key?: string },
+  ): Promise<{
     ok: boolean
     http_status: number | null
     latency_ms: number | null
     message: string
   }> {
-    return api.post(`/providers/${id}/validate`, {}).then((r) => r.data)
+    return api.post(`/providers/${id}/validate`, options ?? {}).then((r) => r.data)
   },
   archive(id: number): Promise<RegisteredProvider> {
     return api.post<RegisteredProvider>(`/providers/${id}/archive`, {}).then((r) => r.data)

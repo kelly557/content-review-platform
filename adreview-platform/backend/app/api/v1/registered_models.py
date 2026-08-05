@@ -40,13 +40,17 @@ from app.models.registered_model import (
     ResourceCredential,
     SmallModelCategory,
 )
+from app.models.audit_item import AuditItem
 from app.models.risk_category import RiskCategory
+from app.models.strategy import Strategy
 from app.models.user import User, UserRole
 from app.schemas.common import Page
 from app.schemas.registered_model import (
     ArtifactUploadResponse,
     ModelArtifactPrecheckRequest,
     ModelPrecheckRequest,
+    ModelReferenceItem,
+    ModelReferencesResponse,
     RegisteredModelCreate,
     RegisteredModelListItem,
     RegisteredModelOut,
@@ -89,20 +93,113 @@ ALLOWED_VERSION_STATUS = {s.value for s in RegisteredModelVersionStatus}
 # 也通过 ALLOWED_SMALL_CATEGORY 兜底放行——不破坏 audit_items 已写的引用。
 _RISK_CATEGORY_CODES_CACHE: set[str] | None = None
 
+
+async def _collect_model_references(
+    db: AsyncSession, model_id: int
+) -> ModelReferencesResponse:
+    """反查模型被哪些业务实体引用（用于删除前阻断检查）。
+
+    范围（按需求）：
+      - audit_item.active_large_model_id == model_id   (kind=large)
+      - strategy.definition.llm_review.model_id == model_id  (kind=large)
+
+    标签（tag.bound_model_id）当前 FK 设为 ON DELETE SET NULL，不阻断。
+    """
+    items: list[ModelReferenceItem] = []
+
+    # 1) audit_item
+    ai_rows = (
+        await db.execute(
+            select(AuditItem.id, AuditItem.name_cn, AuditItem.code)
+            .where(AuditItem.active_large_model_id == model_id)
+        )
+    ).all()
+    for aid, name_cn, code in ai_rows:
+        items.append(
+            ModelReferenceItem(
+                kind="audit_item",
+                id=aid,
+                name=name_cn,
+                detail=f"code={code}",
+            )
+        )
+
+    # 2) strategy（JSONB 遍历 definition.services[].llm_review.model_id）
+    #    策略数小（< 100），application 层遍历可接受；如未来增长可改为 JSONB @>
+    sg_rows = (
+        await db.execute(
+            select(Strategy.id, Strategy.name, Strategy.code, Strategy.scope, Strategy.definition)
+            .where(Strategy.is_active.is_(True))
+        )
+    ).all()
+    for sid, sname, scode, sscope, sdef in sg_rows:
+        if not sdef:
+            continue
+        services = sdef.get("services") if isinstance(sdef, dict) else None
+        if not isinstance(services, list):
+            continue
+        for s in services:
+            if not isinstance(s, dict):
+                continue
+            llm = s.get("llm_review")
+            if not isinstance(llm, dict):
+                continue
+            if llm.get("model_id") == model_id:
+                items.append(
+                    ModelReferenceItem(
+                        kind="strategy",
+                        id=sid,
+                        name=sname,
+                        detail=f"scope={sscope.value if hasattr(sscope, 'value') else sscope}; code={scode}",
+                    )
+                )
+                break
+
+    summary = {
+        "audit_item": sum(1 for x in items if x.kind == "audit_item"),
+        "strategy": sum(1 for x in items if x.kind == "strategy"),
+    }
+    return ModelReferencesResponse(
+        model_id=model_id,
+        is_blocked=len(items) > 0,
+        summary=summary,
+        items=items,
+    )
+
 PROVIDER_PRESETS: Dict[str, Dict[str, Any]] = {
     "openai": {
         "label": "OpenAI",
         "endpoint": "https://api.openai.com/v1",
         "protocol": "openai-compatible",
     },
-    "anthropic": {
-        "label": "Anthropic",
-        "endpoint": "https://api.anthropic.com/v1",
-        "protocol": "anthropic-messages",
-    },
     "bailian": {
-        "label": "阿里百炼 (DashScope)",
+        "label": "阿里云（百炼 DashScope）",
         "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "protocol": "openai-compatible",
+    },
+    "baidu": {
+        "label": "百度（千帆）",
+        "endpoint": "https://qianfan.baidubce.com/v2",
+        "protocol": "openai-compatible",
+    },
+    "tencent": {
+        "label": "腾讯云（混元）",
+        "endpoint": "https://api.hunyuan.cloud.tencent.com/v1",
+        "protocol": "openai-compatible",
+    },
+    "volcengine": {
+        "label": "火山引擎（豆包）",
+        "endpoint": "https://ark.cn-beijing.volces.com/api/v3",
+        "protocol": "openai-compatible",
+    },
+    "zhipu": {
+        "label": "智谱",
+        "endpoint": "https://open.bigmodel.cn/api/paas/v4",
+        "protocol": "openai-compatible",
+    },
+    "MiniMax": {
+        "label": "MiniMax",
+        "endpoint": "https://api.MiniMax.chat/v1",
         "protocol": "openai-compatible",
     },
     "deepseek": {
@@ -110,15 +207,15 @@ PROVIDER_PRESETS: Dict[str, Dict[str, Any]] = {
         "endpoint": "https://api.deepseek.com/v1",
         "protocol": "openai-compatible",
     },
-    "self-hosted": {
-        "label": "自建 / 私有部署",
-        "endpoint": None,
-        "protocol": "openai-compatible",
-    },
     "custom": {
         "label": "自定义",
         "endpoint": None,
         "protocol": "custom",
+    },
+    "self-hosted": {
+        "label": "自建 / 私有部署",
+        "endpoint": None,
+        "protocol": "openai-compatible",
     },
 }
 
@@ -321,6 +418,7 @@ def _to_list_item(
     model: RegisteredModel,
     provider: Optional[RegisteredProvider] = None,
     artifact: Optional[dict] = None,
+    credential: Optional[dict] = None,
 ) -> RegisteredModelListItem:
     p = provider if provider is not None else getattr(model, "provider", None)
     payload = {
@@ -346,6 +444,10 @@ def _to_list_item(
         "owner_id": model.owner_id,
         "created_at": model.created_at,
         "updated_at": model.updated_at,
+        "provider_base_url": p.endpoint_url if p else None,
+        "provider_credential_id": p.credential_id if p else None,
+        "masked_token": credential.get("masked_token") if credential else None,
+        "token_expires_at": credential.get("token_expires_at") if credential else None,
     }
     if artifact:
         payload["artifact_filename"] = artifact.get("artifact_filename")
@@ -477,6 +579,24 @@ async def list_models(
         ).scalars().all()
         providers = {p.id: p for p in provs}
 
+    # 显式取 provider 关联的凭证（API Key + token 过期时间，用于大模型列表展示）
+    credential_ids = {
+        p.credential_id for p in providers.values() if p.credential_id
+    }
+    credentials: dict[int, dict] = {}
+    if credential_ids:
+        cred_rows = (
+            await db.execute(
+                select(
+                    ResourceCredential.id,
+                    ResourceCredential.masked_token,
+                    ResourceCredential.token_expires_at,
+                ).where(ResourceCredential.id.in_(credential_ids))
+            )
+        ).all()
+        for cid, masked, exp in cred_rows:
+            credentials[cid] = {"masked_token": masked, "token_expires_at": exp}
+
     # 显式取 current_version artifact 摘要（小模型列表展示文件名 + 大小）
     # + version_no / version_label（用于列表展示「当前模型版本」）
     # + config（用于树形展示审核点列表）
@@ -505,7 +625,12 @@ async def list_models(
             }
 
     items = [
-        _to_list_item(r, providers.get(r.provider_id), version_artifact.get(r.current_version_id or -1))
+        _to_list_item(
+            r,
+            providers.get(r.provider_id),
+            version_artifact.get(r.current_version_id or -1),
+            credentials.get(providers[r.provider_id].credential_id) if r.provider_id and providers.get(r.provider_id) and providers[r.provider_id].credential_id else None,
+        )
         for r in rows
     ]
     return Page(items=items, total=total, page=page, size=size)
@@ -1001,6 +1126,20 @@ async def delete_model(
     if model is None or model.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
     _require_super_admin_for_small(model.kind, user)
+    # 兜底引用检查：被 audit_item / strategy 引用时禁止删除
+    refs = await _collect_model_references(db, model_id)
+    if refs.is_blocked:
+        # 422 + references payload；前端弹窗可读
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": (
+                    f"该模型仍被 {refs.summary.get('audit_item', 0)} 个审核项、"
+                    f"{refs.summary.get('strategy', 0)} 个策略引用，无法删除"
+                ),
+                "references": refs.model_dump(),
+            },
+        )
     model.is_deleted = True
     model.deleted_at = datetime.utcnow()
     model.updated_by_id = user.id
@@ -1014,6 +1153,22 @@ async def delete_model(
     )
     await db.commit()
     return {"id": model.id, "is_deleted": True}
+
+
+@router.get("/{model_id}/references", response_model=ModelReferencesResponse)
+async def get_model_references(
+    model_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_reader),
+) -> ModelReferencesResponse:
+    """删除前预检：返回该模型被哪些业务实体引用（含 is_blocked 标记）。
+
+    范围：audit_item.active_large_model_id + strategy.definition.llm_review.model_id。
+    """
+    model = await db.scalar(select(RegisteredModel).where(RegisteredModel.id == model_id))
+    if model is None or model.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    return await _collect_model_references(db, model_id)
 
 
 # ─── Versions ───

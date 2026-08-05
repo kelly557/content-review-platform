@@ -289,6 +289,9 @@ class ResourceCredential(Base):
     ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
     masked_token: Mapped[str] = mapped_column(String(64), nullable=False)
     metadata_json: Mapped[Any] = mapped_column("metadata", JSONB, default=dict, nullable=False)
+    token_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_by_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
