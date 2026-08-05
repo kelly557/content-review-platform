@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  DatePicker,
   Descriptions,
   Empty,
   Form,
@@ -59,7 +60,7 @@ export default function ProviderDetailPage() {
   const [editing, setEditing] = useState(false)
   const [editForm] = Form.useForm<RegisteredProviderUpdate>()
   const [rotateOpen, setRotateOpen] = useState(false)
-  const [rotateForm] = Form.useForm<{ api_key: string }>()
+  const [rotateSubmitting, setRotateSubmitting] = useState(false)
   const [appendOpen, setAppendOpen] = useState(false)
   const [appending, setAppending] = useState(false)
   const [appendForm] = Form.useForm<{
@@ -114,22 +115,6 @@ export default function ProviderDetailPage() {
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
       const text = typeof detail === 'string' ? detail : '更新失败'
-      message.error(text)
-    }
-  }
-
-  const handleRotate = async () => {
-    const v = await rotateForm.validateFields().catch(() => null)
-    if (!v) return
-    try {
-      await providersApi.rotateApiKey(providerId, { api_key: v.api_key })
-      message.success('API Key 已替换')
-      rotateForm.resetFields()
-      setRotateOpen(false)
-      await fetchAll()
-    } catch (e: unknown) {
-      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-      const text = typeof detail === 'string' ? detail : '替换失败'
       message.error(text)
     }
   }
@@ -437,31 +422,38 @@ export default function ProviderDetailPage() {
         </Form>
       </Modal>
 
-      <Modal
-        title="替换 API Key"
+      <RotateApiKeyInlineModal
         open={rotateOpen}
+        currentMasked={data.masked_token}
+        currentExpiresAt={data.token_expires_at}
+        loading={rotateSubmitting}
         onCancel={() => setRotateOpen(false)}
-        onOk={handleRotate}
-        okText="替换"
-        cancelText="取消"
-        destroyOnClose
-      >
-        <Alert
-          type="warning"
-          showIcon
-          style={{ marginBottom: 12 }}
-          message="替换后所有引用该凭证的 model 调用将立即使用新 key；旧 token 不再有效。"
-        />
-        <Form<{ api_key: string }> form={rotateForm} layout="vertical">
-          <Form.Item
-            label="新的 API Key"
-            name="api_key"
-            rules={[{ required: true, message: '请填写新的 API key' }]}
-          >
-            <Input.Password visibilityToggle placeholder="sk-..." />
-          </Form.Item>
-        </Form>
-      </Modal>
+        onSubmit={async (body) => {
+          setRotateSubmitting(true)
+          try {
+            const check = await providersApi.validate(providerId, {
+              api_key: body.api_key,
+              endpoint_url: data.endpoint_url,
+            })
+            if (!check.ok) {
+              message.error(
+                `测试连接失败：${check.message}（HTTP ${check.http_status ?? '-'} · ${check.latency_ms ?? '-'}ms）`,
+              )
+              return
+            }
+            await providersApi.rotateApiKey(providerId, body)
+            message.success('API Key 已替换')
+            setRotateOpen(false)
+            await fetchAll()
+          } catch (e: unknown) {
+            const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+            const text = typeof detail === 'string' ? detail : '替换失败'
+            message.error(text)
+          } finally {
+            setRotateSubmitting(false)
+          }
+        }}
+      />
 
       <Modal
         title={`添加模型到「${data.display_name}」`}
@@ -516,5 +508,96 @@ export default function ProviderDetailPage() {
         </Form>
       </Modal>
     </div>
+  )
+}
+
+/**
+ * Provider 详情页专用的"替换 API Key" Modal（包含 API Key + 到期日 2 字段，
+ * 区别于列表行内 cell 的单字段编辑）。
+ */
+interface RotateKeyModalProps {
+  open: boolean
+  currentMasked: string | null
+  currentExpiresAt: string | null
+  loading?: boolean
+  onCancel: () => void
+  onSubmit: (body: { api_key: string; token_expires_at?: string | null }) => Promise<void>
+}
+
+function RotateApiKeyInlineModal({
+  open,
+  currentMasked,
+  currentExpiresAt,
+  loading,
+  onCancel,
+  onSubmit,
+}: RotateKeyModalProps) {
+  const [form] = Form.useForm<{ api_key: string; token_expires_at?: dayjs.Dayjs | null }>()
+
+  useEffect(() => {
+    if (open) {
+      form.resetFields()
+      if (currentExpiresAt) {
+        form.setFieldValue('token_expires_at', dayjs(currentExpiresAt))
+      }
+    }
+  }, [open, currentExpiresAt, form])
+
+  const handleOk = async () => {
+    const v = await form.validateFields().catch(() => null)
+    if (!v) return
+    await onSubmit({
+      api_key: v.api_key,
+      token_expires_at: v.token_expires_at?.toISOString() ?? null,
+    })
+  }
+
+  return (
+    <Modal
+      title="替换 API Key"
+      open={open}
+      onCancel={onCancel}
+      onOk={handleOk}
+      okText="替换"
+      cancelText="取消"
+      confirmLoading={loading}
+      destroyOnClose
+    >
+      <Alert
+        type="warning"
+        showIcon
+        style={{ marginBottom: 12 }}
+        message="替换后所有引用该凭证的模型调用将立即使用新 key；旧 token 不再有效。"
+      />
+      {currentMasked && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={
+            <span>
+              当前 Key：<code>{currentMasked}</code>
+            </span>
+          }
+        />
+      )}
+      <Form layout="vertical" form={form}>
+        <Form.Item
+          label="新的 API Key"
+          name="api_key"
+          rules={[{ required: true, message: '请填写新的 API key' }]}
+        >
+          <Input placeholder="sk-..." />
+        </Form.Item>
+        <Form.Item label="到期日（可选）" name="token_expires_at">
+          <DatePicker
+            showTime
+            style={{ width: '100%' }}
+            format="YYYY-MM-DD HH:mm:ss"
+            placeholder="选择过期时间"
+          />
+        </Form.Item>
+      </Form>
+    </Modal>
   )
 }

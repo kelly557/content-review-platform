@@ -1,34 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  App,
   Button,
+  DatePicker,
   Drawer,
   Form,
   Input,
   Select,
   Space,
   Tag,
-  App,
+  Tooltip,
 } from 'antd'
-import { ApiOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { ApiOutlined, InfoCircleOutlined } from '@ant-design/icons'
+import type { Dayjs } from 'dayjs'
 import { providersApi, registeredModelsApi } from '@/api/registered-models'
 import {
   LARGE_MODEL_CATEGORY_OPTIONS,
   REGISTERED_MODEL_PROVIDER_PRESETS,
-  REGISTERED_MODEL_MODALITY_OPTIONS,
   SMALL_MODEL_CATEGORY_OPTIONS,
   SMALL_MODEL_CATEGORY_LABEL,
   type LargeModelCategory,
-  type ProviderInitialModel,
-  type RegisteredModelModality,
   type RegisteredModelProvider,
   type RegisteredModelKind,
   type SmallModelCategory,
   type SmallModelModality,
 } from '@/types/domain'
-import {
-  MAINSTREAM_MODEL_GROUPS,
-  findMainstreamPreset,
-} from '@/types/registeredModelPresets'
 import SmallModelFormFields, {
   type SmallFormHandle,
   type SmallModelFormValues,
@@ -41,8 +37,10 @@ interface LargeFormValues {
   provider_preset?: RegisteredModelProvider
   endpoint_url: string
   api_key: string
+  token_expires_at?: Dayjs | null
   description?: string
-  initial_models: Array<ProviderInitialModel & { _key?: string }>
+  model_id: string
+  large_category: LargeModelCategory
 }
 
 interface CreateFormValues extends SmallModelFormValues, LargeFormValues {
@@ -126,25 +124,24 @@ export default function CreateModelModal({
     setSubmitting(true)
     try {
       if (mode === 'large') {
-        const initial = (v.initial_models || []).map((m) => ({
-          name: m.name?.trim() || undefined,
-          model_name: m.model_name.trim(),
-          large_category: m.large_category as LargeModelCategory,
-          description: m.description?.trim() || undefined,
-        }))
+        const initial = [
+          {
+            model_name: v.model_id.trim(),
+            large_category: v.large_category,
+          },
+        ]
         const created = await providersApi.create({
           display_name: v.display_name.trim(),
           provider_preset: v.provider_preset,
           endpoint_url: v.endpoint_url.trim(),
           api_key: v.api_key,
+          token_expires_at: v.token_expires_at
+            ? (v.token_expires_at as Dayjs).toISOString()
+            : null,
           description: v.description?.trim() || undefined,
           initial_models: initial,
         })
-        message.success(
-          initial.length
-            ? `创建成功，已同时建好 ${initial.length} 个模型`
-            : 'Provider 创建成功（暂未添加模型）',
-        )
+        message.success('创建成功，已同时建好 1 个模型')
         onCreated?.({ providerId: created.id })
       } else {
         const artifact = (v as CreateFormValues & { __artifact?: unknown })
@@ -348,57 +345,6 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
-  // 当前 Provider 下可用的主流模型分组
-  const currentMainstreamGroup = MAINSTREAM_MODEL_GROUPS.find(
-    (g) => g.vendor === currentPreset,
-  )
-
-  // 每行记录"选了哪个主流模型 key"（仅 UI 状态，控制级联 Select 显隐 + 回填）
-  const [rowPresets, setRowPresets] = useState<Record<number, string>>({})
-
-  const handleRowPresetChange = (
-    fieldName: number,
-    presetKey: string | undefined,
-  ) => {
-    const next = { ...rowPresets }
-    if (presetKey) next[fieldName] = presetKey
-    else delete next[fieldName]
-    setRowPresets(next)
-
-    if (presetKey) {
-      const preset = findMainstreamPreset(presetKey)
-      if (preset) {
-        form.setFieldValue(
-          ['initial_models', fieldName, 'model_name'],
-          preset.defaultModelName,
-        )
-        form.setFieldValue(
-          ['initial_models', fieldName, 'large_category'],
-          preset.largeCategory,
-        )
-        setRowModalities((s) => ({ ...s, [fieldName]: preset.modality }))
-      }
-    } else {
-      setRowModalities((s) => {
-        const n = { ...s }
-        delete n[fieldName]
-        return n
-      })
-    }
-  }
-
-  // 仅显示用，标识这一行的 modality（中文）
-  const [rowModalities, setRowModalities] = useState<
-    Record<number, RegisteredModelModality>
-  >({})
-
-  const modalityLabel = (m: RegisteredModelModality | undefined) => {
-    if (!m) return null
-    return (
-      REGISTERED_MODEL_MODALITY_OPTIONS.find((o) => o.value === m)?.label ?? m
-    )
-  }
-
   const handleTest = async () => {
     const endpointUrl = form.getFieldValue('endpoint_url')?.trim()
     const apiKey = form.getFieldValue('api_key')
@@ -408,10 +354,10 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
     }
     const protocol =
       REGISTERED_MODEL_PROVIDER_PRESETS.find((p) => p.value === currentPreset)?.protocol ?? 'custom'
-    const models = form.getFieldValue('initial_models') as
-      | Array<{ model_name?: string }>
-      | undefined
-    const modelName = models?.[0]?.model_name?.trim() || undefined
+    const modelId = (
+      form.getFieldValue('model_id') as string | undefined
+    )?.trim()
+    const modelName = modelId || undefined
     setTesting(true)
     setTestResult(null)
     try {
@@ -442,11 +388,10 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
           endpoint_url:
             REGISTERED_MODEL_PROVIDER_PRESETS.find((p) => p.value === 'openai')
               ?.defaultEndpoint ?? '',
-          initial_models: [{}],
         }}
       >
         <Form.Item
-          label="显示名称（display_name）"
+          label="显示名称"
           name="display_name"
           rules={[{ required: true, message: '请填写显示名称' }]}
         >
@@ -480,7 +425,58 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
         >
           <Input.Password placeholder="sk-..." visibilityToggle />
         </Form.Item>
-        <Form.Item label="测试连接" tooltip="保存前验证 Provider 接入地址与 API Key 是否可用">
+        <Form.Item
+          label={
+            <span>
+              到期日（可选）{' '}
+              <Tooltip title="凭证级过期时间，列表展示用；过期不会自动禁用调用">
+                <InfoCircleOutlined style={{ color: '#94a3b8' }} />
+              </Tooltip>
+            </span>
+          }
+          name="token_expires_at"
+        >
+          <DatePicker
+            showTime
+            style={{ width: '100%' }}
+            format="YYYY-MM-DD HH:mm:ss"
+            placeholder="选择过期时间（可选）"
+          />
+        </Form.Item>
+        <Form.Item label="描述（可选）" name="description">
+          <Input.TextArea
+            rows={2}
+            placeholder="该 Provider 的用途 / 注意事项 / 环境说明"
+          />
+        </Form.Item>
+
+        <Form.Item
+          label="Model ID"
+          name="model_id"
+          rules={[{ required: true, message: '请填写 Model ID' }]}
+          tooltip="厂商返回的模型标识，如 gpt-4o-mini / claude-3-5-sonnet-latest"
+        >
+          <Input placeholder="gpt-4o-mini / claude-3-5-sonnet-latest" />
+        </Form.Item>
+
+        <Form.Item
+          label="能力类型"
+          name="large_category"
+          rules={[{ required: true, message: '请选择能力类型' }]}
+        >
+          <Select
+            placeholder="能力类型"
+            options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
+              value: o.value,
+              label: o.label,
+            }))}
+          />
+        </Form.Item>
+
+        <Form.Item
+          label="测试连接"
+          tooltip="保存前验证 Provider 接入地址与 API Key 是否可用"
+        >
           <Space direction="vertical" style={{ width: '100%' }}>
             <Space>
               <Button
@@ -496,126 +492,6 @@ function LargeForm({ form, currentPreset, handlePresetChange }: LargeFormProps) 
             </Space>
           </Space>
         </Form.Item>
-        <Form.Item label="描述（可选）" name="description">
-          <Input.TextArea
-            rows={2}
-            placeholder="该 Provider 的用途 / 注意事项 / 环境说明"
-          />
-        </Form.Item>
-
-        <div style={{ marginTop: 8, marginBottom: 8, fontWeight: 500 }}>模型列表</div>
-        <Form.List name="initial_models">
-          {(fields, { add, remove }) => (
-            <>
-              {fields.map((field) => {
-                const rowPreset = rowPresets[field.name]
-                return (
-                  <div
-                    key={field.key}
-                    style={{
-                      border: '1px dashed #d9d9d9',
-                      borderRadius: 6,
-                      padding: 12,
-                      marginBottom: 12,
-                    }}
-                  >
-                    <Space.Compact block style={{ marginBottom: 8 }}>
-                      <Form.Item
-                        name={[field.name, 'model_name']}
-                        noStyle
-                        rules={[{ required: true, message: '请填写 model_id' }]}
-                      >
-                        <Input
-                          style={{ width: 'calc(50% - 24px)' }}
-                          placeholder="model_id：gpt-4o-mini"
-                        />
-                      </Form.Item>
-                      <Form.Item name={[field.name, 'name']} noStyle>
-                        <Input
-                          style={{ width: 'calc(50% - 24px)' }}
-                          placeholder="显示名（可选）：用于策略下拉展示"
-                        />
-                      </Form.Item>
-                      <Button
-                        type="text"
-                        danger
-                        icon={<MinusCircleOutlined />}
-                        onClick={() => {
-                          handleRowPresetChange(field.name, undefined)
-                          remove(field.name)
-                        }}
-                      />
-                    </Space.Compact>
-                    <Space.Compact block>
-                      <Form.Item
-                        name={[field.name, 'large_category']}
-                        noStyle
-                        rules={[{ required: true, message: '请选择能力类型' }]}
-                      >
-                        <Select
-                          style={{ width: 'calc(50% - 24px)' }}
-                          placeholder="能力类型"
-                          options={LARGE_MODEL_CATEGORY_OPTIONS.map((o) => ({
-                            value: o.value,
-                            label: o.label,
-                          }))}
-                        />
-                      </Form.Item>
-                      {currentMainstreamGroup ? (
-                        <Select
-                          style={{ width: 'calc(50% - 24px)' }}
-                          placeholder="从主流模型选择（可选）"
-                          allowClear
-                          showSearch
-                          optionFilterProp="label"
-                          value={rowPreset}
-                          onChange={(v) =>
-                            handleRowPresetChange(
-                              field.name,
-                              v as string | undefined,
-                            )
-                          }
-                          options={currentMainstreamGroup.models.map((m) => ({
-                            value: m.key,
-                            label: `${m.label}（${m.defaultModelName}）`,
-                          }))}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: 'calc(50% - 24px)',
-                            padding: '0 12px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            color: '#94A3B8',
-                            fontSize: 12,
-                          }}
-                        >
-                          自建 / 自定义 Provider，请手动填写 model_id
-                        </div>
-                      )}
-                    </Space.Compact>
-                    {rowModalities[field.name] && (
-                      <div style={{ marginTop: 6 }}>
-                        <Tag color="cyan">
-                          模态：{modalityLabel(rowModalities[field.name])}
-                        </Tag>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-              <Button
-                type="dashed"
-                block
-                icon={<PlusOutlined />}
-                onClick={() => add({})}
-              >
-                添加模型
-              </Button>
-            </>
-          )}
-        </Form.List>
       </Form>
     </>
   )
