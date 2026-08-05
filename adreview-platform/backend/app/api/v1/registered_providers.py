@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,10 +30,12 @@ from app.models.registered_model import (
 )
 from app.schemas.registered_model import (
     ProviderInitialModel,
+    ProviderValidateRequest,
     RegisteredProviderCreate,
     RegisteredProviderDetailOut,
     RegisteredProviderOut,
     RegisteredProviderRotateApiKey,
+    RegisteredProviderSetTokenExpiresAt,
     RegisteredProviderUpdate,
 )
 from app.services.audit import write_audit
@@ -43,16 +45,31 @@ from app.services.resource_auth import require_reader, require_writer
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 
-ALLOWED_PROVIDER_PRESET = {"openai", "anthropic", "bailian", "deepseek", "self-hosted", "custom"}
+ALLOWED_PROVIDER_PRESET = {
+    "openai",
+    "bailian",
+    "baidu",
+    "tencent",
+    "volcengine",
+    "zhipu",
+    "MiniMax",
+    "deepseek",
+    "custom",
+    "self-hosted",
+}
 ALLOWED_LARGE_CATEGORY = {c.value for c in LargeModelCategory}
 
 PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     "openai": {"label": "OpenAI", "endpoint": "https://api.openai.com/v1", "protocol": "openai-compatible"},
-    "anthropic": {"label": "Anthropic", "endpoint": "https://api.anthropic.com/v1", "protocol": "anthropic-messages"},
-    "bailian": {"label": "阿里百炼 (DashScope)", "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1", "protocol": "openai-compatible"},
+    "bailian": {"label": "阿里云（百炼 DashScope）", "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1", "protocol": "openai-compatible"},
+    "baidu": {"label": "百度（千帆）", "endpoint": "https://qianfan.baidubce.com/v2", "protocol": "openai-compatible"},
+    "tencent": {"label": "腾讯云（混元）", "endpoint": "https://api.hunyuan.cloud.tencent.com/v1", "protocol": "openai-compatible"},
+    "volcengine": {"label": "火山引擎（豆包）", "endpoint": "https://ark.cn-beijing.volces.com/api/v3", "protocol": "openai-compatible"},
+    "zhipu": {"label": "智谱", "endpoint": "https://open.bigmodel.cn/api/paas/v4", "protocol": "openai-compatible"},
+    "MiniMax": {"label": "MiniMax", "endpoint": "https://api.MiniMax.chat/v1", "protocol": "openai-compatible"},
     "deepseek": {"label": "DeepSeek", "endpoint": "https://api.deepseek.com/v1", "protocol": "openai-compatible"},
-    "self-hosted": {"label": "自建 / 私有部署", "endpoint": None, "protocol": "openai-compatible"},
     "custom": {"label": "自定义", "endpoint": None, "protocol": "custom"},
+    "self-hosted": {"label": "自建 / 私有部署", "endpoint": None, "protocol": "openai-compatible"},
 }
 
 
@@ -83,6 +100,7 @@ async def _find_or_create_credential(
     api_key: str,
     provider_preset: Optional[str],
     user_id: Optional[int],
+    token_expires_at: Optional[datetime] = None,
 ) -> ResourceCredential:
     """按 (provider_preset + masked_token) 复用已存在的凭证，否则新建。"""
     masked = mask_token(api_key)
@@ -97,6 +115,9 @@ async def _find_or_create_credential(
         )
     )
     if existing is not None:
+        if token_expires_at is not None:
+            existing.token_expires_at = token_expires_at
+            await db.flush()
         return existing
     ciphertext = encrypt_token(api_key)
     cred = ResourceCredential(
@@ -105,6 +126,7 @@ async def _find_or_create_credential(
         ciphertext=ciphertext,
         masked_token=masked,
         metadata_json={"source": "provider_create"},
+        token_expires_at=token_expires_at,
         created_by_id=user_id,
     )
     db.add(cred)
@@ -410,7 +432,11 @@ async def create_provider(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "endpoint_url 必填")
 
     cred = await _find_or_create_credential(
-        db, api_key=body.api_key, provider_preset=preset, user_id=user.id
+        db,
+        api_key=body.api_key,
+        provider_preset=preset,
+        user_id=user.id,
+        token_expires_at=body.token_expires_at,
     )
 
     config: dict[str, Any] = {}
@@ -512,7 +538,11 @@ async def rotate_api_key(
 
     preset = p.provider_preset
     new_cred = await _find_or_create_credential(
-        db, api_key=body.api_key, provider_preset=preset, user_id=user.id
+        db,
+        api_key=body.api_key,
+        provider_preset=preset,
+        user_id=user.id,
+        token_expires_at=body.token_expires_at,
     )
     old_credential_id = p.credential_id
     p.credential_id = new_cred.id
@@ -536,9 +566,76 @@ async def rotate_api_key(
 @router.post("/{provider_id}/validate", response_model=dict)
 async def validate_provider(
     provider_id: int,
+    body: ProviderValidateRequest | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_writer),
 ) -> dict:
+    """Provider 连通性测试。
+
+    - body 不传 / 字段为空：fallback 到 DB 存储凭证 + endpoint_url（向后兼容）
+    - body 含 endpoint_url / api_key：使用临时值探测（仅用于保存前测试连接，不写库）
+    """
+    p = await db.scalar(
+        select(RegisteredProvider).where(RegisteredProvider.id == provider_id)
+    )
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Provider 不存在")
+
+    # 解析临时 / 持久凭证
+    plain_token: Optional[str] = None
+    if body and body.api_key:
+        plain_token = body.api_key
+    elif p.credential_id is not None:
+        ciphertext_row = await db.execute(
+            select(ResourceCredential.ciphertext).where(
+                ResourceCredential.id == p.credential_id
+            )
+        )
+        ciphertext = ciphertext_row.scalar()
+        if ciphertext:
+            from app.services.credential_cipher import decrypt_token
+            try:
+                plain_token = decrypt_token(ciphertext)
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    f"凭证无法解密：{exc}",
+                ) from exc
+
+    if not plain_token:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "Provider 未绑定凭证"
+        )
+
+    endpoint_url = (body.endpoint_url if body and body.endpoint_url else p.endpoint_url)
+    proto = (p.config or {}).get("protocol") or "openai-compatible"
+
+    # 复用 registered_models._validate_endpoint 纯函数
+    from app.api.v1.registered_models import _validate_endpoint
+    log = await _validate_endpoint(
+        endpoint_url, proto, None, plain_token, 10
+    )
+    return {
+        "ok": log.ok,
+        "http_status": log.http_status,
+        "latency_ms": log.latency_ms,
+        "message": log.message,
+    }
+
+
+@router.post("/{provider_id}/token-expires-at", response_model=RegisteredProviderOut)
+async def set_token_expires_at(
+    provider_id: int,
+    body: RegisteredProviderSetTokenExpiresAt,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_writer),
+) -> RegisteredProviderOut:
+    """单独设置 Provider 凭证的过期时间。
+
+    与 rotateApiKey 区别：**不动 API Key**，仅写 token_expires_at。
+    写库前先 precheck：用 DB 现有凭证 + endpoint_url 探测一次（确保 Provider 还活着），
+    失败 → 422 阻断保存。
+    """
     p = await db.scalar(
         select(RegisteredProvider).where(RegisteredProvider.id == provider_id)
     )
@@ -547,39 +644,59 @@ async def validate_provider(
     if p.credential_id is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Provider 未绑定凭证")
 
+    # precheck：用 DB 现有凭证 + endpoint_url
     ciphertext_row = await db.execute(
-        select(ResourceCredential.ciphertext).where(ResourceCredential.id == p.credential_id)
+        select(ResourceCredential.ciphertext).where(
+            ResourceCredential.id == p.credential_id
+        )
     )
     ciphertext = ciphertext_row.scalar()
     if not ciphertext:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Provider 未绑定凭证")
-
     from app.services.credential_cipher import decrypt_token
     try:
-        token = decrypt_token(ciphertext)
+        plain_token = decrypt_token(ciphertext)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"凭证无法解密：{exc}") from exc
-
-    import httpx as _httpx
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, f"凭证无法解密：{exc}"
+        ) from exc
     proto = (p.config or {}).get("protocol") or "openai-compatible"
-    headers = {"User-Agent": "adreview-provider-validator/1.0"}
-    if proto in {"openai-compatible", "anthropic-messages"}:
-        headers["Authorization"] = f"Bearer {token}"
-    target = p.endpoint_url.rstrip("/")
-    try:
-        async with _httpx.AsyncClient(timeout=10) as client:
-            t0 = time.perf_counter()
-            resp = await client.get(target, headers=headers)
-            elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        ok = resp.status_code < 500
-        return {
-            "ok": ok,
-            "http_status": resp.status_code,
-            "latency_ms": elapsed_ms,
-            "message": ("OK" if ok else f"HTTP {resp.status_code}")[:255],
-        }
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "http_status": None, "latency_ms": None, "message": str(exc)[:255]}
+    from app.api.v1.registered_models import _validate_endpoint
+    log = await _validate_endpoint(
+        p.endpoint_url, proto, None, plain_token, 10
+    )
+    if not log.ok:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": f"测试连接失败：{log.message}",
+                "validation": {
+                    "ok": log.ok,
+                    "http_status": log.http_status,
+                    "latency_ms": log.latency_ms,
+                    "message": log.message,
+                },
+            },
+        )
+
+    # 写库
+    cred = await db.scalar(
+        select(ResourceCredential).where(ResourceCredential.id == p.credential_id)
+    )
+    cred.token_expires_at = body.token_expires_at
+    p.updated_by_id = user.id
+    await write_audit(
+        db,
+        actor=user,
+        action="registered_provider.token_expires_at.set",
+        entity_type="registered_provider",
+        entity_id=p.id,
+        payload={
+            "token_expires_at": body.token_expires_at.isoformat(),
+        },
+    )
+    await db.commit()
+    return await _provider_to_out(db, p, await _load_model_count(db, p.id))
 
 
 @router.post("/{provider_id}/archive", response_model=RegisteredProviderOut)

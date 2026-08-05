@@ -117,40 +117,6 @@ export const MAINSTREAM_MODEL_GROUPS: MainstreamVendorGroup[] = [
     ],
   },
   {
-    vendor: 'anthropic',
-    vendorLabel: 'Anthropic',
-    models: [
-      {
-        key: 'claude-3.7-sonnet',
-        label: 'Claude 3.7 Sonnet',
-        defaultModelName: 'claude-3-7-sonnet-20250219',
-        modality: 'text',
-        largeCategory: 'text',
-      },
-      {
-        key: 'claude-3.5-sonnet',
-        label: 'Claude 3.5 Sonnet',
-        defaultModelName: 'claude-3-5-sonnet-20241022',
-        modality: 'text',
-        largeCategory: 'text',
-      },
-      {
-        key: 'claude-3.5-haiku',
-        label: 'Claude 3.5 Haiku',
-        defaultModelName: 'claude-3-5-haiku-20241022',
-        modality: 'text',
-        largeCategory: 'text',
-      },
-      {
-        key: 'claude-3-opus',
-        label: 'Claude 3 Opus',
-        defaultModelName: 'claude-3-opus-20240229',
-        modality: 'image',
-        largeCategory: 'multimodal',
-      },
-    ],
-  },
-  {
     vendor: 'deepseek',
     vendorLabel: 'DeepSeek',
     models: [

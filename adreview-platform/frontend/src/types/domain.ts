@@ -2572,6 +2572,25 @@ export interface KnowledgeDocumentListItem {
   owner_name?: string | null
   updated_at: string | null
   created_at: string
+  // —— Provider 维度字段（仅大模型有值） ————————————————————
+  provider_base_url: string | null
+  provider_credential_id: number | null
+  masked_token: string | null
+  token_expires_at: string | null
+}
+
+export interface ModelReferenceItem {
+  kind: 'audit_item' | 'strategy'
+  id: number
+  name: string
+  detail?: string | null
+}
+
+export interface ModelReferencesResponse {
+  model_id: number
+  is_blocked: boolean
+  summary: { audit_item: number; strategy: number }
+  items: ModelReferenceItem[]
 }
 
 export interface KnowledgeDocumentCreate {
@@ -2598,10 +2617,13 @@ export interface KnowledgeDocumentUpdate {
 
 export type RegisteredModelProvider =
   | 'openai'
-  | 'anthropic'
   | 'bailian'
+  | 'baidu'
+  | 'tencent'
+  | 'volcengine'
+  | 'zhipu'
+  | 'MiniMax'
   | 'deepseek'
-  | 'self-hosted'
   | 'custom'
 
 export const REGISTERED_MODEL_PROVIDER_PRESETS: {
@@ -2611,10 +2633,13 @@ export const REGISTERED_MODEL_PROVIDER_PRESETS: {
   protocol: 'openai-compatible' | 'anthropic-messages' | 'custom'
 }[] = [
   { value: 'openai', label: 'OpenAI', defaultEndpoint: 'https://api.openai.com/v1', protocol: 'openai-compatible' },
-  { value: 'anthropic', label: 'Anthropic', defaultEndpoint: 'https://api.anthropic.com/v1', protocol: 'anthropic-messages' },
-  { value: 'bailian', label: '阿里百炼 (DashScope)', defaultEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1', protocol: 'openai-compatible' },
+  { value: 'bailian', label: '阿里云（百炼 DashScope）', defaultEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1', protocol: 'openai-compatible' },
+  { value: 'baidu', label: '百度（千帆）', defaultEndpoint: 'https://qianfan.baidubce.com/v2', protocol: 'openai-compatible' },
+  { value: 'tencent', label: '腾讯云（混元）', defaultEndpoint: 'https://api.hunyuan.cloud.tencent.com/v1', protocol: 'openai-compatible' },
+  { value: 'volcengine', label: '火山引擎（豆包）', defaultEndpoint: 'https://ark.cn-beijing.volces.com/api/v3', protocol: 'openai-compatible' },
+  { value: 'zhipu', label: '智谱', defaultEndpoint: 'https://open.bigmodel.cn/api/paas/v4', protocol: 'openai-compatible' },
+  { value: 'MiniMax', label: 'MiniMax', defaultEndpoint: 'https://api.MiniMax.chat/v1', protocol: 'openai-compatible' },
   { value: 'deepseek', label: 'DeepSeek', defaultEndpoint: 'https://api.deepseek.com/v1', protocol: 'openai-compatible' },
-  { value: 'self-hosted', label: '自建 / 私有部署', defaultEndpoint: null, protocol: 'openai-compatible' },
   { value: 'custom', label: '自定义', defaultEndpoint: null, protocol: 'custom' },
 ]
 
@@ -2837,6 +2862,25 @@ export interface RegisteredModelListItem {
   owner_name?: string | null
   updated_at: string | null
   created_at: string
+  // —— Provider 维度字段（仅大模型有值） ————————————————————
+  provider_base_url: string | null
+  provider_credential_id: number | null
+  masked_token: string | null
+  token_expires_at: string | null
+}
+
+export interface ModelReferenceItem {
+  kind: 'audit_item' | 'strategy'
+  id: number
+  name: string
+  detail?: string | null
+}
+
+export interface ModelReferencesResponse {
+  model_id: number
+  is_blocked: boolean
+  summary: { audit_item: number; strategy: number }
+  items: ModelReferenceItem[]
 }
 
 export interface RegisteredModelCreate {
@@ -2907,6 +2951,7 @@ export interface RegisteredProvider {
   credential_id: number | null
   masked_token: string | null
   credential_label: string | null
+  token_expires_at: string | null
   status: 'active' | 'archived'
   model_count: number
   owner_id: number | null
@@ -2935,6 +2980,7 @@ export interface RegisteredProviderCreate {
   provider_preset?: RegisteredModelProvider | null
   endpoint_url: string
   api_key: string
+  token_expires_at?: string | null
   initial_models: ProviderInitialModel[]
 }
 
@@ -2947,6 +2993,7 @@ export interface RegisteredProviderUpdate {
 
 export interface RegisteredProviderRotateApiKey {
   api_key: string
+  token_expires_at?: string | null
 }
 
 // ─── 凭证 ───

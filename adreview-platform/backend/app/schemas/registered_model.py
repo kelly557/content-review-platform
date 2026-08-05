@@ -147,6 +147,11 @@ class RegisteredModelListItem(BaseModel):
     owner_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    # —— Provider 维度字段（仅大模型有值） ————————————————————
+    provider_base_url: Optional[str] = None
+    provider_credential_id: Optional[int] = None
+    masked_token: Optional[str] = None
+    token_expires_at: Optional[datetime] = None
 
 
 class RegisteredModelCreate(BaseModel):
@@ -372,6 +377,10 @@ class RegisteredProviderCreate(BaseModel):
         max_length=4096,
         description="API key 原文；服务端加密入库，列表只返 masked 预览",
     )
+    token_expires_at: Optional[datetime] = Field(
+        default=None,
+        description="API Key 过期时间（可选，凭证级；同 Provider 下多个模型共享此字段）",
+    )
     initial_models: List["ProviderInitialModel"] = Field(
         default_factory=list,
         description="Provider 下一次性注册的初始 models；可以为空，运营后续补齐",
@@ -387,6 +396,72 @@ class RegisteredProviderUpdate(BaseModel):
 
 class RegisteredProviderRotateApiKey(BaseModel):
     api_key: str = Field(min_length=1, max_length=4096)
+    token_expires_at: Optional[datetime] = Field(
+        default=None,
+        description="API Key 过期时间（可选；不传则保留原值）",
+    )
+
+
+class ProviderValidateRequest(BaseModel):
+    """Provider 连通性测试请求体（可选）。
+
+    - 字段为空时 fallback 到 DB 存储的凭证 / endpoint_url；
+    - 仅在「保存前测试连接」场景下使用，**不写入数据库**。
+    """
+
+    endpoint_url: Optional[str] = Field(
+        default=None,
+        max_length=2048,
+        description="临时 Base URL；为 None 则使用 DB 存储值",
+    )
+    api_key: Optional[str] = Field(
+        default=None,
+        max_length=4096,
+        description="临时 API Key；为 None 则使用 DB 存储凭证",
+    )
+
+
+class RegisteredProviderSetTokenExpiresAt(BaseModel):
+    """单独设置 Provider 凭证过期时间（不替换 key）。
+
+    与 rotateApiKey 区别：本接口不动 API Key，仅写 token_expires_at；
+    适用于「只调到期提醒」场景，避免重新输入 key。
+    """
+
+    token_expires_at: datetime = Field(
+        ...,
+        description="API Key 过期时间（必填；显式传值，不允许清空）",
+    )
+
+
+# ─── 删除前引用检查 ──────────────────────────────────────────────
+
+
+class ModelReferenceItem(BaseModel):
+    """模型被哪些业务实体引用。"""
+
+    kind: str = Field(
+        description="audit_item / strategy",
+    )
+    id: int
+    name: str = Field(
+        description="展示名（audit_item.name_cn / strategy.name）",
+    )
+    detail: Optional[str] = Field(
+        default=None,
+        description="可选附注（如 strategy 的 scope / code）",
+    )
+
+
+class ModelReferencesResponse(BaseModel):
+    model_id: int
+    is_blocked: bool = Field(
+        description="是否阻断删除：audit_item 或 strategy 引用数 > 0",
+    )
+    summary: dict[str, int] = Field(
+        description="按 kind 聚合的引用数 {audit_item: n, strategy: n}",
+    )
+    items: list[ModelReferenceItem] = Field(default_factory=list)
 
 
 # Provider → 嵌套 ListItem，前向引用
