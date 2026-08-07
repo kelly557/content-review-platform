@@ -2,14 +2,14 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from app.models.user import UserRole
 from app.schemas.common import ORMBase
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    identifier: str = Field(min_length=1, max_length=255, description="用户名或邮箱")
     password: str = Field(min_length=6, max_length=128)
 
 
@@ -25,15 +25,23 @@ class RefreshRequest(BaseModel):
 
 
 class UserCreate(BaseModel):
-    email: EmailStr
     full_name: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=8, max_length=128)
     role: UserRole = UserRole.SUBMITTER
+    email: Optional[EmailStr] = None
+    username: Optional[str] = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def _at_least_one_identifier(self) -> "UserCreate":
+        if not self.email and not self.username:
+            raise ValueError("email 和 username 至少填写一个")
+        return self
 
 
 class UserOut(ORMBase):
     id: int
-    email: EmailStr
+    email: Optional[EmailStr] = None
+    username: Optional[str] = None
     full_name: str
     role: UserRole
     is_active: bool
@@ -44,3 +52,4 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(default=None, max_length=128)
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    username: Optional[str] = Field(default=None, max_length=64)

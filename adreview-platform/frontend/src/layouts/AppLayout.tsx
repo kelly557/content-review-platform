@@ -18,6 +18,7 @@ import {
   ThunderboltOutlined,
   TagsOutlined,
   RobotOutlined,
+  KeyOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
@@ -26,6 +27,7 @@ import { SystemHealthBanner } from '@/components/SystemHealthBanner'
 import { PageGuideButton } from '@/components/PageGuideButton'
 import { PlanButton } from '@/components/PlanButton'
 import { DEV_ACCOUNTS, IS_DEV, type DevAccount } from '@/lib/devAccounts'
+import { isPlatformAdmin, getCurrentUserTenantCode } from '@/lib/tenantAuth'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -72,8 +74,8 @@ const NAV_SECTIONS: Array<{
     key: 'workspace',
     label: '工作区',
     items: [
-      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
-      { kind: 'leaf', key: 'online-review', path: '/online-review', label: '在线审核', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
+      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'root_admin'] },
+      { kind: 'leaf', key: 'online-review', path: '/online-review', label: '在线审核', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'root_admin'] },
       { kind: 'leaf', key: 'triggers', path: '/triggers', label: '自动审核', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
       { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
     ],
@@ -89,10 +91,10 @@ const NAV_SECTIONS: Array<{
         path: '/strategies',
         label: '审核策略',
         icon: <SettingOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'mlr', 'superadmin', 'root_admin'],
+        roles: ['admin', 'mlr', 'root_admin'],
         children: [
           { key: 'strategies-list', path: '/strategies', label: '策略管理' },
-          { key: 'strategies-agents', path: '/strategies/agents', label: '审核智能体', roles: ['superadmin', 'root_admin'] },
+          { key: 'strategies-agents', path: '/strategies/agents', label: '审核智能体', roles: ['root_admin'] },
         ],
       },
       {
@@ -101,7 +103,7 @@ const NAV_SECTIONS: Array<{
         path: '/resources/words',
         label: '资源库',
         icon: <DatabaseOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'mlr', 'superadmin', 'root_admin'],
+        roles: ['admin', 'mlr', 'root_admin'],
         children: [
           { key: 'strategies-words', path: '/resources/words', label: '词库管理' },
           { key: 'strategies-models', path: '/resources/models', label: '模型库管理', roles: ['root_admin'] },
@@ -118,8 +120,8 @@ const NAV_SECTIONS: Array<{
     key: 'analytics',
     label: '审核结果',
     items: [
-      { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
-      { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
+      { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'root_admin'] },
+      { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'root_admin'] },
     ],
   },
   {
@@ -138,6 +140,7 @@ const NAV_SECTIONS: Array<{
           { key: 'admin-users', path: '/admin/users', label: '用户管理' },
           { key: 'admin-roles', path: '/admin/roles', label: '角色管理' },
           { key: 'admin-permissions', path: '/admin/permissions', label: '权限管理' },
+          { key: 'admin-api-keys', path: '/admin/api-keys', label: 'API Keys' },
         ],
       },
       {
@@ -146,7 +149,7 @@ const NAV_SECTIONS: Array<{
         path: '/admin/models/large',
         label: '模型管理',
         icon: <RobotOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'superadmin', 'root_admin'],
+        roles: ['admin', 'root_admin'],
         children: [
           { key: 'admin-models-large', path: '/admin/models/large', label: '大模型' },
           { key: 'admin-models-small', path: '/admin/models/small', label: '小模型' },
@@ -158,7 +161,18 @@ const NAV_SECTIONS: Array<{
         path: '/admin/tags',
         label: '标签管理',
         icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'superadmin', 'root_admin'],
+        roles: ['admin', 'root_admin'],
+      },
+      {
+        kind: 'group',
+        key: 'admin-platform',
+        path: '/admin/tenants',
+        label: '平台管理',
+        icon: <KeyOutlined style={{ fontSize: ICON_SIZE }} />,
+        roles: ['superadmin', 'root_admin'],
+        children: [
+          { key: 'admin-tenants', path: '/admin/tenants', label: '租户管理' },
+        ],
       },
     ],
   },
@@ -174,8 +188,8 @@ export default function AppLayout() {
 
   const switchTo = async (acc: DevAccount) => {
     try {
-      await login({ email: acc.email, password: acc.password })
-      message.success(`已切换为 ${ROLE_LABELS[acc.role]}`)
+      await login({ identifier: acc.identifier, password: acc.password })
+      message.success(`已切换为 ${acc.label}`)
     } catch {
       message.error('切换失败')
     }
@@ -321,8 +335,8 @@ export default function AppLayout() {
             return {
               key: `switch-${acc.role}`,
               label: isCurrent
-                ? `✓ 当前 ${ROLE_LABELS[acc.role]}`
-                : `⇄ ${ROLE_LABELS[acc.role]}`,
+                ? `✓ 当前 ${acc.label}`
+                : `⇄ ${acc.label}`,
               disabled: isCurrent,
               icon: isCurrent ? undefined : <UserSwitchOutlined />,
               onClick: isCurrent ? undefined : () => switchTo(acc),
@@ -414,6 +428,9 @@ export default function AppLayout() {
                 <Avatar icon={<UserOutlined />} />
                 <Text style={{ color: '#fff' }}>{user.full_name}</Text>
                 <Tag color="blue">{ROLE_LABELS[user.role]}</Tag>
+                {!isPlatformAdmin(user) && getCurrentUserTenantCode(user) && (
+                  <Tag color="geekblue">{getCurrentUserTenantCode(user)}</Tag>
+                )}
               </Space>
             </Dropdown>
           </Space>

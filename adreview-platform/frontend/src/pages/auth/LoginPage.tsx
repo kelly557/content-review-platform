@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Form, Input, Button, Card, Typography, Alert, Space } from 'antd'
-import { LockOutlined, MailOutlined } from '@ant-design/icons'
+import { Form, Input, Button, Card, Typography, Alert, Space, Tooltip } from 'antd'
+import { LockOutlined, UserOutlined } from '@ant-design/icons'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store'
+import { DEV_ACCOUNTS, IS_DEV, type DevAccount } from '@/lib/devAccounts'
 
 const { Title, Text } = Typography
 
@@ -10,19 +11,29 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { user, login, loading, initialized } = useAuthStore()
   const [error, setError] = useState<string | null>(null)
+  const [form] = Form.useForm<{ identifier: string; password: string }>()
 
   if (initialized && user) {
+    if (user.role === 'superadmin' || user.role === 'root_admin') {
+      return <Navigate to="/admin/tenants" replace />
+    }
     return <Navigate to="/overview" replace />
   }
 
-  const onFinish = async (values: { email: string; password: string }) => {
+  const onFinish = async (values: { identifier: string; password: string }) => {
     setError(null)
     try {
+      const { user } = useAuthStore.getState()
       await login(values)
-      navigate('/overview', { replace: true })
+      const u = useAuthStore.getState().user ?? user
+      if (u && (u.role === 'superadmin' || u.role === 'root_admin')) {
+        navigate('/admin/tenants', { replace: true })
+      } else {
+        navigate('/overview', { replace: true })
+      }
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || '登录失败，请检查邮箱和密码')
+      setError(msg || '登录失败，请检查用户名和密码')
     }
   }
 
@@ -68,16 +79,15 @@ export default function LoginPage() {
 
           {error && <Alert type="error" message={error} showIcon />}
 
-          <Form layout="vertical" onFinish={onFinish} autoComplete="off" requiredMark={false}>
+          <Form form={form} layout="vertical" onFinish={onFinish} autoComplete="off" requiredMark={false}>
             <Form.Item
-              label="邮箱"
-              name="email"
+              label="用户名"
+              name="identifier"
               rules={[
-                { required: true, message: '请输入邮箱' },
-                { type: 'email', message: '请输入有效邮箱' },
+                { required: true, message: '请输入用户名或邮箱' },
               ]}
             >
-              <Input prefix={<MailOutlined />} placeholder="you@company.com" size="large" />
+              <Input prefix={<UserOutlined />} placeholder="用户名或邮箱" size="large" />
             </Form.Item>
             <Form.Item
               label="密码"
@@ -93,11 +103,33 @@ export default function LoginPage() {
             </Form.Item>
           </Form>
 
-          <div style={{ textAlign: 'center' }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              默认账号: admin / superadmin / rootadmin / reviewer / mlr / submitter。管理员默认密码分别为 admin123 / superadmin123 / rootadmin123。
-            </Text>
-          </div>
+          {IS_DEV && (
+            <div style={{ textAlign: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                开发环境快速填充（点击角色填充表单）
+              </Text>
+              <Space wrap size={[8, 8]}>
+                {DEV_ACCOUNTS.map((acc: DevAccount) => (
+                  <Tooltip
+                    key={acc.role}
+                    title={`${acc.identifier} / ${acc.password}`}
+                  >
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        form.setFieldsValue({
+                          identifier: acc.identifier,
+                          password: acc.password,
+                        })
+                      }}
+                    >
+                      {acc.label}
+                    </Button>
+                  </Tooltip>
+                ))}
+              </Space>
+            </div>
+          )}
         </Space>
       </Card>
     </div>

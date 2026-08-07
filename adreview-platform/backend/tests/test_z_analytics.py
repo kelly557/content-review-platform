@@ -73,7 +73,7 @@ def test_analytics_schemas_present():
 async def test_reports_requires_reviewer_role(client):
     login = await client.post(
         "/api/v1/auth/login",
-        json={"email": "submitter@adreview.example.com", "password": "submitter123"},
+        json={"identifier": "submitter@adreview.example.com", "password": "submitter123"},
     )
     assert login.status_code == 200, login.text
     client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
@@ -86,7 +86,7 @@ async def test_reports_requires_reviewer_role(client):
 async def test_alerts_ack_requires_mlr(client):
     login = await client.post(
         "/api/v1/auth/login",
-        json={"email": "reviewer@adreview.example.com", "password": "reviewer123"},
+        json={"identifier": "reviewer@adreview.example.com", "password": "reviewer123"},
     )
     assert login.status_code == 200, login.text
     client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
@@ -101,7 +101,7 @@ async def test_alerts_ack_requires_mlr(client):
 
 
 async def _login(client, email: str, password: str) -> None:
-    r = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    r = await client.post("/api/v1/auth/login", json={"identifier": email, "password": password})
     assert r.status_code == 200, r.text
     client.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
 

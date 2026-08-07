@@ -4,50 +4,49 @@
  * 仅供 dev 构建使用 — 生产构建由 `import.meta.env.DEV === false` gate
  * 剔除 UI（参考 AppLayout.tsx 的 dropdownItems）。
  *
- * 默认管理员密码使用固定配置：
- *   - admin       => `admin123`
- *   - superadmin  => `superadmin123`
- *   - root_admin  => `rootadmin123`
- * reviewer / mlr / submitter 使用 seed.py 中的固定测试密码。
+ * 只保留 3 类视角，体现租户特性：
+ *   - 超级管理员（平台）
+ *   - 超级管理员（Acme 租户）
+ *   - 业务员（Acme 租户 / Globex 租户）
  */
 import type { UserRole } from '@/types/auth'
 
 export interface DevAccount {
   role: UserRole
-  email: string
+  identifier: string
   password: string
+  label: string
+  tenantCode: string | null
 }
 
 export const DEV_ACCOUNTS: DevAccount[] = [
   {
-    role: 'root_admin',
-    email: 'rootadmin@adreview.example.com',
-    password: 'rootadmin123',
-  },
-  {
     role: 'superadmin',
-    email: 'superadmin@adreview.example.com',
+    identifier: 'superadmin@adreview.example.com',
     password: 'superadmin123',
+    label: '超级管理员（平台）',
+    tenantCode: null,
   },
   {
     role: 'admin',
-    email: 'admin@adreview.example.com',
+    identifier: 'admin@adreview.example.com',
     password: 'admin123',
-  },
-  {
-    role: 'mlr',
-    email: 'mlr@adreview.example.com',
-    password: 'mlr12345',
+    label: '超级管理员（Acme 租户）',
+    tenantCode: 'acme',
   },
   {
     role: 'reviewer',
-    email: 'reviewer@adreview.example.com',
+    identifier: 'reviewer@adreview.example.com',
     password: 'reviewer123',
+    label: '业务员（Acme 租户）',
+    tenantCode: 'acme',
   },
   {
-    role: 'submitter',
-    email: 'submitter@adreview.example.com',
-    password: 'submitter123',
+    role: 'mlr',
+    identifier: 'mlr@adreview.example.com',
+    password: 'mlr12345',
+    label: '业务员（Globex 租户）',
+    tenantCode: 'globex',
   },
 ]
 

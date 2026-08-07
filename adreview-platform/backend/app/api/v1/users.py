@@ -31,15 +31,25 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("admin", "superadmin")),
 ) -> User:
-    exists = await db.execute(
-        select(User).where(
-            (User.email == body.email) & (User.is_deleted == False)  # noqa: E712
+    if body.email:
+        exists = await db.execute(
+            select(User).where(
+                (User.email == body.email) & (User.is_deleted == False)  # noqa: E712
+            )
         )
-    )
-    if exists.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
+        if exists.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
+    if body.username:
+        exists = await db.execute(
+            select(User).where(
+                (User.username == body.username) & (User.is_deleted == False)  # noqa: E712
+            )
+        )
+        if exists.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="username already exists")
     user = User(
         email=body.email,
+        username=body.username,
         full_name=body.full_name,
         hashed_password=hash_password(body.password),
         role=body.role,
@@ -72,6 +82,18 @@ async def update_user(
                 detail="cannot deactivate current logged-in user",
             )
         user.is_active = body.is_active
+    if body.username is not None:
+        if body.username:
+            clash = await db.execute(
+                select(User).where(
+                    (User.username == body.username)
+                    & (User.id != user_id)
+                    & (User.is_deleted == False)  # noqa: E712
+                )
+            )
+            if clash.scalar_one_or_none():
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="username already exists")
+        user.username = body.username or None
     await db.flush()
     await db.commit()
     await db.refresh(user)

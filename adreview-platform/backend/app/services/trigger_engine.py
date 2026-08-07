@@ -404,7 +404,7 @@ async def notify_trigger_disabled(trigger: Trigger, actor: User) -> None:
             "trigger_id": trigger.id,
             "trigger_code": trigger.code,
             "trigger_name": trigger.name,
-            "disabled_by": actor.email,
+            "disabled_by": actor.email or actor.username,
             "disabled_at": datetime.now(timezone.utc).isoformat(),
         }
         await notifier.dispatch(payload, channels)

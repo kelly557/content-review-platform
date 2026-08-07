@@ -33,5 +33,5 @@ def test_login_validation():
     from app.main import app
 
     client = TestClient(app)
-    r = client.post("/api/v1/auth/login", json={"email": "x", "password": "y"})
+    r = client.post("/api/v1/auth/login", json={"identifier": "x", "password": "y"})
     assert r.status_code == 422

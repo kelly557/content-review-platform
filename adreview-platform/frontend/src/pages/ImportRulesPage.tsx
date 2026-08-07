@@ -257,7 +257,7 @@ export default function ImportRulesPage() {
         >
           <Space size="middle" align="center" wrap>
             <Text>当前账号：</Text>
-            <Text strong>{user?.email}</Text>
+            <Text strong>{user?.email || user?.username}</Text>
             <Tag color="purple">{user?.role}</Tag>
           </Space>
         </div>

@@ -9,7 +9,8 @@ export type UserRole =
 
 export interface User {
   id: number
-  email: string
+  email: string | null
+  username: string | null
   full_name: string
   role: UserRole
   is_active: boolean
@@ -17,7 +18,7 @@ export interface User {
 }
 
 export interface LoginPayload {
-  email: string
+  identifier: string
   password: string
 }
 

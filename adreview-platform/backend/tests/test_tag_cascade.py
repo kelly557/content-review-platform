@@ -18,7 +18,7 @@ from app.models.tag import (
 async def _login(client: AsyncClient, email: str, password: str) -> None:
     r = await client.post(
         "/api/v1/auth/login",
-        json={"email": email, "password": password},
+        json={"identifier": email, "password": password},
     )
     assert r.status_code == 200, r.text
 
@@ -28,7 +28,7 @@ async def admin_client(client: AsyncClient) -> AsyncClient:
     """Use the shared conftest client (which seeds admin users) and login as admin."""
     r = await client.post(
         "/api/v1/auth/login",
-        json={"email": "admin@adreview.example.com", "password": "admin123"},
+        json={"identifier": "admin@adreview.example.com", "password": "admin123"},
     )
     assert r.status_code == 200, r.text
     token = r.json()["access_token"]

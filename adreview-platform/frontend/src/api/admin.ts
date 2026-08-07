@@ -8,17 +8,19 @@ import type {
 } from '@/types/role'
 
 export interface UserCreatePayload {
-  email: string
   full_name: string
   password: string
   role: UserRole
   is_active?: boolean
+  email?: string | null
+  username?: string | null
 }
 
 export interface UserUpdatePayload {
   full_name?: string
   role?: UserRole
   is_active?: boolean
+  username?: string | null
 }
 
 export const usersApi = {

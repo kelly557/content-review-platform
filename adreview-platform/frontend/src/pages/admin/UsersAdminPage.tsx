@@ -16,11 +16,14 @@ import {
 } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   usersApi,
   type UserCreatePayload,
   type UserUpdatePayload,
 } from '@/api/admin'
+import { apiKeyMock } from '@/lib/mock/apiKeyMock'
+import { isPlatformAdmin, getCurrentUserTenantId } from '@/lib/tenantAuth'
 import { useAuthStore } from '@/store'
 import {
   MERGED_ROLE_LABELS,
@@ -30,10 +33,12 @@ import {
   type User,
   type UserRole,
 } from '@/types/domain'
+import type { Tenant } from '@/types/tenant'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 
 interface BaseFormValues {
+  username: string
   email: string
   full_name: string
   role: UserRole
@@ -48,20 +53,40 @@ interface CreateFormValues extends BaseFormValues {
 export default function UsersAdminPage() {
   const { message } = App.useApp()
   const currentUser = useAuthStore((s) => s.user)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [items, setItems] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState<User | null>(null)
   const [creating, setCreating] = useState(false)
   const [saving, setSaving] = useState(false)
   const [roleFilter, setRoleFilter] = useState<string[]>([])
+  const [tenants, setTenants] = useState<Tenant[]>([])
   const [createForm] = Form.useForm<CreateFormValues>()
   const [editForm] = Form.useForm<BaseFormValues>()
 
+  const platformAdmin = isPlatformAdmin(currentUser)
+  const ownTenantId = getCurrentUserTenantId(currentUser)
+
+  const tenantFilter = platformAdmin
+    ? (searchParams.get('tenant_id') ?? undefined)
+    : ownTenantId
+
+  const tenantMap = useMemo(() => {
+    const m = new Map<string, Tenant>()
+    tenants.forEach((t) => m.set(t.id, t))
+    return m
+  }, [tenants])
+
   const fetchList = () => {
     setLoading(true)
-    usersApi
-      .list()
-      .then(setItems)
+    Promise.all([
+      usersApi.list(),
+      apiKeyMock.listTenants(),
+    ])
+      .then(([list, tnList]) => {
+        setItems(list)
+        setTenants(tnList)
+      })
       .finally(() => setLoading(false))
   }
 
@@ -69,11 +94,19 @@ export default function UsersAdminPage() {
     fetchList()
   }, [])
 
+  const updateTenantParam = (val: string | undefined) => {
+    const next = new URLSearchParams(searchParams)
+    if (val) next.set('tenant_id', val)
+    else next.delete('tenant_id')
+    setSearchParams(next, { replace: true })
+  }
+
   const openCreate = () => {
     setCreating(true)
     setEditing(null)
     createForm.resetFields()
     createForm.setFieldsValue({
+      username: '',
       email: '',
       full_name: '',
       password: '',
@@ -87,7 +120,8 @@ export default function UsersAdminPage() {
     setCreating(false)
     setEditing(u)
     editForm.setFieldsValue({
-      email: u.email,
+      username: u.username ?? '',
+      email: u.email ?? '',
       full_name: u.full_name,
       role: u.role,
       is_active: u.is_active,
@@ -106,8 +140,13 @@ export default function UsersAdminPage() {
       message.error('两次密码不一致')
       return
     }
+    if (!v.email && !v.username) {
+      message.error('用户名和邮箱至少填写一个')
+      return
+    }
     const payload: UserCreatePayload = {
-      email: v.email,
+      username: v.username?.trim() || null,
+      email: v.email?.trim() || null,
       full_name: v.full_name,
       password: v.password,
       role: v.role,
@@ -116,6 +155,7 @@ export default function UsersAdminPage() {
     setSaving(true)
     try {
       const created = await usersApi.create(payload)
+      apiKeyMock.setUserTenant(created.id, tenantFilter ?? 'tnt_default')
       setItems((prev) => [created, ...prev])
       message.success('已创建')
       closeDrawer()
@@ -135,6 +175,7 @@ export default function UsersAdminPage() {
     const payload: UserUpdatePayload = {
       full_name: v.full_name,
       role: v.role,
+      username: v.username?.trim() || null,
     }
     if (!isSelf) payload.is_active = v.is_active
     setSaving(true)
@@ -155,7 +196,7 @@ export default function UsersAdminPage() {
     try {
       await usersApi.delete(u.id)
       setItems((prev) => prev.filter((x) => x.id !== u.id))
-      message.success(`已删除 ${u.email}`)
+      message.success(`已删除 ${u.email || u.username}`)
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       message.error(detail ?? '删除失败')
@@ -163,19 +204,33 @@ export default function UsersAdminPage() {
   }
 
   const filteredItems = useMemo(() => {
-    const withoutRootAdmin = items.filter((u) => toMergedRoleKey(u.role) !== 'root_admin')
-    if (roleFilter.length === 0) return withoutRootAdmin
-    const matched: User[] = []
-    for (const u of withoutRootAdmin) {
-      if (roleFilter.includes(toMergedRoleKey(u.role))) matched.push(u)
+    let list = items.filter((u) => toMergedRoleKey(u.role) !== 'root_admin')
+    if (tenantFilter) {
+      list = list.filter((u) => apiKeyMock.getUserTenant(u.id) === tenantFilter)
     }
-    return matched
-  }, [items, roleFilter])
+    if (roleFilter.length === 0) return list
+    return list.filter((u) => roleFilter.includes(toMergedRoleKey(u.role)))
+  }, [items, roleFilter, tenantFilter])
 
   const columns: TableColumnsType<User> = [
     { title: 'ID', dataIndex: 'id', width: 80 },
-    { title: '邮箱', dataIndex: 'email' },
+    {
+      title: '用户名', dataIndex: 'username', width: 140,
+      render: (v: string | null) => v ? <Text code>{v}</Text> : <Text type="secondary">-</Text>,
+    },
+    {
+      title: '邮箱', dataIndex: 'email',
+      render: (v: string | null) => v ? <Text>{v}</Text> : <Text type="secondary">-</Text>,
+    },
     { title: '姓名', dataIndex: 'full_name' },
+    {
+      title: '租户', key: 'tenant', width: 120,
+      render: (_, row) => {
+        const tid = apiKeyMock.getUserTenant(row.id)
+        const tn = tenantMap.get(tid)
+        return tn ? <Tag>{tn.code}</Tag> : <Tag>default</Tag>
+      },
+    },
     {
       title: '角色', dataIndex: 'role', width: 140,
       render: (r: UserRole) => {
@@ -215,7 +270,7 @@ export default function UsersAdminPage() {
               </Tooltip>
             ) : (
               <Popconfirm
-                title={`确认删除 ${row.email}?`}
+                title={`确认删除 ${row.email || row.username}?`}
                 description="删除后该账号无法登录，但历史业务数据保留"
                 okText="删除"
                 cancelText="取消"
@@ -251,6 +306,20 @@ export default function UsersAdminPage() {
           用户管理
         </Title>
         <Space size="middle" wrap>
+          {platformAdmin && (
+            <Select
+              allowClear
+              placeholder="按租户筛选"
+              style={{ minWidth: 180 }}
+              value={tenantFilter}
+              onChange={(v) => updateTenantParam(v)}
+              options={tenants.map((t) => ({
+                value: t.id,
+                label: `${t.name} (${t.code})${t.is_active ? '' : ' · 已禁用'}`,
+                disabled: !t.is_active,
+              }))}
+            />
+          )}
           <Select
             mode="multiple"
             allowClear
@@ -295,13 +364,21 @@ export default function UsersAdminPage() {
       >
         <Form<CreateFormValues> form={createForm} layout="vertical">
           <Form.Item
+            name="username"
+            label="用户名"
+            rules={[{ max: 64, message: '不超过 64 字符' }]}
+            extra="选填，与邮箱至少填一个"
+          >
+            <Input maxLength={64} placeholder="如：zhangsan" />
+          </Form.Item>
+          <Form.Item
             name="email"
             label="邮箱"
             validateTrigger={['onBlur', 'onSubmit']}
             rules={[
-              { required: true, message: '请输入邮箱' },
               { type: 'email', message: '请输入合法邮箱' },
             ]}
+            extra="选填，与用户名至少填一个"
           >
             <Input maxLength={255} placeholder="someone@example.com" />
           </Form.Item>
@@ -364,7 +441,7 @@ export default function UsersAdminPage() {
       <Drawer
         open={editing != null}
         onClose={closeDrawer}
-        title={editing ? `编辑用户: ${editing.email}` : ''}
+        title={editing ? `编辑用户: ${editing.email || editing.username}` : ''}
         width={480}
         destroyOnClose
         extra={
@@ -377,6 +454,13 @@ export default function UsersAdminPage() {
         }
       >
         <Form<BaseFormValues> form={editForm} layout="vertical">
+          <Form.Item
+            name="username"
+            label="用户名"
+            rules={[{ max: 64, message: '不超过 64 字符' }]}
+          >
+            <Input maxLength={64} placeholder="选填" />
+          </Form.Item>
           <Form.Item
             name="email"
             label="邮箱"

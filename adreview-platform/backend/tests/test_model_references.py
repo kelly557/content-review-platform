@@ -23,7 +23,7 @@ from app.models.strategy import Strategy, StrategyScope
 
 
 ADMIN = {
-    "email": "admin@adreview.example.com",
+    "identifier": "admin@adreview.example.com",
     "password": "admin123",
 }
 

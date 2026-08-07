@@ -6,7 +6,7 @@ from httpx import AsyncClient
 
 
 ADMIN = {
-    "email": "admin@adreview.example.com",
+    "identifier": "admin@adreview.example.com",
     "password": "admin123",
 }
 
@@ -218,7 +218,7 @@ async def test_provider_delete_empty_ok(client):
 async def test_provider_reject_non_admin(client):
     r = await client.post(
         "/api/v1/auth/login",
-        json={"email": "reviewer@adreview.example.com", "password": "reviewer123"},
+        json={"identifier": "reviewer@adreview.example.com", "password": "reviewer123"},
     )
     assert r.status_code == 200
     client.headers["Authorization"] = f"Bearer {r.json()['access_token']}"

@@ -6,7 +6,7 @@ from httpx import AsyncClient
 
 
 SUPERADMIN = {
-    "email": "superadmin@adreview.example.com",
+    "identifier": "superadmin@adreview.example.com",
     "password": "superadmin123",
 }
 

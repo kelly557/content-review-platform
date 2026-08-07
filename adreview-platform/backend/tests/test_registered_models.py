@@ -6,12 +6,12 @@ from httpx import AsyncClient
 
 
 ADMIN = {
-    "email": "admin@adreview.example.com",
+    "identifier": "admin@adreview.example.com",
     "password": "admin123",
 }
 
 _SUPERADMIN = {
-    "email": "superadmin@adreview.example.com",
+    "identifier": "superadmin@adreview.example.com",
     "password": "superadmin123",
 }
 
@@ -357,7 +357,7 @@ async def test_small_model_provider_optional(client):
 async def test_models_reject_non_admin_write(client):
     r = await client.post(
         "/api/v1/auth/login",
-        json={"email": "reviewer@adreview.example.com", "password": "reviewer123"},
+        json={"identifier": "reviewer@adreview.example.com", "password": "reviewer123"},
     )
     assert r.status_code == 200
     client.headers["Authorization"] = f"Bearer {r.json()['access_token']}"

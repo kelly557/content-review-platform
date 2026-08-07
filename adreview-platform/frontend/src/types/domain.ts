@@ -593,7 +593,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   reviewer: '审核员',
   mlr: 'MLR 专家', // deprecated
   staff: '业务员',
-  admin: '管理员',
+  admin: '超级管理员',
   superadmin: '超级管理员',
   root_admin: '根管理员',
 }
@@ -604,7 +604,7 @@ export const STAFF_SUBROLES: ReadonlyArray<UserRole> = ['staff', 'reviewer']
 
 export const MERGED_ROLE_LABELS: Record<MergedRoleKey, string> = {
   staff: '业务员',
-  admin: '管理员',
+  admin: '超级管理员',
   superadmin: '超级管理员',
   root_admin: '根管理员',
 }

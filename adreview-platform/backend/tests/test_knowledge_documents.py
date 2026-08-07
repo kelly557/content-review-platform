@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 ADMIN_PAYLOAD = {
-    "email": "admin@adreview.example.com",
+    "identifier": "admin@adreview.example.com",
     "password": "admin123",
 }
 
@@ -149,7 +149,7 @@ async def test_knowledge_documents_list_filters(client):
 async def test_knowledge_documents_reject_non_admin_write(client):
     r = await client.post(
         "/api/v1/auth/login",
-        json={"email": "mlr@adreview.example.com", "password": "mlr12345"},
+        json={"identifier": "mlr@adreview.example.com", "password": "mlr12345"},
     )
     assert r.status_code == 200
     client.headers["Authorization"] = f"Bearer {r.json()['access_token']}"

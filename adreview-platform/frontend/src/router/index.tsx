@@ -83,6 +83,8 @@ const CreateTriggerPage = lazy(() => import('@/pages/triggers/CreateTriggerPage'
 const TriggerDetailPage = lazy(() => import('@/pages/triggers/TriggerDetailPage'))
 const FeatureDisabledPage = lazy(() => import('@/pages/FeatureDisabledPage'))
 const ImportRulesPage = lazy(() => import('@/pages/ImportRulesPage'))
+const ApiKeysPage = lazy(() => import('@/pages/admin/ApiKeysPage'))
+const TenantsAdminPage = lazy(() => import('@/pages/admin/TenantsAdminPage'))
 
 function Fallback() {
   return <Spin style={{ display: 'block', margin: '20vh auto' }} />
@@ -273,6 +275,7 @@ export default function AppRoutes() {
               <Route path="/admin/tags" element={<TagsAdminPage />} />
               <Route path="/admin/models/large" element={<ModelsAdminLargePage />} />
               <Route path="/admin/models/small" element={<ModelsAdminSmallPage />} />
+              <Route path="/admin/api-keys" element={<ApiKeysPage />} />
               <Route path="/triggers" element={<TriggersListPage />} />
               <Route path="/triggers/new" element={<CreateTriggerPage />} />
               <Route path="/triggers/:id" element={<TriggerDetailPage />} />
@@ -287,6 +290,7 @@ export default function AppRoutes() {
 
             <Route element={<ProtectedRoute allow={['superadmin', 'root_admin']} />}>
               <Route path="/strategies/agents" element={<ReviewAgentsPage />} />
+              <Route path="/admin/tenants" element={<TenantsAdminPage />} />
             </Route>
 
             <Route element={<ProtectedRoute allow={['root_admin']} />}>

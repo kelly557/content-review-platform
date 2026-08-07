@@ -44,7 +44,7 @@ async def test_query_results_requires_reviewer_role(client):
     """submitter cannot access the query page."""
     login = await client.post(
         "/api/v1/auth/login",
-        json={"email": "submitter@adreview.example.com", "password": "submitter123"},
+        json={"identifier": "submitter@adreview.example.com", "password": "submitter123"},
     )
     assert login.status_code == 200, login.text
     client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
@@ -58,7 +58,7 @@ async def test_query_results_reviewer_can_list(client):
     """reviewer can call the endpoint with empty results."""
     login = await client.post(
         "/api/v1/auth/login",
-        json={"email": "reviewer@adreview.example.com", "password": "reviewer123"},
+        json={"identifier": "reviewer@adreview.example.com", "password": "reviewer123"},
     )
     assert login.status_code == 200, login.text
     client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
@@ -75,7 +75,7 @@ async def test_query_results_reviewer_can_list(client):
 async def test_query_labels_empty(client):
     login = await client.post(
         "/api/v1/auth/login",
-        json={"email": "mlr@adreview.example.com", "password": "mlr12345"},
+        json={"identifier": "mlr@adreview.example.com", "password": "mlr12345"},
     )
     assert login.status_code == 200, login.text
     client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
@@ -89,7 +89,7 @@ async def test_query_labels_empty(client):
 async def test_query_results_invalid_conditions(client):
     login = await client.post(
         "/api/v1/auth/login",
-        json={"email": "reviewer@adreview.example.com", "password": "reviewer123"},
+        json={"identifier": "reviewer@adreview.example.com", "password": "reviewer123"},
     )
     assert login.status_code == 200, login.text
     client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
@@ -103,7 +103,7 @@ async def test_query_review_requires_reviewer_role(client):
     """submitter cannot access the review page."""
     login = await client.post(
         "/api/v1/auth/login",
-        json={"email": "submitter@adreview.example.com", "password": "submitter123"},
+        json={"identifier": "submitter@adreview.example.com", "password": "submitter123"},
     )
     assert login.status_code == 200, login.text
     client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"

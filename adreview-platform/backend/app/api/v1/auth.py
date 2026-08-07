@@ -15,7 +15,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
-    result = await db.execute(select(User).where(User.email == body.email))
+    identifier = body.identifier.strip()
+    if "@" in identifier:
+        result = await db.execute(select(User).where(User.email == identifier))
+    else:
+        result = await db.execute(select(User).where(User.username == identifier))
     user = result.scalar_one_or_none()
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")

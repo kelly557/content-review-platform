@@ -11,7 +11,7 @@ import app.models  # noqa: F401
 
 async def _login(client, email: str, password: str) -> None:
     r = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": password}
+        "/api/v1/auth/login", json={"identifier": email, "password": password}
     )
     assert r.status_code == 200, r.text
     client.headers["Authorization"] = f"Bearer {r.json()['access_token']}"

@@ -29,7 +29,8 @@ class User(Base):
     public_id: Mapped[str] = mapped_column(
         String(36), unique=True, index=True, nullable=False, default=new_public_id
     )
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True, nullable=True)
     full_name: Mapped[str] = mapped_column(String(128), nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.SUBMITTER, nullable=False)
