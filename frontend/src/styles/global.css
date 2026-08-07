@@ -1,0 +1,216 @@
+/* Trust & Authority: high contrast, no decorative noise. */
+
+:root {
+  --color-primary: #0F172A;
+  --color-accent: #0369A1;
+  --color-bg: #F8FAFC;
+  --color-surface: #FFFFFF;
+  --color-text: #020617;
+  --color-muted: #64748B;
+  --color-border: #E2E8F0;
+  --color-destructive: #DC2626;
+  --color-success: #16A34A;
+  --color-text-secondary: #475569;
+  --color-muted-soft: #94A3B8;
+  --color-border-strong: #CBD5E1;
+  --color-divider: #F1F5F9;
+  --color-surface-2: #F8FAFC;
+  --color-accent-soft: #F0F9FF;
+  --color-danger-soft: #FEF2F2;
+  --color-success-soft: #F0FDF4;
+  --color-warning-soft: #FFFBEB;
+  --color-json-string: #B91C1C;
+  --color-json-number: #A16207;
+  --color-json-bool: #0D9488;
+  --color-json-null: #94A3B8;
+  --color-json-key: #0F172A;
+  --color-json-meta: #94A3B8;
+  --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 1px 3px 0 rgba(15, 23, 42, 0.06);
+  --shadow-hover: 0 4px 12px -2px rgba(15, 23, 42, 0.12);
+  --shadow-module: 0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.04);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: Roboto, "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: var(--color-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Focus rings: 2px accent ring, 2px offset - WCAG 2.1 SC 2.4.7 */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Custom utility classes (sparingly) */
+.surface-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+/* Module box: a higher-elevation container used to separate major
+ * functional blocks (2026-07-29). White surface, no border, soft shadow,
+ * 12px radius. Designed to be stacked vertically with .module-gap between. */
+.module-box {
+  background: var(--color-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-module);
+  padding: 24px;
+}
+
+.module-gap {
+  height: 32px;
+}
+
+.module-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.module-section-title-count {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--color-divider);
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+
+.text-muted { color: var(--color-muted); }
+.text-destructive { color: var(--color-destructive); }
+.text-success { color: var(--color-success); }
+
+/* Reduce motion: respect OS-level preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Borderless rules tree table: 2026-07-30 全清样式
+ * - 去掉表头分隔线、hover 高亮、行高亮 flash 动画、表格背景
+ * - 仅保留 section 行 padding 与 scroll-margin-top
+ */
+.rules-tree-table.ant-table {
+  background: transparent;
+}
+.rules-tree-table.ant-table .ant-table-thead > tr > th {
+  background: transparent;
+  border: none;
+  border-bottom: none;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  font-weight: 500;
+  font-size: 12px;
+  color: #94A3B8;
+  letter-spacing: 0.3px;
+}
+.rules-tree-table.ant-table .ant-table-tbody > tr > td {
+  background: transparent;
+  border: none;
+  border-top: none;
+  border-bottom: none;
+  padding-top: 0;
+  padding-bottom: 0;
+  /* 2026-07-30 对齐 fix：td 默认 vertical-align middle 让 ☐ ↔ label 同基线 */
+  vertical-align: middle;
+}
+.rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-divider > td {
+  height: 36px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  pointer-events: none;
+}
+.rules-tree-table.ant-table .ant-table-tbody > tr:not(.rules-tree-row-section):not(.rules-tree-row-divider):hover > td {
+  background: transparent;
+}
+.rules-tree-table.ant-table .ant-table-cell-row-hover {
+  background: transparent !important;
+}
+.rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-highlight > td {
+  background: transparent;
+}
+.rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-section > td {
+  background: transparent;
+  padding: 0 8px;
+  scroll-margin-top: 8px;
+}
+.rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-section:hover > td {
+  background: transparent;
+}
+.rules-tree-table.ant-table .ant-table-tbody > tr.rules-tree-row-flash > td {
+  animation: none;
+}
+
+/* Right-side drawer backdrop: dims Sider + Header + Content while drawer is open */
+.app-layout-dimmed {
+  pointer-events: none;
+  user-select: none;
+}
+
+.app-dim-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 999;
+  pointer-events: none;
+  animation: appDimFadeIn 200ms ease;
+}
+
+@keyframes appDimFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Borderless model list table (both small + large): no row separators. */
+.model-list-table.ant-table .ant-table-thead > tr > th {
+  border-bottom: 1px solid var(--color-border);
+}
+.model-list-table.ant-table .ant-table-thead > tr > th,
+.model-list-table.ant-table .ant-table-tbody > tr > td {
+  border-left: none;
+  border-right: none;
+}
+.model-list-table.ant-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--color-border);
+}
+/* Collapse separators for data rows; keep header divider subtle. */
+.model-list-table.ant-table .ant-table-tbody > tr > td {
+  border-bottom: none;
+}
+.model-list-table.ant-table .ant-table-tbody > tr:not(:last-child) > td {
+  border-bottom: none;
+}

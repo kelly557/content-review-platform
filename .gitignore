@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.log
+npm-debug.log*
+.DS_Store
+tsconfig.tsbuildinfo
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Storage (uploaded media)
+storage/uploads/*
+storage/thumbnails/*
+storage/exports/*
+!storage/uploads/.gitkeep
+!storage/thumbnails/.gitkeep
+!storage/exports/.gitkeep
+
+# PG dumps produced by start_backend_safe.sh (rotate ADREVIEW_BACKUP_KEEP)
+storage/backups/
+
+# Alembic artifacts that should not survive cross-checking
+*.bak
+
+# OpenAPI / Swagger dev snapshots (regenerated from /docs)
+docs/moderation-openapi*.json
+docs/moderation-openapi*.yaml
+docs/moderation-openapi*.html
+docs/moderation-swagger*.html

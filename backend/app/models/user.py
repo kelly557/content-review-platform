@@ -1,0 +1,56 @@
+"""User model and role enum."""
+from __future__ import annotations
+
+import enum
+from datetime import datetime
+from typing import List, Optional
+
+from sqlalchemy import Boolean, DateTime, Enum, String, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.id_generator import new_public_id
+from app.db.session import Base
+
+
+class UserRole(str, enum.Enum):
+    SUBMITTER = "submitter"  # deprecated: 已并入 staff，仅历史数据兼容
+    REVIEWER = "reviewer"
+    MLR = "mlr"  # deprecated: 已并入 staff，仅历史数据兼容
+    STAFF = "staff"
+    ADMIN = "admin"
+    SUPERADMIN = "superadmin"
+    ROOT_ADMIN = "root_admin"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    full_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.SUBMITTER, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, index=True
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    materials: Mapped[List["Material"]] = relationship(  # type: ignore[name-defined]
+        back_populates="submitter", foreign_keys="Material.submitter_id"
+    )
+    review_assignments: Mapped[List["ReviewAssignment"]] = relationship(  # type: ignore[name-defined]
+        back_populates="assignee", foreign_keys="ReviewAssignment.assignee_id"
+    )

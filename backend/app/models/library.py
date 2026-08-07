@@ -1,0 +1,190 @@
+"""Library: unified word/image/reply library (replaces word_sets + image_sets).
+
+A library is one of type 'word', 'image', or 'reply'. Word and image libraries
+carry a LibraryKind ('黑名单' / '白名单') describing match semantics; reply
+libraries implicitly treat every entry as a hit-on-trigger rule and do not
+carry a kind. Items (词条/图片/触发-回复 对) live in `library_items`; the legacy
+Text-blob `words_text` and the legacy `image_set_items` table are superseded.
+Custom_library_id on audit_points now points here.
+"""
+from __future__ import annotations
+
+import enum
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Optional
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON, TypeDecorator
+
+from app.db.session import Base
+from app.core.id_generator import new_public_id
+
+if TYPE_CHECKING:
+    from app.models.audit_point import AuditPoint
+
+
+class _JSONType(TypeDecorator):
+    """JSONB on Postgres, JSON on SQLite (test)."""
+
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(JSONB())
+        return dialect.type_descriptor(JSON())
+
+
+class LibraryType(str, enum.Enum):
+    WORD = "word"
+    IMAGE = "image"
+    REPLY = "reply"
+
+
+class LibraryKind(str, enum.Enum):
+    """Match semantics for word/image libraries.
+
+    - BLACKLIST: hit on any entry rejects/forwards according to the rule.
+    - WHITELIST: hit on any entry explicitly allows/short-circuits.
+
+    Reply libraries (LibraryType.REPLY) implicitly treat every trigger as a
+    hit-on-trigger rule and therefore do not carry a kind.
+    """
+
+    BLACKLIST = "黑名单"
+    WHITELIST = "白名单"
+
+
+class Library(Base):
+    __tablename__ = "libraries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, nullable=False, default=new_public_id
+    )
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    library_type: Mapped[LibraryType] = mapped_column(
+        Enum(
+            LibraryType,
+            name="librarytype",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
+        nullable=False,
+    )
+    # 仅 word / image 库必填；reply 库存 NULL（其规则即包含命中，不需要类型概念）
+    kind: Mapped[Optional[LibraryKind]] = mapped_column(
+        Enum(
+            LibraryKind,
+            name="librarykind",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
+        nullable=True,
+    )
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
+    # 通用平台库标记: True = 平台预置共享库,仅超级管理员可见可改可删;
+    # False = 用户自建个性化库 (默认)。
+    is_platform: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=False), nullable=True
+    )
+    ignored_services: Mapped[Any] = mapped_column(
+        _JSONType, default=list, nullable=False
+    )
+    # 词库/图片库的有效时间区间；UTC。
+    # - 两者都为 NULL → 永久生效
+    # - 仅 effective_until 设了值 → 永久生效到该时刻
+    # - 仅 effective_from 设了值 → 从该时刻起永久生效
+    # - 两者都设了值 → [from, until] 闭区间生效（区间为空校验不允许）
+    effective_from: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    effective_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # 二级风险标签 (审核点):代答库使用位置定位。SET NULL on point 删。
+    # 仅 reply 库有意义；word / image 库应保持 NULL。
+    # 历史存量 reply 库允许为 NULL（schema 兼容），新增 reply 库必传。
+    risk_point_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("audit_points.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=False), onupdate=func.now(), nullable=True
+    )
+
+    items: Mapped[list["LibraryItem"]] = relationship(
+        back_populates="library",
+        cascade="all, delete-orphan",
+        order_by="LibraryItem.id.desc()",
+    )
+    risk_point: Mapped[Optional["AuditPoint"]] = relationship(
+        "AuditPoint",
+        lazy="select",
+        foreign_keys=[risk_point_id],
+    )
+    back_audit_points: Mapped[list["AuditPoint"]] = relationship(
+        "AuditPoint",
+        secondary="audit_point_libraries",
+        viewonly=True,
+        lazy="selectin",
+        overlaps="linked_libraries",
+    )
+    back_audit_items: Mapped[list["AuditItem"]] = relationship(
+        "AuditItem",
+        secondary="audit_item_libraries",
+        viewonly=True,
+        lazy="selectin",
+        overlaps="linked_libraries",
+    )
+    # 库标签 (level 1/2): 一/二级风险标签,可绑定一个,命中命中文案前缀拼接来源。
+    # 使用 M2M 表 (library_tags) 而非单 FK,便于后续扩展为多标签。
+    # lazy="select" 而非 selectin:matcher 走单独 raw SQL CTE 一次性算 path,
+    # 不依赖 ORM 自动 selectinload (后者在跨测试 schema 场景下会触发 column
+    # compile cache 串号)。前端用 lib.tags 读出 binding 也是按需 query。
+    tags: Mapped[list["Tag"]] = relationship(
+        "Tag",
+        secondary="library_tags",
+        viewonly=True,
+        lazy="select",
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_libraries_type_kind_active",
+            "library_type",
+            "kind",
+            "is_deleted",
+            "is_active",
+        ),
+        Index(
+            "ix_libraries_effective_range",
+            "effective_from",
+            "effective_until",
+        ),
+    )
