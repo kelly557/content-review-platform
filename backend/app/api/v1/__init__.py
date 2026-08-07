@@ -24,6 +24,7 @@ from app.api.v1 import (
     reports,
     risk_categories,
     reviews,
+    review_agents,
     roles,
     rule_sets,
     service_categories,
@@ -44,6 +45,7 @@ api_router.include_router(roles.router)
 api_router.include_router(materials.router)
 api_router.include_router(online_review.router)
 api_router.include_router(reviews.router)
+api_router.include_router(review_agents.router)
 api_router.include_router(workflows.router)
 api_router.include_router(annotations.router)
 api_router.include_router(reports.router)
