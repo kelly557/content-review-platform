@@ -30,6 +30,7 @@ class UserCreate(BaseModel):
     role: UserRole = UserRole.SUBMITTER
     email: Optional[EmailStr] = None
     username: Optional[str] = Field(default=None, max_length=64)
+    tenant_id: Optional[int] = None
 
     @model_validator(mode="after")
     def _at_least_one_identifier(self) -> "UserCreate":
@@ -45,6 +46,7 @@ class UserOut(ORMBase):
     full_name: str
     role: UserRole
     is_active: bool
+    tenant_id: Optional[int] = None
     created_at: datetime
 
 
@@ -53,3 +55,4 @@ class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
     username: Optional[str] = Field(default=None, max_length=64)
+    tenant_id: Optional[int] = None

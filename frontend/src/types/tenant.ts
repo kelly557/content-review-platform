@@ -1,5 +1,6 @@
 export interface Tenant {
-  id: string
+  id: number
+  public_id: string
   code: string
   name: string
   contact_email: string
@@ -12,7 +13,8 @@ export interface Tenant {
 export interface TenantCreateInput {
   code: string
   name: string
-  contact_email: string
+  contact_email?: string
+  is_active?: boolean
 }
 
 export interface TenantUpdateInput {

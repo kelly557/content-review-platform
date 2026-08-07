@@ -3,13 +3,13 @@ export type ApiKeyScope = 'read' | 'write'
 export type ApiKeyStatus = 'active' | 'revoked' | 'expired'
 
 export interface ApiKey {
-  id: string
-  tenant_id: string
+  id: number
+  tenant_id: number
   name: string
   description?: string
   key_prefix: string
   scope: ApiKeyScope
-  created_by: string
+  created_by: string | null
   expires_at: string | null
   revoked_at: string | null
   last_used_at: string | null
@@ -17,7 +17,7 @@ export interface ApiKey {
 }
 
 export interface ApiKeyCreateInput {
-  tenant_id: string
+  tenant_id: number
   name: string
   description?: string
   scope: ApiKeyScope
@@ -29,7 +29,7 @@ export interface ApiKeyCreated extends ApiKey {
 }
 
 export interface ApiKeyListParams {
-  tenant_id?: string
+  tenant_id?: number
   scope?: ApiKeyScope
   status?: ApiKeyStatus
   q?: string

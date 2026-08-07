@@ -14,6 +14,7 @@ export interface UserCreatePayload {
   is_active?: boolean
   email?: string | null
   username?: string | null
+  tenant_id?: number | null
 }
 
 export interface UserUpdatePayload {
@@ -21,6 +22,7 @@ export interface UserUpdatePayload {
   role?: UserRole
   is_active?: boolean
   username?: string | null
+  tenant_id?: number | null
 }
 
 export const usersApi = {
@@ -59,4 +61,22 @@ export const rolesApi = {
   delete(id: number) {
     return api.delete<{ ok: boolean; id: number }>(`/roles/${id}`).then((r) => r.data)
   },
+  listPermissions(roleKey: string) {
+    return api
+      .get<RolePermissionRow[]>(`/roles/${encodeURIComponent(roleKey)}/permissions`)
+      .then((r) => r.data)
+  },
+  replacePermissions(roleKey: string, items: RolePermissionRow[]) {
+    return api
+      .put<RolePermissionRow[]>(`/roles/${encodeURIComponent(roleKey)}/permissions`, {
+        items,
+      })
+      .then((r) => r.data)
+  },
+}
+
+export interface RolePermissionRow {
+  role_key: string
+  menu_key: string
+  permissions: string[]
 }

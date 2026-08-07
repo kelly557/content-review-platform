@@ -1,31 +1,34 @@
-import { apiKeyMock } from '@/lib/mock/apiKeyMock'
 import type { User } from '@/types/auth'
 
-const PLATFORM_TENANT_ID = 'tnt_default'
+// 平台租户：tenant_id 为 NULL 的用户（root_admin 或平台 superadmin）视为归属平台租户。
+export const PLATFORM_TENANT_ID: number | null = null
 
 export function isPlatformAdmin(user: User | null | undefined): boolean {
   if (!user) return false
   if (user.role === 'root_admin') return true
   if (user.role !== 'superadmin') return false
-  const tenantId = apiKeyMock.getUserTenant(user.id)
-  return tenantId === PLATFORM_TENANT_ID
+  // superadmin 且 tenant_id 为 null（平台租户）才是平台管理员
+  return user.tenant_id == null
 }
 
-export function getCurrentUserTenantId(user: User | null | undefined): string {
+export function getCurrentUserTenantId(user: User | null | undefined): number | null {
   if (!user) return PLATFORM_TENANT_ID
   if (isPlatformAdmin(user)) return PLATFORM_TENANT_ID
-  return apiKeyMock.getUserTenant(user.id)
+  return user.tenant_id ?? PLATFORM_TENANT_ID
 }
 
 export function canManageAllTenants(user: User | null | undefined): boolean {
   return isPlatformAdmin(user)
 }
 
-export function getCurrentUserTenantCode(user: User | null | undefined): string | null {
+export function getCurrentUserTenantCode(
+  user: User | null | undefined,
+  tenants: { id: number; code: string }[] = [],
+): string | null {
   if (!user || isPlatformAdmin(user)) return null
-  const tid = apiKeyMock.getUserTenant(user.id)
-  const tn = apiKeyMock.getTenantByIdSync(tid)
-  return tn?.code ?? null
+  const tid = user.tenant_id
+  if (tid == null) return null
+  return tenants.find((t) => t.id === tid)?.code ?? null
 }
 
 export function getRoleDisplayLabel(user: User | null | undefined): string {

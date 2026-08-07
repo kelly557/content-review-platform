@@ -22,7 +22,7 @@ import {
   type UserCreatePayload,
   type UserUpdatePayload,
 } from '@/api/admin'
-import { apiKeyMock } from '@/lib/mock/apiKeyMock'
+import { tenantsApi } from '@/api/tenants'
 import { isPlatformAdmin, getCurrentUserTenantId } from '@/lib/tenantAuth'
 import { useAuthStore } from '@/store'
 import {
@@ -68,11 +68,11 @@ export default function UsersAdminPage() {
   const ownTenantId = getCurrentUserTenantId(currentUser)
 
   const tenantFilter = platformAdmin
-    ? (searchParams.get('tenant_id') ?? undefined)
-    : ownTenantId
+    ? (searchParams.get('tenant_id') ? Number(searchParams.get('tenant_id')) : undefined)
+    : ownTenantId ?? undefined
 
   const tenantMap = useMemo(() => {
-    const m = new Map<string, Tenant>()
+    const m = new Map<number, Tenant>()
     tenants.forEach((t) => m.set(t.id, t))
     return m
   }, [tenants])
@@ -81,7 +81,7 @@ export default function UsersAdminPage() {
     setLoading(true)
     Promise.all([
       usersApi.list(),
-      apiKeyMock.listTenants(),
+      tenantsApi.list(),
     ])
       .then(([list, tnList]) => {
         setItems(list)
@@ -94,9 +94,9 @@ export default function UsersAdminPage() {
     fetchList()
   }, [])
 
-  const updateTenantParam = (val: string | undefined) => {
+  const updateTenantParam = (val: number | undefined) => {
     const next = new URLSearchParams(searchParams)
-    if (val) next.set('tenant_id', val)
+    if (val !== undefined && val !== null) next.set('tenant_id', String(val))
     else next.delete('tenant_id')
     setSearchParams(next, { replace: true })
   }
@@ -151,11 +151,11 @@ export default function UsersAdminPage() {
       password: v.password,
       role: v.role,
       is_active: v.is_active,
+      tenant_id: tenantFilter ?? null,
     }
     setSaving(true)
     try {
       const created = await usersApi.create(payload)
-      apiKeyMock.setUserTenant(created.id, tenantFilter ?? 'tnt_default')
       setItems((prev) => [created, ...prev])
       message.success('已创建')
       closeDrawer()
@@ -205,8 +205,8 @@ export default function UsersAdminPage() {
 
   const filteredItems = useMemo(() => {
     let list = items.filter((u) => toMergedRoleKey(u.role) !== 'root_admin')
-    if (tenantFilter) {
-      list = list.filter((u) => apiKeyMock.getUserTenant(u.id) === tenantFilter)
+    if (tenantFilter !== undefined) {
+      list = list.filter((u) => (u.tenant_id ?? null) === tenantFilter)
     }
     if (roleFilter.length === 0) return list
     return list.filter((u) => roleFilter.includes(toMergedRoleKey(u.role)))
@@ -226,8 +226,8 @@ export default function UsersAdminPage() {
     {
       title: '租户', key: 'tenant', width: 120,
       render: (_, row) => {
-        const tid = apiKeyMock.getUserTenant(row.id)
-        const tn = tenantMap.get(tid)
+        const tid = row.tenant_id ?? null
+        const tn = tid !== null ? tenantMap.get(tid) : undefined
         return tn ? <Tag>{tn.code}</Tag> : <Tag>default</Tag>
       },
     },

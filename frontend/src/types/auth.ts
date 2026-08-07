@@ -14,6 +14,7 @@ export interface User {
   full_name: string
   role: UserRole
   is_active: boolean
+  tenant_id: number | null
   created_at: string
 }
 

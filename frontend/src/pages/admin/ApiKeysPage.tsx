@@ -30,7 +30,8 @@ import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 
-import { apiKeyMock } from '@/lib/mock/apiKeyMock'
+import { apiKeysApi } from '@/api/apiKeys'
+import { tenantsApi } from '@/api/tenants'
 import { isPlatformAdmin, getCurrentUserTenantId } from '@/lib/tenantAuth'
 import { useAuthStore } from '@/store'
 import type { ApiKey, ApiKeyScope, ApiKeyStatus } from '@/types/apiKey'
@@ -73,14 +74,14 @@ export default function ApiKeysPage() {
   const platformAdmin = isPlatformAdmin(currentUser)
   const ownTenantId = getCurrentUserTenantId(currentUser)
   const tenantFilter = platformAdmin
-    ? (searchParams.get('tenant_id') ?? undefined)
-    : ownTenantId
+    ? (searchParams.get('tenant_id') ? Number(searchParams.get('tenant_id')) : undefined)
+    : ownTenantId ?? undefined
   const scopeFilter = (searchParams.get('scope') as ApiKeyScope | null) ?? undefined
   const statusFilter = (searchParams.get('status') as ApiKeyStatus | null) ?? undefined
   const keyword = searchParams.get('q') ?? ''
 
   const tenantMap = useMemo(() => {
-    const m = new Map<string, Tenant>()
+    const m = new Map<number, Tenant>()
     tenants.forEach((t) => m.set(t.id, t))
     return m
   }, [tenants])
@@ -89,18 +90,19 @@ export default function ApiKeysPage() {
     setLoading(true)
     try {
       const [kList, tnList] = await Promise.all([
-        apiKeyMock.listKeys({
+        apiKeysApi.list({
           tenant_id: tenantFilter,
           scope: scopeFilter,
           status: statusFilter,
           q: keyword || undefined,
         }),
-        apiKeyMock.listTenants(),
+        tenantsApi.list(),
       ])
       setKeys(kList)
       setTenants(tnList)
     } catch (e) {
-      message.error((e as Error).message || '加载失败')
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || (e as Error).message || '加载失败')
     } finally {
       setLoading(false)
     }
@@ -110,9 +112,9 @@ export default function ApiKeysPage() {
     load()
   }, [load])
 
-  const updateParam = (key: string, val: string | undefined) => {
+  const updateParam = (key: string, val: string | number | undefined) => {
     const next = new URLSearchParams(searchParams)
-    if (val) next.set(key, val)
+    if (val !== undefined && val !== null && val !== '') next.set(key, String(val))
     else next.delete(key)
     setSearchParams(next, { replace: true })
   }
@@ -121,7 +123,7 @@ export default function ApiKeysPage() {
     const values = await form.validateFields()
     setSubmitting(true)
     try {
-      const created = await apiKeyMock.createKey({
+      const created = await apiKeysApi.create({
         tenant_id: values.tenant_id,
         name: values.name.trim(),
         description: values.description?.trim() || undefined,
@@ -134,7 +136,9 @@ export default function ApiKeysPage() {
       showPlaintextModal(created)
       await load()
     } catch (e) {
-      if ((e as Error).message) message.error((e as Error).message)
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      if (detail) message.error(detail)
+      else if ((e as Error).message) message.error((e as Error).message)
     } finally {
       setSubmitting(false)
     }
@@ -196,11 +200,12 @@ export default function ApiKeysPage() {
 
   const handleRevoke = async (k: ApiKey) => {
     try {
-      await apiKeyMock.revokeKey(k.id)
+      await apiKeysApi.revoke(k.id)
       message.success(`已撤销「${k.name}」`)
       await load()
     } catch (e) {
-      message.error((e as Error).message)
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || (e as Error).message)
     }
   }
 
@@ -213,12 +218,13 @@ export default function ApiKeysPage() {
       cancelText: '取消',
       onOk: async () => {
         try {
-          const created = await apiKeyMock.rotateKey(k.id)
+          const created = await apiKeysApi.rotate(k.id)
           message.success('已轮换，请保存新 API Key')
           showPlaintextModal(created)
           await load()
         } catch (e) {
-          message.error((e as Error).message)
+          const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+          message.error(detail || (e as Error).message)
         }
       },
     })
@@ -246,7 +252,7 @@ export default function ApiKeysPage() {
       dataIndex: 'tenant_id',
       key: 'tenant',
       width: '12%',
-      render: (id: string) => {
+      render: (id: number) => {
         const tn = tenantMap.get(id)
         return tn ? <Tag>{tn.code}</Tag> : <Text type="secondary">-</Text>
       },

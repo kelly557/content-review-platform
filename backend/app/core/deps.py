@@ -63,3 +63,26 @@ async def require_superadmin(user: User = Depends(get_current_user)) -> User:
             detail="Requires role: superadmin",
         )
     return user
+
+
+# 平台租户标识（与前端 PLATFORM_TENANT_ID 对齐）。tenant_id 为 NULL 的用户
+# 视为归属平台租户。
+PLATFORM_TENANT_ID = "tnt_default"
+
+
+async def require_platform_admin(user: User = Depends(get_current_user)) -> User:
+    """Dependency: platform operator (tenants / API keys management).
+
+    平台管理员 = root_admin 或归属平台租户(``tnt_default``)的 superadmin。
+    与前端 ``tenantAuth.isPlatformAdmin`` 语义一致。tenant_id 为空视为平台租户。
+    """
+    if user.role == UserRole.ROOT_ADMIN:
+        return user
+    if user.role == UserRole.SUPERADMIN:
+        tenant_id = getattr(user, "tenant_id", None)
+        if tenant_id is None or tenant_id == PLATFORM_TENANT_ID:
+            return user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Requires platform admin role",
+    )

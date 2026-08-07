@@ -23,7 +23,7 @@ import { SystemHealthBanner } from '@/components/SystemHealthBanner'
 import { PageGuideButton } from '@/components/PageGuideButton'
 import { PlanButton } from '@/components/PlanButton'
 import { DEV_ACCOUNTS, IS_DEV, type DevAccount } from '@/lib/devAccounts'
-import { isPlatformAdmin, getCurrentUserTenantCode, getRoleDisplayLabel } from '@/lib/tenantAuth'
+import { isPlatformAdmin, getRoleDisplayLabel } from '@/lib/tenantAuth'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -436,9 +436,6 @@ export default function AppLayout() {
                 <Avatar icon={<UserOutlined />} />
                 <Text style={{ color: '#fff' }}>{user.full_name}</Text>
                 <Tag color="blue">{getRoleDisplayLabel(user)}</Tag>
-                {!isPlatformAdmin(user) && getCurrentUserTenantCode(user) && (
-                  <Tag color="geekblue">{getCurrentUserTenantCode(user)}</Tag>
-                )}
               </Space>
             </Dropdown>
           </Space>

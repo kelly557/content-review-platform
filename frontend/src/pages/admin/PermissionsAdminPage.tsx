@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   App,
   Button,
@@ -24,6 +24,7 @@ import {
   MERGED_ROLE_LABELS,
   type MergedRoleKey,
 } from '@/types/domain'
+import { rolesApi, type RolePermissionRow } from '@/api/admin'
 
 const { Title } = Typography
 
@@ -35,70 +36,33 @@ const VISIBLE_ROLE_KEYS: ReadonlyArray<MergedRoleKey> = MERGED_ROLE_KEYS.filter(
 // 不渲染"删除"checkbox 的节点（业务上无删除功能）
 const NON_DELETE_NODES = new Set<string>(['query', 'reports'])
 
-function buildMockPermissions(): RolePermissions {
-  const rows = flattenMenuForTable()
-  const out: Record<string, Record<string, Partial<Record<PermissionKey, boolean>>>> = {}
-
-  // 管理员对以下节点仅查看（无编辑/删除）：词库-系统 / 代答库-系统
-  const ADMIN_VIEW_ONLY_NODES = new Set<string>([
-    'resources-words-system',
-    'resources-replies-system',
-  ])
-  // 管理员对模型管理 / 标签管理：仅查看（包括一级和子节点）
-  const ADMIN_VIEW_ONLY_TAG_NODES = new Set<string>([
-    'system-models',
-    'admin-models-large',
-    'admin-models-small',
-    'system-tags',
-  ])
-  // 业务员对账号管理下子节点全部不勾选
-  const STAFF_NO_ACCOUNT_NODES = new Set<string>([
-    'admin-users',
-    'admin-roles',
-    'admin-permissions',
-  ])
-  // 业务员对模型管理 / 标签管理：全部不勾选（一级 + 子节点）
-  const STAFF_NO_TAG_NODES = new Set<string>([
-    'system-models',
-    'admin-models-large',
-    'admin-models-small',
-    'system-tags',
-  ])
-
-  for (const role of MERGED_ROLE_KEYS) {
-    out[role] = {}
-    for (const row of rows) {
-      const node = row.menuNode
-      const perms = node.permissions ?? []
-      const initial: Partial<Record<PermissionKey, boolean>> = {}
-      for (const p of PERMISSION_KEYS) {
-        initial[p] = perms.includes(p)
+// 把后端 RolePermissionRow[] 与 MENU_TREE 默认 permissions 合并为 RolePermissions 状态
+function mergeStoredIntoRole(
+  base: RolePermissions,
+  role: MergedRoleKey,
+  stored: RolePermissionRow[],
+): RolePermissions {
+  const storedMap = new Map<string, Set<string>>()
+  for (const r of stored) {
+    storedMap.set(r.menu_key, new Set(r.permissions ?? []))
+  }
+  const menuRows = flattenMenuForTable()
+  const next = { ...base, [role]: { ...base[role] } }
+  for (const row of menuRows) {
+    const node = row.menuNode
+    const defaultPerms = node.permissions ?? []
+    const storedPerms = storedMap.get(node.key)
+    const initial: Partial<Record<PermissionKey, boolean>> = {}
+    for (const p of PERMISSION_KEYS) {
+      if (storedPerms) {
+        initial[p] = storedPerms.has(p)
+      } else {
+        initial[p] = defaultPerms.includes(p)
       }
-      out[role][node.key] = initial
     }
+    next[role][node.key] = initial
   }
-
-  // 管理员：词库-系统 / 代答库-系统 → 仅查看
-  for (const key of ADMIN_VIEW_ONLY_NODES) {
-    out.admin[key] = { view: true }
-  }
-  // 管理员：模型管理 / 标签管理（一级+子节点）→ 仅查看
-  for (const key of ADMIN_VIEW_ONLY_TAG_NODES) {
-    out.admin[key] = { view: true }
-  }
-  // 业务员：账号管理下 3 个子节点 → 全部不勾选
-  for (const key of STAFF_NO_ACCOUNT_NODES) {
-    out.staff[key] = {}
-  }
-  // 业务员：模型管理 / 标签管理 → 全部不勾选
-  for (const key of STAFF_NO_TAG_NODES) {
-    out.staff[key] = {}
-  }
-  // superadmin：全部全勾
-  for (const row of rows) {
-    out.superadmin[row.menuNode.key] = { view: true, edit: true, delete: true }
-  }
-  return out as RolePermissions
+  return next
 }
 
 const LEVEL1_LABEL: Record<string, string> = Object.fromEntries(
@@ -108,10 +72,38 @@ const LEVEL1_LABEL: Record<string, string> = Object.fromEntries(
 export default function PermissionsAdminPage() {
   const { message, modal } = App.useApp()
   const [activeRole, setActiveRole] = useState<MergedRoleKey>('admin')
-  const [perms, setPerms] = useState<RolePermissions>(() => buildMockPermissions())
+  const [perms, setPerms] = useState<RolePermissions>(() => {
+    // 空初始 — 加载后填充
+    const out: RolePermissions = {}
+    for (const role of MERGED_ROLE_KEYS) out[role] = {}
+    return out
+  })
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(false)
   const rows = useMemo(() => flattenMenuForTable(), [])
+
+  // 加载某角色权限
+  const loadRolePerms = useCallback(
+    async (role: MergedRoleKey) => {
+      setLoading(true)
+      try {
+        const stored = await rolesApi.listPermissions(role)
+        setPerms((prev) => mergeStoredIntoRole(prev, role, stored))
+      } catch (e) {
+        const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        message.error(detail ?? '加载权限失败')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [message],
+  )
+
+  useEffect(() => {
+    loadRolePerms(activeRole)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRole])
 
   const togglePerm = useCallback(
     (menuKey: string, perm: PermissionKey, checked: boolean) => {
@@ -129,14 +121,25 @@ export default function PermissionsAdminPage() {
 
   const handleSave = useCallback(async () => {
     setSaving(true)
-    // mock: 模拟 300ms 延时
-    await new Promise((r) => setTimeout(r, 300))
-    setSaving(false)
-    setDirty(false)
-    message.success(
-      `已保存 ${MERGED_ROLE_LABELS[activeRole]} 的菜单权限`,
-    )
-  }, [activeRole, message])
+    try {
+      const rolePerms = perms[activeRole] ?? {}
+      const items: RolePermissionRow[] = Object.entries(rolePerms).map(
+        ([menuKey, permMap]) => ({
+          role_key: activeRole,
+          menu_key: menuKey,
+          permissions: PERMISSION_KEYS.filter((p) => permMap?.[p]),
+        }),
+      )
+      await rolesApi.replacePermissions(activeRole, items)
+      setDirty(false)
+      message.success(`已保存 ${MERGED_ROLE_LABELS[activeRole]} 的菜单权限`)
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }, [activeRole, perms, message])
 
   const requestSwitchRole = useCallback(
     (next: MergedRoleKey) => {
@@ -271,6 +274,7 @@ export default function PermissionsAdminPage() {
           dataSource={rows}
           columns={columns}
           pagination={false}
+          loading={loading}
         />
       </Card>
     </div>

@@ -52,7 +52,7 @@ from app.db.session import SessionLocal
 # new migration that changes DDL, update this constant too.
 # ─────────────────────────────────────────────────────────────────────
 
-REVISION_HEAD = "20260807_users_email_nullable"
+REVISION_HEAD = "20260810_add_tenants_api_keys_permissions"
 
 
 @dataclass(frozen=True)
@@ -91,6 +91,9 @@ EXPECTED_TABLES: tuple[str, ...] = (
     "strategy_points_v2",         # added by 20260715
     "disposition_rules",          # added by 20260715
     "llm_calls",                  # added by 20260716
+    "tenants",                    # added by 20260810
+    "api_keys",                   # added by 20260810
+    "role_permissions",           # added by 20260810
 )
 
 EXPECTED_COLUMNS: tuple[ExpectedColumn, ...] = (
@@ -109,6 +112,8 @@ EXPECTED_COLUMNS: tuple[ExpectedColumn, ...] = (
     ExpectedColumn("strategies", ("rule_set_id", "disposition_rule_id")),
     # users.username added by 20260807_users_username
     ExpectedColumn("users", ("username",)),
+    # users.tenant_id added by 20260810
+    ExpectedColumn("users", ("tenant_id",)),
 )
 
 

@@ -53,6 +53,7 @@ async def create_user(
         full_name=body.full_name,
         hashed_password=hash_password(body.password),
         role=body.role,
+        tenant_id=body.tenant_id,
     )
     db.add(user)
     await db.flush()
@@ -94,6 +95,8 @@ async def update_user(
             if clash.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="username already exists")
         user.username = body.username or None
+    if body.tenant_id is not None:
+        user.tenant_id = body.tenant_id
     await db.flush()
     await db.commit()
     await db.refresh(user)

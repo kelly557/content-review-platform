@@ -47,3 +47,6 @@ from app.models.uploaded_document import (  # noqa: F401
     UploadedDocStatus,
 )
 from app.models.role import Role  # noqa: F401
+from app.models.tenant import Tenant  # noqa: F401
+from app.models.api_key import ApiKey  # noqa: F401
+from app.models.role_permission import RolePermission  # noqa: F401

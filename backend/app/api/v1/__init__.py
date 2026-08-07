@@ -5,6 +5,7 @@ from app.api.v1 import (
     admin_import_rules,
     alerts,
     annotations,
+    api_keys,
     audit_items,
     audit_points,
     auth,
@@ -28,6 +29,7 @@ from app.api.v1 import (
     services,
     strategies,
     tags,
+    tenants,
     triggers,
     uploaded_documents,
     users,
@@ -68,3 +70,5 @@ api_router.include_router(registered_providers.router)
 api_router.include_router(uploaded_documents.router)
 api_router.include_router(risk_categories.router)
 api_router.include_router(page_guides.router)
+api_router.include_router(tenants.router)
+api_router.include_router(api_keys.router)

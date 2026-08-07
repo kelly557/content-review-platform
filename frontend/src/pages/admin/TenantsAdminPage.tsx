@@ -18,7 +18,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined, MoreOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 
-import { apiKeyMock } from '@/lib/mock/apiKeyMock'
+import { tenantsApi } from '@/api/tenants'
 import { usersApi } from '@/api/admin'
 import type { Tenant, TenantCreateInput } from '@/types/tenant'
 
@@ -43,10 +43,11 @@ export default function TenantsAdminPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const list = await apiKeyMock.listTenants()
+      const list = await tenantsApi.list()
       setTenants(list)
     } catch (e) {
-      message.error((e as Error).message || '加载失败')
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || (e as Error).message || '加载失败')
     } finally {
       setLoading(false)
     }
@@ -79,17 +80,18 @@ export default function TenantsAdminPage() {
     setSubmitting(true)
     try {
       if (editing) {
-        await apiKeyMock.updateTenant(editing.id, {
+        await tenantsApi.update(editing.id, {
           name: values.name.trim(),
-          contact_email: values.contact_email?.trim() || '',
+          contact_email: values.contact_email?.trim() || undefined,
           is_active: values.is_active ?? true,
         })
         message.success('租户已更新')
       } else {
-        const tenant = await apiKeyMock.createTenant({
+        const tenant = await tenantsApi.create({
           code: values.code.trim(),
           name: values.name.trim(),
-          contact_email: values.contact_email?.trim() || '',
+          contact_email: values.contact_email?.trim() || undefined,
+          is_active: values.is_active ?? true,
         })
         try {
           const identifier = values.admin_identifier!.trim()
@@ -106,15 +108,15 @@ export default function TenantsAdminPage() {
               const userIdentifier = isAdminEmail
                 ? `${identifier.split('@')[0]}${r.suffix}@${identifier.split('@')[1]}`
                 : `${identifier}${r.suffix}`
-              const u = await usersApi.create({
+              await usersApi.create({
                 email: isAdminEmail ? userIdentifier : null,
                 username: isAdminEmail ? null : userIdentifier,
                 full_name: `${baseName}（${r.label}）`,
                 password,
                 role: r.role,
                 is_active: true,
+                tenant_id: tenant.id,
               })
-              apiKeyMock.setUserTenant(u.id, tenant.id)
             } catch {
               // 单个角色创建失败不阻断其他
             }
@@ -129,7 +131,9 @@ export default function TenantsAdminPage() {
       form.resetFields()
       await load()
     } catch (e) {
-      if ((e as Error).message) message.error((e as Error).message)
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      if (detail) message.error(detail)
+      else if ((e as Error).message) message.error((e as Error).message)
     } finally {
       setSubmitting(false)
     }
@@ -138,11 +142,12 @@ export default function TenantsAdminPage() {
   const handleToggleActive = async (t: Tenant) => {
     const next = !t.is_active
     try {
-      await apiKeyMock.updateTenant(t.id, { is_active: next })
+      await tenantsApi.update(t.id, { is_active: next })
       message.success(next ? '已启用' : '已禁用')
       await load()
     } catch (e) {
-      message.error((e as Error).message)
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || (e as Error).message)
     }
   }
 

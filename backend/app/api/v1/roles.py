@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import require_roles
 from app.db.session import get_db
 from app.models.role import Role
+from app.models.role_permission import RolePermission
 from app.models.user import User
 from app.schemas.role import (
     RoleCreate,
@@ -27,6 +28,7 @@ from app.schemas.role import (
     RoleOut,
     RoleUpdate,
 )
+from app.schemas.role_permission import RolePermissionOut, RolePermissionsUpdate
 
 router = APIRouter(prefix="/roles", tags=["roles"])
 
@@ -137,3 +139,49 @@ async def delete_role(
     await db.delete(role)
     await db.commit()
     return {"ok": True, "id": role_id}
+
+
+# ──────────────────────────────────────────────────────────────
+# 权限矩阵 — /roles/{role_key}/permissions
+# ──────────────────────────────────────────────────────────────
+
+
+@router.get("/{role_key}/permissions", response_model=list[RolePermissionOut])
+async def list_role_permissions(
+    role_key: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("admin", "superadmin")),
+) -> list[RolePermissionOut]:
+    result = await db.execute(
+        select(RolePermission).where(RolePermission.role_key == role_key)
+    )
+    return [RolePermissionOut.model_validate(r) for r in result.scalars()]
+
+
+@router.put("/{role_key}/permissions", response_model=list[RolePermissionOut])
+async def replace_role_permissions(
+    role_key: str,
+    body: RolePermissionsUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("admin", "superadmin")),
+) -> list[RolePermissionOut]:
+    # 批量替换: 先删后插
+    result = await db.execute(
+        select(RolePermission).where(RolePermission.role_key == role_key)
+    )
+    for r in result.scalars():
+        await db.delete(r)
+    await db.flush()
+    for item in body.items:
+        rp = RolePermission(
+            role_key=role_key,
+            menu_key=item.menu_key,
+            permissions=item.permissions,
+        )
+        db.add(rp)
+    await db.flush()
+    await db.commit()
+    result = await db.execute(
+        select(RolePermission).where(RolePermission.role_key == role_key)
+    )
+    return [RolePermissionOut.model_validate(r) for r in result.scalars()]
