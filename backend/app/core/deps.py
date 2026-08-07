@@ -70,6 +70,21 @@ async def require_superadmin(user: User = Depends(get_current_user)) -> User:
 PLATFORM_TENANT_ID = "tnt_default"
 
 
+def is_platform_admin(user: User | None) -> bool:
+    """Plain boolean check (no dependency). 与 require_platform_admin 同语义。
+
+    平台管理员 = root_admin 或 tenant_id 为空(平台租户)的 superadmin。
+    供路由内部按平台/业务管理员分支返回不同数据范围时使用。
+    """
+    if user is None:
+        return False
+    if user.role == UserRole.ROOT_ADMIN:
+        return True
+    if user.role == UserRole.SUPERADMIN:
+        return getattr(user, "tenant_id", None) is None
+    return False
+
+
 async def require_platform_admin(user: User = Depends(get_current_user)) -> User:
     """Dependency: platform operator (tenants / API keys management).
 

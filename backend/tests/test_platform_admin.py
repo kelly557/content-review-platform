@@ -123,6 +123,46 @@ async def test_platform_admin_gates_non_platform_user(client):
     assert r.status_code == 403
 
 
+async def test_business_admin_sees_only_own_tenant(client):
+    """业务管理员(归属某租户的 admin)只能看到自己租户, 不能创建/删除租户。"""
+    await _login(client, "rootadmin@adreview.example.com", "rootadmin123")
+    # 建一个租户
+    r = await client.post(
+        "/api/v1/admin/tenants",
+        json={"code": "biz1", "name": "业务租户1"},
+    )
+    tenant_id = r.json()["id"]
+
+    # 建一个归属该租户的 admin 用户
+    from app.core.security import hash_password  # noqa
+    r = await client.post(
+        "/api/v1/users",
+        json={
+            "username": "bizadmin",
+            "full_name": "业务管理员",
+            "password": "bizadmin123",
+            "role": "admin",
+            "tenant_id": tenant_id,
+        },
+    )
+    assert r.status_code == 201
+
+    # 以该业务管理员登录
+    await _login(client, "bizadmin", "bizadmin123")
+    r = await client.get("/api/v1/admin/tenants")
+    assert r.status_code == 200
+    items = r.json()
+    assert len(items) == 1
+    assert items[0]["id"] == tenant_id
+
+    # 业务管理员不能创建租户 (写操作仍需 platform admin)
+    r = await client.post(
+        "/api/v1/admin/tenants",
+        json={"code": "forbidden", "name": "x"},
+    )
+    assert r.status_code == 403
+
+
 async def test_me_returns_tenant_id(client):
     await _login(client, "admin@adreview.example.com", "admin123")
     r = await client.get("/api/v1/auth/me")
