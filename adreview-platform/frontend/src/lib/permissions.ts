@@ -21,9 +21,11 @@ export const canCreateTask = (user: User | null | undefined): boolean => {
   return r === 'reviewer' || r === 'mlr' || isAdminRole(r)
 }
 
-/** 可编辑策略/触发器/库等后台：admin / superadmin */
-export const canManageBackend = (user: User | null | undefined): boolean =>
-  isAdminRole(user?.role)
+/** 可编辑策略/触发器/库等后台：reviewer / mlr / admin / superadmin */
+export const canManageBackend = (user: User | null | undefined): boolean => {
+  const r = user?.role
+  return r === 'reviewer' || r === 'mlr' || isAdminRole(r)
+}
 
 /** 可作为 reviewer/mlr/admin 处理任务 */
 export const canHandleTask = (user: User | null | undefined): boolean => {

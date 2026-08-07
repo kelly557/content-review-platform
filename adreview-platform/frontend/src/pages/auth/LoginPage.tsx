@@ -4,6 +4,7 @@ import { LockOutlined, UserOutlined } from '@ant-design/icons'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store'
 import { DEV_ACCOUNTS, IS_DEV, type DevAccount } from '@/lib/devAccounts'
+import { isPlatformAdmin } from '@/lib/tenantAuth'
 
 const { Title, Text } = Typography
 
@@ -14,7 +15,7 @@ export default function LoginPage() {
   const [form] = Form.useForm<{ identifier: string; password: string }>()
 
   if (initialized && user) {
-    if (user.role === 'superadmin' || user.role === 'root_admin') {
+    if (isPlatformAdmin(user)) {
       return <Navigate to="/admin/tenants" replace />
     }
     return <Navigate to="/overview" replace />
@@ -26,7 +27,7 @@ export default function LoginPage() {
       const { user } = useAuthStore.getState()
       await login(values)
       const u = useAuthStore.getState().user ?? user
-      if (u && (u.role === 'superadmin' || u.role === 'root_admin')) {
+      if (u && isPlatformAdmin(u)) {
         navigate('/admin/tenants', { replace: true })
       } else {
         navigate('/overview', { replace: true })

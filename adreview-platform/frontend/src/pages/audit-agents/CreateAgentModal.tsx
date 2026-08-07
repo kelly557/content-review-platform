@@ -10,6 +10,7 @@ import {
   Select,
   Space,
   Table,
+  Tag,
   Tooltip,
   Typography,
 } from 'antd'
@@ -59,6 +60,7 @@ export interface CreateAgentFormProps {
   initialLargeModel?: string
   initialRows?: AgentPromptRow[]
   draftSavedAt?: string | null
+  currentVersion?: string | null
   showTopBar?: boolean
   canPublish?: boolean
   historyDisabled?: boolean
@@ -123,6 +125,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
   initialLargeModel,
   initialRows,
   draftSavedAt,
+  currentVersion,
   showTopBar,
   canPublish,
   historyDisabled,
@@ -234,6 +237,11 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
           }}
         >
           <Space size={6}>
+            {currentVersion && (
+              <Tag color="blue" style={{ margin: 0 }}>
+                {currentVersion}
+              </Tag>
+            )}
             <InfoCircleOutlined style={{ color: '#1677FF' }} />
             <Text type="secondary">
               {draftSavedAt

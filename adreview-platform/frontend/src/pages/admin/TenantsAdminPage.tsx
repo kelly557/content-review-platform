@@ -94,18 +94,34 @@ export default function TenantsAdminPage() {
         try {
           const identifier = values.admin_identifier!.trim()
           const isAdminEmail = identifier.includes('@')
-          const adminUser = await usersApi.create({
-            email: isAdminEmail ? identifier : null,
-            username: isAdminEmail ? null : identifier,
-            full_name: values.admin_name?.trim() || identifier.split('@')[0],
-            password: values.admin_password!,
-            role: 'admin',
-            is_active: true,
-          })
-          apiKeyMock.setUserTenant(adminUser.id, tenant.id)
+          const baseName = values.admin_name?.trim() || identifier.split('@')[0]
+          const password = values.admin_password!
+          const roles: Array<{ role: 'superadmin' | 'admin' | 'staff'; suffix: string; label: string }> = [
+            { role: 'superadmin', suffix: '_superadmin', label: '超级管理员' },
+            { role: 'admin', suffix: '_admin', label: '管理员' },
+            { role: 'staff', suffix: '_staff', label: '业务员' },
+          ]
+          for (const r of roles) {
+            try {
+              const userIdentifier = isAdminEmail
+                ? `${identifier.split('@')[0]}${r.suffix}@${identifier.split('@')[1]}`
+                : `${identifier}${r.suffix}`
+              const u = await usersApi.create({
+                email: isAdminEmail ? userIdentifier : null,
+                username: isAdminEmail ? null : userIdentifier,
+                full_name: `${baseName}（${r.label}）`,
+                password,
+                role: r.role,
+                is_active: true,
+              })
+              apiKeyMock.setUserTenant(u.id, tenant.id)
+            } catch {
+              // 单个角色创建失败不阻断其他
+            }
+          }
         } catch (e) {
           const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-          message.warning(`租户已创建，但初始超级管理员创建失败：${detail ?? '请手动创建'}`)
+          message.warning(`租户已创建，但部分默认用户创建失败：${detail ?? '请手动创建'}`)
         }
         message.success('租户已创建')
       }
@@ -331,7 +347,7 @@ export default function TenantsAdminPage() {
                   { min: 8, message: '至少 8 位' },
                   { max: 128, message: '不超过 128 位' },
                 ]}
-                extra="8 ~ 128 位"
+                extra="8 ~ 128 位，3 个默认角色用户共用此密码"
               >
                 <Input.Password placeholder="至少 8 位" />
               </Form.Item>

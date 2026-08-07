@@ -94,10 +94,9 @@ function buildMockPermissions(): RolePermissions {
   for (const key of STAFF_NO_TAG_NODES) {
     out.staff[key] = {}
   }
-  // superadmin / root_admin：全部全勾
+  // superadmin：全部全勾
   for (const row of rows) {
     out.superadmin[row.menuNode.key] = { view: true, edit: true, delete: true }
-    out.root_admin[row.menuNode.key] = { view: true, edit: true, delete: true }
   }
   return out as RolePermissions
 }

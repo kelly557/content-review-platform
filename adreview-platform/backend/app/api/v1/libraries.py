@@ -733,7 +733,7 @@ async def create_library(
 async def batch_create_libraries(
     body: LibraryBatchCreateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles("admin")),
+    current_user: User = Depends(require_roles("admin", "reviewer")),
 ) -> LibraryBatchCreateResult:
     """Create up to 20 libraries in one call.
 

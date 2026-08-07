@@ -98,7 +98,7 @@ export default function AppRoutes() {
 
         <Route element={<ProtectedRoute />}>
           {/* 隐藏工具页：admin 才能进、不挂主产品 chrome，URL 不在侧栏菜单暴露 */}
-          <Route element={<ProtectedRoute allow={['admin', 'root_admin']} />}>
+          <Route element={<ProtectedRoute allow={['admin', 'superadmin', 'root_admin']} />}>
             <Route path="/import-rules" element={<ImportRulesPage />} />
           </Route>
 
@@ -123,7 +123,7 @@ export default function AppRoutes() {
               <Route path="/query" element={<QueryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin', 'root_admin']} />}>
+            <Route element={<ProtectedRoute allow={['admin', 'mlr', 'reviewer', 'superadmin', 'root_admin']} />}>
               <Route path="/strategies" element={<StrategyListPage />} />
               {/* 老的 rules-by-type 路径重定向到新的"通用"页(向后兼容) */}
               <Route
@@ -275,7 +275,6 @@ export default function AppRoutes() {
               <Route path="/admin/tags" element={<TagsAdminPage />} />
               <Route path="/admin/models/large" element={<ModelsAdminLargePage />} />
               <Route path="/admin/models/small" element={<ModelsAdminSmallPage />} />
-              <Route path="/admin/api-keys" element={<ApiKeysPage />} />
               <Route path="/triggers" element={<TriggersListPage />} />
               <Route path="/triggers/new" element={<CreateTriggerPage />} />
               <Route path="/triggers/:id" element={<TriggerDetailPage />} />
@@ -288,8 +287,15 @@ export default function AppRoutes() {
               />
             </Route>
 
-            <Route element={<ProtectedRoute allow={['superadmin', 'root_admin']} />}>
+            <Route element={<ProtectedRoute allow={['superadmin', 'admin', 'root_admin']} />}>
+              <Route path="/admin/api-keys" element={<ApiKeysPage />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allow={['superadmin', 'admin', 'root_admin']} />}>
               <Route path="/strategies/agents" element={<ReviewAgentsPage />} />
+            </Route>
+
+            <Route element={<ProtectedRoute platformOnly />}>
               <Route path="/admin/tenants" element={<TenantsAdminPage />} />
             </Route>
 
@@ -300,7 +306,7 @@ export default function AppRoutes() {
               <Route path="/resources/images/:id" element={<ImageLibraryDetailPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute allow={['admin', 'mlr', 'superadmin', 'root_admin']} />}>
+            <Route element={<ProtectedRoute allow={['admin', 'mlr', 'reviewer', 'superadmin', 'root_admin']} />}>
               <Route path="/human-review-rules" element={<HumanReviewRulesPage />} />
             </Route>
           </Route>

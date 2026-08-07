@@ -143,6 +143,10 @@ const SEED_USER_TENANT_MAP: Record<number, string> = {
   3: 'tnt_globex',
   4: 'tnt_globex',
   5: 'tnt_default',
+  6: 'tnt_default',
+  7: 'tnt_globex',
+  11: 'tnt_acme',
+  12: 'tnt_globex',
 }
 
 function loadUserTenantMap(): Map<number, string> {

@@ -71,7 +71,7 @@ const INITIAL_AGENTS: AgentRow[] = [
     modality: '文本',
     onlineAt: '2026-07-20 10:59:36',
     updatedAt: '2026-07-20 10:59:36',
-    version: '1784516376946',
+    version: 'v1',
     publishedAt: '2026-07-20 10:59:36',
     draftSavedAt: '2026-07-20 18:05:45',
     modelId: 'text_audit_llm',
@@ -482,6 +482,13 @@ export default function ReviewAgentsPage() {
         ),
       },
       { title: '模态', dataIndex: 'modality', width: '9%' },
+      {
+        title: '版本',
+        dataIndex: 'version',
+        width: '8%',
+        render: (v: string | null) =>
+          v ? <Tag color="blue">{v}</Tag> : <Text type="secondary">-</Text>,
+      },
       { title: '上线时间', dataIndex: 'onlineAt', width: '16%' },
       { title: '更新时间', dataIndex: 'updatedAt', width: '18%' },
       {
@@ -647,6 +654,7 @@ export default function ReviewAgentsPage() {
           initialLargeModel={editingAgent?.modelId}
           initialRows={editingAgent?.points}
           draftSavedAt={editingAgent?.draftSavedAt ?? null}
+          currentVersion={editingAgent?.version ?? null}
           showTopBar={true}
           canPublish={canPublish}
           historyDisabled={!editingAgent}

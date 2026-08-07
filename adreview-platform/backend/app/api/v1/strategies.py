@@ -582,7 +582,7 @@ async def _next_code(db: AsyncSession) -> str:
 @router.get("", response_model=Page[StrategyOut])
 async def list_strategies(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin", "mlr")),
+    _: User = Depends(require_roles("admin", "mlr", "reviewer")),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     q: Optional[str] = None,
@@ -614,7 +614,7 @@ async def list_strategies(
 async def create_strategy(
     body: StrategyCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_roles("admin")),
+    user: User = Depends(require_roles("admin", "reviewer")),
 ) -> StrategyOut:
     if body.scope == StrategyScope.DEFAULT:
         raise HTTPException(
@@ -745,7 +745,7 @@ async def create_strategy(
 async def get_strategy(
     strategy_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin", "mlr")),
+    _: User = Depends(require_roles("admin", "mlr", "reviewer")),
 ) -> StrategyOut:
     strategy = await db.get(Strategy, strategy_id)
     if not strategy:
@@ -758,7 +758,7 @@ async def update_strategy(
     strategy_id: int,
     body: StrategyUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_roles("admin")),
+    user: User = Depends(require_roles("admin", "reviewer")),
 ) -> StrategyOut:
     strategy = await db.get(Strategy, strategy_id)
     if not strategy:
@@ -918,7 +918,7 @@ async def update_strategy(
 async def delete_strategy(
     strategy_id: int,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_roles("admin")),
+    user: User = Depends(require_roles("admin", "reviewer")),
 ) -> Response:
     strategy = await db.get(Strategy, strategy_id)
     if not strategy:
@@ -941,7 +941,7 @@ async def duplicate_strategy(
     strategy_id: int,
     body: StrategyDuplicateRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_roles("admin")),
+    user: User = Depends(require_roles("admin", "reviewer")),
 ) -> Strategy:
     src = await db.get(Strategy, strategy_id)
     if not src:
@@ -1003,7 +1003,7 @@ async def duplicate_strategy(
 async def validate_strategy(
     strategy_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin", "mlr")),
+    _: User = Depends(require_roles("admin", "mlr", "reviewer")),
 ) -> StrategyValidateResult:
     strategy = await db.get(Strategy, strategy_id)
     if not strategy:

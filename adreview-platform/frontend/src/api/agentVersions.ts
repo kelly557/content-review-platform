@@ -40,10 +40,23 @@ function writeStore(store: AgentVersionStore) {
   }
 }
 
+function normalizeVersions(list: AgentVersion[]): AgentVersion[] {
+  if (list.length === 0) return list
+  const needsNormalize = list.some((v) => !v.version.startsWith('v'))
+  if (!needsNormalize) return list
+  const sorted = [...list].sort((a, b) => (a.publishedAt < b.publishedAt ? -1 : 1))
+  return sorted.map((v, idx) => ({ ...v, version: `v${idx + 1}` }))
+}
+
 export function listVersions(agentId: string): AgentVersion[] {
   const store = readStore()
-  const list = store.versions[agentId] ?? []
-  return [...list].sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1))
+  const raw = store.versions[agentId] ?? []
+  const normalized = normalizeVersions(raw)
+  if (normalized !== raw) {
+    store.versions[agentId] = normalized
+    writeStore(store)
+  }
+  return [...normalized].sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1))
 }
 
 export function publishVersion(
@@ -51,14 +64,14 @@ export function publishVersion(
   snapshot: AgentVersionSnapshot,
 ): AgentVersion {
   const store = readStore()
-  const list = store.versions[agentId] ?? []
+  const raw = store.versions[agentId] ?? []
+  const list = normalizeVersions(raw)
   const ts = new Date()
-  const stamp =
-    `${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`
+  const nextSeq = list.length + 1
   const newVersion: AgentVersion = {
-    id: `v-${stamp}-${Math.random().toString(36).slice(2, 6)}`,
+    id: `v-${nextSeq}-${Math.random().toString(36).slice(2, 6)}`,
     agentId,
-    version: stamp,
+    version: `v${nextSeq}`,
     status: 'published',
     isCurrent: false,
     publishedAt: formatDate(ts),

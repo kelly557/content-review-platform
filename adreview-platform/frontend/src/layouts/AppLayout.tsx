@@ -22,12 +22,11 @@ import {
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuthStore, useUiStore } from '@/store'
-import { ROLE_LABELS } from '@/types/domain'
 import { SystemHealthBanner } from '@/components/SystemHealthBanner'
 import { PageGuideButton } from '@/components/PageGuideButton'
 import { PlanButton } from '@/components/PlanButton'
 import { DEV_ACCOUNTS, IS_DEV, type DevAccount } from '@/lib/devAccounts'
-import { isPlatformAdmin, getCurrentUserTenantCode } from '@/lib/tenantAuth'
+import { isPlatformAdmin, getCurrentUserTenantCode, getRoleDisplayLabel } from '@/lib/tenantAuth'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -41,6 +40,7 @@ type NavChild = {
   path?: string
   label: string
   roles?: string[]
+  platformOnly?: boolean
   children?: NavChild[]
 }
 
@@ -52,6 +52,7 @@ type NavNode =
       label: string
       icon: React.ReactNode
       roles: string[]
+      platformOnly?: boolean
     }
   | {
       kind: 'group'
@@ -60,6 +61,7 @@ type NavNode =
       label: string
       icon: React.ReactNode
       roles: string[]
+      platformOnly?: boolean
       children: NavChild[]
     }
 
@@ -74,8 +76,8 @@ const NAV_SECTIONS: Array<{
     key: 'workspace',
     label: '工作区',
     items: [
-      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'root_admin'] },
-      { kind: 'leaf', key: 'online-review', path: '/online-review', label: '在线审核', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'root_admin'] },
+      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
+      { kind: 'leaf', key: 'online-review', path: '/online-review', label: '在线审核', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
       { kind: 'leaf', key: 'triggers', path: '/triggers', label: '自动审核', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
       { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
     ],
@@ -91,10 +93,10 @@ const NAV_SECTIONS: Array<{
         path: '/strategies',
         label: '审核策略',
         icon: <SettingOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'mlr', 'root_admin'],
+        roles: ['admin', 'mlr', 'reviewer', 'superadmin', 'root_admin'],
         children: [
           { key: 'strategies-list', path: '/strategies', label: '策略管理' },
-          { key: 'strategies-agents', path: '/strategies/agents', label: '审核智能体', roles: ['root_admin'] },
+          { key: 'strategies-agents', path: '/strategies/agents', label: '审核智能体', roles: ['superadmin', 'admin', 'root_admin'] },
         ],
       },
       {
@@ -103,7 +105,7 @@ const NAV_SECTIONS: Array<{
         path: '/resources/words',
         label: '资源库',
         icon: <DatabaseOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'mlr', 'root_admin'],
+        roles: ['admin', 'mlr', 'reviewer', 'superadmin', 'root_admin'],
         children: [
           { key: 'strategies-words', path: '/resources/words', label: '词库管理' },
           { key: 'strategies-models', path: '/resources/models', label: '模型库管理', roles: ['root_admin'] },
@@ -120,8 +122,8 @@ const NAV_SECTIONS: Array<{
     key: 'analytics',
     label: '审核结果',
     items: [
-      { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'root_admin'] },
-      { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'root_admin'] },
+      { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
+      { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
     ],
   },
   {
@@ -140,7 +142,6 @@ const NAV_SECTIONS: Array<{
           { key: 'admin-users', path: '/admin/users', label: '用户管理' },
           { key: 'admin-roles', path: '/admin/roles', label: '角色管理' },
           { key: 'admin-permissions', path: '/admin/permissions', label: '权限管理' },
-          { key: 'admin-api-keys', path: '/admin/api-keys', label: 'API Keys' },
         ],
       },
       {
@@ -149,7 +150,7 @@ const NAV_SECTIONS: Array<{
         path: '/admin/models/large',
         label: '模型管理',
         icon: <RobotOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'root_admin'],
+        roles: ['admin', 'superadmin', 'root_admin'],
         children: [
           { key: 'admin-models-large', path: '/admin/models/large', label: '大模型' },
           { key: 'admin-models-small', path: '/admin/models/small', label: '小模型' },
@@ -161,7 +162,7 @@ const NAV_SECTIONS: Array<{
         path: '/admin/tags',
         label: '标签管理',
         icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'root_admin'],
+        roles: ['admin', 'superadmin', 'root_admin'],
       },
       {
         kind: 'group',
@@ -170,8 +171,10 @@ const NAV_SECTIONS: Array<{
         label: '平台管理',
         icon: <KeyOutlined style={{ fontSize: ICON_SIZE }} />,
         roles: ['superadmin', 'root_admin'],
+        platformOnly: true,
         children: [
-          { key: 'admin-tenants', path: '/admin/tenants', label: '租户管理' },
+          { key: 'admin-tenants', path: '/admin/tenants', label: '租户管理', platformOnly: true },
+          { key: 'admin-api-keys', path: '/admin/api-keys', label: 'API Keys' },
         ],
       },
     ],
@@ -207,8 +210,26 @@ export default function AppLayout() {
     return null
   }
 
+  const platform = isPlatformAdmin(user)
+
   const filterByRole = (items: NavNode[]): NavNode[] =>
-    items.filter((n) => n.roles.includes(user.role))
+    items.filter((n) => {
+      if (platform) {
+        return n.platformOnly === true && n.roles.includes(user.role)
+      }
+      if (n.platformOnly === true) return false
+      return n.roles.includes(user.role)
+    })
+
+  const filterChildren = (children: NavChild[]): NavChild[] =>
+    children.filter((c) => {
+      if (!c.roles) return true
+      if (platform) {
+        return c.platformOnly === true && c.roles.includes(user.role)
+      }
+      if (c.platformOnly === true) return false
+      return c.roles.includes(user.role)
+    })
 
   const visibleSections = NAV_SECTIONS
     .map((section) => ({ ...section, items: filterByRole(section.items) }))
@@ -244,9 +265,7 @@ export default function AppLayout() {
           label: <Link to={node.path}>{node.label}</Link>,
         })
       } else {
-        const visibleChildren = node.children.filter(
-          (c) => !c.roles || c.roles.includes(user.role),
-        )
+        const visibleChildren = filterChildren(node.children)
         items.push({
           key: node.key,
           icon: node.icon,
@@ -254,9 +273,7 @@ export default function AppLayout() {
           children: visibleChildren.map((c) => {
             if (c.children && c.children.length > 0) {
               // 二级 group (例如 "图片审核规则" 下挂 "通用图片规则 / 个性化图片规则")
-              const visibleGrand = c.children.filter(
-                (gc) => !gc.roles || gc.roles.includes(user.role),
-              )
+              const visibleGrand = filterChildren(c.children)
               return {
                 key: c.key,
                 label: c.label,
@@ -427,7 +444,7 @@ export default function AppLayout() {
               <Space style={{ cursor: 'pointer' }}>
                 <Avatar icon={<UserOutlined />} />
                 <Text style={{ color: '#fff' }}>{user.full_name}</Text>
-                <Tag color="blue">{ROLE_LABELS[user.role]}</Tag>
+                <Tag color="blue">{getRoleDisplayLabel(user)}</Tag>
                 {!isPlatformAdmin(user) && getCurrentUserTenantCode(user) && (
                   <Tag color="geekblue">{getCurrentUserTenantCode(user)}</Tag>
                 )}
