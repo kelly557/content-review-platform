@@ -19,12 +19,12 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     app_debug: bool = True
     app_secret: str = "change-me"
-    app_base_url: str = "http://localhost:8000"
+    app_base_url: str = "http://localhost:9000"
     default_admin_password: str = "admin123"
     default_superadmin_password: str = "superadmin123"
     default_root_admin_password: str = "rootadmin123"
 
-    cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:5473"])
 
     database_url: str = "postgresql+asyncpg://adreview:adreview@localhost:5432/adreview"
     database_url_sync: str = "postgresql+psycopg2://adreview:adreview@localhost:5432/adreview"

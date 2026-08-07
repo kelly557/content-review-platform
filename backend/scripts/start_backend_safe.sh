@@ -133,5 +133,5 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 
 # Launch uvicorn
-exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" \
+exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-9000}" \
     > "$LOG_DIR/backend-$(date +%Y%m%d-%H%M%S).log" 2>&1

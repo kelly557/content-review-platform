@@ -48,11 +48,11 @@ from app.db.session import SessionLocal
 
 # ─────────────────────────────────────────────────────────────────────
 # Expected schema state — mirror of models after the LATEST applied
-# alembic migration ("20260716_review_detail_cleanup"). If you add a
+# alembic migration ("20260807_users_email_nullable"). If you add a
 # new migration that changes DDL, update this constant too.
 # ─────────────────────────────────────────────────────────────────────
 
-REVISION_HEAD = "20260716_review_detail_cleanup"
+REVISION_HEAD = "20260807_users_email_nullable"
 
 
 @dataclass(frozen=True)
@@ -107,6 +107,8 @@ EXPECTED_COLUMNS: tuple[ExpectedColumn, ...] = (
       )),
     # strategies: FK cols added by 20260715_phase_b_split_strategy
     ExpectedColumn("strategies", ("rule_set_id", "disposition_rule_id")),
+    # users.username added by 20260807_users_username
+    ExpectedColumn("users", ("username",)),
 )
 
 
