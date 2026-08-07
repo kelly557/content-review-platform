@@ -44,6 +44,8 @@ storage/exports/*
 
 # PG dumps produced by start_backend_safe.sh (rotate ADREVIEW_BACKUP_KEEP)
 storage/backups/
+backend/storage/backups/
+backend/storage/logs/
 
 # Alembic artifacts that should not survive cross-checking
 *.bak
