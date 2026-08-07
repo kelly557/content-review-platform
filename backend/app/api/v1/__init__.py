@@ -16,6 +16,7 @@ from app.api.v1 import (
     libraries,
     material_packages,
     materials,
+    online_review,
     page_guides,
     query,
     registered_models,
@@ -41,6 +42,7 @@ api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(roles.router)
 api_router.include_router(materials.router)
+api_router.include_router(online_review.router)
 api_router.include_router(reviews.router)
 api_router.include_router(workflows.router)
 api_router.include_router(annotations.router)

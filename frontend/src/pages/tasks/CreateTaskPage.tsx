@@ -2,11 +2,8 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { App, Button, Card, Select, Space, Tabs, Typography } from 'antd'
 import { strategiesApi } from '@/api/strategies'
-import {
-  runOnlineDetectionMock,
-  type MockRequest,
-  type MockResponse,
-} from '@/api/onlineReviewMock'
+import { runOnlineDetection } from '@/api/onlineReview'
+import type { MockRequest, MockResponse } from '@/api/onlineReviewMock'
 import UploadArea, { type UploadItem } from '@/components/task-create/UploadArea'
 import AnalysisPanel, {
   type ParsedFileItem,
@@ -125,7 +122,7 @@ export default function CreateTaskPage() {
     setResult({ state: 'loading' })
     try {
       const selectedStrategy = strategies.find((s) => s.id === strategyId)
-      const mock = await runOnlineDetectionMock({
+      const result = await runOnlineDetection({
         strategyId,
         strategyName: selectedStrategy?.name,
         items: uploadItems,
@@ -134,9 +131,9 @@ export default function CreateTaskPage() {
       })
       setResult({
         state: 'done',
-        request: mock.request,
-        response: mock.response,
-        latencyMs: mock.latencyMs,
+        request: result.request,
+        response: result.response,
+        latencyMs: result.latencyMs,
       })
       message.success(`已检测 ${v.count} 个素材`)
     } catch (e) {
