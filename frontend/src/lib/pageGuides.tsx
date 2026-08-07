@@ -617,8 +617,6 @@ const auditPointGuide: PageGuide = {
 export const PAGE_GUIDES: Record<string, PageGuide> = {
   ...FILLED,
   '/online-review': onlineReviewGuide,
-  '/materials': TBD,
-  '/materials/:id': TBD,
   '/tasks/:id': TBD,
   '/tasks/package/:id': TBD,
 
@@ -642,13 +640,6 @@ export const PAGE_GUIDES: Record<string, PageGuide> = {
   '/resources/words/:id': TBD,
   '/resources/replies': TBD,
   '/resources/replies/:id': TBD,
-  '/resources/models': TBD,
-  '/resources/models/:id': TBD,
-  '/resources/providers/:id': TBD,
-  '/resources/knowledge': TBD,
-  '/resources/knowledge/:id': TBD,
-  '/resources/images': TBD,
-  '/resources/images/:id': TBD,
 
   '/packages/:code/items': TBD,
   '/packages/:code/items/new': TBD,
@@ -656,17 +647,10 @@ export const PAGE_GUIDES: Record<string, PageGuide> = {
   '/packages/:code/items/:itemId/points/new': auditPointGuide,
   '/packages/:code/items/:itemId/points/:pointId': auditPointGuide,
 
-  '/triggers': TBD,
-  '/triggers/new': TBD,
-  '/triggers/:id': TBD,
-
   '/admin/users': usersAdminGuide,
   '/admin/roles': TBD,
 
   '/admin/tags': tagsAdminGuide,
-
-  '/tags': TBD,
-  '/human-review-rules': TBD,
 
   '/admin/models/small': modelAdminSmallGuide,
   '/admin/models/large': TBD,

@@ -51,11 +51,11 @@ const ENTRIES: EntryDef[] = [
   },
   {
     key: 'models',
-    title: '模型库管理',
+    title: '模型管理',
     icon: <ExperimentOutlined />,
-    description: '维护文本/图片模型配置',
-    to: '/resources/models',
-    visibleTo: ['admin', 'mlr', 'superadmin', 'root_admin'],
+    description: '维护大/小模型配置',
+    to: '/admin/models/large',
+    visibleTo: ['admin', 'superadmin', 'root_admin'],
   },
   {
     key: 'replies',

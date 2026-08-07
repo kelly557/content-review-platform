@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { App, Layout, Menu, Avatar, Dropdown, Space, Typography, Button, Tag, type MenuProps } from 'antd'
 import {
   DashboardOutlined,
-  FileImageOutlined,
   AuditOutlined,
   TeamOutlined,
   BarChartOutlined,
@@ -12,10 +11,8 @@ import {
   UserOutlined,
   UserSwitchOutlined,
   SettingOutlined,
-  ClusterOutlined,
   DatabaseOutlined,
   SearchOutlined,
-  ThunderboltOutlined,
   TagsOutlined,
   RobotOutlined,
   KeyOutlined,
@@ -78,8 +75,6 @@ const NAV_SECTIONS: Array<{
     items: [
       { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
       { kind: 'leaf', key: 'online-review', path: '/online-review', label: '在线审核', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
-      { kind: 'leaf', key: 'triggers', path: '/triggers', label: '自动审核', icon: <ThunderboltOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
-      { kind: 'leaf', key: 'materials', path: '/materials', label: '素材库', icon: <FileImageOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
     ],
   },
   {
@@ -108,13 +103,9 @@ const NAV_SECTIONS: Array<{
         roles: ['admin', 'mlr', 'reviewer', 'superadmin', 'root_admin'],
         children: [
           { key: 'strategies-words', path: '/resources/words', label: '词库管理' },
-          { key: 'strategies-models', path: '/resources/models', label: '模型库管理', roles: ['root_admin'] },
-          { key: 'strategies-images', path: '/resources/images', label: '图片库管理', roles: ['root_admin'] },
           { key: 'strategies-replies', path: '/resources/replies', label: '代答库管理' },
-          { key: 'strategies-knowledge', path: '/resources/knowledge', label: '知识库管理', roles: ['root_admin'] },
         ],
       },
-      { kind: 'leaf', key: 'human-review-rules', path: '/human-review-rules', label: '人工审核策略', icon: <ClusterOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['root_admin'] },
     ],
   },
   {

@@ -30,7 +30,6 @@ import {
   ReloadOutlined,
   TableOutlined,
 } from '@ant-design/icons'
-import { Link } from 'react-router-dom'
 import dayjs, { type Dayjs } from 'dayjs'
 import { registeredModelsApi, providersApi } from '@/api/registered-models'
 import type {
@@ -388,13 +387,8 @@ const [items, setItems] = useState<RegisteredModelListItem[]>([])
       title: '名称',
       dataIndex: 'modelName',
       width: '14%',
-      render: (v: string, row) => (
-        <Link
-          to={`/resources/models/${row.modelId}`}
-          style={{ fontWeight: 500 }}
-        >
-          {v}
-        </Link>
+      render: (v: string) => (
+        <span style={{ fontWeight: 500 }}>{v}</span>
       ),
     },
     {
@@ -918,12 +912,7 @@ function ModelCardGrid({
                 styles={{ body: { padding: 16 } }}
                 title={
                   <Space size={4} wrap>
-                    <Link
-                      to={`/resources/models/${m.id}`}
-                      style={{ fontWeight: 500 }}
-                    >
-                      {m.name}
-                    </Link>
+                    <span style={{ fontWeight: 500 }}>{m.name}</span>
                     {categoryOpt && (
                       <Tag
                         color={categoryOpt.color}
