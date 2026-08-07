@@ -10,6 +10,7 @@ from app.api.v1 import (
     audit_points,
     auth,
     detection_rules,
+    desensitization,
     dispositions,
     health,
     knowledge_documents,
@@ -56,6 +57,7 @@ api_router.include_router(services.router)
 api_router.include_router(libraries.router)
 api_router.include_router(detection_rules.router)
 api_router.include_router(detection_rules.hr_router)
+api_router.include_router(desensitization.router)
 api_router.include_router(audit_items.router)
 api_router.include_router(audit_points.router)
 api_router.include_router(material_packages.router)

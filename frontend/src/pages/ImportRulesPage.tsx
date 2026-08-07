@@ -188,7 +188,7 @@ export default function ImportRulesPage() {
     [mediaType, tableText],
   )
 
-  if (initialized && (!user || user.role !== 'admin')) {
+  if (initialized && (!user || !['admin', 'superadmin', 'root_admin'].includes(user.role))) {
     return <Navigate to="/overview" replace />
   }
   if (!initialized) return null
