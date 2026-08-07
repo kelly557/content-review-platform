@@ -750,6 +750,7 @@ export default function ModelsAdminSmallPage() {
               inputText: testText,
               auditPoints,
               configuredTags,
+              modelId: selected.id,
             })
           : await runModelTest({
               modality: 'image',
@@ -758,6 +759,7 @@ export default function ModelsAdminSmallPage() {
                 new File([new Blob()], testImage?.name ?? 'mock.png'),
               auditPoints,
               configuredTags,
+              modelId: selected.id,
             })
       // 将测试结果写入当前模型的 testHistory
       setModels((prev) =>

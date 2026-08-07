@@ -22,6 +22,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1739,6 +1740,192 @@ async def validate_model(
     )
     await db.commit()
     return RegisteredModelValidateResult(ok=log.ok, log=log, status=model.status)
+
+
+# ──────────────────────────────────────────────────────────────
+# 小模型测试 & 接入校验（在线试调用）
+# ──────────────────────────────────────────────────────────────
+
+
+class ModelTestRequest(BaseModel):
+    modality: str = "text"
+    input_text: Optional[str] = None
+    audit_points: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ModelTestPointResult(BaseModel):
+    point: str
+    triggered: bool
+    confidence: float
+
+
+class ModelTestResponseModel(BaseModel):
+    decision: str  # pass | block
+    latency_ms: int
+    confidence: float
+    results: List[ModelTestPointResult]
+    raw_output: str
+
+
+@router.post("/{model_id}/test", response_model=ModelTestResponseModel)
+async def test_model(
+    model_id: int,
+    body: ModelTestRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_writer),
+) -> ModelTestResponseModel:
+    """在线试调用小模型: 用样本文本触发模型 endpoint, 返回命中结果.
+
+    MVP 实现: 若模型未挂载 Provider 或 endpoint 不可达, 返回 pass + 空结果
+    (不抛错, 避免阻断前端试调体验). 后续可接入真实协议适配.
+    """
+    model = await db.scalar(select(RegisteredModel).where(RegisteredModel.id == model_id))
+    if model is None or model.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "模型不存在")
+    _require_super_admin_for_small(model.kind, user)
+
+    started = time.time()
+    points = body.audit_points or []
+    results: List[ModelTestPointResult] = []
+    decision = "pass"
+    raw_segments = (body.input_text or "").splitlines()
+    triggered_labels: List[str] = []
+
+    # 仅文本模态尝试远程调用; 其他模态或无 provider 时降级为空结果
+    if body.modality == "text" and model.provider_id:
+        provider = await db.scalar(
+            select(RegisteredProvider).where(RegisteredProvider.id == model.provider_id)
+        )
+        token: str | None = None
+        if provider and provider.credential_id:
+            cr = await db.execute(
+                select(ResourceCredential.ciphertext).where(
+                    ResourceCredential.id == provider.credential_id
+                )
+            )
+            ciphertext = cr.scalar()
+            if ciphertext:
+                try:
+                    from app.services.credential_cipher import decrypt_token
+                    token = decrypt_token(ciphertext)
+                except Exception:
+                    token = None
+        if provider and provider.endpoint_url:
+            try:
+                payload: Dict[str, Any] = {"text": body.input_text or ""}
+                headers = {"Content-Type": "application/json"}
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        provider.endpoint_url, json=payload, headers=headers
+                    )
+                    raw = {
+                        "status": resp.status_code,
+                        "body": resp.text[:2000],
+                        "segments": [s for s in raw_segments if s.strip()],
+                    }
+                    # 约定: 200 且 body 含 hit/trigger 关键字视为 block
+                    if resp.status_code == 200:
+                        body_lower = resp.text.lower()
+                        if any(k in body_lower for k in ("hit", "trigger", "block", "risk")):
+                            decision = "block"
+            except Exception as exc:
+                raw = {"error": str(exc), "segments": [s for s in raw_segments if s.strip()]}
+        else:
+            raw = {"error": "no provider endpoint", "segments": [s for s in raw_segments if s.strip()]}
+    else:
+        raw = {
+            "modality": body.modality,
+            "segments": [s for s in raw_segments if s.strip()],
+            "note": "non-text modality or no provider; skipped remote call",
+        }
+
+    for p in points:
+        label = p.get("label") or p.get("name") or ""
+        triggered = decision == "block" and bool(label)
+        if triggered:
+            triggered_labels.append(label)
+        results.append(
+            ModelTestPointResult(
+                point=label,
+                triggered=triggered,
+                confidence=0.85 if triggered else 0.0,
+            )
+        )
+
+    import json
+
+    return ModelTestResponseModel(
+        decision=decision,
+        latency_ms=int((time.time() - started) * 1000),
+        confidence=0.85 if decision == "block" else 0.0,
+        results=results,
+        raw_output=json.dumps(
+            {"decision": decision, "triggered_points": triggered_labels, "raw": raw},
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+
+
+class AccessCheckRequest(BaseModel):
+    modality: str = "text"
+    endpoint_url: str
+    name: Optional[str] = None
+
+
+class AccessCheckResponseModel(BaseModel):
+    ok: bool
+    discovered_tags: List[str] = Field(default_factory=list)
+    latency_ms: int
+    message: Optional[str] = None
+
+
+@router.post("/access-check", response_model=AccessCheckResponseModel)
+async def access_check(
+    body: AccessCheckRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_writer),
+) -> AccessCheckResponseModel:
+    """接入校验: 探测 endpoint_url 连通性, 返回该模型支持的风险标签.
+
+    MVP: 对 endpoint 发 HEAD/GET, 连通即 ok=True; discoveredTags 暂返回
+    该 modality 的通用标签集 (前端可据此配置). 后续可读取模型 /labels 端点.
+    """
+    started = time.time()
+    if not body.endpoint_url:
+        return AccessCheckResponseModel(ok=False, latency_ms=0, message="endpoint_url 为空")
+
+    if body.modality not in ("text", "image"):
+        return AccessCheckResponseModel(
+            ok=False,
+            latency_ms=int((time.time() - started) * 1000),
+            message=f"当前模态「{body.modality}」暂不支持接入校验，请使用图片或文本模型",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(body.endpoint_url)
+        ok = resp.status_code < 500
+    except Exception as exc:
+        return AccessCheckResponseModel(
+            ok=False,
+            latency_ms=int((time.time() - started) * 1000),
+            message=f"连接失败：{exc}",
+        )
+
+    # 通用标签集（与前端 mock 标签对齐，便于配置）
+    tags = (
+        ["涉政敏感", "广告营销", "色情低俗", "暴恐违禁", "辱骂攻击", "虚假宣传", "青少年不良", "隐私信息"]
+        if body.modality == "text"
+        else ["涉政敏感人物", "广告商品识别", "色情低俗", "暴恐血腥", "青少年不良", "公众人物", "商标侵权", "违规水印"]
+    )
+    return AccessCheckResponseModel(
+        ok=ok,
+        discovered_tags=tags if ok else [],
+        latency_ms=int((time.time() - started) * 1000),
+    )
 
 
 @router.post("/{model_id}/archive", response_model=RegisteredModelOut)
