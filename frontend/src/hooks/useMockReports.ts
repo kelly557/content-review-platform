@@ -10,7 +10,7 @@ interface MockReportsState {
 }
 
 const DEFAULT_STATE: MockReportsState = {
-  enabled: true,
+  enabled: false,
   seed: 0xc1d2e3f4,
 }
 

@@ -4,6 +4,7 @@ import {
   DEFAULT_ANOMALY_THRESHOLDS,
   AnomalyThreshold,
 } from '@/lib/anomalyThresholds'
+import { alertRulesApi } from '@/api/alertRules'
 
 // v3 key — 形态从 v2 (critical_threshold / warn_threshold / extra_condition
 // 三个扁平字段) 改为 v3 (critical / warn 嵌套 + extra_conditions[]),
@@ -29,14 +30,34 @@ export function useAnomalyThresholds() {
     DEFAULT_ANOMALY_THRESHOLDS,
   )
 
-  // 读到的不是 v3 形态时, 立刻清掉 localStorage 并 fallback DEFAULT.
-  // 仅在挂载时跑一次.
   const [thresholds, setThresholds] = useState<AnomalyThreshold[]>(() => {
     if (!isV3Shape(rawThresholds)) {
       return DEFAULT_ANOMALY_THRESHOLDS
     }
     return rawThresholds
   })
+  const [loading, setLoading] = useState(false)
+
+  // 从后端加载规则（首次 + 手动 reload）
+  const reload = useCallback(async () => {
+    setLoading(true)
+    try {
+      const list = await alertRulesApi.list()
+      if (list.length > 0) {
+        setThresholds(list)
+        setRawThresholds(list)
+      }
+    } catch {
+      // 加载失败保留本地
+    } finally {
+      setLoading(false)
+    }
+  }, [setRawThresholds])
+
+  useEffect(() => {
+    reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!isV3Shape(rawThresholds)) {
@@ -67,11 +88,12 @@ export function useAnomalyThresholds() {
 
   const updateOne = useCallback(
     (code: string, patch: Partial<AnomalyThreshold>) => {
-      write(
-        thresholds.map((t) =>
-          t.rule_code === code ? { ...t, ...patch, source: 'custom' } : t,
-        ),
+      const next = thresholds.map((t) =>
+        t.rule_code === code ? { ...t, ...patch, source: 'custom' as const } : t,
       )
+      write(next)
+      // 异步同步到后端（失败静默，下次 reload 拉取最新）
+      alertRulesApi.update(code, patch).catch(() => {})
     },
     [write, thresholds],
   )
@@ -83,10 +105,11 @@ export function useAnomalyThresholds() {
       write(
         thresholds.map((t) =>
           t.rule_code === code
-            ? { ...t, enabled: !t.enabled, source: 'custom' }
+            ? { ...t, enabled: !t.enabled, source: 'custom' as const }
             : t,
         ),
       )
+      alertRulesApi.update(code, { enabled: !cur.enabled }).catch(() => {})
     },
     [write, thresholds],
   )
@@ -100,6 +123,7 @@ export function useAnomalyThresholds() {
         source: 'custom',
       }
       write([...thresholds, normalized])
+      alertRulesApi.create(normalized).catch(() => {})
     },
     [write, thresholds],
   )
@@ -107,6 +131,7 @@ export function useAnomalyThresholds() {
   const removeRule = useCallback(
     (code: string) => {
       write(thresholds.filter((t) => t.rule_code !== code))
+      alertRulesApi.delete(code).catch(() => {})
     },
     [write, thresholds],
   )
@@ -129,7 +154,7 @@ export function useAnomalyThresholds() {
     [thresholds],
   )
 
-  return { thresholds, updateOne, toggleEnabled, addRule, removeRule, setAll, reset, summary }
+  return { thresholds, updateOne, toggleEnabled, addRule, removeRule, setAll, reset, summary, reload, loading }
 }
 
 // 清理 v1 / v2 旧 key — 抽屉打开时主动调用一次.

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Empty, TreeSelect } from 'antd'
-import { MOCK_TAG_TREE } from '@/lib/riskPointMock'
+import { tagsApi } from '@/api/tags'
 import type { TagTreeNode } from '@/types/domain'
 
 interface Props {
@@ -57,16 +57,37 @@ export default function LibraryTagPicker({
   allowClear = true,
   selectableLevels = [1, 2],
 }: Props) {
-  // 2026-08-03: 资源库 / 词库 / 代答库 picker 改为纯前端 mock,
-  // 不再调用 tagsApi.tree()。MOCK_TAG_TREE 来源见 lib/riskPointMock.ts
-  // (5 L1 + 9 L2, 用户口径)。
-  const [tree] = useState<TagTreeNode[]>(MOCK_TAG_TREE)
+  // 从后端加载真实标签树
+  const [tree, setTree] = useState<TagTreeNode[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    tagsApi
+      .tree()
+      .then((t) => {
+        if (!cancelled) setTree(t)
+      })
+      .catch(() => {
+        // 加载失败留空树
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const treeData = useMemo(
     () => buildTree(tree, selectableLevels),
     [tree, selectableLevels],
   )
 
+  if (loading) {
+    return <TreeSelect loading placeholder="加载标签中…" style={{ width: '100%' }} />
+  }
   if (!treeData.length) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无标签" />
   }

@@ -34,6 +34,12 @@ from app.schemas.alert import (
     AlertRootCauseResponse,
     AlertRootCauseWindow,
 )
+from app.models.alert_rule import AlertRule
+from app.schemas.alert_rule import (
+    AlertRuleCreate,
+    AlertRuleOut,
+    AlertRuleUpdate,
+)
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -412,3 +418,143 @@ async def ack_alert(
     await db.commit()
     await db.refresh(alert)
     return _to_out(alert)
+
+
+# ---------------------------------------------------------------------------
+# Alert rules — 异常规则配置（前端 anomalyThresholds 持久化）
+# ---------------------------------------------------------------------------
+
+# 默认规则（与前端 DEFAULT_ANOMALY_THRESHOLDS 对齐），首次 GET 时 upsert
+_DEFAULT_ALERT_RULES = [
+    {
+        "rule_code": "reject_rate_high",
+        "label": "拒绝率异常",
+        "metric": "拒绝率",
+        "dimension": "审核模态",
+        "algorithm": "固定阈值",
+        "window_label": "近 1 小时",
+        "critical": {"operator": ">", "value": 5, "unit": "%"},
+        "warn": {"operator": ">", "value": 3, "unit": "%"},
+        "extra_conditions": [],
+        "description": "拒绝率过高",
+        "enabled": True,
+        "source": "default",
+    },
+    {
+        "rule_code": "high_risk_content_high",
+        "label": "账号高风险阻断异常",
+        "metric": "高风险阻断率",
+        "dimension": "审核模态",
+        "algorithm": "固定阈值",
+        "window_label": "近 1 小时",
+        "critical": {"operator": ">", "value": 10, "unit": "%"},
+        "warn": {"operator": ">", "value": 5, "unit": "%"},
+        "extra_conditions": [],
+        "description": "高风险内容占比过高",
+        "enabled": True,
+        "source": "default",
+    },
+    {
+        "rule_code": "high_risk_account_concentration",
+        "label": "高风险账号聚集异常",
+        "metric": "高风险账号数",
+        "dimension": "全局",
+        "algorithm": "固定阈值",
+        "window_label": "近 24 小时",
+        "critical": {"operator": ">", "value": 5, "unit": "count"},
+        "warn": {"operator": ">", "value": 3, "unit": "count"},
+        "extra_conditions": [{"field": "request_count", "operator": ">", "value": 10}],
+        "description": "同一账号高频高风险",
+        "enabled": True,
+        "source": "default",
+    },
+]
+
+
+@router.get("/rules", response_model=List[AlertRuleOut])
+async def list_alert_rules(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> List[AlertRuleOut]:
+    # 首次访问 upsert 默认规则
+    for d in _DEFAULT_ALERT_RULES:
+        existing = await db.execute(
+            select(AlertRule).where(AlertRule.rule_code == d["rule_code"])
+        )
+        if not existing.scalar_one_or_none():
+            db.add(AlertRule(**d))
+    await db.commit()
+    result = await db.execute(select(AlertRule).order_by(AlertRule.id.asc()))
+    return [AlertRuleOut.model_validate(r) for r in result.scalars()]
+
+
+@router.put("/rules/{rule_code}", response_model=AlertRuleOut)
+async def update_alert_rule(
+    rule_code: str,
+    body: AlertRuleUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("admin", "superadmin")),
+) -> AlertRuleOut:
+    r = await db.scalar(select(AlertRule).where(AlertRule.rule_code == rule_code))
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="规则不存在")
+    if body.label is not None:
+        r.label = body.label
+    if body.critical is not None:
+        r.critical = body.critical.model_dump()
+    if body.warn is not None:
+        r.warn = body.warn.model_dump()
+    if body.extra_conditions is not None:
+        r.extra_conditions = [c.model_dump() for c in body.extra_conditions]
+    if body.description is not None:
+        r.description = body.description
+    if body.enabled is not None:
+        r.enabled = body.enabled
+    await db.commit()
+    await db.refresh(r)
+    return AlertRuleOut.model_validate(r)
+
+
+@router.post("/rules", response_model=AlertRuleOut, status_code=status.HTTP_201_CREATED)
+async def create_alert_rule(
+    body: AlertRuleCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("admin", "superadmin")),
+) -> AlertRuleOut:
+    existing = await db.execute(
+        select(AlertRule).where(AlertRule.rule_code == body.rule_code)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="rule_code 已存在")
+    r = AlertRule(
+        rule_code=body.rule_code,
+        label=body.label,
+        metric=body.metric,
+        dimension=body.dimension or "全局",
+        algorithm=body.algorithm or "固定阈值",
+        window_label=body.window_label or "近 1 小时",
+        critical=body.critical.model_dump() if body.critical else None,
+        warn=body.warn.model_dump() if body.warn else None,
+        extra_conditions=[c.model_dump() for c in body.extra_conditions] if body.extra_conditions else [],
+        description=body.description,
+        enabled=body.enabled if body.enabled is not None else True,
+        source=body.source or "custom",
+    )
+    db.add(r)
+    await db.commit()
+    await db.refresh(r)
+    return AlertRuleOut.model_validate(r)
+
+
+@router.delete("/rules/{rule_code}", status_code=status.HTTP_200_OK)
+async def delete_alert_rule(
+    rule_code: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("admin", "superadmin")),
+) -> dict:
+    r = await db.scalar(select(AlertRule).where(AlertRule.rule_code == rule_code))
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="规则不存在")
+    await db.delete(r)
+    await db.commit()
+    return {"ok": True, "rule_code": rule_code}

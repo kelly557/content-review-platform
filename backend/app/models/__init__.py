@@ -51,3 +51,4 @@ from app.models.tenant import Tenant  # noqa: F401
 from app.models.api_key import ApiKey  # noqa: F401
 from app.models.role_permission import RolePermission  # noqa: F401
 from app.models.review_agent import ReviewAgent, ReviewAgentVersion  # noqa: F401
+from app.models.alert_rule import AlertRule  # noqa: F401
