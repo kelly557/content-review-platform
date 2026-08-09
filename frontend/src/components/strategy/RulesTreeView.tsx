@@ -567,6 +567,19 @@ const COL_TOTAL = 2
   // 每个父审核点下的三级 sub 列表 — 从后端拉取（真实数据）
   const [subsByPointId, setSubsByPointId] = useState<Record<number, SubAuditPoint[]>>({})
 
+  // dataSource 是渲染期现算的数组，每次 render 都是新引用，不能直接做依赖，
+  // 否则 effect 会在「拉取 → setState → 重渲染」间死循环（404 时会弹窗风暴）。
+  // 用「包+点 id 列表」的字符串 key 作为稳定依赖。
+  const pointIdsKey = useMemo(
+    () =>
+      dataSource
+        .filter((r) => r.kind === 'point')
+        .map((r) => `${r.point.package_code}:${r.point.id}`)
+        .join(','),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pointsByItem],
+  )
+
   useEffect(() => {
     const points = dataSource.filter((r) => r.kind === 'point')
     if (points.length === 0) {
@@ -607,7 +620,8 @@ const COL_TOTAL = 2
     return () => {
       alive = false
     }
-  }, [dataSource])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointIdsKey])
 
   const columns: TableColumnsType<FlatRowRecord> = [
     {

@@ -72,7 +72,12 @@ api.interceptors.response.use(
       } else if (status >= 500) {
         msg.error('服务异常，请稍后重试')
       } else if (detail) {
-        msg.error(detail)
+        // GET 请求的 404/409 等由调用方本地处理（空态/兜底），不全局弹窗，
+        // 避免列表轮询/级联拉取时因单条资源缺失造成弹窗风暴
+        const method = error.config?.method?.toUpperCase()
+        if (status !== 404 || method !== 'GET') {
+          msg.error(detail)
+        }
       }
     } else if (error.code === 'ECONNABORTED') {
       msg.error('请求超时')
