@@ -20,6 +20,7 @@ export interface ReviewAgent {
   draft_saved_at: string | null
   current_version: string | null
   created_at: string
+  updated_at: string | null
 }
 
 export interface ReviewAgentCreate {

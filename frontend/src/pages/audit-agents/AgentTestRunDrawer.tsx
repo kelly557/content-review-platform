@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  App,
   Button,
   Card,
   Drawer,
@@ -26,6 +27,8 @@ export interface AgentTestRunDrawerProps {
   open: boolean
   onClose: () => void
   modality: '文本' | '图像' | '图文'
+  /** 后端数值 id（字符串形式）。新建草稿态可能为空。 */
+  agentId?: string
   agentName: string
   points: { id: string; label: string }[]
   ready: boolean
@@ -35,10 +38,12 @@ export default function AgentTestRunDrawer({
   open,
   onClose,
   modality,
+  agentId,
   agentName,
   points,
   ready,
 }: AgentTestRunDrawerProps) {
+  const { message } = App.useApp()
   const [mode, setMode] = useState<'single' | 'multi'>('single')
   const [text, setText] = useState('')
   const [running, setRunning] = useState(false)
@@ -59,11 +64,18 @@ export default function AgentTestRunDrawer({
 
   const handleRun = async () => {
     if (!text.trim()) return
+    if (!agentId) {
+      message.warning('请先保存智能体后再测试')
+      return
+    }
     setRunning(true)
     setResult(null)
     try {
-      const r = await runTest({ modality, text, mode, points })
+      const r = await runTest({ agentId, modality, text, mode, points })
       setResult(r)
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '测试失败')
     } finally {
       setRunning(false)
     }

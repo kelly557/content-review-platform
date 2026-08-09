@@ -1,3 +1,5 @@
+import { reviewAgentsApi } from './reviewAgents'
+
 export type TestModality = 'single' | 'multi'
 
 export interface TestSample {
@@ -42,62 +44,32 @@ export function getPresetSamples(): TestSample[] {
   return PRESET_SAMPLES
 }
 
-function randomLatency() {
-  return Math.round(1500 + Math.random() * 1500)
-}
-
-function pickPoints<T>(points: T[], count: number): T[] {
-  if (count <= 0 || points.length === 0) return []
-  const shuffled = [...points].sort(() => Math.random() - 0.5)
-  return shuffled.slice(0, Math.min(count, points.length))
-}
-
-export function runTest(input: {
+/**
+ * 对指定智能体发起在线效果测试。
+ * agentId 为后端数值 id（字符串形式）。
+ */
+export async function runTest(input: {
+  agentId: string
   modality: '文本' | '图像' | '图文'
   text: string
   mode: TestModality
   points: { id: string; label: string }[]
 }): Promise<TestResult> {
-  const latencyMs = randomLatency()
-  const segments =
-    input.mode === 'multi'
-      ? input.text.split(/\n+/).map((s) => s.trim()).filter(Boolean)
-      : [input.text]
-
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const triggeredCount =
-        input.points.length > 0
-          ? Math.min(input.points.length, Math.max(0, Math.floor(Math.random() * 3)))
-          : 0
-      const triggered = input.points.map((p) => ({
-        pointId: p.id,
-        label: p.label,
-        triggered: false,
-      }))
-      const picked = pickPoints(input.points, triggeredCount)
-      for (const p of picked) {
-        const idx = triggered.findIndex((t) => t.pointId === p.id)
-        if (idx >= 0) triggered[idx].triggered = true
-      }
-
-      const decision: 'pass' | 'block' = triggeredCount > 0 ? 'block' : 'pass'
-      const confidence = Math.round((60 + Math.random() * 35) * 10) / 10
-
-      const raw = {
-        decision,
-        segments,
-        triggered_points: triggered.filter((t) => t.triggered).map((t) => t.label),
-        latency_ms: latencyMs,
-      }
-
-      resolve({
-        decision,
-        latencyMs,
-        confidence,
-        triggered,
-        rawOutput: JSON.stringify(raw, null, 2),
-      })
-    }, latencyMs)
+  const r = await reviewAgentsApi.test(Number(input.agentId), {
+    modality: input.modality,
+    text: input.text,
+    mode: input.mode,
+    points: input.points.map((p) => ({ id: p.id, label: p.label })),
   })
+  return {
+    decision: r.decision,
+    latencyMs: r.latencyMs,
+    confidence: r.confidence,
+    triggered: r.triggered.map((t) => ({
+      pointId: t.pointId,
+      label: t.label,
+      triggered: t.triggered,
+    })),
+    rawOutput: r.rawOutput,
+  }
 }

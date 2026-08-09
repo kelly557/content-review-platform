@@ -42,6 +42,7 @@ import {
   unpublishCurrent,
   type AgentVersionSnapshot,
 } from '@/api/agentVersions'
+import { reviewAgentsApi, type ReviewAgent } from '@/api/reviewAgents'
 import { useUiStore } from '@/store'
 
 const { Title, Text } = Typography
@@ -50,6 +51,8 @@ type AgentStatus = '已发布' | '未发布' | '已下线'
 type AgentModality = '文本' | '图像' | '图文' | '音频' | '视频'
 
 interface AgentRow {
+  /** 后端数值 id（API 调用用） */
+  id: number
   appId: string
   name: string
   status: AgentStatus
@@ -63,27 +66,34 @@ interface AgentRow {
   points: AgentPromptRow[]
 }
 
-const INITIAL_AGENTS: AgentRow[] = [
-  {
-    appId: 'txt_check_agent_01',
-    name: '测试',
-    status: '已发布',
-    modality: '文本',
-    onlineAt: '2026-07-20 10:59:36',
-    updatedAt: '2026-07-20 10:59:36',
-    version: 'v1',
-    publishedAt: '2026-07-20 10:59:36',
-    draftSavedAt: '2026-07-20 18:05:45',
-    modelId: 'text_audit_llm',
-    points: [
-      {
-        id: 'row-1',
-        label: '医药专项',
-        desc: 'OTC药物发布需要绑定claims和evidence',
-      },
-    ],
-  },
-]
+function _fmtTs(iso: string | null): string {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+function _toRow(a: ReviewAgent): AgentRow {
+  return {
+    id: a.id,
+    appId: a.app_id,
+    name: a.name,
+    status: a.status as AgentStatus,
+    modality: a.modality as AgentModality,
+    onlineAt: a.online_at ? _fmtTs(a.online_at) : '-',
+    updatedAt: _fmtTs(a.updated_at ?? null),
+    version: a.current_version,
+    publishedAt: a.published_at,
+    draftSavedAt: a.draft_saved_at,
+    modelId: a.model_id != null ? String(a.model_id) : '',
+    points: (a.points ?? []).map((p) => ({
+      id: p.id ?? '',
+      label: p.label,
+      desc: p.desc ?? '',
+    })),
+  }
+}
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
   已发布: 'green',
@@ -114,19 +124,24 @@ const STEPS = [
   },
 ]
 
-function pad(n: number) {
-  return String(n).padStart(2, '0')
-}
-
-function timestamp() {
-  const d = new Date()
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
-
 export default function ReviewAgentsPage() {
   const { message } = App.useApp()
   const setAppDimmed = useUiStore((s) => s.setAppDimmed)
-  const [agents, setAgents] = useState<AgentRow[]>(INITIAL_AGENTS)
+  const [agents, setAgents] = useState<AgentRow[]>([])
+
+  const reloadAgents = async () => {
+    try {
+      const list = await reviewAgentsApi.list()
+      setAgents(list.map(_toRow))
+    } catch {
+      message.error('加载审核智能体失败')
+    }
+  }
+
+  useEffect(() => {
+    void reloadAgents()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 两步创建
   const [step1Open, setStep1Open] = useState(false)
@@ -189,70 +204,61 @@ export default function ReviewAgentsPage() {
     setEditingAgent(null)
   }
 
-  const handleCreateOrUpdate = (payload: CreateAgentPayload) => {
+  const handleCreateOrUpdate = async (payload: CreateAgentPayload) => {
     setCreating(true)
-    const ts = timestamp()
-    if (editingAgent) {
-      setAgents((prev) =>
-        prev.map((a) =>
-          a.appId === editingAgent.appId
-            ? {
-                ...a,
-                name: payload.name,
-                modality: payload.modality as AgentModality,
-                modelId: payload.largeModel,
-                points: payload.rows,
-                updatedAt: ts,
-                draftSavedAt: ts,
-              }
-            : a,
-        ),
-      )
-      message.success('已更新审核智能体')
-    } else {
-      const sequence = String(agents.length + 1).padStart(2, '0')
-      const modalityPrefix = payload.modality === '文本' ? 'txt' : 'mm'
-      const appId = `${modalityPrefix}_check_agent_${sequence}`
-      const next: AgentRow = {
-        appId,
-        name: payload.name,
-        status: '未发布',
-        modality: payload.modality as AgentModality,
-        onlineAt: '-',
-        updatedAt: ts,
-        version: null,
-        publishedAt: null,
-        draftSavedAt: ts,
-        modelId: payload.largeModel,
-        points: payload.rows,
+    try {
+      if (editingAgent) {
+        await reviewAgentsApi.update(editingAgent.id, {
+          name: payload.name,
+          modality: payload.modality,
+          points: payload.rows.map((r) => ({ id: r.id, label: r.label, desc: r.desc })),
+        })
+        message.success('已更新审核智能体')
+      } else {
+        const sequence = String(agents.length + 1).padStart(2, '0')
+        const modalityPrefix = payload.modality === '文本' ? 'txt' : 'mm'
+        const appId = `${modalityPrefix}_check_agent_${sequence}_${Date.now().toString(36)}`
+        await reviewAgentsApi.create({
+          app_id: appId,
+          name: payload.name,
+          modality: payload.modality,
+          points: payload.rows.map((r) => ({ id: r.id, label: r.label, desc: r.desc })),
+        })
+        message.success('已创建审核智能体')
       }
-      setAgents((prev) => [next, ...prev])
-      message.success('已创建审核智能体')
+      await reloadAgents()
+      closeStep2()
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '操作失败')
+    } finally {
+      setCreating(false)
     }
-    setCreating(false)
-    closeStep2()
   }
 
-  const handleRename = (agent: AgentRow, newName: string) => {
+  const handleRename = async (agent: AgentRow, newName: string) => {
     const trimmed = newName.trim()
     if (!trimmed) {
       message.warning('名称不能为空')
       return false
     }
-    setAgents((prev) =>
-      prev.map((a) =>
-        a.appId === agent.appId ? { ...a, name: trimmed, updatedAt: timestamp() } : a,
-      ),
-    )
-    message.success('已更新名称')
-    return true
+    try {
+      await reviewAgentsApi.update(agent.id, { name: trimmed })
+      await reloadAgents()
+      message.success('已更新名称')
+      return true
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '重命名失败')
+      return false
+    }
   }
 
   const handlePublish = () => {
     setPublishOpen(true)
   }
 
-  const handleConfirmPublish = () => {
+  const handleConfirmPublish = async () => {
     const state = formRef.current?.getState()
     if (!state || !state.isValid) {
       setPublishOpen(false)
@@ -260,87 +266,63 @@ export default function ReviewAgentsPage() {
       return
     }
 
-    const ts = timestamp()
     const validRows = state.rows.filter((r) => r.label.trim() && r.desc.trim())
     const modality = (step1Payload?.modality ??
       (editingAgent && ['文本', '图文'].includes(editingAgent.modality)
         ? editingAgent.modality
-        : '文本')) as AgentVersionSnapshot['modality']   
+        : '文本')) as AgentVersionSnapshot['modality']
 
-    let targetAppId: string
-    let isNew = false
+    try {
+      let targetId: number
+      let isNew = false
 
-    if (editingAgent) {
-      targetAppId = editingAgent.appId
-      // 先把表单最新 state 落到编辑中的 agent
-      setAgents((prev) =>
-        prev.map((a) =>
-          a.appId === editingAgent.appId
-            ? {
-                ...a,
-                name: state.name,
-                modelId: state.modelId,
-                points: validRows,
-                modality: modality as AgentModality,
-                updatedAt: ts,
-                draftSavedAt: ts,
-              }
-            : a,
-        ),
-      )
-    } else {
-      // 新建态：先落表
-      const sequence = String(agents.length + 1).padStart(2, '0')
-      const modalityPrefix = modality === '文本' ? 'txt' : 'mm'
-      targetAppId = `${modalityPrefix}_check_agent_${sequence}`
-      isNew = true
-      const next: AgentRow = {
-        appId: targetAppId,
+      const pointsPayload = validRows.map((r) => ({ id: r.id, label: r.label, desc: r.desc }))
+
+      if (editingAgent) {
+        // 先保存最新配置
+        await reviewAgentsApi.update(editingAgent.id, {
+          name: state.name,
+          modality,
+          points: pointsPayload,
+        })
+        targetId = editingAgent.id
+      } else {
+        // 新建态：先创建
+        const sequence = String(agents.length + 1).padStart(2, '0')
+        const modalityPrefix = modality === '文本' ? 'txt' : 'mm'
+        const appId = `${modalityPrefix}_check_agent_${sequence}_${Date.now().toString(36)}`
+        const created = await reviewAgentsApi.create({
+          app_id: appId,
+          name: state.name,
+          modality,
+          points: pointsPayload,
+        })
+        targetId = created.id
+        isNew = true
+      }
+
+      const snapshot: AgentVersionSnapshot = {
+        modality,
         name: state.name,
-        status: '未发布',
-        modality: modality as AgentModality,
-        onlineAt: '-',
-        updatedAt: ts,
-        version: null,
-        publishedAt: null,
-        draftSavedAt: ts,
         modelId: state.modelId,
         points: validRows,
       }
-      setAgents((prev) => [next, ...prev])
-    }
+      const v = await publishVersion(String(targetId), snapshot)
 
-    const snapshot: AgentVersionSnapshot = {
-      modality,
-      name: state.name,
-      modelId: state.modelId,
-      points: validRows,
+      await reloadAgents()
+      setPublishOpen(false)
+      if (isNew) {
+        closeStep2()
+      }
+      message.success(
+        isNew
+          ? `已创建并发布，版本 ${v.version}`
+          : `已发布，版本 ${v.version}`,
+      )
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '发布失败')
     }
-    const v = publishVersion(targetAppId, snapshot)
-
-    setAgents((prev) =>
-      prev.map((a) =>
-        a.appId === targetAppId
-          ? {
-              ...a,
-              status: '已发布',
-              version: v.version,
-              publishedAt: v.publishedAt,
-              onlineAt: v.publishedAt,
-              updatedAt: timestamp(),
-            }
-          : a,
-      ),
-    )
-    setPublishOpen(false)
-    if (isNew) {
-      closeStep2()
-    }
-    message.success(
-      isNew
-        ? `已创建并发布，版本 ${v.version}`
-        : `已发布，版本 ${v.version}`,
-    )
   }
 
   const handleUnpublish = (agent: AgentRow) => {
@@ -348,53 +330,40 @@ export default function ReviewAgentsPage() {
     setUnpublishOpen(true)
   }
 
-  const handleConfirmUnpublish = () => {
+  const handleConfirmUnpublish = async () => {
     if (!editingAgent) {
       setUnpublishOpen(false)
       return
     }
-    unpublishCurrent(editingAgent.appId)
-    const ts = timestamp()
-    setAgents((prev) =>
-      prev.map((a) =>
-        a.appId === editingAgent.appId
-          ? {
-              ...a,
-              status: '未发布',
-              version: null,
-              publishedAt: null,
-              onlineAt: '-',
-              updatedAt: ts,
-            }
-          : a,
-      ),
-    )
-    setUnpublishOpen(false)
-    message.success('已下线')
+    try {
+      await unpublishCurrent(String(editingAgent.id))
+      await reloadAgents()
+      setUnpublishOpen(false)
+      message.success('已下线')
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '下线失败')
+    }
   }
 
-  const handleRollback = (snapshot: AgentVersionSnapshot) => {
+  const handleRollback = async (snapshot: AgentVersionSnapshot) => {
     if (!editingAgent) return
-    setAgents((prev) =>
-      prev.map((a) =>
-        a.appId === editingAgent.appId
-          ? {
-              ...a,
-              modality: snapshot.modality as AgentModality,
-              name: snapshot.name,
-              modelId: snapshot.modelId,
-              points: snapshot.points,
-              draftSavedAt: null,
-              updatedAt: timestamp(),
-            }
-          : a,
-      ),
-    )
-    message.success('已恢复到此版本配置，请检查后保存或发布')
+    try {
+      await reviewAgentsApi.update(editingAgent.id, {
+        name: snapshot.name,
+        modality: snapshot.modality,
+        points: snapshot.points.map((p) => ({ id: p.id, label: p.label, desc: p.desc })),
+      })
+      await reloadAgents()
+      message.success('已恢复到此版本配置，请检查后保存或发布')
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? '恢复失败')
+    }
   }
 
   const handleSaveDraft = (payload: CreateAgentPayload) => {
-    handleCreateOrUpdate(payload)
+    void handleCreateOrUpdate(payload)
   }
 
   // canPublish 实时同步自 formRef；表单 useImperativeHandle 已提供 getState().isValid
@@ -439,10 +408,10 @@ export default function ReviewAgentsPage() {
             trigger="click"
             placement="topLeft"
             destroyTooltipOnHide
-            content={
+              content={
               <RenamePopoverContent
                 initial={v}
-                onConfirm={(val) => handleRename(row, val)}
+                onConfirm={(val) => { void handleRename(row, val) }}
               />
             }
           >
@@ -681,7 +650,7 @@ export default function ReviewAgentsPage() {
       {editingAgent && (
         <AgentHistoryModal
           open={historyOpen}
-          agentId={editingAgent.appId}
+          agentId={String(editingAgent.id)}
           onClose={() => setHistoryOpen(false)}
           onRollback={handleRollback}
         />
@@ -692,10 +661,11 @@ export default function ReviewAgentsPage() {
         open={testOpen}
         onClose={() => setTestOpen(false)}
         modality={testModality}
+        agentId={editingAgent ? String(editingAgent.id) : undefined}
         agentName={testAgentName}
         points={testPoints}
-          ready={canPublish}
-        />
+        ready={canPublish}
+      />
 
       {/* 发布提示弹窗 */}
       <PublishAgentModal
@@ -721,7 +691,7 @@ function RenamePopoverContent({
   onConfirm,
 }: {
   initial: string
-  onConfirm: (value: string) => boolean
+  onConfirm: (value: string) => void
 }) {
   const [val, setVal] = useState(initial)
   useEffect(() => {

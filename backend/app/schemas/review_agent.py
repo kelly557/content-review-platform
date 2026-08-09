@@ -41,6 +41,7 @@ class ReviewAgentOut(ORMBase):
     draft_saved_at: Optional[datetime] = None
     current_version: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 class AgentVersionSnapshot(BaseModel):

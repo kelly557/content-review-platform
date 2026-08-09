@@ -1,3 +1,5 @@
+import { reviewAgentsApi, type ReviewAgentVersion } from './reviewAgents'
+
 export interface AgentVersionSnapshot {
   modality: '文本' | '图像' | '图文'
   name: string
@@ -15,91 +17,38 @@ export interface AgentVersion {
   snapshot: AgentVersionSnapshot
 }
 
-export interface AgentVersionStore {
-  versions: Record<string, AgentVersion[]>
-}
-
-const STORAGE_KEY = 'adreview.agent.versions'
-
-function readStore(): AgentVersionStore {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { versions: {} }
-    const parsed = JSON.parse(raw) as AgentVersionStore
-    return parsed && typeof parsed === 'object' && parsed.versions ? parsed : { versions: {} }
-  } catch {
-    return { versions: {} }
+function _map(v: ReviewAgentVersion): AgentVersion {
+  return {
+    id: String(v.id),
+    agentId: String(v.agent_id),
+    version: v.version,
+    status: 'published',
+    isCurrent: v.is_current,
+    publishedAt: v.published_at,
+    snapshot: (v.snapshot as AgentVersionSnapshot) ?? {
+      modality: '文本',
+      name: '',
+      modelId: '',
+      points: [],
+    },
   }
 }
 
-function writeStore(store: AgentVersionStore) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store))
-  } catch {
-    // ignore quota errors in prototype
-  }
+// agentId 为后端数值 id 的字符串形式
+export async function listVersions(agentId: string): Promise<AgentVersion[]> {
+  const list = await reviewAgentsApi.listVersions(Number(agentId))
+  return list.map(_map).sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1))
 }
 
-function normalizeVersions(list: AgentVersion[]): AgentVersion[] {
-  if (list.length === 0) return list
-  const needsNormalize = list.some((v) => !v.version.startsWith('v'))
-  if (!needsNormalize) return list
-  const sorted = [...list].sort((a, b) => (a.publishedAt < b.publishedAt ? -1 : 1))
-  return sorted.map((v, idx) => ({ ...v, version: `v${idx + 1}` }))
-}
-
-export function listVersions(agentId: string): AgentVersion[] {
-  const store = readStore()
-  const raw = store.versions[agentId] ?? []
-  const normalized = normalizeVersions(raw)
-  if (normalized !== raw) {
-    store.versions[agentId] = normalized
-    writeStore(store)
-  }
-  return [...normalized].sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1))
-}
-
-export function publishVersion(
+export async function publishVersion(
   agentId: string,
   snapshot: AgentVersionSnapshot,
-): AgentVersion {
-  const store = readStore()
-  const raw = store.versions[agentId] ?? []
-  const list = normalizeVersions(raw)
-  const ts = new Date()
-  const nextSeq = list.length + 1
-  const newVersion: AgentVersion = {
-    id: `v-${nextSeq}-${Math.random().toString(36).slice(2, 6)}`,
-    agentId,
-    version: `v${nextSeq}`,
-    status: 'published',
-    isCurrent: false,
-    publishedAt: formatDate(ts),
-    snapshot,
-  }
-  const next = list.map((v) => ({ ...v, isCurrent: false }))
-  next.push(newVersion)
-  newVersion.isCurrent = true
-  store.versions[agentId] = next
-  writeStore(store)
-  return newVersion
+): Promise<AgentVersion> {
+  const v = await reviewAgentsApi.publish(Number(agentId), snapshot)
+  return _map(v)
 }
 
-export function unpublishCurrent(agentId: string): AgentVersion | null {
-  const store = readStore()
-  const list = store.versions[agentId] ?? []
-  if (list.length === 0) return null
-  const current = list.find((v) => v.isCurrent) ?? null
-  const next = list.map((v) => ({ ...v, isCurrent: false }))
-  store.versions[agentId] = next
-  writeStore(store)
-  return current
-}
-
-function pad(n: number) {
-  return String(n).padStart(2, '0')
-}
-
-function formatDate(d: Date) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+export async function unpublishCurrent(agentId: string): Promise<AgentVersion | null> {
+  const v = await reviewAgentsApi.unpublish(Number(agentId))
+  return _map(v)
 }

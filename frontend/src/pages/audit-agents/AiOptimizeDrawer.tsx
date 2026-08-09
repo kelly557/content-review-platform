@@ -21,10 +21,11 @@ import {
 } from '@ant-design/icons'
 import AgentParsePanel from './AgentParsePanel'
 import AgentFileViewerModal from './AgentFileViewerModal'
+import { reviewAgentsApi } from '@/api/reviewAgents'
 import {
   downloadFile,
   genDocId,
-  runMockParse,
+  runParseDoc,
   validateFile,
   type AgentParseDocument,
 } from '@/api/agentParseDocs'
@@ -56,58 +57,6 @@ const MAX_SAMPLES_PER_KIND = 50
 const MAX_SAMPLE_LINE_LEN = 600
 const DIRECTION_PLACEHOLDER =
   '请简要概括待检测业务场景、检测目标以及检测范围。如:检测信贷营销场景中,AI客服/机器人对申请中用户做出的利率预估、额度承诺、征信误导等违规内容'
-
-function buildMockResult(
-  direction: string,
-  original: string,
-  docsContext: string,
-): AiOptimizeResult {
-  void direction
-  void docsContext
-  return {
-    original,
-    issues: [
-      {
-        label: '模糊且不合规',
-        text:
-          '未锚定《药品管理法》具体条款,尤其是第八章"药品价格和广告"——这是广告合规的核心依据。法条明确要求药品广告必须显著标明"请按药品说明书或者在药师指导下购买和使用"(第82条),且不得含有表示功效、安全性的断言或保证(第87条)。',
-      },
-      {
-        label: '混淆概念',
-        text:
-          '"claims and evidence"是科研/循证医学术语,非法使用语境;《药品管理法》中对应的是"适应症、功能主治、用法用量"等核准内容(第49条),以及禁止"暗示、示疗效""利用患者形象作证明"等行为(第87条)。OTC广告无需"绑定证据",但必须严格限定于注册说明书范围,且须标注忠告语。',
-      },
-    ],
-    checklist: [
-      '是否为OTC药品(需查验"OTC"标识或国药准字Z/H后续+非处方药标识)',
-      '是否出现未经批准的适应症、功效宣称(如"根治""速效""无副作用")',
-      '是否缺失法定忠告语(第82条强制要求)',
-      '是否使用患者/专家形象、比较性用语、绝对化用语(第87条禁止情形)',
-    ],
-    scenarioNote:
-      '任务背景是"医药广告引流检测",即识别以广告形式诱导用户跳转购买的行为。违规本质是"通过违规话术促成交易转化",而非单纯内容不完整。因此描述必须聚焦引流动作中的违法要素:如夸大功效诱导点击、隐瞒禁忌诱导购买、未标忠告语即引导下单等。',
-    cases: {
-      note: '案例为空("违规样本:\n正常样本:"),但结合任务背景可推知典型违规模式:',
-      examples: [
-        {
-          kind: 'compliant',
-          text: '"xx牌蚊虫抑颗粒(OTC),用于风热感冒引起的发热、咽喉肿痛。请按说明书或药师指导使用。"',
-        },
-        {
-          kind: 'violation',
-          text: '"三天退烧!儿童服用零副作用!点击立即抢购→"(含绝对化用语+安全性断言+无禁忌语+诱导性CTA)',
-        },
-      ],
-    },
-    direction:
-      '将标签重定义为明确指向OTC药品广告中违反《药品管理法》第八章第82、87条的具体引流违规行为,强调"法定忠告语缺失""功效断言""诱导性话术"三大硬性红线,剔除"evidence"等无关术语,紧扣"引流"这一动作场景。',
-    finalTag: {
-      name: '医药_OTC引流违规',
-      description:
-        'OTC药品广告中存在功效/安全性断言(如"根治""无副作用")、绝对化用语(如"第一""唯一"),且未显著标注"请按说明书或在药师指导下购买和使用"忠告语,并含"点击抢购""立即领取"等引流词',
-    },
-  }
-}
 
 function resultToPlainText(r: AiOptimizeResult): string {
   const lines: string[] = []
@@ -191,7 +140,7 @@ export default function AiOptimizeDrawer({
     setDocuments((prev) => [...valid, ...prev])
 
     valid.forEach((doc) => {
-      runMockParse(doc, {
+      runParseDoc(doc, {
         onProgress: (p) => updateDoc(doc.id, { progress: p }),
       })
         .then(async (r) => {
@@ -224,7 +173,7 @@ export default function AiOptimizeDrawer({
     const doc = documents.find((d) => d.id === docId)
     if (!doc) return
     updateDoc(docId, { status: 'parsing', progress: 0, message: undefined, startedAt: Date.now() })
-    runMockParse(doc, {
+    runParseDoc(doc, {
       onProgress: (p) => updateDoc(docId, { progress: p }),
     })
       .then(async (r) => {
@@ -269,10 +218,10 @@ export default function AiOptimizeDrawer({
     setViolationSamples('')
     setDocuments([])
     setResult(null)
-    message.info('已重置(原型)')
+    message.info('已重置')
   }
 
-  const handleOptimize = () => {
+  const handleOptimize = async () => {
     if (!direction.trim()) {
       message.warning('请填写「补充优化方向」')
       return
@@ -282,16 +231,39 @@ export default function AiOptimizeDrawer({
     const docsContext = successDocs
       .map((d) => `[${d.name}]\n${(d.preview ?? '').slice(0, 1000)}`)
       .join('\n\n')
-    window.setTimeout(() => {
-      const next = buildMockResult(direction.trim(), originalLabel, docsContext)
-      setResult(next)
-      setGenerating(false)
+    try {
+      const next = await reviewAgentsApi.aiOptimize({
+        direction: direction.trim(),
+        original_label: originalLabel,
+        docs_context: docsContext || undefined,
+      })
+      // 后端返回结构与 AiOptimizeResult 对齐；cases.kind 需收窄为字面量
+      setResult({
+        original: next.original,
+        issues: next.issues,
+        checklist: next.checklist,
+        scenarioNote: next.scenarioNote,
+        cases: {
+          note: next.cases?.note ?? '',
+          examples: (next.cases?.examples ?? []).map((e) => ({
+            kind: (e.kind === 'compliant' ? 'compliant' : 'violation') as 'compliant' | 'violation',
+            text: e.text,
+          })),
+        },
+        direction: next.direction,
+        finalTag: next.finalTag,
+      })
       message.success(
         successDocs.length > 0
-          ? `已生成 AI 优化结果(原型,引用 ${successDocs.length} 份解析文档)`
-          : '已生成 AI 优化结果(原型)',
+          ? `已生成 AI 优化结果（引用 ${successDocs.length} 份解析文档）`
+          : '已生成 AI 优化结果',
       )
-    }, 800)
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail ?? 'AI 优化失败')
+    } finally {
+      setGenerating(false)
+    }
   }
 
   const handleCopy = async () => {

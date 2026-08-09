@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Card, Descriptions, Drawer, Grid, Popconfirm, Space, Tag, Timeline, Typography } from 'antd'
 import { RollbackOutlined } from '@ant-design/icons'
 import { listVersions, type AgentVersion, type AgentVersionSnapshot } from '@/api/agentVersions'
@@ -73,7 +73,27 @@ export default function AgentHistoryModal({
   onClose,
   onRollback,
 }: AgentHistoryModalProps) {
-  const versions = useMemo(() => (open ? listVersions(agentId) : []), [open, agentId])
+  const [versions, setVersions] = useState<AgentVersion[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    setLoading(true)
+    listVersions(agentId)
+      .then((v) => {
+        if (alive) setVersions(v)
+      })
+      .catch(() => {
+        if (alive) setVersions([])
+      })
+      .finally(() => {
+        if (alive) setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [open, agentId])
   const screens = useBreakpoint()
   const width = screens.md ? 520 : '100vw'
 
@@ -87,7 +107,11 @@ export default function AgentHistoryModal({
       mask={false}
       destroyOnHidden
     >
-      {versions.length === 0 ? (
+      {loading ? (
+        <div style={{ textAlign: 'center', color: '#94A3B8', padding: '40px 0' }}>
+          加载中…
+        </div>
+      ) : versions.length === 0 ? (
         <div style={{ textAlign: 'center', color: '#94A3B8', padding: '40px 0' }}>
           暂无历史版本，发布后会生成快照。
         </div>

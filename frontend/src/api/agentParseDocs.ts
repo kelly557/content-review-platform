@@ -1,4 +1,5 @@
 import { App } from 'antd'
+import { api } from './client'
 
 export type AgentParseStatus = 'pending' | 'parsing' | 'success' | 'failed'
 
@@ -70,46 +71,44 @@ interface RunParseOptions {
   onProgress?: (progress: number) => void
 }
 
-export function runMockParse(
+interface ParseDocApiResponse {
+  points: { label: string; desc: string }[]
+  source_info: string
+  preview: string
+  char_count: number
+}
+
+/**
+ * 调用后端文档解析端点，返回解析出的文本预览与审核点。
+ * onProgress 仅在开始/结束回调（后端一次性返回，无中间进度）。
+ */
+export async function runParseDoc(
   doc: AgentParseDocument,
   opts: RunParseOptions = {},
 ): Promise<Pick<AgentParseDocument, 'status' | 'preview' | 'charCount' | 'durationMs' | 'message'>> {
-  return new Promise((resolve) => {
-    const duration = 2500
-    const startedAt = Date.now()
-    const tick = window.setInterval(() => {
-      const elapsed = Date.now() - startedAt
-      const progress = Math.min(95, Math.round((elapsed / duration) * 100))
-      opts.onProgress?.(progress)
-      if (elapsed >= duration) {
-        window.clearInterval(tick)
-      }
-    }, 200)
-
-    window.setTimeout(async () => {
-      window.clearInterval(tick)
-      opts.onProgress?.(100)
-      const random = Math.random()
-      const failed = random < 0.2
-      if (failed) {
-        const reasons = ['文件格式不支持', '解析超时,请稍后重试']
-        const reason = reasons[Math.floor(Math.random() * reasons.length)]
-        resolve({
-          status: 'failed',
-          message: reason,
-          durationMs: Date.now() - startedAt,
-        })
-        return
-      }
-      const preview = await readTextPreview(doc.file)
-      resolve({
-        status: 'success',
-        preview,
-        charCount: preview.length,
-        durationMs: Date.now() - startedAt,
-      })
-    }, duration)
-  })
+  const startedAt = Date.now()
+  opts.onProgress?.(30)
+  const fd = new FormData()
+  fd.append('file', doc.file)
+  try {
+    const { data } = await api.post<ParseDocApiResponse>('/review-agents/parse-doc', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    opts.onProgress?.(100)
+    return {
+      status: 'success',
+      preview: data.preview || (await readTextPreview(doc.file)),
+      charCount: data.char_count,
+      durationMs: Date.now() - startedAt,
+    }
+  } catch (e) {
+    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+    return {
+      status: 'failed',
+      message: detail ?? '解析失败，请稍后重试',
+      durationMs: Date.now() - startedAt,
+    }
+  }
 }
 
 export function useParseMessage() {
