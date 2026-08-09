@@ -261,6 +261,8 @@ export default function StrategyTypeTabs({
       ),
       children: (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {/* 仅活动 tab 挂载规则树（含数据拉取），避免多棵树同时加载卡顿。
+              切 tab 时 RulesTreeView 内部缓存重拉，持久状态在父级不丢。 */}
           {/* 语音 tab：AudioRuleCard（声纹 / 音频质量 + 单选） */}
           {cat.key === 'audio' &&
             onVoiceRuleModeChange &&
@@ -315,7 +317,7 @@ export default function StrategyTypeTabs({
               （语音审转写文本→文本树；文档文本段→文本树、图片段→图片树；
                视频画面段→图片树、语音段→文本树），保证处处三级标签。
               mediaKey 显式传 tab 自身 key，pointOverrides/pointMap 不与文/图 tab 串数据。 */}
-          {cat.key === 'audio' && showAudioRulesTree && (
+          {cat.key === 'audio' && activeCategory === 'audio' && showAudioRulesTree && (
             <RulesTreeView
               key={`${cat.key}-${voiceRuleMode}`}
               packageCode={PACKAGE_BY_MEDIA.text}
@@ -335,7 +337,7 @@ export default function StrategyTypeTabs({
               intensity={intensity}
             />
           )}
-          {cat.key === 'doc' && docSegments && docSegments[0].mode === 'independent' && (
+          {cat.key === 'doc' && activeCategory === 'doc' && docSegments && docSegments[0].mode === 'independent' && (
             <RulesTreeView
               key={`${cat.key}-text`}
               packageCode={PACKAGE_BY_MEDIA.text}
@@ -355,7 +357,7 @@ export default function StrategyTypeTabs({
               intensity={intensity}
             />
           )}
-          {cat.key === 'doc' && docSegments && docSegments[1].mode === 'independent' && (
+          {cat.key === 'doc' && activeCategory === 'doc' && docSegments && docSegments[1].mode === 'independent' && (
             <RulesTreeView
               key={`${cat.key}-image`}
               packageCode={PACKAGE_BY_MEDIA.image}
@@ -375,7 +377,7 @@ export default function StrategyTypeTabs({
               intensity={intensity}
             />
           )}
-          {cat.key === 'video' && videoSegments && videoSegments[0].mode === 'independent' && (
+          {cat.key === 'video' && activeCategory === 'video' && videoSegments && videoSegments[0].mode === 'independent' && (
             <RulesTreeView
               key={`${cat.key}-frame`}
               packageCode={PACKAGE_BY_MEDIA.image}
@@ -395,7 +397,7 @@ export default function StrategyTypeTabs({
               intensity={intensity}
             />
           )}
-          {cat.key === 'video' && videoSegments && videoSegments[1].mode === 'independent' && (
+          {cat.key === 'video' && activeCategory === 'video' && videoSegments && videoSegments[1].mode === 'independent' && (
             <RulesTreeView
               key={`${cat.key}-audio`}
               packageCode={PACKAGE_BY_MEDIA.text}
@@ -415,8 +417,8 @@ export default function StrategyTypeTabs({
               intensity={intensity}
             />
           )}
-          {/* 普通 tab（非合成类）的规则树 */}
-          {cat.key !== 'audio' && cat.key !== 'doc' && cat.key !== 'video' && (
+          {/* 普通 tab（非合成类）的规则树 — 仅活动 tab 挂载 */}
+          {cat.key !== 'audio' && cat.key !== 'doc' && cat.key !== 'video' && activeCategory === cat.key && (
             <>
               {/* 配置词库快捷栏：仅文本 tab 时,在规则树之上(作为右栏顶部)。
                   选择状态仅本地,刷新即丢。 */}

@@ -590,39 +590,49 @@ const COL_TOTAL = 2
 
   useEffect(() => {
     const points = dataSource.filter((r) => r.kind === 'point')
-    if (points.length === 0) {
+    const pkg = points[0]?.point.package_code
+    if (points.length === 0 || !pkg) {
       setSubsByPointId({})
       return
     }
+    // 按 point.id 建索引，用于给 sub 回填 l1/l2 标签
+    const pointCtx: Record<number, { l1: string; l2: string }> = {}
+    for (const r of points) {
+      pointCtx[r.point.id] = {
+        l1: r.item.name_cn,
+        l2: r.point.label_cn || r.point.label,
+      }
+    }
     let alive = true
     const load = async () => {
-      const map: Record<number, SubAuditPoint[]> = {}
-      await Promise.all(
-        points.map(async (r) => {
-          try {
-            const subs = await auditPointsApi.listSubPoints(
-              r.point.package_code,
-              r.point.id,
-            )
-            map[r.point.id] = subs.map((s) => ({
-              id: s.id,
-              point_id: s.id,
-              l1_label: r.item.name_cn,
-              l2_label: r.point.label_cn || r.point.label,
-              l3_label: s.label_cn || s.label,
-              label_cn: s.label_cn || s.label,
-              low_threshold: 0,
-              medium_threshold: s.medium_threshold,
-              high_threshold: s.high_threshold,
-              is_enabled: s.is_enabled,
-              sort_order: s.sort_order,
-            }))
-          } catch {
-            map[r.point.id] = []
-          }
-        }),
-      )
-      if (alive) setSubsByPointId(map)
+      // 一次拉全包 sub-审核点，按 parent_point_id 分组（替代逐点 N+1 拉取）
+      try {
+        const allSubs = await auditPointsApi.listAllSubPoints(pkg)
+        if (!alive) return
+        const map: Record<number, SubAuditPoint[]> = {}
+        for (const s of allSubs) {
+          const pid = s.parent_point_id
+          if (pid == null) continue
+          const ctx = pointCtx[pid]
+          if (!ctx) continue // 不属于当前展示的点，跳过
+          ;(map[pid] ??= []).push({
+            id: s.id,
+            point_id: s.id,
+            l1_label: ctx.l1,
+            l2_label: ctx.l2,
+            l3_label: s.label_cn || s.label,
+            label_cn: s.label_cn || s.label,
+            low_threshold: 0,
+            medium_threshold: s.medium_threshold,
+            high_threshold: s.high_threshold,
+            is_enabled: s.is_enabled,
+            sort_order: s.sort_order,
+          })
+        }
+        if (alive) setSubsByPointId(map)
+      } catch {
+        if (alive) setSubsByPointId({})
+      }
     }
     void load()
     return () => {

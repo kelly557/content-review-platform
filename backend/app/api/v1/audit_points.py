@@ -186,6 +186,40 @@ async def list_sub_points(
     return [AuditPointOut.model_validate(serialize_audit_point(r)) for r in rows]
 
 
+@router.get("/{code}/sub-points", response_model=list[AuditPointOut])
+async def list_all_sub_points(
+    code: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> list[AuditPointOut]:
+    """批量返回某包全部三级 sub-审核点（parent_point_id 非空）。
+
+    RulesTreeView 一次拉全包 subs 再按 parent_point_id 分组，替代逐点
+    ``/points/{id}/sub-points`` 的 N+1 拉取（文本包 230 次 → 1 次）。
+    """
+    from sqlalchemy.orm import selectinload
+
+    await _ensure_package(db, code)
+    stmt = (
+        select(AuditPoint)
+        .where(
+            AuditPoint.package_code == code,
+            AuditPoint.parent_point_id.isnot(None),
+        )
+        .order_by(
+            AuditPoint.parent_point_id.asc(),
+            AuditPoint.sort_order.asc(),
+            AuditPoint.id.asc(),
+        )
+        .options(
+            selectinload(AuditPoint.linked_library_links),
+            selectinload(AuditPoint.linked_libraries),
+        )
+    )
+    rows = list((await db.execute(stmt)).scalars())
+    return [AuditPointOut.model_validate(serialize_audit_point(r)) for r in rows]
+
+
 @router.post("/{code}/points/{point_id}/sub-points", response_model=AuditPointOut, status_code=status.HTTP_201_CREATED)
 async def create_sub_point(
     code: str,

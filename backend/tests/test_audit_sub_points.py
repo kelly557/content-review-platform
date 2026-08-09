@@ -87,3 +87,37 @@ async def test_sub_point_404_for_missing_parent(client, db_session):
     await _login(client, "admin@adreview.example.com", "admin123")
     r = await client.get("/api/v1/packages/test_pkg_sub_c/points/999999/sub-points")
     assert r.status_code == 404
+
+
+async def test_list_all_sub_points_batch(client, db_session):
+    """GET /packages/{code}/sub-points 一次返回全包三级 sub（替代逐点 N+1）。"""
+    from app.models.audit_point import AuditPoint
+
+    item_id, point_id = await _seed(db_session, "test_pkg_sub_batch")
+    await _login(client, "admin@adreview.example.com", "admin123")
+
+    # 造 2 个 sub
+    for i in range(2):
+        r = await client.post(
+            "/api/v1/packages/test_pkg_sub_batch/points/" f"{point_id}/sub-points",
+            json={"item_id": item_id, "label_cn": f"sub{i}"},
+        )
+        assert r.status_code == 201, r.text
+
+    # 批量端点：返回该包全部 sub（parent_point_id 非空）
+    r = await client.get("/api/v1/packages/test_pkg_sub_batch/sub-points")
+    assert r.status_code == 200, r.text
+    subs = r.json()
+    assert len(subs) == 2
+    assert all(s["parent_point_id"] == point_id for s in subs)
+    # 顶级点不在批量结果里
+    assert all(s["id"] != point_id for s in subs)
+
+
+async def test_list_all_sub_points_empty(client, db_session):
+    """无 sub 的包返回空列表。"""
+    await _seed(db_session, "test_pkg_sub_empty")
+    await _login(client, "admin@adreview.example.com", "admin123")
+    r = await client.get("/api/v1/packages/test_pkg_sub_empty/sub-points")
+    assert r.status_code == 200
+    assert r.json() == []

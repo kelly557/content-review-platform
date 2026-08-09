@@ -72,6 +72,12 @@ export const auditPointsApi = {
       .get<AuditPoint[]>(`/packages/${packageCode}/points/${pointId}/sub-points`)
       .then((r) => r.data)
   },
+  /** 批量拉取某包全部三级 sub-审核点（按 parent_point_id 分组用） */
+  listAllSubPoints(packageCode: string) {
+    return api
+      .get<AuditPoint[]>(`/packages/${packageCode}/sub-points`)
+      .then((r) => r.data)
+  },
   /** 在父审核点下创建三级 sub 审核点 */
   createSubPoint(packageCode: string, pointId: number, payload: AuditPointCreate) {
     return api

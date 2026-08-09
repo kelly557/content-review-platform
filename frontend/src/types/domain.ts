@@ -1569,6 +1569,8 @@ export interface AuditPoint {
   source_quote: string | null
   /** 结构化文件行号 */
   source_line_no: number | null
+  /** 三级 sub-审核点的父审核点 id（NULL = 顶级审核点） */
+  parent_point_id?: number | null
   created_at: string
   updated_at: string | null
 }
