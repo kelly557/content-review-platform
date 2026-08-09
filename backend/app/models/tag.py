@@ -88,6 +88,9 @@ TAG_LEVEL_LEAF = 3    # 叶子级（三级，必绑模型）
 
 VALID_TAG_LEVELS = (TAG_LEVEL_TOP, TAG_LEVEL_MID, TAG_LEVEL_LEAF)
 
+# 适用模态（仅三级标签使用；一/二级为 NULL 表示跨模态共享节点）
+VALID_TAG_MODALITIES = ("text", "image", "audio", "video")
+
 
 class Tag(Base):
     __tablename__ = "tags"
@@ -141,6 +144,11 @@ class Tag(Base):
         secondary="library_tags",
         viewonly=True,
     )
+
+    # 适用模态（仅 level=3 有意义；level<3 必须为 NULL）
+    modality: Mapped[Optional[str]] = mapped_column(
+        String(8), nullable=True, index=True
+    )  # 'text'|'image'|'audio'|'video'|null
 
     # 三级标签绑定模型（FK → registered_models.id, ON DELETE SET NULL）
     # 只有 level=3 才允许设置；业务校验放在 service 层

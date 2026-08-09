@@ -76,6 +76,7 @@ def _to_summary(tag) -> TagSummary:
         status=tag.status,
         level=tag.level,
         parent_id=tag.parent_id,
+        modality=tag.modality,
         bound_model_id=tag.bound_model_id,
         bound_model_kind=tag.bound_model_kind,
         updated_at=tag.updated_at,
@@ -101,6 +102,7 @@ async def list_tags(
     level: Optional[int] = Query(None, ge=1, le=3),
     parent_id: Optional[str] = None,
     bound_model_id: Optional[int] = Query(None, ge=1),
+    modality: Optional[str] = Query(None, description="按适用模态过滤三级标签 text/image/audio/video"),
 ):
     items, total = await tag_service.list_tags(
         db,
@@ -116,6 +118,7 @@ async def list_tags(
         level=level,
         parent_id=parent_id,
         bound_model_id=bound_model_id,
+        modality=modality,
     )
     return Page(items=[_to_summary(t) for t in items], total=total, page=page, size=size)
 

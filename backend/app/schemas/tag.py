@@ -15,6 +15,7 @@ from app.models.tag import (
     TAG_LEVEL_MID,
     TAG_LEVEL_TOP,
     VALID_TAG_LEVELS,
+    VALID_TAG_MODALITIES,
     TagCategory,
     TagDomain,
     TagStatus,
@@ -39,6 +40,7 @@ class TagBase(BaseModel):
     # ── 三级级联字段 ──
     level: int = Field(default=TAG_LEVEL_TOP, ge=TAG_LEVEL_TOP, le=TAG_LEVEL_LEAF)
     parent_id: Optional[str] = Field(default=None, max_length=36)
+    modality: Optional[str] = Field(default=None, max_length=8)
     bound_model_id: Optional[int] = Field(default=None, ge=1)
     bound_model_kind: Optional[str] = Field(default=None, max_length=8)
 
@@ -64,6 +66,16 @@ class TagBase(BaseModel):
             raise ValueError("bound_model_kind 必须是 large 或 small")
         return v
 
+    @field_validator("modality")
+    @classmethod
+    def _validate_modality(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.lower()
+        if v not in VALID_TAG_MODALITIES:
+            raise ValueError(f"modality 必须是 {'/'.join(VALID_TAG_MODALITIES)}")
+        return v
+
 
 class TagCreate(TagBase):
     """新建标签 body。
@@ -71,6 +83,7 @@ class TagCreate(TagBase):
     业务约束（service 层校验）：
       - level=1 时 parent_id 必须为 null
       - level>1 时 parent_id 必填，且 parent.level = level-1
+      - level=3 时 modality 必填（适用模态）；level<3 时 modality 必须为 null
       - level=3 时 bound_model_id 可选（可创建未绑定模型的三级标签）
       - level<3 时 bound_model_id 必须为 null
       - level=3 一旦提供 bound_model_id，则必须同时提供 bound_model_kind=large|small
@@ -90,8 +103,19 @@ class TagUpdate(BaseModel):
     evidence_refs: Optional[List[str]] = None
     status: Optional[TagStatus] = None
     # level/parent_id 一旦创建不允许改（防循环），如需调整请删除重建
+    modality: Optional[str] = Field(default=None, max_length=8)
     bound_model_id: Optional[int] = Field(default=None, ge=1)
     bound_model_kind: Optional[str] = Field(default=None, max_length=8)
+
+    @field_validator("modality")
+    @classmethod
+    def _validate_modality(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.lower()
+        if v not in VALID_TAG_MODALITIES:
+            raise ValueError(f"modality 必须是 {'/'.join(VALID_TAG_MODALITIES)}")
+        return v
 
     @field_validator("bound_model_kind")
     @classmethod
@@ -121,6 +145,7 @@ class TagOut(ORMBase):
     version: int
     level: int
     parent_id: Optional[str]
+    modality: Optional[str]
     bound_model_id: Optional[int]
     bound_model_kind: Optional[str]
     created_at: datetime
@@ -144,6 +169,7 @@ class TagSummary(BaseModel):
     status: TagStatus
     level: int
     parent_id: Optional[str]
+    modality: Optional[str]
     bound_model_id: Optional[int]
     bound_model_kind: Optional[str]
     updated_at: Optional[datetime]
@@ -158,6 +184,7 @@ class TagTreeNode(BaseModel):
     level: int
     status: TagStatus
     domain: TagDomain
+    modality: Optional[str] = None
     bound_model_id: Optional[int] = None
     bound_model_kind: Optional[str] = None
     bound_model_label: Optional[str] = None  # 拼接好的模型显示名（id + name），前端直接渲染

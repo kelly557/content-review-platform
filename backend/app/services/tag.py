@@ -61,6 +61,7 @@ async def list_tags(
     level: Optional[int] = None,
     parent_id: Optional[str] = None,
     bound_model_id: Optional[int] = None,
+    modality: Optional[str] = None,
 ) -> Tuple[List[Tag], int]:
     stmt = select(Tag)
     conds = [Tag.deleted_at.is_(None)]
@@ -76,6 +77,8 @@ async def list_tags(
         conds.append(Tag.parent_id == parent_id)
     if bound_model_id is not None:
         conds.append(Tag.bound_model_id == bound_model_id)
+    if modality:
+        conds.append(Tag.modality == modality)
     if q:
         conds.append(or_(Tag.name.ilike(f"%{q}%"), Tag.code.ilike(f"%{q}%")))
     if conds:
@@ -137,6 +140,7 @@ async def create_tag(db: AsyncSession, body: TagCreate) -> Tag:
         status=body.status,
         level=body.level,
         parent_id=body.parent_id,
+        modality=body.modality,
         bound_model_id=body.bound_model_id,
         bound_model_kind=body.bound_model_kind,
         version=1,
@@ -153,6 +157,10 @@ async def update_tag(db: AsyncSession, tag: Tag, body: TagUpdate) -> Tag:
     # bound_model_id / bound_model_kind 联动校验：level=3 才能绑
     if "bound_model_id" in data or "bound_model_kind" in data:
         await _validate_bound_model_on_update(db, tag, data.get("bound_model_id"), data.get("bound_model_kind"))
+
+    # modality 仅三级标签可设置
+    if "modality" in data and data["modality"] is not None and tag.level != TAG_LEVEL_LEAF:
+        raise TagValidationError(f"{_cn_level(tag.level)}标签不允许设置适用模态（跨模态共享）")
 
     for k, v in data.items():
         setattr(tag, k, v)
@@ -224,6 +232,8 @@ async def _validate_hierarchy_on_create(db: AsyncSession, body: TagCreate) -> No
             )
 
     if body.level == TAG_LEVEL_LEAF:
+        if not body.modality:
+            raise TagValidationError("三级标签必须指定适用模态 modality（text/image/audio/video）")
         if body.bound_model_id is None and body.bound_model_kind is None:
             pass
         else:
@@ -235,6 +245,8 @@ async def _validate_hierarchy_on_create(db: AsyncSession, body: TagCreate) -> No
                 db, body.bound_model_id, body.bound_model_kind
             )
     else:
+        if body.modality is not None:
+            raise TagValidationError(f"{_cn_level(body.level)}标签不允许设置适用模态（跨模态共享）")
         if body.bound_model_id is not None or body.bound_model_kind is not None:
             raise TagValidationError(f"{_cn_level(body.level)}标签不允许绑定模型")
 
@@ -315,6 +327,7 @@ async def build_tree(db: AsyncSession) -> List[TagTreeNode]:
             level=t.level,
             status=t.status,
             domain=t.domain,
+            modality=t.modality,
             bound_model_id=t.bound_model_id,
             bound_model_kind=t.bound_model_kind,
             bound_model_label=model_label.get(t.bound_model_id) if t.bound_model_id else None,

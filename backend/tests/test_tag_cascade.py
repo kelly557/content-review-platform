@@ -61,6 +61,7 @@ async def _make_tag_payload(
     parent_id: str | None = None,
     bound_model_id: int | None = None,
     bound_model_kind: str | None = None,
+    modality: str | None = None,
 ) -> dict:
     return {
         "code": code,
@@ -70,6 +71,8 @@ async def _make_tag_payload(
         "status": TagStatus.ACTIVE.value,
         "level": level,
         "parent_id": parent_id,
+        # 三级标签必填适用模态（service 校验）
+        "modality": modality if modality is not None else ("text" if level == 3 else None),
         "bound_model_id": bound_model_id,
         "bound_model_kind": bound_model_kind,
     }
@@ -87,6 +90,82 @@ async def test_create_top_level_ok(admin_client: AsyncClient) -> None:
     assert body["level"] == 1
     assert body["parent_id"] is None
     assert body["bound_model_id"] is None
+    assert body["modality"] is None
+
+
+async def test_create_l3_requires_modality(admin_client: AsyncClient) -> None:
+    """三级标签必须指定适用模态。"""
+    top = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(code="t_m_l1", name="涉政", level=TAG_LEVEL_TOP),
+    )
+    mid = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(
+            code="t_m_l2", name="一号领导", level=TAG_LEVEL_MID,
+            parent_id=top.json()["id"],
+        ),
+    )
+    r = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(
+            code="t_m_l3", name="漫画", level=TAG_LEVEL_LEAF,
+            parent_id=mid.json()["id"], modality=None,
+        ),
+    )
+    # _make_tag_payload 对 level=3 默认补 text，这里显式 None 也会被补；
+    # 直接构造裸 payload 验证 422/400
+    assert r.status_code == 201  # 默认补 modality 后创建成功
+    payload = {
+        "code": "t_m_l3_bare", "name": "写实",
+        "domain": "politics", "category": "figure", "status": "active",
+        "level": 3, "parent_id": mid.json()["id"],
+    }
+    r2 = await admin_client.post("/api/v1/tags", json=payload)
+    assert r2.status_code == 400
+    assert "modality" in r2.json()["detail"]
+
+
+async def test_create_top_level_rejects_modality(admin_client: AsyncClient) -> None:
+    """一/二级标签不允许设置适用模态（跨模态共享）。"""
+    r = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(
+            code="t_m_top_mod", name="涉政", level=TAG_LEVEL_TOP, modality="image",
+        ),
+    )
+    assert r.status_code == 400
+    assert "模态" in r.json()["detail"]
+
+
+async def test_list_tags_filter_by_modality(admin_client: AsyncClient) -> None:
+    """列表接口支持 modality 过滤。"""
+    top = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(code="t_f_l1", name="色情", level=TAG_LEVEL_TOP),
+    )
+    mid = await admin_client.post(
+        "/api/v1/tags",
+        json=await _make_tag_payload(
+            code="t_f_l2", name="裸露", level=TAG_LEVEL_MID,
+            parent_id=top.json()["id"],
+        ),
+    )
+    for code, modality in (("t_f_img", "image"), ("t_f_txt", "text")):
+        r = await admin_client.post(
+            "/api/v1/tags",
+            json=await _make_tag_payload(
+                code=code, name=f"露点-{modality}", level=TAG_LEVEL_LEAF,
+                parent_id=mid.json()["id"], modality=modality,
+            ),
+        )
+        assert r.status_code == 201, r.text
+    r = await admin_client.get("/api/v1/tags", params={"level": 3, "modality": "image", "size": 200})
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert items and all(i["modality"] == "image" for i in items)
+    assert any(i["code"] == "t_f_img" for i in items)
+    assert not any(i["code"] == "t_f_txt" for i in items)
 
 
 async def test_create_l2_requires_l1_parent(admin_client: AsyncClient) -> None:
