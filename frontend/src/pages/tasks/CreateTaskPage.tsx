@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { App, Button, Card, Select, Space, Tabs, Typography } from 'antd'
 import { strategiesApi } from '@/api/strategies'
 import { runOnlineDetection } from '@/api/onlineReview'
-import type { MockRequest, MockResponse } from '@/api/onlineReviewMock'
+import type { OnlineReviewRequest, OnlineReviewResponse } from '@/api/onlineReviewTypes'
 import UploadArea, { type UploadItem } from '@/components/task-create/UploadArea'
 import AnalysisPanel, {
   type ParsedFileItem,
@@ -34,8 +34,8 @@ const BULK_LIMIT = 50
 
 interface DetectionResult {
   state: OnlineReviewResultState
-  request?: MockRequest
-  response?: MockResponse
+  request?: OnlineReviewRequest
+  response?: OnlineReviewResponse
   latencyMs?: number
   errorMessage?: string
 }

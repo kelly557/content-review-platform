@@ -707,4 +707,4 @@ async def _suggest_impl(
         )
         for s in scored
     ]
-    return SuggestResponse(matches=matches, mock=True, engine="mock-v1")
+    return SuggestResponse(matches=matches, mock=False, engine="tfidf-v1")

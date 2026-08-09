@@ -584,7 +584,7 @@ export interface TopRiskLabelItem {
   count: number
   risk_level: RiskLevel
   last_hit_at: string
-  /** 占比 0-100, 仅前端 mock 填充; 后端字段可选 */
+  /** 占比 0-100（后端可选字段） */
   percentage?: number
 }
 
@@ -1560,8 +1560,6 @@ export interface AuditPoint {
   source_quote: string | null
   /** 结构化文件行号 */
   source_line_no: number | null
-  /** 前端 mock 标记：true 表示来自前端兜底数据,真实后端没有,不可提交 */
-  is_mock?: boolean
   created_at: string
   updated_at: string | null
 }
@@ -1614,7 +1612,6 @@ export interface AuditPointBatchResult {
 /**
  * sub 审核点（三级标签）展示型类型 — 2026-07-30 新增
  *
- * - 仅前端 mock，不参与后端 schema
  * - 挂在 AuditPoint（审核点，二级标签）之下
  * - 每个 sub 自带 3 档风险分阈值（low/medium/high）
  * - 风险分阈值由 Box A「平台内置规则」表格的 sub 块内 RangeMinOnlyInput 编辑

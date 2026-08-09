@@ -1,11 +1,11 @@
 import { api } from './client'
 import type { MaterialType } from '@/types/domain'
 import type { UploadItem } from '@/components/task-create/UploadArea'
-import type { MockRequest, MockResponse } from '@/api/onlineReviewMock'
+import type { OnlineReviewRequest, OnlineReviewResponse } from '@/api/onlineReviewTypes'
 
 export interface OnlineDetectionResult {
-  request: MockRequest
-  response: MockResponse
+  request: OnlineReviewRequest
+  response: OnlineReviewResponse
   latencyMs: number
 }
 
@@ -13,7 +13,7 @@ interface DetectApiResponse {
   conclusion: string
   log_id: number
   conclusionType: number
-  data: Array<{ msg: string; conclusion: string; hits: MockResponse['data'][number]['hits'] }>
+  data: Array<{ msg: string; conclusion: string; hits: OnlineReviewResponse['data'][number]['hits'] }>
   latency_ms: number
 }
 
@@ -23,7 +23,7 @@ function buildRequestSummary(
   backendType: MaterialType,
   mode: 'single' | 'bulk',
   strategyName?: string,
-): MockRequest {
+): OnlineReviewRequest {
   const requestItems = items.map((it, idx) => {
     if (it.file) {
       return {
@@ -82,7 +82,7 @@ export async function runOnlineDetection(
     { signal },
   )
 
-  const response: MockResponse = {
+  const response: OnlineReviewResponse = {
     conclusion: data.conclusion,
     log_id: data.log_id,
     phoneRisk: {},

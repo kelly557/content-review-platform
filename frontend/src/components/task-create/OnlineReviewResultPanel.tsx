@@ -1,6 +1,6 @@
 import { Collapse, Spin, Tag, Typography } from 'antd'
 import JsonTreeView from './JsonTreeView'
-import type { MockRequest, MockResponse } from '@/api/onlineReviewMock'
+import type { OnlineReviewRequest, OnlineReviewResponse } from '@/api/onlineReviewTypes'
 import { colors } from '@/styles/theme'
 
 const { Text } = Typography
@@ -12,8 +12,8 @@ export type OnlineReviewResultState = 'idle' | 'loading' | 'done' | 'error'
 
 export interface OnlineReviewResultPanelProps {
   state: OnlineReviewResultState
-  request?: MockRequest
-  response?: MockResponse
+  request?: OnlineReviewRequest
+  response?: OnlineReviewResponse
   latencyMs?: number
   errorMessage?: string
 }

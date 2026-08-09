@@ -7,11 +7,6 @@ import type {
   SuggestResponse,
 } from '@/types/domain'
 
-/** 暴露给前端页面：判断 auditPoint 是否来自 mock 兜底（已下线兜底，恒为 false） */
-export function isMockAuditPoint(p: { is_mock?: boolean } | null | undefined): boolean {
-  return Boolean(p?.is_mock)
-}
-
 export const auditItemsApi = {
   list(packageCode: string, params?: { enabled?: boolean; q?: string }) {
     return api

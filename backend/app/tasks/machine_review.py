@@ -402,10 +402,6 @@ def _build_rule_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return rule_hits
 
 
-# Backwards compatibility alias: external tests / scripts still import this.
-_generate_mock_rule_hits = _build_rule_hits
-
-
 def _build_desensitize_plan(hits: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Build desensitize plan from sensitive hits (risk=敏感 且 sensitive ≥ S1).
 

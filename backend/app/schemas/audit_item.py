@@ -148,5 +148,5 @@ class ItemSuggestion(BaseModel):
 
 class SuggestResponse(BaseModel):
     matches: list[ItemSuggestion] = Field(default_factory=list)
-    mock: bool = True
-    engine: str = "mock-v1"
+    mock: bool = False
+    engine: str = "tfidf-v1"
