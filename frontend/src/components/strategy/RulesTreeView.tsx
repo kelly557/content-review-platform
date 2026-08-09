@@ -19,8 +19,8 @@ import { auditPointsApi } from '@/api/auditPoints'
 import type {
   AuditItem,
   AuditPoint,
+  SubAuditPoint,
 } from '@/types/domain'
-import { getMockSubAuditPoints } from '@/lib/riskPointMock'
 import { getIntensityFallback, DEFAULT_INTENSITY, type Intensity } from '@/lib/threshold'
 import type { ImageTextMode } from '@/types/domain'
 import { type CategoryKey } from './constants'
@@ -564,15 +564,49 @@ function PointsColumn({
 const COL_TOTAL = 2
   const [subEnabledMap, setSubEnabledMap] = useState<Record<number, boolean>>({})
 
-  // 2026-07-30 新增：每个父审核点下的 sub 列表(供 ☑ 三态 + label 列共享)
-  const subsByPointId = useMemo(() => {
-    const map: Record<number, ReturnType<typeof getMockSubAuditPoints>> = {}
-    dataSource.forEach((r) => {
-      if (r.kind === 'point') {
-        map[r.point.id] = getMockSubAuditPoints(r.point.id, r.item.name_cn)
-      }
-    })
-    return map
+  // 每个父审核点下的三级 sub 列表 — 从后端拉取（真实数据）
+  const [subsByPointId, setSubsByPointId] = useState<Record<number, SubAuditPoint[]>>({})
+
+  useEffect(() => {
+    const points = dataSource.filter((r) => r.kind === 'point')
+    if (points.length === 0) {
+      setSubsByPointId({})
+      return
+    }
+    let alive = true
+    const load = async () => {
+      const map: Record<number, SubAuditPoint[]> = {}
+      await Promise.all(
+        points.map(async (r) => {
+          try {
+            const subs = await auditPointsApi.listSubPoints(
+              r.point.package_code,
+              r.point.id,
+            )
+            map[r.point.id] = subs.map((s) => ({
+              id: s.id,
+              point_id: s.id,
+              l1_label: r.item.name_cn,
+              l2_label: r.point.label_cn || r.point.label,
+              l3_label: s.label_cn || s.label,
+              label_cn: s.label_cn || s.label,
+              low_threshold: 0,
+              medium_threshold: s.medium_threshold,
+              high_threshold: s.high_threshold,
+              is_enabled: s.is_enabled,
+              sort_order: s.sort_order,
+            }))
+          } catch {
+            map[r.point.id] = []
+          }
+        }),
+      )
+      if (alive) setSubsByPointId(map)
+    }
+    void load()
+    return () => {
+      alive = false
+    }
   }, [dataSource])
 
   const columns: TableColumnsType<FlatRowRecord> = [

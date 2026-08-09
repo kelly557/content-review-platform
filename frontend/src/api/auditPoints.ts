@@ -66,6 +66,18 @@ export const auditPointsApi = {
       .post<{ items: AuditPoint[] }>(`/packages/${packageCode}/points/reset`)
       .then((r) => r.data)
   },
+  /** 三级 sub 审核点列表（真实后端） */
+  listSubPoints(packageCode: string, pointId: number) {
+    return api
+      .get<AuditPoint[]>(`/packages/${packageCode}/points/${pointId}/sub-points`)
+      .then((r) => r.data)
+  },
+  /** 在父审核点下创建三级 sub 审核点 */
+  createSubPoint(packageCode: string, pointId: number, payload: AuditPointCreate) {
+    return api
+      .post<AuditPoint>(`/packages/${packageCode}/points/${pointId}/sub-points`, payload)
+      .then((r) => r.data)
+  },
   parseDocument(file: File) {
     const formData = new FormData()
     formData.append('file', file)

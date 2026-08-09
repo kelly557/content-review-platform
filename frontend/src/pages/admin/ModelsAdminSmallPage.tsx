@@ -1,6 +1,6 @@
-// 模型管理 / 小模型（mock 数据版本）
-// 按 ASCII 设计稿实现：左 280px 列表 + 右详情（版本历史、模型标签、推荐风险阈值、引用标签、模型测试）。
-// 数据来源：当前为前端 mock（无后端依赖），后续接 API 时替换 fetchList / fetchVersions / fetchRefs。
+// 模型管理 / 小模型（接真实后端 API）
+// 布局：左 280px 列表 + 右详情（版本历史、模型标签、推荐风险阈值、配置标签、模型测试）。
+// 数据来源：registeredModelsApi / tagsApi；模型测试与接入校验走真实接口（结果仅存本次会话）。
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import {
@@ -18,6 +18,7 @@ import {
   Popconfirm,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
   Tooltip,
@@ -29,6 +30,7 @@ import type { UploadFile } from 'antd/es/upload/interface'
 import {
   ApiOutlined,
   DownOutlined,
+  FileOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -37,6 +39,9 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/store'
+import { useRiskCategoryStore } from '@/store/riskCategories'
+import { registeredModelsApi } from '@/api/registered-models'
+import { tagsApi } from '@/api/tags'
 import { runModelTest, type ModelTestResponse } from '@/api/modelTest'
 import {
   runAccessCheck,
@@ -44,11 +49,19 @@ import {
 } from '@/api/modelAccessCheck'
 import ModelConfigTagModal from '@/pages/admin/ModelConfigTagModal'
 import type { ConfiguredTagEntry } from '@/pages/admin/configuredTagTypes'
-import { findStrategiesByDiscoveredTag } from '@/lib/auditStrategyRefMock'
+import type {
+  ArtifactUploadResponse,
+  RegisteredModelListItem,
+  RegisteredModelStatus,
+  RegisteredModelVersion,
+  TagReferenceItem,
+  TagTreeNode,
+} from '@/types/domain'
+import { SMALL_MODEL_CATEGORY_OPTIONS } from '@/types/domain'
 
 const { Text, Title } = Typography
 
-// ── 模态选项（4 类） ──
+// ── 模态选项（筛选用,4 类；新增小模型时后端仅支持 text / image） ──
 const MODALITY_OPTIONS_4 = [
   { value: 'text', label: '文本' },
   { value: 'image', label: '图片' },
@@ -60,455 +73,81 @@ const MODALITY_LABEL_4: Record<Modality4, string> = MODALITY_OPTIONS_4.reduce(
   (acc, o) => ({ ...acc, [o.value]: o.label }),
   {} as Record<Modality4, string>,
 )
+// 新增小模型可选模态（后端 ALLOWED_MODALITY = text / image）
+const MODALITY_OPTIONS_SMALL = MODALITY_OPTIONS_4.filter(
+  (o) => o.value === 'text' || o.value === 'image',
+)
 
-// ── mock 数据类型 ──
-type MockStatus = 'active' | 'inactive' | 'pending'
-interface MockVersion {
+// ── 页面展示类型（由真实 DTO 映射而来） ──
+type DisplayStatus = 'active' | 'pending' | 'inactive'
+interface VersionRow {
   id: number
+  versionNo: number
   versionLabel: string
-  status: MockStatus
+  status: DisplayStatus
   releasedAt: string
-}
-interface MockRef {
-  id: string
-  path: string
-}
-interface MockModelTestRecord {
-  decision: 'pass' | 'block'
-  latencyMs: number
-  confidence: number
-  rawOutput: string
+  endpointUrl: string | null
 }
 interface RiskThresholdRange {
   low: [number, number]
   mid: [number, number]
   high: [number, number]
 }
-interface MockModel {
-  id: number
-  name: string
-  smallCategory: string
-  modality: Modality4
-  endpoint_url: string
-  status: MockStatus
-  createdAt: string
-  currentVersion: MockVersion
-  history: MockVersion[]
-  refs: MockRef[]
-  testHistory?: MockModelTestRecord[]
-  riskThreshold?: RiskThresholdRange
-  discoveredTags?: string[]
-  configuredTags?: ConfiguredTagEntry[]
+
+// 模型状态映射：active→已发布；draft/validating→未发布；inactive/failed/archived→已下线
+function toDisplayStatus(s: RegisteredModelStatus): DisplayStatus {
+  if (s === 'active') return 'active'
+  if (s === 'draft' || s === 'validating') return 'pending'
+  return 'inactive'
 }
 
-const MOCK_MODELS: MockModel[] = [
-  {
-    id: 1,
-    name: 'leader_v1',
-    smallCategory: 'politics',
-    modality: 'image',
-    endpoint_url: 'https://api.adreview.example.com/v1/leader',
-    status: 'inactive',
-    createdAt: '2025-03-10',
-    currentVersion: {
-      id: 100,
-      versionLabel: 'v1',
-      status: 'inactive',
-      releasedAt: '2025-03-10',
-    },
-    history: [
-      {
-        id: 100,
-        versionLabel: 'v1',
-        status: 'inactive',
-        releasedAt: '2025-03-10',
-      },
-    ],
-    refs: [
-      { id: 'r1', path: '涉政 / 一号领导 / 写实' },
-      { id: 'r2', path: '涉政 / 二号领导 / 写实' },
-    ],
-    discoveredTags: [
-      '涉政敏感人物',
-      '公众人物',
-      '暴恐血腥',
-      '违规水印',
-    ],
-    configuredTags: [
-      {
-        discoveredTag: '涉政敏感人物',
-        tagId: 'mock-l3-politics-top-leader-real',
-        tagPath: '涉政 / 一号领导 / 写实',
-      },
-      {
-        discoveredTag: '公众人物',
-        tagId: 'mock-l3-politics-former-leader-figure',
-        tagPath: '涉政 / 历任领导 / 人像',
-      },
-      {
-        discoveredTag: '暴恐血腥',
-        tagId: 'mock-l3-terror-org-image',
-        tagPath: '暴恐 / 恐怖组织 / 画面',
-      },
-    ],
-    testHistory: [
-      {
-        decision: 'block',
-        latencyMs: 1832,
-        confidence: 78.4,
-        rawOutput: JSON.stringify(
-          {
-            decision: 'block',
-            modality: 'image',
-            image_provided: true,
-            triggered_points: ['涉政 / 一号领导 / 写实'],
-            latency_ms: 1832,
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-  },
-  {
-    id: 2,
-    name: 'cartoon_model',
-    smallCategory: 'politics',
-    modality: 'image',
-    endpoint_url: 'https://api.adreview.example.com/v1/cartoon',
-    status: 'active',
-    createdAt: '2025-05-18',
-    currentVersion: {
-      id: 302,
-      versionLabel: 'v3',
-      status: 'active',
-      releasedAt: '2025-05-18',
-    },
-    history: [
-      {
-        id: 302,
-        versionLabel: 'v3',
-        status: 'active',
-        releasedAt: '2025-05-18',
-      },
-      {
-        id: 301,
-        versionLabel: 'v2',
-        status: 'inactive',
-        releasedAt: '2025-04-22',
-      },
-      {
-        id: 300,
-        versionLabel: 'v1',
-        status: 'inactive',
-        releasedAt: '2025-03-10',
-      },
-    ],
-    refs: [
-      { id: 'r3', path: '涉政 / 一号领导 / 漫画' },
-      { id: 'r4', path: '涉政 / 二号领导 / 漫画' },
-      { id: 'r5', path: '涉政 / 领导人恶搞漫画' },
-      { id: 'r6', path: '涉政 / 高级领导 / 漫画' },
-      { id: 'r7', path: '涉政 / 政治漫画 / 时政' },
-      { id: 'r8', path: '涉政 / 政治漫画 / 历史' },
-      { id: 'r9', path: '涉政 / 卡通形象 / 领导人' },
-      { id: 'r10', path: '涉政 / 卡通形象 / 名人' },
-      { id: 'r11', path: '涉政 / 政治讽刺 / 漫画' },
-      { id: 'r12', path: '涉政 / 政治讽刺 / 配图' },
-    ],
-    discoveredTags: ['涉政敏感人物', '色情低俗', '青少年不良', '商标侵权'],
-    configuredTags: [
-      {
-        discoveredTag: '涉政敏感人物',
-        tagId: 'mock-l3-politics-top-leader-cartoon',
-        tagPath: '涉政 / 一号领导 / 漫画',
-      },
-      {
-        discoveredTag: '色情低俗',
-        tagId: 'mock-l3-politics-former-leader-cartoon',
-        tagPath: '涉政 / 历任领导 / 漫画',
-      },
-      {
-        discoveredTag: '青少年不良',
-        tagId: 'mock-l3-politics-symbol-graffiti',
-        tagPath: '涉政 / 政治象征 / 涂鸦',
-      },
-    ],
-    testHistory: [
-      {
-        decision: 'pass',
-        latencyMs: 2158,
-        confidence: 87.5,
-        rawOutput: JSON.stringify(
-          {
-            decision: 'pass',
-            modality: 'image',
-            image_provided: true,
-            triggered_points: [],
-            latency_ms: 2158,
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-    riskThreshold: {
-      low: [0.2, 0.35],
-      mid: [0.36, 0.74],
-      high: [0.75, 1.0],
-    },
-  },
-  {
-    id: 3,
-    name: 'flag_model',
-    smallCategory: 'politics',
-    modality: 'image',
-    endpoint_url: 'https://api.adreview.example.com/v1/flag',
-    status: 'active',
-    createdAt: '2025-02-01',
-    currentVersion: {
-      id: 400,
-      versionLabel: 'v2',
-      status: 'active',
-      releasedAt: '2025-06-30',
-    },
-    history: [
-      {
-        id: 400,
-        versionLabel: 'v2',
-        status: 'active',
-        releasedAt: '2025-06-30',
-      },
-      {
-        id: 401,
-        versionLabel: 'v1',
-        status: 'inactive',
-        releasedAt: '2025-02-01',
-      },
-    ],
-    refs: [
-      { id: 'r20', path: '涉政 / 国旗国徽 / 篡改' },
-      { id: 'r21', path: '涉政 / 国旗国徽 / 涂鸦' },
-    ],
-    discoveredTags: ['涉政敏感人物', '违规水印', '公众人物'],
-    configuredTags: [
-      {
-        discoveredTag: '涉政敏感人物',
-        tagId: 'mock-l3-politics-top-leader-illust',
-        tagPath: '涉政 / 一号领导 / 配图',
-      },
-      {
-        discoveredTag: '违规水印',
-        tagId: 'mock-l3-politics-symbol-tamper',
-        tagPath: '涉政 / 政治象征 / 篡改',
-      },
-    ],
-    testHistory: [
-      {
-        decision: 'pass',
-        latencyMs: 1623,
-        confidence: 91.2,
-        rawOutput: JSON.stringify(
-          {
-            decision: 'pass',
-            modality: 'image',
-            image_provided: true,
-            triggered_points: [],
-            latency_ms: 1623,
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-    riskThreshold: {
-      low: [0.0, 0.25],
-      mid: [0.26, 0.7],
-      high: [0.71, 1.0],
-    },
-  },
-  {
-    id: 4,
-    name: 'ocr_model',
-    smallCategory: 'ad_law',
-    modality: 'text',
-    endpoint_url: 'https://api.adreview.example.com/v1/ocr',
-    status: 'active',
-    createdAt: '2025-01-15',
-    currentVersion: {
-      id: 500,
-      versionLabel: 'v5',
-      status: 'active',
-      releasedAt: '2025-07-01',
-    },
-    history: [
-      {
-        id: 500,
-        versionLabel: 'v5',
-        status: 'active',
-        releasedAt: '2025-07-01',
-      },
-      {
-        id: 501,
-        versionLabel: 'v4',
-        status: 'inactive',
-        releasedAt: '2025-05-10',
-      },
-      {
-        id: 502,
-        versionLabel: 'v3',
-        status: 'inactive',
-        releasedAt: '2025-04-05',
-      },
-      {
-        id: 503,
-        versionLabel: 'v2',
-        status: 'inactive',
-        releasedAt: '2025-03-20',
-      },
-      {
-        id: 504,
-        versionLabel: 'v1',
-        status: 'inactive',
-        releasedAt: '2025-01-15',
-      },
-    ],
-    refs: [
-      { id: 'r30', path: '广告法 / 极限词 / 识别' },
-      { id: 'r31', path: '广告法 / 虚假宣传 / OCR' },
-    ],
-    discoveredTags: ['广告营销', '虚假宣传', '辱骂攻击', '隐私信息', '涉政敏感'],
-    configuredTags: [
-      {
-        discoveredTag: '广告营销',
-        tagId: 'mock-l3-ads-law-misleading-extreme',
-        tagPath: '广告法 / 误导性虚假广告 / 极限词',
-      },
-      {
-        discoveredTag: '虚假宣传',
-        tagId: 'mock-l3-ads-law-misleading-promise',
-        tagPath: '广告法 / 误导性虚假广告 / 虚假承诺',
-      },
-      {
-        discoveredTag: '辱骂攻击',
-        tagId: 'mock-l3-insult-regional-text',
-        tagPath: '辱骂 / 地域歧视 / 文字',
-      },
-      {
-        discoveredTag: '隐私信息',
-        tagId: 'mock-l3-insult-person-text',
-        tagPath: '辱骂 / 人格侮辱 / 文字',
-      },
-    ],
-    testHistory: [
-      {
-        decision: 'pass',
-        latencyMs: 945,
-        confidence: 93.8,
-        rawOutput: JSON.stringify(
-          {
-            decision: 'pass',
-            modality: 'text',
-            segments: ['本产品绝对有效，根治各种问题...'],
-            image_provided: false,
-            triggered_points: ['广告法 / 极限词 / 识别'],
-            latency_ms: 945,
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-  },
-  {
-    id: 5,
-    name: 'face_model',
-    smallCategory: 'porn',
-    modality: 'image',
-    endpoint_url: 'https://api.adreview.example.com/v1/face',
-    status: 'active',
-    createdAt: '2024-12-20',
-    currentVersion: {
-      id: 600,
-      versionLabel: 'v4',
-      status: 'active',
-      releasedAt: '2025-06-12',
-    },
-    history: [
-      {
-        id: 600,
-        versionLabel: 'v4',
-        status: 'active',
-        releasedAt: '2025-06-12',
-      },
-      {
-        id: 601,
-        versionLabel: 'v3',
-        status: 'inactive',
-        releasedAt: '2025-04-20',
-      },
-      {
-        id: 602,
-        versionLabel: 'v2',
-        status: 'inactive',
-        releasedAt: '2025-02-10',
-      },
-      {
-        id: 603,
-        versionLabel: 'v1',
-        status: 'inactive',
-        releasedAt: '2024-12-20',
-      },
-    ],
-    refs: [
-      { id: 'r40', path: '涉黄 / 成人内容 / 面部' },
-      { id: 'r41', path: '涉黄 / 表情包 / 露骨' },
-    ],
-    discoveredTags: ['色情低俗', '暴恐血腥', '青少年不良', '公众人物'],
-    configuredTags: [
-      {
-        discoveredTag: '色情低俗',
-        tagId: 'mock-l3-insult-regional-emoji',
-        tagPath: '辱骂 / 地域歧视 / 表情包',
-      },
-      {
-        discoveredTag: '暴恐血腥',
-        tagId: 'mock-l3-insult-person-cartoon',
-        tagPath: '辱骂 / 人格侮辱 / 卡通',
-      },
-      {
-        discoveredTag: '青少年不良',
-        tagId: 'mock-l3-terror-org-figure-avatar',
-        tagPath: '暴恐 / 恐怖组织人物 / 头像',
-      },
-    ],
-    testHistory: [
-      {
-        decision: 'pass',
-        latencyMs: 2241,
-        confidence: 88.1,
-        rawOutput: JSON.stringify(
-          {
-            decision: 'pass',
-            modality: 'image',
-            image_provided: true,
-            triggered_points: [],
-            latency_ms: 2241,
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-    riskThreshold: {
-      low: [0.15, 0.4],
-      mid: [0.41, 0.8],
-      high: [0.81, 1.0],
-    },
-  },
-]
+// 版本状态映射：active→在线；draft/validated→未发布；inactive/failed/archived→已下线
+function toVersionDisplayStatus(s: string): DisplayStatus {
+  if (s === 'active') return 'active'
+  if (s === 'draft' || s === 'validated') return 'pending'
+  return 'inactive'
+}
 
-function statusTag(status: MockStatus) {
+function mapVersion(v: RegisteredModelVersion): VersionRow {
+  return {
+    id: v.id,
+    versionNo: v.version_no,
+    versionLabel: v.version_label ?? `v${v.version_no}`,
+    status: toVersionDisplayStatus(v.status),
+    releasedAt: dayjs(v.created_at).format('YYYY-MM-DD'),
+    endpointUrl: v.endpoint_url,
+  }
+}
+
+// 模型标签（discoveredTags）：来自当前版本 config.points
+function discoveredFromConfig(
+  cfg: Record<string, unknown> | null | undefined,
+): string[] {
+  if (!cfg) return []
+  const rawPoints = (cfg as { points?: unknown }).points
+  if (!Array.isArray(rawPoints)) return []
+  const out: string[] = []
+  for (const p of rawPoints) {
+    if (typeof p === 'string') {
+      out.push(p)
+    } else if (
+      p != null &&
+      typeof p === 'object' &&
+      typeof (p as { label?: unknown }).label === 'string'
+    ) {
+      out.push((p as { label: string }).label)
+    }
+  }
+  return out
+}
+
+function errDetail(err: unknown, fallback: string): string {
+  const d = (err as { response?: { data?: { detail?: unknown } } })?.response
+    ?.data?.detail
+  return typeof d === 'string' ? d : fallback
+}
+
+function statusTag(status: DisplayStatus) {
   if (status === 'active')
     return (
       <Tag
@@ -549,7 +188,7 @@ function statusTag(status: MockStatus) {
   )
 }
 
-function versionStatusTag(status: 'active' | 'inactive' | 'pending'): React.ReactNode {
+function versionStatusTag(status: DisplayStatus): React.ReactNode {
   if (status === 'active')
     return (
       <Tag
@@ -590,33 +229,77 @@ function versionStatusTag(status: 'active' | 'inactive' | 'pending'): React.Reac
   )
 }
 
-function healthOkTag(time: string) {
-  return (
-    <Tag
-      style={{
-        background: '#ECFDF5',
-        borderColor: '#A7F3D0',
-        color: '#047857',
-        margin: 0,
-      }}
-    >
-      ● 服务状态：健康 {time}
-    </Tag>
-  )
-}
+// ── 模型文件上传（小模型 artifact，真实接口 uploadArtifact） ──
+function ArtifactUploadButton({
+  value,
+  onChange,
+}: {
+  value: ArtifactUploadResponse | null
+  onChange: (a: ArtifactUploadResponse | null) => void
+}) {
+  const { message } = App.useApp()
+  const [uploading, setUploading] = useState(false)
 
-function healthErrorTag(time: string) {
+  if (value) {
+    return (
+      <div
+        style={{
+          border: '1px solid #d9d9d9',
+          borderRadius: 6,
+          padding: '6px 12px',
+          background: '#fafafa',
+        }}
+      >
+        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Space>
+            <FileOutlined style={{ color: '#1677ff' }} />
+            <span>{value.filename}</span>
+            <Tag>{(value.size / 1024 / 1024).toFixed(2)} MB</Tag>
+          </Space>
+          <Button
+            type="link"
+            size="small"
+            danger
+            onClick={() => onChange(null)}
+          >
+            重新上传
+          </Button>
+        </Space>
+      </div>
+    )
+  }
+
   return (
-    <Tag
-      style={{
-        background: '#FEF2F2',
-        borderColor: '#FECACA',
-        color: '#B91C1C',
-        margin: 0,
+    <Upload
+      accept=".onnx,.pt,.pth,.bin,.zip,.tar,.gz,.tgz,.h5,.pb,.safetensors"
+      showUploadList={false}
+      customRequest={async ({ file, onSuccess, onError }) => {
+        const f = file as File
+        if (f.size > 512 * 1024 * 1024) {
+          message.error('文件超过 512MB 上限')
+          onError?.(new Error('文件超过 512MB 上限'))
+          return
+        }
+        setUploading(true)
+        try {
+          const meta = await registeredModelsApi.uploadArtifact(f)
+          onChange(meta)
+          onSuccess?.(meta)
+          message.success(
+            `上传成功 · ${meta.filename} (${(meta.size / 1024 / 1024).toFixed(2)} MB)`,
+          )
+        } catch (e) {
+          onError?.(e as Error)
+          message.error(errDetail(e, '文件上传失败'))
+        } finally {
+          setUploading(false)
+        }
       }}
     >
-      ● 服务状态：异常 {time}
-    </Tag>
+      <Button icon={<UploadOutlined />} loading={uploading}>
+        选择模型文件
+      </Button>
+    </Upload>
   )
 }
 
@@ -701,28 +384,136 @@ export default function ModelsAdminSmallPage() {
   const { user } = useAuthStore()
   const canWrite = user?.role === 'superadmin' || user?.role === 'root_admin'
 
-  const [models, setModels] = useState<MockModel[]>(MOCK_MODELS)
+  // ── 真实数据：模型列表 / 标签树 / 版本 ──────────────────────
+  const [items, setItems] = useState<RegisteredModelListItem[]>([])
+  const [listLoading, setListLoading] = useState(false)
+  const [listError, setListError] = useState(false)
+  const [tagTree, setTagTree] = useState<TagTreeNode[]>([])
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [versions, setVersions] = useState<VersionRow[]>([])
+  const [versionsLoading, setVersionsLoading] = useState(false)
+  const [reloadToken, setReloadToken] = useState(0)
+
+  // ── 会话级状态（后端无对应持久化字段,刷新后丢失） ──────────────────────
+  const [testResults, setTestResults] = useState<
+    Record<number, ModelTestResponse>
+  >({})
+  const [thresholdMap, setThresholdMap] = useState<
+    Record<number, RiskThresholdRange>
+  >({})
+  const [configuredMap, setConfiguredMap] = useState<
+    Record<number, ConfiguredTagEntry[]>
+  >({})
+  const [discoveredOverride, setDiscoveredOverride] = useState<
+    Record<number, string[]>
+  >({})
+
   const [q, setQ] = useState('')
   const [modalityFilter, setModalityFilter] = useState<Modality4[]>([])
   const [refTagsFilter, setRefTagsFilter] = useState<string[][]>([])
-  const [selectedId, setSelectedId] = useState<number | null>(
-    MOCK_MODELS[0]?.id ?? null,
-  )
   const [deactivatePreview, setDeactivatePreview] = useState<{
     open: boolean
-    refs: MockRef[]
-    target: MockModel | null
-  }>({ open: false, refs: [], target: null })
+    loading: boolean
+    tags: TagReferenceItem[]
+    target: RegisteredModelListItem | null
+  }>({ open: false, loading: false, tags: [], target: null })
+  const [deactivating, setDeactivating] = useState(false)
+  const [deleteChecking, setDeleteChecking] = useState(false)
   const [newVersionOpen, setNewVersionOpen] = useState(false)
-  const [uploadForm] = Form.useForm<{ endpoint_url: string }>()
-  const [publishTarget, setPublishTarget] = useState<MockVersion | null>(null)
-  const [healthCheckedAt, setHealthCheckedAt] = useState<string>('')
+  const [newVerArtifact, setNewVerArtifact] =
+    useState<ArtifactUploadResponse | null>(null)
+  const [newVerSaving, setNewVerSaving] = useState(false)
+  const [publishTarget, setPublishTarget] = useState<VersionRow | null>(null)
+
+  const fetchList = async (keepSelection = true) => {
+    setListLoading(true)
+    setListError(false)
+    try {
+      const res = await registeredModelsApi.list({ kind: 'small', size: 100 })
+      setItems(res.items)
+      setSelectedId((prev) => {
+        if (keepSelection && prev != null && res.items.some((i) => i.id === prev))
+          return prev
+        return res.items[0]?.id ?? null
+      })
+    } catch {
+      setListError(true)
+    } finally {
+      setListLoading(false)
+    }
+  }
+
+  const fetchTagTree = async () => {
+    try {
+      setTagTree(await tagsApi.tree())
+    } catch {
+      // 保留旧树
+    }
+  }
+
+  useEffect(() => {
+    fetchList()
+    fetchTagTree()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 选中模型变化 / 列表刷新后,重新拉取版本历史
+  useEffect(() => {
+    if (selectedId == null) {
+      setVersions([])
+      return
+    }
+    let cancelled = false
+    setVersionsLoading(true)
+    registeredModelsApi
+      .listVersions(selectedId)
+      .then((vs) => {
+        if (cancelled) return
+        setVersions(
+          [...vs]
+            .sort((a, b) => b.version_no - a.version_no)
+            .map(mapVersion),
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setVersions([])
+      })
+      .finally(() => {
+        if (!cancelled) setVersionsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedId, reloadToken])
+
+  const refreshAll = () => {
+    fetchList()
+    setReloadToken((t) => t + 1)
+  }
 
   // ── 模型测试 ──────────────────────
   const [testImage, setTestImage] = useState<UploadFile | null>(null)
   const [testText, setTestText] = useState('')
   const [testRunning, setTestRunning] = useState(false)
   const [testCardOpen, setTestCardOpen] = useState(false)
+
+  const selected = useMemo(
+    () => items.find((m) => m.id === selectedId) ?? null,
+    [items, selectedId],
+  )
+
+  const selectedDiscoveredTags = useMemo(
+    () =>
+      selected
+        ? (discoveredOverride[selected.id] ??
+          discoveredFromConfig(selected.current_version_config))
+        : [],
+    [selected, discoveredOverride],
+  )
+  const selectedConfiguredTags = selected
+    ? (configuredMap[selected.id] ?? [])
+    : []
+  const selectedThreshold = selected ? thresholdMap[selected.id] : undefined
 
   const handleRunTest = async () => {
     if (!selected) return
@@ -736,10 +527,8 @@ export default function ModelsAdminSmallPage() {
     }
     setTestRunning(true)
     try {
-      const auditPoints = (selected.discoveredTags ?? []).map((label) => ({
-        label,
-      }))
-      const configuredTags = (selected.configuredTags ?? []).map((c) => ({
+      const auditPoints = selectedDiscoveredTags.map((label) => ({ label }))
+      const configuredTags = selectedConfiguredTags.map((c) => ({
         discoveredTag: c.discoveredTag,
         tagPath: c.tagPath,
       }))
@@ -756,30 +545,13 @@ export default function ModelsAdminSmallPage() {
               modality: 'image',
               imageFile:
                 (testImage?.originFileObj as File | undefined) ??
-                new File([new Blob()], testImage?.name ?? 'mock.png'),
+                new File([new Blob()], testImage?.name ?? 'upload.png'),
               auditPoints,
               configuredTags,
               modelId: selected.id,
             })
-      // 将测试结果写入当前模型的 testHistory
-      setModels((prev) =>
-        prev.map((m) =>
-          m.id === selected.id
-            ? {
-                ...m,
-                testHistory: [
-                  {
-                    decision: r.decision,
-                    latencyMs: r.latencyMs,
-                    confidence: r.confidence,
-                    rawOutput: r.rawOutput,
-                  },
-                  ...(m.testHistory ?? []),
-                ],
-              }
-            : m,
-        ),
-      )
+      // 测试结果仅记录到本次会话（后端无测试历史持久化接口）
+      setTestResults((prev) => ({ ...prev, [selected.id]: r }))
     } catch {
       message.error('测试失败')
     } finally {
@@ -787,27 +559,25 @@ export default function ModelsAdminSmallPage() {
     }
   }
 
-  // ── 推荐风险阈值（行内编辑）──────────────────────
+  // ── 推荐风险阈值（行内编辑,会话级保存）──────────────────────
   type ThresholdKey = 'low' | 'mid' | 'high'
   const [editingKey, setEditingKey] = useState<ThresholdKey | null>(null)
   const [draftLow, setDraftLow] = useState<[number, number]>([0, 0])
   const [draftMid, setDraftMid] = useState<[number, number]>([0, 0])
   const [draftHigh, setDraftHigh] = useState<[number, number]>([0, 1])
 
-  // ── 设计说明卡（折叠子节）──────────────────────
-
   const startEdit = (key: ThresholdKey) => {
     if (!selected) return
-    if (!selected.riskThreshold) return
-    if (key === 'low') setDraftLow([...selected.riskThreshold.low] as [number, number])
-    if (key === 'mid') setDraftMid([...selected.riskThreshold.mid] as [number, number])
-    if (key === 'high') setDraftHigh([...selected.riskThreshold.high] as [number, number])
+    if (!selectedThreshold) return
+    if (key === 'low') setDraftLow([...selectedThreshold.low] as [number, number])
+    if (key === 'mid') setDraftMid([...selectedThreshold.mid] as [number, number])
+    if (key === 'high') setDraftHigh([...selectedThreshold.high] as [number, number])
     setEditingKey(key)
   }
 
   const commitEdit = (key: ThresholdKey) => {
     if (!selected) return
-    const current = selected.riskThreshold
+    const current = selectedThreshold
     const next: RiskThresholdRange = current
       ? {
           low: key === 'low' ? draftLow : current.low,
@@ -819,11 +589,7 @@ export default function ModelsAdminSmallPage() {
           mid: draftMid,
           high: [draftHigh[0], 1],
         }
-    setModels((prev) =>
-      prev.map((m) =>
-        m.id === selected.id ? { ...m, riskThreshold: next } : m,
-      ),
-    )
+    setThresholdMap((prev) => ({ ...prev, [selected.id]: next }))
     setEditingKey(null)
     message.success('已保存阈值')
   }
@@ -840,25 +606,23 @@ export default function ModelsAdminSmallPage() {
     setEditingKey(null)
   }
 
-  useEffect(() => {
-    const POLL_MS = 60 * 60 * 1000
-    const tick = () => setHealthCheckedAt(dayjs().format('HH:mm:ss'))
-    tick()
-    const id = setInterval(tick, POLL_MS)
-    return () => clearInterval(id)
-  }, [])
-
   // 切换模型时,丢弃未保存的阈值草稿
   useEffect(() => {
     return () => {
       setEditingKey(null)
     }
   }, [selectedId])
+
+  // ── 新增模型 ──────────────────────
   const [addOpen, setAddOpen] = useState(false)
   const [addSubmitting, setAddSubmitting] = useState(false)
+  const [addArtifact, setAddArtifact] = useState<ArtifactUploadResponse | null>(
+    null,
+  )
   const [addForm] = Form.useForm<{
     name: string
-    modality: Modality4
+    small_category: string
+    modality: 'text' | 'image'
     endpoint_url: string
   }>()
   const [accessRunning, setAccessRunning] = useState(false)
@@ -866,69 +630,69 @@ export default function ModelsAdminSmallPage() {
   const [accessResult, setAccessResult] = useState<AccessCheckResult | null>(
     null,
   )
+  const riskItems = useRiskCategoryStore((s) => s.items)
+  const ensureRiskLoaded = useRiskCategoryStore((s) => s.ensureLoaded)
+  useEffect(() => {
+    void ensureRiskLoaded()
+  }, [ensureRiskLoaded])
 
-  // 从 models[].refs 动态推导三级标签树（Cascader 用）
+  // 左侧筛选：标签 Cascader 选项（真实标签树,仅启用节点）
   const refTagTree = useMemo(() => {
     interface TreeNode {
       value: string
       label: string
       children?: TreeNode[]
     }
-    const level1 = new Map<string, Map<string, Set<string>>>()
-    for (const m of models) {
-      for (const r of m.refs) {
-        const parts = r.path
-          .split('/')
-          .map((s) => s.trim())
-          .filter(Boolean)
-        if (parts.length < 2) continue
-        const [l1, l2, l3] = parts
-        if (!level1.has(l1)) level1.set(l1, new Map())
-        const l2Map = level1.get(l1)!
-        if (!l2Map.has(l2)) l2Map.set(l2, new Set())
-        if (l3) l2Map.get(l2)!.add(l3)
-      }
-    }
-    const build = (
-      l1Name: string,
-      l2Map: Map<string, Set<string>>,
-    ): TreeNode => {
-      const l2Nodes: TreeNode[] = []
-      const l2Keys = [...l2Map.keys()].sort((a, b) => a.localeCompare(b, 'zh'))
-      for (const l2Name of l2Keys) {
-        const l3Set = l2Map.get(l2Name)!
-        const l2Path = `${l1Name} / ${l2Name}`
-        if (l3Set.size === 0) {
-          l2Nodes.push({ value: l2Path, label: l2Name })
-        } else {
-          const l3Children: TreeNode[] = []
-          const l3Keys = [...l3Set].sort((a, b) => a.localeCompare(b, 'zh'))
-          for (const l3Name of l3Keys) {
-            const l3Path = `${l2Path} / ${l3Name}`
-            l3Children.push({ value: l3Path, label: l3Name })
-          }
-          l2Nodes.push({ value: l2Path, label: l2Name, children: l3Children })
+    const active = (nodes: TagTreeNode[]) =>
+      nodes.filter((n) => n.status === 'active')
+    return active(tagTree).map((l1) => {
+      const l2Nodes: TreeNode[] = active(l1.children ?? []).map((l2) => {
+        const l2Path = `${l1.name} / ${l2.name}`
+        const l3Nodes: TreeNode[] = active(l2.children ?? []).map((l3) => ({
+          value: `${l2Path} / ${l3.name}`,
+          label: l3.name,
+        }))
+        return l3Nodes.length > 0
+          ? { value: l2Path, label: l2.name, children: l3Nodes }
+          : { value: l2Path, label: l2.name }
+      })
+      return { value: l1.name, label: l1.name, children: l2Nodes }
+    })
+  }, [tagTree])
+
+  // 每个模型被哪些三级标签绑定（tag.bound_model_id,真实数据）
+  const boundTagPathsByModel = useMemo(() => {
+    const map = new Map<number, string[]>()
+    const walk = (nodes: TagTreeNode[], trail: string[]) => {
+      for (const n of nodes) {
+        const path = [...trail, n.name]
+        if (n.level === 3 && n.bound_model_id != null) {
+          const arr = map.get(n.bound_model_id) ?? []
+          arr.push(path.join(' / '))
+          map.set(n.bound_model_id, arr)
         }
+        if (n.children?.length) walk(n.children, path)
       }
-      return { value: l1Name, label: l1Name, children: l2Nodes }
     }
-    return [...level1.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0], 'zh'))
-      .map(([l1Name, l2Map]) => build(l1Name, l2Map))
-  }, [models])
+    walk(tagTree, [])
+    return map
+  }, [tagTree])
 
   const filtered = useMemo(
     () =>
-      models.filter((m) => {
+      items.filter((m) => {
         if (
           q.trim() &&
           !m.name.toLowerCase().includes(q.toLowerCase().trim())
         )
           return false
-        if (modalityFilter.length > 0 && !modalityFilter.includes(m.modality))
+        if (
+          modalityFilter.length > 0 &&
+          (!m.modality || !modalityFilter.includes(m.modality))
+        )
           return false
         if (refTagsFilter.length > 0) {
-          const paths = m.refs.map((r) => r.path)
+          const paths = boundTagPathsByModel.get(m.id) ?? []
           const leafTags = refTagsFilter.map((arr) =>
             arr[arr.length - 1],
           )
@@ -937,111 +701,155 @@ export default function ModelsAdminSmallPage() {
         }
         return true
       }),
-    [models, q, modalityFilter, refTagsFilter],
+    [items, q, modalityFilter, refTagsFilter, boundTagPathsByModel],
   )
 
-  const selected = useMemo(
-    () => models.find((m) => m.id === selectedId) ?? null,
-    [models, selectedId],
-  )
+  // 测试结果：本次会话内,每个模型独立持有最近一次结果
+  const testResult: ModelTestResponse | null = selected
+    ? (testResults[selected.id] ?? null)
+    : null
 
-  // 测试结果从当前选中模型派生（每个模型独立持有 testHistory，不再共享）
-  const testResult: ModelTestResponse | null = useMemo(() => {
-    const r = selected?.testHistory?.[0]
-    if (!r) return null
-    return {
-      decision: r.decision,
-      latencyMs: r.latencyMs,
-      confidence: r.confidence,
-      results: [],
-      rawOutput: r.rawOutput,
-    }
-  }, [selected?.testHistory])
-
-  // mock 健康探测：leader_v1 异常，其他模型健康。
-  const healthStatus: 'ok' | 'error' =
-    selected?.name === 'leader_v1' ? 'error' : 'ok'
-
-  // 测试门控：testResult 由当前选中模型的 testHistory 派生
+  // 测试门控：发布前需先在本次会话中通过测试（后端无测试历史持久化）
   const isCurrentModelTested = testResult !== null
   const isCurrentModelTestedPass =
     isCurrentModelTested && testResult.decision === 'pass'
 
+  const currentVersionLabel = selected
+    ? (selected.current_version_label ??
+      (selected.current_version_no != null
+        ? `v${selected.current_version_no}`
+        : '—'))
+    : '—'
+
   const nextVersionNo = useMemo(() => {
-    if (!selected) return 1
-    return (
-      Math.max(
-        ...selected.history.map(
-          (h) => parseInt(h.versionLabel.replace(/[^0-9]/g, ''), 10) || 0,
-        ),
-        parseInt(
-          selected.currentVersion.versionLabel.replace(/[^0-9]/g, ''),
-          10,
-        ) || 0,
-      ) + 1
-    )
-  }, [selected])
+    if (versions.length === 0) return 1
+    return Math.max(...versions.map((v) => v.versionNo)) + 1
+  }, [versions])
 
   // ── 操作：发布 / 取消发布 ──────────────────────
-  const handleActivate = () => {
+  const handleActivate = async () => {
     if (!selected) return
-    setModels((prev) =>
-      prev.map((m) =>
-        m.id === selected.id ? { ...m, status: 'active' } : m,
-      ),
-    )
-    message.success('已发布')
+    try {
+      await registeredModelsApi.activate(selected.id)
+      message.success('已发布')
+      refreshAll()
+    } catch (err) {
+      message.error(errDetail(err, '发布失败'))
+    }
   }
 
-  const openDeactivatePreview = () => {
+  const openDeactivatePreview = async () => {
     if (!selected) return
-    setDeactivatePreview({
-      open: true,
-      refs: selected.refs,
-      target: selected,
-    })
+    const target = selected
+    setDeactivatePreview({ open: true, loading: true, tags: [], target })
+    try {
+      const res = await tagsApi.referencesByModel(target.id)
+      setDeactivatePreview((p) =>
+        p.target?.id === target.id ? { ...p, loading: false, tags: res.items } : p,
+      )
+    } catch {
+      setDeactivatePreview((p) => ({ ...p, loading: false }))
+      message.error('查询引用标签失败')
+    }
   }
 
-  const confirmDeactivate = () => {
+  const confirmDeactivate = async () => {
+    const target = deactivatePreview.target
+    if (!target) return
+    setDeactivating(true)
+    try {
+      await registeredModelsApi.deactivate(target.id)
+      message.success('已取消发布')
+      setDeactivatePreview({ open: false, loading: false, tags: [], target: null })
+      refreshAll()
+    } catch (err) {
+      message.error(errDetail(err, '取消发布失败'))
+    } finally {
+      setDeactivating(false)
+    }
+  }
+
+  // ── 操作：删除模型 ──────────────────────
+  const handleDeleteModel = async () => {
     if (!selected) return
-    setModels((prev) =>
-      prev.map((m) =>
-        m.id === selected.id ? { ...m, status: 'inactive' } : m,
-      ),
-    )
-    message.success('已取消发布')
-    setDeactivatePreview({ open: false, refs: [], target: null })
+    const target = selected
+    setDeleteChecking(true)
+    try {
+      const refs = await registeredModelsApi.references(target.id)
+      if (refs.is_blocked) {
+        Modal.warning({
+          title: '无法删除 — 存在以下引用',
+          width: 520,
+          centered: true,
+          okText: '关闭',
+          content: (
+            <ul style={{ marginTop: 8, paddingLeft: 20 }}>
+              {refs.items.map((r) => (
+                <li key={`${r.kind}-${r.id}`}>
+                  <Tag color={r.kind === 'strategy' ? 'purple' : 'cyan'}>
+                    {r.kind === 'strategy' ? '策略' : '审核项'}
+                  </Tag>
+                  <Text strong>{r.name}</Text>
+                  {r.detail && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {` ${r.detail}`}
+                    </Text>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ),
+        })
+        return
+      }
+      Modal.confirm({
+        title: `确认删除模型「${target.name}」？`,
+        content: '删除后该模型将从列表移除（软删除）,此操作不可撤销。',
+        okText: '确认删除',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            await registeredModelsApi.delete(target.id)
+            message.success('已删除')
+            fetchList(false)
+          } catch (err) {
+            message.error(errDetail(err, '删除失败'))
+          }
+        },
+      })
+    } catch (err) {
+      message.error(errDetail(err, '查询引用失败'))
+    } finally {
+      setDeleteChecking(false)
+    }
   }
 
   // ── 操作：上传新版本 ──────────────────────
   const handleUploadNewVersion = () => {
     if (!selected) return
-    uploadForm.resetFields()
+    setNewVerArtifact(null)
     setNewVersionOpen(true)
   }
 
   const confirmUploadNewVersion = async () => {
     if (!selected) return
-    const v = await uploadForm.validateFields().catch(() => null)
-    if (!v) return
-    const newV: MockVersion = {
-      id: Date.now(),
-      versionLabel: `v${nextVersionNo}`,
-      status: 'pending',
-      releasedAt: dayjs().format('YYYY-MM-DD'),
+    setNewVerSaving(true)
+    try {
+      const v = await registeredModelsApi.createVersion(selected.id, {
+        artifact: newVerArtifact ?? undefined,
+      })
+      message.success(
+        `已保存新版本 ${v.version_label ?? `v${v.version_no}`}，状态：未发布`,
+      )
+      setNewVersionOpen(false)
+      setNewVerArtifact(null)
+      refreshAll()
+    } catch (err) {
+      message.error(errDetail(err, '保存新版本失败'))
+    } finally {
+      setNewVerSaving(false)
     }
-    setModels((prev) =>
-      prev.map((m) =>
-        m.id === selected.id
-          ? {
-              ...m,
-              history: [newV, ...m.history],
-            }
-          : m,
-      ),
-    )
-    message.success(`已保存新版本 ${newV.versionLabel}，状态：未发布`)
-    setNewVersionOpen(false)
   }
 
   // ── 操作：接入校验 ──────────────────────
@@ -1078,36 +886,37 @@ export default function ModelsAdminSmallPage() {
       message.warning('请先完成接入校验')
       return
     }
+    if (!addArtifact) {
+      message.warning('请上传模型文件')
+      return
+    }
     setAddSubmitting(true)
     try {
-      const today = dayjs().format('YYYY-MM-DD')
-      const newId =
-        models.length === 0 ? 1 : Math.max(...models.map((m) => m.id)) + 1
-      const v1: MockVersion = {
-        id: Date.now(),
-        versionLabel: 'v1',
-        status: 'pending',
-        releasedAt: today,
-      }
-      const newModel: MockModel = {
-        id: newId,
+      const created = await registeredModelsApi.create({
         name: v.name.trim(),
-        smallCategory: '',
+        kind: 'small',
+        small_category: v.small_category,
         modality: v.modality,
-        endpoint_url: v.endpoint_url.trim(),
-        status: 'pending',
-        createdAt: today,
-        currentVersion: v1,
-        history: [v1],
-        refs: [],
-        discoveredTags: accessResult?.discoveredTags ?? [],
+        registration_method: 'uploaded_file',
+        artifact: addArtifact,
+        status: 'draft',
+      })
+      // 接入校验发现的模型标签后端暂不持久化,本会话内展示
+      if (accessResult && accessResult.discoveredTags.length > 0) {
+        setDiscoveredOverride((prev) => ({
+          ...prev,
+          [created.id]: accessResult.discoveredTags,
+        }))
       }
-      setModels((prev) => [...prev, newModel])
-      setSelectedId(newId)
       addForm.resetFields()
       resetAccessState()
+      setAddArtifact(null)
       setAddOpen(false)
       message.success('已新增模型')
+      await fetchList(false)
+      setSelectedId(created.id)
+    } catch (err) {
+      message.error(errDetail(err, '新增模型失败'))
     } finally {
       setAddSubmitting(false)
     }
@@ -1123,6 +932,7 @@ export default function ModelsAdminSmallPage() {
     setAddOpen(false)
     addForm.resetFields()
     resetAccessState()
+    setAddArtifact(null)
   }
 
   // ── 操作：配置标签 ──────────────────────
@@ -1134,54 +944,68 @@ export default function ModelsAdminSmallPage() {
   const closeConfigModal = () => {
     setConfigModalOpen(false)
   }
-  const handleSaveConfigTag = (entry: ConfiguredTagEntry) => {
-    if (!selected) return
-    setModels((prev) =>
-      prev.map((m) =>
-        m.id === selected.id
-          ? {
-              ...m,
-              configuredTags: [...(m.configuredTags ?? []), entry],
-            }
-          : m,
-      ),
-    )
-    message.success(
-      `已配置:${entry.discoveredTag} → ${entry.tagPath}`,
-    )
+  const handleSaveConfigTag = async (
+    entry: ConfiguredTagEntry,
+  ): Promise<boolean> => {
+    if (!selected) return false
+    try {
+      await tagsApi.update(entry.tagId, {
+        bound_model_id: selected.id,
+        bound_model_kind: 'small',
+      })
+    } catch (err) {
+      message.error(errDetail(err, '配置标签绑定失败'))
+      return false
+    }
+    setConfiguredMap((prev) => ({
+      ...prev,
+      [selected.id]: [...(prev[selected.id] ?? []), entry],
+    }))
+    fetchTagTree()
+    message.success(`已配置:${entry.discoveredTag} → ${entry.tagPath}`)
+    return true
   }
-  const handleRemoveConfigTag = (tagId: string) => {
+  const handleRemoveConfigTag = async (tagId: string) => {
     if (!selected) return
-    const target = (selected.configuredTags ?? []).find(
-      (e) => e.tagId === tagId,
-    )
+    const target = selectedConfiguredTags.find((e) => e.tagId === tagId)
     if (!target) return
 
-    const refStrategies = findStrategiesByDiscoveredTag(
-      target.discoveredTag,
-    )
+    // 策略引用反查（真实 references 接口,含 strategy 引用）
+    let refStrategies: string[] = []
+    try {
+      const refs = await registeredModelsApi.references(selected.id)
+      refStrategies = refs.items
+        .filter((i) => i.kind === 'strategy')
+        .map((i) => i.name)
+    } catch {
+      // 查询失败按无策略引用处理,不阻断移除
+    }
     const isPublished = selected.status === 'active'
     const isRefByStrategy = refStrategies.length > 0
 
-    const performRemove = () => {
-      setModels((prev) =>
-        prev.map((m) =>
-          m.id === selected.id
-            ? {
-                ...m,
-                configuredTags: (m.configuredTags ?? []).filter(
-                  (e) => e.tagId !== tagId,
-                ),
-              }
-            : m,
+    const performRemove = async () => {
+      try {
+        await tagsApi.update(tagId, {
+          bound_model_id: null,
+          bound_model_kind: null,
+        })
+      } catch (err) {
+        message.error(errDetail(err, '移除失败'))
+        return
+      }
+      setConfiguredMap((prev) => ({
+        ...prev,
+        [selected.id]: (prev[selected.id] ?? []).filter(
+          (e) => e.tagId !== tagId,
         ),
-      )
+      }))
+      fetchTagTree()
       message.success('已移除配置')
     }
 
     // 无任何阻塞项 → 直接移除
     if (!isPublished && !isRefByStrategy) {
-      performRemove()
+      await performRemove()
       return
     }
 
@@ -1242,35 +1066,23 @@ export default function ModelsAdminSmallPage() {
   }
 
   // ── 操作：切换版本（pending / inactive → current，带二次确认） ──────────────────────
-  const handlePublishVersion = (version: MockVersion) => {
+  const handlePublishVersion = async (version: VersionRow) => {
     if (!selected) return
-    setModels((prev) =>
-      prev.map((m) =>
-        m.id === selected.id
-          ? {
-              ...m,
-              status: 'active',
-              currentVersion: { ...version, status: 'active' },
-              history: m.history.map((h) =>
-                h.id === version.id
-                  ? { ...h, status: 'active' }
-                  : h.id === selected.currentVersion.id
-                    ? { ...h, status: 'inactive' }
-                    : h,
-              ),
-            }
-          : m,
-      ),
-    )
-    message.success(
-      version.status === 'pending'
-        ? `已发布 ${version.versionLabel}`
-        : `已切换到 ${version.versionLabel}`,
-    )
+    try {
+      await registeredModelsApi.activateVersion(selected.id, version.id)
+      message.success(
+        version.status === 'pending'
+          ? `已发布 ${version.versionLabel}`
+          : `已切换到 ${version.versionLabel}`,
+      )
+      refreshAll()
+    } catch (err) {
+      message.error(errDetail(err, '切换版本失败'))
+    }
   }
 
   // ── 版本历史表 ──────────────────────
-  const versionColumns: ColumnsType<MockVersion> = [
+  const versionColumns: ColumnsType<VersionRow> = [
     {
       title: '版本',
       dataIndex: 'versionLabel',
@@ -1278,7 +1090,7 @@ export default function ModelsAdminSmallPage() {
       render: (v: string, row) => (
         <Space direction="vertical" size={0}>
           <Text strong>{v}</Text>
-          {row.id === selected?.currentVersion.id && (
+          {row.id === selected?.current_version_id && (
             <Text type="secondary" style={{ fontSize: 11 }}>
               当前
             </Text>
@@ -1290,7 +1102,7 @@ export default function ModelsAdminSmallPage() {
       title: '状态',
       dataIndex: 'status',
       width: '20%',
-      render: (s: 'active' | 'inactive') => versionStatusTag(s),
+      render: (s: DisplayStatus) => versionStatusTag(s),
     },
     {
       title: '发布时间',
@@ -1302,28 +1114,25 @@ export default function ModelsAdminSmallPage() {
     },
     {
       title: 'API 地址',
-      dataIndex: 'endpoint_url',
+      dataIndex: 'endpointUrl',
       width: '24%',
-      render: () => {
-        const url = selected?.endpoint_url
-        return (
-          <Text
-            copyable={!!url}
-            type={url ? undefined : 'secondary'}
-            ellipsis={{ tooltip: url }}
-            style={{ maxWidth: 280 }}
-          >
-            {url || '—'}
-          </Text>
-        )
-      },
+      render: (url: string | null) => (
+        <Text
+          copyable={!!url}
+          type={url ? undefined : 'secondary'}
+          ellipsis={{ tooltip: url }}
+          style={{ maxWidth: 280 }}
+        >
+          {url || '—'}
+        </Text>
+      ),
     },
     {
       title: '操作',
       width: '20%',
       render: (_, row) => {
         const isCurrent =
-          selected && row.id === selected.currentVersion.id
+          selected && row.id === selected.current_version_id
         if (isCurrent) {
           return (
             <Text type="secondary" style={{ fontSize: 12 }}>
@@ -1472,7 +1281,22 @@ export default function ModelsAdminSmallPage() {
               maxHeight: 720,
             }}
           >
-            {filtered.length === 0 ? (
+            {listLoading ? (
+              <div style={{ textAlign: 'center', padding: 24 }}>
+                <Spin size="small" />
+              </div>
+            ) : listError ? (
+              <Alert
+                type="error"
+                showIcon
+                message="模型列表加载失败"
+                action={
+                  <Button size="small" onClick={() => fetchList(false)}>
+                    重试
+                  </Button>
+                }
+              />
+            ) : filtered.length === 0 ? (
               <Empty description="暂无小模型" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
               filtered.map((m) => {
@@ -1502,7 +1326,9 @@ export default function ModelsAdminSmallPage() {
 
         {/* 右：模型详情 */}
         <div style={{ flex: 1, minWidth: 0, paddingLeft: 8 }}>
-          {!selected && <Empty description="请从左侧选择一个模型查看详情" />}
+          {!selected && !listLoading && (
+            <Empty description="请从左侧选择一个模型查看详情" />
+          )}
           {selected && (
             <div>
               <Title level={4} style={{ marginTop: 0 }}>
@@ -1520,64 +1346,76 @@ export default function ModelsAdminSmallPage() {
                 }}
               >
                 <div style={{ position: 'absolute', top: 16, right: 24 }}>
-                  {selected.status === 'active' ? (
-                    <Popconfirm
-                      title="确认取消发布？"
-                      description="取消发布后该模型将无法被推理链路调用。"
-                      okText="下一步"
-                      cancelText="返回"
-                      onConfirm={openDeactivatePreview}
+                  <Space size={8}>
+                    <Button
+                      danger
+                      type="text"
+                      size="small"
+                      disabled={!canWrite}
+                      loading={deleteChecking}
+                      onClick={handleDeleteModel}
                     >
-                      <Button danger ghost disabled={!canWrite}>
-                        取消发布
-                      </Button>
-                    </Popconfirm>
-                  ) : (
-                    <Tooltip
-                      title={
-                        !isCurrentModelTestedPass
-                          ? '请先在「模型测试」中通过测试'
-                          : ''
-                      }
-                    >
-                      <Button
-                        type="primary"
-                        onClick={handleActivate}
-                        disabled={!canWrite || !isCurrentModelTestedPass}
+                      删除
+                    </Button>
+                    {selected.status === 'active' ? (
+                      <Popconfirm
+                        title="确认取消发布？"
+                        description="取消发布后该模型将无法被推理链路调用。"
+                        okText="下一步"
+                        cancelText="返回"
+                        onConfirm={openDeactivatePreview}
                       >
-                        发布
-                      </Button>
-                    </Tooltip>
-                  )}
+                        <Button danger ghost disabled={!canWrite}>
+                          取消发布
+                        </Button>
+                      </Popconfirm>
+                    ) : (
+                      <Tooltip
+                        title={
+                          !isCurrentModelTestedPass
+                            ? '请先在「模型测试」中通过测试'
+                            : ''
+                        }
+                      >
+                        <Button
+                          type="primary"
+                          onClick={handleActivate}
+                          disabled={!canWrite || !isCurrentModelTestedPass}
+                        >
+                          发布
+                        </Button>
+                      </Tooltip>
+                    )}
+                  </Space>
                 </div>
 
                 <Space
                   size={0}
                   wrap
                   align="center"
-                  style={{ paddingRight: 120 }}
+                  style={{ paddingRight: 200 }}
                 >
                   <Text type="secondary">当前版本：</Text>
                   <Text strong style={{ marginRight: 16 }}>
-                    {selected.currentVersion.versionLabel}
+                    {currentVersionLabel}
                   </Text>
                   <Divider type="vertical" />
                   <Text type="secondary" style={{ marginRight: 8 }}>
                     状态：
                   </Text>
-                  {statusTag(selected.status)}
+                  {statusTag(toDisplayStatus(selected.status))}
                   <Divider type="vertical" />
                   <Text type="secondary">模态：</Text>
                   <Text strong style={{ marginRight: 16 }}>
-                    {MODALITY_LABEL_4[selected.modality]}
+                    {selected.modality
+                      ? MODALITY_LABEL_4[selected.modality]
+                      : '—'}
                   </Text>
                   <Divider type="vertical" />
                   <Text type="secondary">创建时间：</Text>
-                  <Text strong>{selected.createdAt}</Text>
-                  <Divider type="vertical" />
-                  {healthStatus === 'ok'
-                    ? healthOkTag(healthCheckedAt)
-                    : healthErrorTag(healthCheckedAt)}
+                  <Text strong>
+                    {dayjs(selected.created_at).format('YYYY-MM-DD')}
+                  </Text>
                 </Space>
               </div>
 
@@ -1606,7 +1444,7 @@ export default function ModelsAdminSmallPage() {
                       【版本历史】
                     </Text>
                     <Text type="secondary" style={{ marginLeft: 12 }}>
-                      {selected.history.length} 个版本
+                      {versions.length} 个版本
                     </Text>
                   </div>
                   <Button
@@ -1620,10 +1458,11 @@ export default function ModelsAdminSmallPage() {
                   </Button>
                 </div>
                 <div style={{ padding: '0 24px 16px' }}>
-                  <Table<MockVersion>
+                  <Table<VersionRow>
                     rowKey="id"
                     size="middle"
-                    dataSource={selected.history}
+                    loading={versionsLoading}
+                    dataSource={versions}
                     columns={versionColumns}
                     pagination={{
                       pageSize: 5,
@@ -1656,15 +1495,14 @@ export default function ModelsAdminSmallPage() {
                       【模型标签】
                     </Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      ({selected.discoveredTags?.length ?? 0})
+                      ({selectedDiscoveredTags.length})
                     </Text>
                   </Space>
                 </div>
 
-                {selected.discoveredTags &&
-                selected.discoveredTags.length > 0 ? (
+                {selectedDiscoveredTags.length > 0 ? (
                   <Space size={6} wrap>
-                    {selected.discoveredTags.map((tag) => (
+                    {selectedDiscoveredTags.map((tag) => (
                       <Tag key={tag} color="blue">
                         {tag}
                       </Tag>
@@ -1707,7 +1545,7 @@ export default function ModelsAdminSmallPage() {
                   </Text>
                 </div>
 
-                {selected.riskThreshold || editingKey !== null ? (
+                {selectedThreshold || editingKey !== null ? (
                   <div>
                     <div
                       style={{
@@ -1733,7 +1571,7 @@ export default function ModelsAdminSmallPage() {
                               : draftHigh
                         const [a, b] = isEditing
                           ? draft
-                          : (selected.riskThreshold?.[key] ?? draft)
+                          : (selectedThreshold?.[key] ?? draft)
                         return (
                           <div key={key}>
                             <div style={{ marginBottom: 8 }}>
@@ -1847,7 +1685,7 @@ export default function ModelsAdminSmallPage() {
                         </Button>
                       </div>
                     )}
-                    {selected.riskThreshold && (
+                    {selectedThreshold && (
                       <Text
                         type="secondary"
                         style={{ fontSize: 12, display: 'block', marginTop: 8 }}
@@ -1909,7 +1747,7 @@ export default function ModelsAdminSmallPage() {
                       【配置标签】
                     </Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      ({selected.configuredTags?.length ?? 0})
+                      ({selectedConfiguredTags.length})
                     </Text>
                   </Space>
                   <Button
@@ -1918,9 +1756,9 @@ export default function ModelsAdminSmallPage() {
                     icon={<PlusOutlined />}
                     disabled={
                       !canWrite ||
-                      (selected.discoveredTags?.length ?? 0) === 0 ||
-                      (selected.discoveredTags ?? []).every((t) =>
-                        (selected.configuredTags ?? []).some(
+                      selectedDiscoveredTags.length === 0 ||
+                      selectedDiscoveredTags.every((t) =>
+                        selectedConfiguredTags.some(
                           (c) => c.discoveredTag === t,
                         ),
                       )
@@ -1932,8 +1770,8 @@ export default function ModelsAdminSmallPage() {
                 </div>
 
                 <ConfigTagTable
-                  configuredTags={selected.configuredTags ?? []}
-                  discoveredTags={selected.discoveredTags ?? []}
+                  configuredTags={selectedConfiguredTags}
+                  discoveredTags={selectedDiscoveredTags}
                   onRemove={handleRemoveConfigTag}
                 />
               </div>
@@ -2023,7 +1861,7 @@ export default function ModelsAdminSmallPage() {
                     <Space style={{ marginBottom: 12 }}>
                       <Text type="secondary">模型：</Text>
                       <Text strong>
-                        {selected.name} {selected.currentVersion.versionLabel}
+                        {selected.name} {currentVersionLabel}
                       </Text>
                     </Space>
 
@@ -2104,7 +1942,7 @@ export default function ModelsAdminSmallPage() {
                         >
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             测试模型：{selected.name}{' '}
-                            {selected.currentVersion.versionLabel}
+                            {currentVersionLabel}
                           </Text>
                         </Space>
                         <Space
@@ -2166,11 +2004,11 @@ export default function ModelsAdminSmallPage() {
         placement="right"
         width={520}
         open={deactivatePreview.open}
-        onClose={() => setDeactivatePreview({ open: false, refs: [], target: null })}
+        onClose={() => setDeactivatePreview({ open: false, loading: false, tags: [], target: null })}
         destroyOnClose
         extra={
           <Tag color="orange">
-            <ExclamationCircleOutlined /> 影响 {deactivatePreview.refs.length} 个三级标签
+            <ExclamationCircleOutlined /> 影响 {deactivatePreview.tags.length} 个三级标签
           </Tag>
         }
       >
@@ -2195,21 +2033,31 @@ export default function ModelsAdminSmallPage() {
                 overflowY: 'auto',
               }}
             >
-              {deactivatePreview.refs.length === 0 && (
-                <Text type="secondary">无引用</Text>
-              )}
-              {deactivatePreview.refs.map((r) => (
-                <div key={r.id} style={{ padding: '4px 0' }}>
-                  <Tag color="blue">{r.path}</Tag>
+              {deactivatePreview.loading ? (
+                <div style={{ textAlign: 'center', padding: 12 }}>
+                  <Spin size="small" />
                 </div>
-              ))}
+              ) : deactivatePreview.tags.length === 0 ? (
+                <Text type="secondary">无引用</Text>
+              ) : (
+                deactivatePreview.tags.map((t) => (
+                  <div key={t.id} style={{ padding: '4px 0' }}>
+                    <Tag color="blue">{t.path}</Tag>
+                  </div>
+                ))
+              )}
             </div>
             <div style={{ marginTop: 24, textAlign: 'right' }}>
               <Space>
-                <Button onClick={() => setDeactivatePreview({ open: false, refs: [], target: null })}>
+                <Button onClick={() => setDeactivatePreview({ open: false, loading: false, tags: [], target: null })}>
                   返回
                 </Button>
-                <Button danger type="primary" onClick={confirmDeactivate}>
+                <Button
+                  danger
+                  type="primary"
+                  loading={deactivating}
+                  onClick={confirmDeactivate}
+                >
                   确认取消发布
                 </Button>
               </Space>
@@ -2226,37 +2074,30 @@ export default function ModelsAdminSmallPage() {
         onOk={confirmUploadNewVersion}
         okText="保存"
         cancelText="取消"
+        okButtonProps={{ disabled: !canWrite }}
+        confirmLoading={newVerSaving}
         width={520}
         destroyOnClose
       >
         {selected && (
-          <Form
-            form={uploadForm}
-            layout="vertical"
-            requiredMark
-            style={{ marginTop: 8 }}
-          >
+          <Form layout="vertical" style={{ marginTop: 8 }}>
             <Form.Item label="模型名称">
               <Input value={selected.name} disabled />
             </Form.Item>
 
             <Form.Item label="当前版本">
               <Space size={8}>
-                <Tag>{selected.currentVersion.versionLabel}</Tag>
+                <Tag>{currentVersionLabel}</Tag>
                 <Text type="secondary">→</Text>
                 <Tag color="blue">v{nextVersionNo}</Tag>
               </Space>
             </Form.Item>
 
-            <Form.Item
-              label="API 地址"
-              name="endpoint_url"
-              rules={[
-                { required: true, message: '请输入 API 地址' },
-                { type: 'url', message: '请输入有效的 URL' },
-              ]}
-            >
-              <Input placeholder="请输入新版本的 API 地址，例如 https://api.example.com/v3" />
+            <Form.Item label="模型文件（可选,不上传则沿用当前版本文件）">
+              <ArtifactUploadButton
+                value={newVerArtifact}
+                onChange={setNewVerArtifact}
+              />
             </Form.Item>
 
             <Alert
@@ -2285,7 +2126,7 @@ export default function ModelsAdminSmallPage() {
           <>
             <p>
               将 <Text strong>{selected.name}</Text> 从{' '}
-              <Text strong>{selected.currentVersion.versionLabel}</Text>{' '}
+              <Text strong>{currentVersionLabel}</Text>{' '}
               切换到 <Text strong>{publishTarget.versionLabel}</Text>。
             </p>
             <Alert
@@ -2295,7 +2136,7 @@ export default function ModelsAdminSmallPage() {
                 <>
                   切换后将启用{' '}
                   <Text strong>{publishTarget.versionLabel}</Text> 作为当前版本
-                  （已发布/在线），<Text strong>{selected.currentVersion.versionLabel}</Text>{' '}
+                  （已发布/在线），<Text strong>{currentVersionLabel}</Text>{' '}
                   转为下线状态（已下线）。此操作会立即影响线上业务，请谨慎操作。
                 </>
               }
@@ -2359,6 +2200,28 @@ export default function ModelsAdminSmallPage() {
           </Form.Item>
 
           <Form.Item
+            label="识别风险类型"
+            name="small_category"
+            rules={[{ required: true, message: '请选择识别风险类型' }]}
+          >
+            <Select
+              placeholder="请选择识别风险类型"
+              disabled={accessRunning}
+              options={
+                riskItems.length > 0
+                  ? riskItems.map((o) => ({
+                      value: o.code,
+                      label: o.label,
+                    }))
+                  : SMALL_MODEL_CATEGORY_OPTIONS.map((o) => ({
+                      value: o.value,
+                      label: o.label,
+                    }))
+              }
+            />
+          </Form.Item>
+
+          <Form.Item
             label="模态"
             name="modality"
             rules={[{ required: true, message: '请选择模态' }]}
@@ -2366,10 +2229,17 @@ export default function ModelsAdminSmallPage() {
             <Select
               placeholder="请选择模态"
               disabled={accessRunning}
-              options={MODALITY_OPTIONS_4.map((o) => ({
+              options={MODALITY_OPTIONS_SMALL.map((o) => ({
                 value: o.value,
                 label: o.label,
               }))}
+            />
+          </Form.Item>
+
+          <Form.Item label="模型文件" required>
+            <ArtifactUploadButton
+              value={addArtifact}
+              onChange={setAddArtifact}
             />
           </Form.Item>
 
@@ -2428,8 +2298,25 @@ export default function ModelsAdminSmallPage() {
       <ModelConfigTagModal
         open={configModalOpen}
         onClose={closeConfigModal}
-        model={selected}
-        allModels={models}
+        model={
+          selected
+            ? {
+                id: selected.id,
+                name: selected.name,
+                discoveredTags: selectedDiscoveredTags,
+                configuredTags: selectedConfiguredTags,
+              }
+            : null
+        }
+        allModels={items.map((m) => ({
+          id: m.id,
+          name: m.name,
+          discoveredTags:
+            discoveredOverride[m.id] ??
+            discoveredFromConfig(m.current_version_config),
+          configuredTags: configuredMap[m.id] ?? [],
+        }))}
+        tagTree={tagTree}
         onSave={handleSaveConfigTag}
       />
     </div>

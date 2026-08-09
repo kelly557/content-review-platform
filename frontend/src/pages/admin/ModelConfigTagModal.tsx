@@ -10,8 +10,8 @@ import {
   TreeSelect,
   Typography,
 } from 'antd'
-import { MOCK_BUSINESS_TAG_TREE, buildTagPath } from '@/lib/mockBusinessTagTree'
 import type { TagTreeNode } from '@/types/domain'
+import { buildTagPath } from '@/lib/tagUtils'
 import { computeOccupancy } from '@/lib/configuredTagOccupancy'
 import type { ConfiguredTagEntry } from '@/pages/admin/configuredTagTypes'
 
@@ -19,7 +19,7 @@ const { Text } = Typography
 
 export type { ConfiguredTagEntry }
 
-interface MockModelLike {
+interface ConfigTagModelLike {
   id: number | string
   name: string
   discoveredTags?: string[]
@@ -29,19 +29,34 @@ interface MockModelLike {
 interface Props {
   open: boolean
   onClose: () => void
-  model: MockModelLike | null
+  model: ConfigTagModelLike | null
   /** 所有模型,用于计算全局占用 */
-  allModels: MockModelLike[]
-  onSave: (entry: ConfiguredTagEntry) => void
+  allModels: ConfigTagModelLike[]
+  /** 真实业务标签树（tagsApi.tree()） */
+  tagTree: TagTreeNode[]
+  /** 返回 false 表示保存失败（保持弹窗打开） */
+  onSave: (entry: ConfiguredTagEntry) => Promise<boolean> | boolean
+}
+
+interface TreeSelectNode {
+  value: string
+  title: string
+  rawTitle: string
+  level: number
+  selectable: boolean
+  disableCheckbox?: boolean
+  children?: TreeSelectNode[]
 }
 
 function filterAndConvertTree(
   nodes: TagTreeNode[],
   occupiedByOther: Set<string>,
   occupiedBySelf: Set<string>,
-): any[] {
-  const out: any[] = []
+): TreeSelectNode[] {
+  const out: TreeSelectNode[] = []
   for (const n of nodes) {
+    // 仅提供「已启用」的标签供绑定
+    if (n.status !== 'active') continue
     if (n.level === 3) {
       if (occupiedByOther.has(n.id) || occupiedBySelf.has(n.id)) continue
       out.push({
@@ -76,10 +91,12 @@ export default function ModelConfigTagModal({
   onClose,
   model,
   allModels,
+  tagTree,
   onSave,
 }: Props) {
   const [form] = Form.useForm<{ discoveredTag: string; tagId: string }>()
   const [tagId, setTagId] = useState<string | undefined>()
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!open) {
@@ -88,19 +105,41 @@ export default function ModelConfigTagModal({
     }
   }, [open, form])
 
+  // 真实标签树上的 bound_model_id 占用（跨页面绑定的全局占用）
+  const treeBound = useMemo(() => {
+    const byOther = new Set<string>()
+    const bySelf = new Set<string>()
+    if (!model) return { byOther, bySelf }
+    const walk = (nodes: TagTreeNode[]) => {
+      for (const n of nodes) {
+        if (n.level === 3 && n.bound_model_id != null) {
+          if (String(n.bound_model_id) === String(model.id)) bySelf.add(n.id)
+          else byOther.add(n.id)
+        }
+        if (n.children?.length) walk(n.children)
+      }
+    }
+    walk(tagTree)
+    return { byOther, bySelf }
+  }, [tagTree, model])
+
   const occupancy = useMemo(() => {
-    if (!model) return { occupiedByOther: new Set<string>(), occupiedBySelf: new Set<string>() }
-    return computeOccupancy(allModels, model.id)
-  }, [model, allModels])
+    const base = model
+      ? computeOccupancy(allModels, model.id)
+      : { occupiedByOther: new Set<string>(), occupiedBySelf: new Set<string>() }
+    for (const id of treeBound.byOther) base.occupiedByOther.add(id)
+    for (const id of treeBound.bySelf) base.occupiedBySelf.add(id)
+    return base
+  }, [model, allModels, treeBound])
 
   const treeData = useMemo(
     () =>
       filterAndConvertTree(
-        MOCK_BUSINESS_TAG_TREE,
+        tagTree,
         occupancy.occupiedByOther,
         occupancy.occupiedBySelf,
       ),
-    [occupancy],
+    [tagTree, occupancy],
   )
 
   if (!model) return null
@@ -109,17 +148,22 @@ export default function ModelConfigTagModal({
     (t) => !(model.configuredTags ?? []).some((c) => c.discoveredTag === t),
   )
 
-  const selectedTagPath = tagId ? buildTagPath(MOCK_BUSINESS_TAG_TREE, tagId) : ''
+  const selectedTagPath = tagId ? buildTagPath(tagTree, tagId) : ''
 
   const handleSubmit = async () => {
     const v = await form.validateFields().catch(() => null)
     if (!v) return
-    onSave({
-      discoveredTag: v.discoveredTag,
-      tagId: v.tagId,
-      tagPath: buildTagPath(MOCK_BUSINESS_TAG_TREE, v.tagId),
-    })
-    onClose()
+    setSaving(true)
+    try {
+      const ok = await onSave({
+        discoveredTag: v.discoveredTag,
+        tagId: v.tagId,
+        tagPath: buildTagPath(tagTree, v.tagId),
+      })
+      if (ok !== false) onClose()
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -148,6 +192,7 @@ export default function ModelConfigTagModal({
       okText="保存"
       cancelText="取消"
       onOk={handleSubmit}
+      confirmLoading={saving}
       okButtonProps={{ disabled: unconfiguredTags.length === 0 }}
     >
       {unconfiguredTags.length === 0 ? (
