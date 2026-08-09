@@ -17,7 +17,7 @@ import type {
   AlertRootCauseResponse,
   AlertRootCauseTopRiskLabel,
 } from '@/types/domain'
-import { alertsApi, type MockMode } from '@/api/reports'
+import { alertsApi } from '@/api/reports'
 import { useAnomalyThresholds } from '@/hooks/useAnomalyThresholds'
 import {
   formatExtraConditions,
@@ -42,7 +42,6 @@ interface Props {
   windowEnd?: string
   status?: 'open' | 'acknowledged'
   ruleLabel?: string
-  mock?: MockMode
   onClose: () => void
 }
 
@@ -56,7 +55,6 @@ export default function AlertEventDetailDrawer({
   windowEnd,
   status,
   ruleLabel,
-  mock,
   onClose,
 }: Props) {
   const [data, setData] = useState<AlertRootCauseResponse | null>(null)
@@ -70,7 +68,7 @@ export default function AlertEventDetailDrawer({
     setErr(null)
     setData(null)
     alertsApi
-      .detail(alertId, { ruleCode }, mock)
+      .detail(alertId)
       .then((rc) => {
         if (alive) setData(rc)
       })
@@ -83,7 +81,7 @@ export default function AlertEventDetailDrawer({
     return () => {
       alive = false
     }
-  }, [open, alertId, ruleCode, mock])
+  }, [open, alertId, ruleCode])
 
   const sev = formatSeverity(ruleCode ? data?.rule_code ?? '' : 'info')
   void sev

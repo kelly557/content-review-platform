@@ -21,7 +21,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { SettingOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
-import { reportsApi, alertsApi, type MockMode } from '@/api/reports'
+import { reportsApi, alertsApi } from '@/api/reports'
 import type {
   AlertEventOut,
   AnomalyQuery,
@@ -79,7 +79,7 @@ function shortDay(d: Dayjs): string {
   return d.format('MM.DD')
 }
 
-export default function AnomalyTab({ mock }: { mock?: MockMode } = {}) {
+export default function AnomalyTab() {
   const [windowKey, setWindowKey] = useState<AnomalyWindow>('1h')
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [modalities, setModalities] = useState<AuditModality[]>([])
@@ -111,7 +111,7 @@ export default function AnomalyTab({ mock }: { mock?: MockMode } = {}) {
   useEffect(() => {
     let alive = true
     reportsApi
-      .riskTrendOptions(mock?.enabled ? mock : undefined)
+      .riskTrendOptions()
       .then((opt) => {
         if (alive) setOptions(opt)
       })
@@ -121,7 +121,7 @@ export default function AnomalyTab({ mock }: { mock?: MockMode } = {}) {
     return () => {
       alive = false
     }
-  }, [mock?.enabled, mock?.seed])
+  }, [])
 
   const refresh = async () => {
     setLoading(true)
@@ -142,16 +142,12 @@ export default function AnomalyTab({ mock }: { mock?: MockMode } = {}) {
       } else {
         query.window = windowKey
       }
-      const mockArg = mock?.enabled ? mock : undefined
       const [a, l] = await Promise.all([
-        reportsApi.anomaly(query, mockArg),
-        alertsApi.list(
-          {
-            ...query,
-            status: statusFilter,
-          },
-          mockArg,
-        ),
+        reportsApi.anomaly(query),
+        alertsApi.list({
+          ...query,
+          status: statusFilter,
+        }),
       ])
       setAnomaly(a)
       setAlerts(l.items)
@@ -176,32 +172,13 @@ export default function AnomalyTab({ mock }: { mock?: MockMode } = {}) {
     riskLabelPaths,
     granularity,
     statusFilter,
-    mock?.enabled,
-    mock?.seed,
   ])
 
   const handleAck = async (id: number, note: string) => {
     setAcking(id)
     try {
-      const mockArg = mock?.enabled ? mock : undefined
-      await alertsApi.ack(id, note, mockArg)
-      if (mock?.enabled) {
-        setAlerts((prev) =>
-          prev.map((a) =>
-            a.id === id
-              ? {
-                  ...a,
-                  status: 'acknowledged',
-                  ack_by: 1,
-                  ack_at: new Date().toISOString(),
-                  ack_note: note,
-                }
-              : a,
-          ),
-        )
-      } else {
-        await refresh()
-      }
+      await alertsApi.ack(id, note)
+      await refresh()
       message.success('已确认')
     } catch (e: unknown) {
       message.error(e instanceof Error ? e.message : '操作失败')
@@ -562,7 +539,6 @@ export default function AnomalyTab({ mock }: { mock?: MockMode } = {}) {
         windowStart={detailAlert?.window_start}
         windowEnd={detailAlert?.window_end}
         status={detailAlert?.status}
-        mock={mock}
         onClose={() => setDetailAlert(null)}
       />
     </Space>

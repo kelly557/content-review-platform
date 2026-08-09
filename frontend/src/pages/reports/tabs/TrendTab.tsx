@@ -11,7 +11,7 @@ import {
   Typography,
 } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
-import { reportsApi, type MockMode } from '@/api/reports'
+import { reportsApi } from '@/api/reports'
 import type {
   AuditModality,
   RiskTimeseriesPoint,
@@ -59,7 +59,7 @@ const RISK_LEVEL_CARDS = [
 
 
 
-export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
+export default function TrendTab() {
   const [windowKey, setWindowKey] = useState<WindowKey>('7d')
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [modalities, setModalities] = useState<AuditModality[]>([])
@@ -84,7 +84,7 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
   useEffect(() => {
     let alive = true
     reportsApi
-      .riskTrendOptions(mock?.enabled ? mock : undefined)
+      .riskTrendOptions()
       .then((opt) => {
         if (alive) setOptions(opt)
       })
@@ -94,7 +94,7 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
     return () => {
       alive = false
     }
-  }, [mock?.enabled, mock?.seed])
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -116,11 +116,9 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
     } else {
       base.window = windowKey === 'today' ? 'today' : windowKey === '30d' ? '30d' : '7d'
     }
-    const mockArg = mock?.enabled ? mock : undefined
-
     Promise.all([
-      reportsApi.riskTrend(base, mockArg),
-      reportsApi.riskTopLabels({ ...base, limit: 5, dimension: topRiskDimension }, mockArg),
+      reportsApi.riskTrend(base),
+      reportsApi.riskTopLabels({ ...base, limit: 5, dimension: topRiskDimension }),
     ])
       .then(([rt, top]) => {
         if (!alive) return
@@ -148,8 +146,6 @@ export default function TrendTab({ mock }: { mock?: MockMode } = {}) {
     riskLabelPaths,
     granularity,
     topRiskDimension,
-    mock?.enabled,
-    mock?.seed,
   ])
 
   // 4 张风险等级卡片：占比 = 该等级条数 / sum_of_4 (denominator).
