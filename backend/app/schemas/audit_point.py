@@ -37,6 +37,7 @@ def serialize_audit_point(point: "AuditPoint") -> dict:
         "source_document_id": getattr(point, "source_document_id", None),
         "source_quote": getattr(point, "source_quote", None),
         "source_line_no": getattr(point, "source_line_no", None),
+        "parent_point_id": getattr(point, "parent_point_id", None),
         "created_at": point.created_at,
         "updated_at": point.updated_at,
     }
@@ -65,6 +66,7 @@ class AuditPointOut(ORMBase):
     source_document_id: Optional[int] = None
     source_quote: Optional[str] = None
     source_line_no: Optional[int] = None
+    parent_point_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

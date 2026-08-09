@@ -95,6 +95,15 @@ class AuditPoint(Base):
     # 来源行号（结构化文件导入时记录 Excel/CSV 行号，便于追溯）
     source_line_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    # 三级审核点（sub audit point）：自引用父审核点。NULL = 顶级审核点。
+    # RulesTreeView 的三级 sub 列表从本字段派生（替代前端 getMockSubAuditPoints）。
+    parent_point_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("audit_points.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), nullable=False
     )

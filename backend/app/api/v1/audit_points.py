@@ -158,6 +158,66 @@ async def list_points(
     return [AuditPointOut.model_validate(serialize_audit_point(r)) for r in rows]
 
 
+@router.get("/{code}/points/{point_id}/sub-points", response_model=list[AuditPointOut])
+async def list_sub_points(
+    code: str,
+    point_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> list[AuditPointOut]:
+    """三级审核点（sub audit point）列表：某父审核点下的子审核点。
+
+    替代前端 getMockSubAuditPoints；RulesTreeView 从此处拉三级 sub 列表。
+    """
+    await _ensure_package(db, code)
+    parent = await db.get(AuditPoint, point_id)
+    if parent is None or parent.package_code != code:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="审核点不存在")
+    stmt = (
+        select(AuditPoint)
+        .where(AuditPoint.parent_point_id == point_id)
+        .order_by(AuditPoint.sort_order.asc(), AuditPoint.id.asc())
+    )
+    rows = list((await db.execute(stmt)).scalars())
+    return [AuditPointOut.model_validate(serialize_audit_point(r)) for r in rows]
+
+
+@router.post("/{code}/points/{point_id}/sub-points", response_model=AuditPointOut, status_code=status.HTTP_201_CREATED)
+async def create_sub_point(
+    code: str,
+    point_id: int,
+    body: AuditPointCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AuditPointOut:
+    """在指定父审核点下创建三级 sub 审核点。"""
+    await _ensure_package(db, code)
+    parent = await db.get(AuditPoint, point_id)
+    if parent is None or parent.package_code != code:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="审核点不存在")
+    point_code = await _generate_point_code(db, code, parent.item_id)
+    sub = AuditPoint(
+        package_code=code,
+        item_id=parent.item_id,
+        parent_point_id=point_id,
+        code=point_code,
+        label=body.label_cn,
+        label_cn=body.label_cn,
+        description=body.description,
+        medium_threshold=body.medium_threshold,
+        high_threshold=body.high_threshold,
+        risk_level=body.risk_level,
+        is_enabled=True,
+        is_builtin=False,
+        sort_order=0,
+    )
+    db.add(sub)
+    await db.flush()
+    await db.commit()
+    await db.refresh(sub)
+    return AuditPointOut.model_validate(serialize_audit_point(sub))
+
+
 @router.post("/{code}/points", response_model=AuditPointOut, status_code=status.HTTP_201_CREATED)
 async def create_point(
     code: str,

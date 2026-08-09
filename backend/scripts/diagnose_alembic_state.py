@@ -52,7 +52,7 @@ from app.db.session import SessionLocal
 # new migration that changes DDL, update this constant too.
 # ─────────────────────────────────────────────────────────────────────
 
-REVISION_HEAD = "20260812_add_strategy_tag_refs"
+REVISION_HEAD = "20260812_audit_points_parent"
 
 
 @dataclass(frozen=True)
@@ -118,6 +118,8 @@ EXPECTED_COLUMNS: tuple[ExpectedColumn, ...] = (
     ExpectedColumn("users", ("username",)),
     # users.tenant_id added by 20260810
     ExpectedColumn("users", ("tenant_id",)),
+    # audit_points.parent_point_id added by 20260812
+    ExpectedColumn("audit_points", ("parent_point_id",)),
 )
 
 
