@@ -104,6 +104,15 @@ class AuditPoint(Base):
         index=True,
     )
 
+    # 与标签体系的链接：顶级审核点 ↔ 二级标签；sub-审核点 ↔ 三级标签。
+    # 标签删除时 SET NULL（保留审核点）。NULL = 手工/历史数据。
+    tag_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("tags.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), nullable=False
     )

@@ -49,6 +49,8 @@ class AuditItemOut(ORMBase):
     sort_order: int = 0
     is_enabled: bool = True
     is_builtin: bool = False
+    # 与一级标签的链接（数美镜像数据）；NULL = 手工/历史数据
+    tag_id: Optional[str] = None
     point_count: int = 0
     # N:M 关联：审核项 ↔ 自定义图库/词库
     linked_libraries: list[LinkedLibraryOut] = Field(default_factory=list)

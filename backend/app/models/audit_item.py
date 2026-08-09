@@ -63,6 +63,14 @@ class AuditItem(Base):
     is_builtin: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, server_default="false"
     )
+    # 与标签体系的链接：审核项 ↔ 一级标签（数美标签镜像时写入）。
+    # 标签删除时 SET NULL（保留审核项）。NULL = 手工/历史数据。
+    tag_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("tags.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     # 通用规则「生效小模型版本」指针：仅 is_builtin=true 时写入；FK 到
     # registered_model_versions.id。version 删除时 SET NULL（前端显示「未指定」）。
     active_small_model_version_id: Mapped[Optional[int]] = mapped_column(

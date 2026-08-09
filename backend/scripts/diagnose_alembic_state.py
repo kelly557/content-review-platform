@@ -52,7 +52,7 @@ from app.db.session import SessionLocal
 # new migration that changes DDL, update this constant too.
 # ─────────────────────────────────────────────────────────────────────
 
-REVISION_HEAD = "20260813_add_tag_modality"
+REVISION_HEAD = "20260813_audit_rule_tag_links"
 
 
 @dataclass(frozen=True)
@@ -122,6 +122,9 @@ EXPECTED_COLUMNS: tuple[ExpectedColumn, ...] = (
     ExpectedColumn("audit_points", ("parent_point_id",)),
     # tags.modality added by 20260813
     ExpectedColumn("tags", ("modality",)),
+    # audit_items/audit_points.tag_id added by 20260813_audit_rule_tag_links
+    ExpectedColumn("audit_items", ("tag_id",)),
+    ExpectedColumn("audit_points", ("tag_id",)),
 )
 
 

@@ -38,6 +38,7 @@ def serialize_audit_point(point: "AuditPoint") -> dict:
         "source_quote": getattr(point, "source_quote", None),
         "source_line_no": getattr(point, "source_line_no", None),
         "parent_point_id": getattr(point, "parent_point_id", None),
+        "tag_id": getattr(point, "tag_id", None),
         "created_at": point.created_at,
         "updated_at": point.updated_at,
     }
@@ -67,6 +68,8 @@ class AuditPointOut(ORMBase):
     source_quote: Optional[str] = None
     source_line_no: Optional[int] = None
     parent_point_id: Optional[int] = None
+    # 与标签体系的链接：顶级审核点 ↔ 二级标签；sub-审核点 ↔ 三级标签
+    tag_id: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
