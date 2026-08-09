@@ -359,7 +359,11 @@ async def _generate_item_code(db: AsyncSession, package_code: str) -> str:
 async def _point_counts(db: AsyncSession, package_code: str) -> dict[int, int]:
     result = await db.execute(
         select(AuditPoint.item_id, func.count(AuditPoint.id))
-        .where(AuditPoint.package_code == package_code)
+        .where(
+            AuditPoint.package_code == package_code,
+            # 只计顶级审核点；sub-审核点（parent_point_id 非空）不计入 item 点数
+            AuditPoint.parent_point_id.is_(None),
+        )
         .group_by(AuditPoint.item_id)
     )
     return {row[0]: int(row[1]) for row in result.all()}

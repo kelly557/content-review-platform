@@ -1473,6 +1473,8 @@ export interface AuditItem {
   sort_order: number
   is_enabled: boolean
   is_builtin: boolean
+  /** 与一级标签的链接（数美标签镜像数据）；null = 手工/历史数据 */
+  tag_id?: string | null
   point_count: number
   /** 「关联自定义图库词库」上移至审核项；同 item 下须共享单一 library_type。 */
   linked_libraries: AuditItemLinkedLibrary[]
@@ -1559,6 +1561,8 @@ export interface AuditPoint {
   is_builtin: boolean
   custom_wordset_id: number | null
   sort_order: number
+  /** 与标签体系的链接：顶级审核点↔二级标签；sub-审核点↔三级标签 */
+  tag_id?: string | null
   /** 来源文件 ID（仅由「自定义规则 Agent」上传文件解析时写入） */
   source_document_id: number | null
   /** 原文片段（LLM 解析时记录） */

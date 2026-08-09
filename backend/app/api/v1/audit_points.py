@@ -137,6 +137,7 @@ async def list_points(
     _: User = Depends(get_current_user),
     item_id: Optional[int] = None,
     enabled: Optional[bool] = None,
+    include_subs: bool = Query(False, description="是否包含 sub-审核点（默认仅返回顶级审核点）"),
 ) -> list[AuditPointOut]:
     from sqlalchemy.orm import selectinload
 
@@ -153,6 +154,9 @@ async def list_points(
         stmt = stmt.where(AuditPoint.item_id == item_id)
     if enabled is not None:
         stmt = stmt.where(AuditPoint.is_enabled.is_(enabled))
+    if not include_subs:
+        # sub-审核点走 /points/{id}/sub-points 单独拉取，列表默认仅顶级点
+        stmt = stmt.where(AuditPoint.parent_point_id.is_(None))
     stmt = stmt.order_by(AuditPoint.item_id.asc(), AuditPoint.sort_order.asc(), AuditPoint.id.asc())
     rows = list((await db.execute(stmt)).scalars())
     return [AuditPointOut.model_validate(serialize_audit_point(r)) for r in rows]
