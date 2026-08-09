@@ -1287,6 +1287,7 @@ export interface Tag {
   version: number
   level: TagLevel
   parent_id?: string | null
+  modality?: TagModality | null
   bound_model_id?: number | null
   bound_model_kind?: BoundModelKind | null
   created_at: string
@@ -1306,6 +1307,7 @@ export interface TagSummary {
   status: TagStatus
   level: TagLevel
   parent_id?: string | null
+  modality?: TagModality | null
   bound_model_id?: number | null
   bound_model_kind?: BoundModelKind | null
   updated_at?: string | null
@@ -1326,6 +1328,7 @@ export interface TagCreate {
   status?: TagStatus
   level?: TagLevel
   parent_id?: string | null
+  modality?: TagModality | null
   bound_model_id?: number | null
   bound_model_kind?: BoundModelKind | null
 }
@@ -1342,6 +1345,7 @@ export interface TagUpdate {
   knowledge_refs?: string[]
   evidence_refs?: string[]
   status?: TagStatus
+  modality?: TagModality | null
   bound_model_id?: number | null
   bound_model_kind?: BoundModelKind | null
 }
@@ -1353,6 +1357,7 @@ export interface TagTreeNode {
   level: TagLevel
   status: TagStatus
   domain: TagDomain
+  modality?: TagModality | null
   bound_model_id?: number | null
   bound_model_kind?: BoundModelKind | null
   bound_model_label?: string | null

@@ -1,17 +1,15 @@
 // 标签管理（系统管理 → 标签管理）
-// 设计要点（v4）：
-//   - 用户可自由选择创建一级 / 二级 / 三级标签（编辑模式层级只读）
-//   - 三级标签可设置「适用模态」（仅标签属性，不绑定模型）
+// 设计要点（v5，真实 API 版）：
+//   - 数据源：tagsApi.tree() 一次拉取三级树，前端扁平化为行
+//   - 三级标签带「适用模态」（每条三级记录一个模态，图文双模态即两行）
 //   - 标签页面只做标签 CRUD + 模型绑定展示，不提供绑定 / 解绑模型的操作
-//     （绑定关系由其他模块维护；此处只展示已绑定模型与「未绑定 → 无阈值」状态）
-//   - 停用 / 删除前先查引用清单：
+//     （绑定关系由模型模块维护；此处只展示已绑定模型与「未绑定 → 无阈值」状态）
+//   - 停用 / 删除前先调 tagsApi.getReferences 查引用清单：
 //     · 停用被 active 策略引用 → 阻止
 //     · 删除任何引用 → 阻止
-//     阻止时弹出顶层 TagReferenceConfirmModal 展示引用详情
-//   - 当前 mock 阶段：引用清单走本地 mockGetReferences（与 backend _MOCK_STRATEGY_REFS 对齐）
-//     TODO: 真实接入后改回 tagsApi.getReferences + axios 409 兜底
-//   - 列表行：一级 / 二级没有下挂子标签时单独成行；三级按 {模态, 模型} 组合拆行
-import { useEffect, useMemo, useState } from 'react'
+//     阻止时弹出顶层 TagReferenceConfirmModal 展示引用详情；接口 409 兜底
+//   - 列表行：一级 / 二级没有下挂子标签时单独成行；三级每条记录一行
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   App,
   AutoComplete,
@@ -22,6 +20,7 @@ import {
   Input,
   Select,
   Space,
+  Spin,
   Table,
   Tag as AntdTag,
   Typography,
@@ -35,281 +34,105 @@ import {
   TagsOutlined,
   CheckOutlined,
   CloseOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons'
+import { tagsApi } from '@/api/tags'
 import type {
-  TagReferenceModel,
-  TagReferences,
-  TagReferenceStrategy,
+  TagModality,
+  TagStatus,
+  TagTreeNode,
 } from '@/types/domain'
 import { TagReferenceConfirmModal } from '@/components/TagReferenceConfirmModal'
 
 const { Text, Title } = Typography
 
 type Level = 1 | 2 | 3
-type Status = 'active' | 'inactive'
-type Modality = 'text' | 'image' | 'audio' | 'video'
-type ModelKind = 'large' | 'small'
 
-const MODALITY_LABELS: Record<Modality, string> = {
+const MODALITY_LABELS: Record<TagModality, string> = {
   text: '文本',
   image: '图像',
   audio: '音频',
   video: '视频',
 }
 
-const MODALITY_OPTIONS: { value: Modality; label: string }[] = [
+const MODALITY_OPTIONS: { value: TagModality; label: string }[] = [
   { value: 'text', label: '文本' },
   { value: 'image', label: '图像' },
   { value: 'audio', label: '音频' },
   { value: 'video', label: '视频' },
 ]
 
-interface MockModel {
-  id: number
-  name: string
-  kind: ModelKind
-  version: string
-  modality: Modality
-}
-
-interface MockTag {
+/** 页面内部行用标签结构（由 tree 扁平化得来） */
+interface TagRow {
   id: string
+  code: string
   level: Level
   name: string
-  status: Status
-  /** 可被审核策略引用(true)/未启用 false;缺模型时强制 false */
-  enabled: boolean
+  status: TagStatus
   parentId: string | null
-  /** 仅展示用途:三级标签单条记录对应一个模态;模型绑定关系由其他模块维护 */
-  modality?: Modality
-  boundModelId?: number
-}
-
-const MOCK_MODELS: MockModel[] = [
-  { id: 1, name: 'gpt-4o-mini', kind: 'small', version: 'v2', modality: 'text' },
-  { id: 2, name: 'claude-3-haiku', kind: 'small', version: 'v1', modality: 'text' },
-  { id: 3, name: 'qwen-vl-max', kind: 'small', version: 'v3', modality: 'image' },
-  { id: 4, name: 'leader_v1', kind: 'small', version: 'v1', modality: 'image' },
-  { id: 5, name: 'cartoon_model', kind: 'small', version: 'v3', modality: 'image' },
-  { id: 6, name: 'flag_model', kind: 'small', version: 'v2', modality: 'image' },
-  { id: 7, name: 'ocr_model', kind: 'small', version: 'v5', modality: 'image' },
-  { id: 8, name: 'face_model', kind: 'small', version: 'v4', modality: 'image' },
-  { id: 9, name: 'nsfw_detector', kind: 'small', version: 'v6', modality: 'image' },
-  { id: 10, name: 'speech_to_text', kind: 'small', version: 'v2', modality: 'audio' },
-]
-
-const INITIAL_MOCK_TAGS: MockTag[] = [
-  // 一级
-  { id: 'l1-politics', level: 1, name: '涉政', status: 'active', enabled: true, parentId: null },
-  { id: 'l1-ads_law', level: 1, name: '广告法', status: 'active', enabled: true, parentId: null },
-  { id: 'l1-porn', level: 1, name: '涉黄', status: 'active', enabled: true, parentId: null },
-  { id: 'l1-medical', level: 1, name: '医药', status: 'active', enabled: true, parentId: null },
-  { id: 'l1-violence', level: 1, name: '涉暴', status: 'active', enabled: true, parentId: null },
-  { id: 'l1-custom', level: 1, name: '自定义', status: 'inactive', enabled: false, parentId: null },
-
-  // 二级
-  { id: 'l2-leader1', level: 2, name: '一号领导', status: 'active', enabled: true, parentId: 'l1-politics' },
-  { id: 'l2-leader2', level: 2, name: '二号领导', status: 'active', enabled: true, parentId: 'l1-politics' },
-  { id: 'l2-flag', level: 2, name: '国旗国徽', status: 'active', enabled: true, parentId: 'l1-politics' },
-  { id: 'l2-cartoon_pol', level: 2, name: '政治讽刺', status: 'active', enabled: true, parentId: 'l1-politics' },
-  { id: 'l2-absolute', level: 2, name: '极限词', status: 'active', enabled: true, parentId: 'l1-ads_law' },
-  { id: 'l2-fake_claim', level: 2, name: '虚假宣传', status: 'active', enabled: true, parentId: 'l1-ads_law' },
-  { id: 'l2-nude', level: 2, name: '成人内容', status: 'active', enabled: true, parentId: 'l1-porn' },
-  { id: 'l2-cartoon_porn', level: 2, name: '色情漫画', status: 'inactive', enabled: false, parentId: 'l1-porn' },
-  { id: 'l2-medical_claim', level: 2, name: '医药宣传', status: 'active', enabled: true, parentId: 'l1-medical' },
-  { id: 'l2-weapon', level: 2, name: '武器', status: 'active', enabled: true, parentId: 'l1-violence' },
-
-  // 三级 — 每个模态一行独立记录
-  // 漫画·一号领导 (图像 + 视频) → 拆成 2 行
-  { id: 'l3-leader1-write', level: 3, name: '写实', status: 'active', enabled: true, parentId: 'l2-leader1', modality: 'image', boundModelId: 4 },
-  { id: 'l3-leader1-cartoon-image', level: 3, name: '漫画', status: 'active', enabled: true, parentId: 'l2-leader1', modality: 'image', boundModelId: 5 },
-  { id: 'l3-leader1-cartoon-video', level: 3, name: '漫画', status: 'active', enabled: false, parentId: 'l2-leader1', modality: 'video' },
-  // 二号领导·漫画 → 单行
-  { id: 'l3-leader2-cartoon', level: 3, name: '漫画', status: 'active', enabled: true, parentId: 'l2-leader2', modality: 'image', boundModelId: 5 },
-  // 文本描述 (文本 + 图像) → 拆成 2 行
-  { id: 'l3-leader2-text-text', level: 3, name: '文本描述', status: 'active', enabled: true, parentId: 'l2-leader2', modality: 'text', boundModelId: 1 },
-  { id: 'l3-leader2-text-image', level: 3, name: '文本描述', status: 'active', enabled: false, parentId: 'l2-leader2', modality: 'image' },
-  // 国旗国徽
-  { id: 'l3-flag-vandalize', level: 3, name: '篡改', status: 'active', enabled: true, parentId: 'l2-flag', modality: 'image', boundModelId: 6 },
-  { id: 'l3-flag-graffiti', level: 3, name: '涂鸦', status: 'active', enabled: true, parentId: 'l2-flag', modality: 'image', boundModelId: 6 },
-  // 政治讽刺
-  { id: 'l3-cartoon_pol-latest', level: 3, name: '时政讽刺', status: 'active', enabled: true, parentId: 'l2-cartoon_pol', modality: 'image', boundModelId: 5 },
-  { id: 'l3-cartoon_pol-history', level: 3, name: '历史讽刺', status: 'active', enabled: true, parentId: 'l2-cartoon_pol', modality: 'image', boundModelId: 5 },
-  // 极限用语 (文本 + 图像) → 拆成 2 行
-  { id: 'l3-absolute-text', level: 3, name: '极限用语', status: 'active', enabled: true, parentId: 'l2-absolute', modality: 'text', boundModelId: 7 },
-  { id: 'l3-absolute-image-text', level: 3, name: '极限用语', status: 'active', enabled: false, parentId: 'l2-absolute', modality: 'image' },
-  { id: 'l3-absolute-image-banner', level: 3, name: '极限标语', status: 'active', enabled: true, parentId: 'l2-absolute', modality: 'image', boundModelId: 7 },
-  // 虚假宣传
-  { id: 'l3-fake_claim-text', level: 3, name: '夸大疗效', status: 'active', enabled: true, parentId: 'l2-fake_claim', modality: 'text', boundModelId: 1 },
-  // 成人内容
-  { id: 'l3-nude-face', level: 3, name: '成人面部', status: 'active', enabled: true, parentId: 'l2-nude', modality: 'image', boundModelId: 8 },
-  { id: 'l3-nude-body', level: 3, name: '成人裸露', status: 'active', enabled: true, parentId: 'l2-nude', modality: 'image', boundModelId: 9 },
-  // 音频呻吟 (音频 + 视频) → 拆成 2 行
-  { id: 'l3-nude-voice-audio', level: 3, name: '音频呻吟', status: 'active', enabled: true, parentId: 'l2-nude', modality: 'audio', boundModelId: 10 },
-  { id: 'l3-nude-voice-video', level: 3, name: '音频呻吟', status: 'active', enabled: false, parentId: 'l2-nude', modality: 'video' },
-  { id: 'l3-cartoon_porn-anime', level: 3, name: '动漫色情', status: 'inactive', enabled: false, parentId: 'l2-cartoon_porn', modality: 'image', boundModelId: 5 },
-  { id: 'l3-medical_claim-text', level: 3, name: '包治百病', status: 'active', enabled: true, parentId: 'l2-medical_claim', modality: 'text', boundModelId: 1 },
-  { id: 'l3-weapon-real', level: 3, name: '真实武器', status: 'active', enabled: true, parentId: 'l2-weapon', modality: 'image', boundModelId: 3 },
-  { id: 'l3-weapon-toy', level: 3, name: '仿真玩具', status: 'active', enabled: true, parentId: 'l2-weapon', modality: 'image', boundModelId: 3 },
-]
-
-interface DrawerState {
-  open: boolean
-  editing: MockTag | null
+  domain: string
+  modality?: TagModality | null
+  boundModelId?: number | null
+  boundModelLabel?: string | null
 }
 
 interface FlatRow {
   key: string
-  rowTag: MockTag
-  l1: MockTag | null
-  l2: MockTag | null
-  l3: MockTag | null
+  rowTag: TagRow
+  l1: TagRow | null
+  l2: TagRow | null
+  l3: TagRow | null
 }
 
-function findById(list: MockTag[], id: string | null | undefined): MockTag | null {
+interface DrawerState {
+  open: boolean
+  editing: TagRow | null
+}
+
+function flattenTree(nodes: TagTreeNode[]): TagRow[] {
+  const out: TagRow[] = []
+  const walk = (list: TagTreeNode[], parentId: string | null) => {
+    for (const n of list) {
+      out.push({
+        id: n.id,
+        code: n.code,
+        level: n.level as Level,
+        name: n.name,
+        status: n.status,
+        parentId,
+        domain: n.domain,
+        modality: n.modality ?? null,
+        boundModelId: n.bound_model_id ?? null,
+        boundModelLabel: n.bound_model_label ?? null,
+      })
+      if (n.children?.length) walk(n.children, n.id)
+    }
+  }
+  walk(nodes, null)
+  return out
+}
+
+function findById(list: TagRow[], id: string | null | undefined): TagRow | null {
   if (!id) return null
   return list.find((t) => t.id === id) ?? null
 }
 
-// 父级 combobox 输入处理:
-// - 有 id → 选了已有标签,直接返回 id
-// - 仅 name → 自动创建新的一级/二级标签,生成 id,setTags 追加,返回新 id
-// - 空 → 返回 null
-function ensureParentTag(
-  input: { id?: string; name: string } | null,
-  level: 1 | 2,
-  parentId: string | null,
-  setTags: React.Dispatch<React.SetStateAction<MockTag[]>>,
-): string | null {
-  const name = input?.name.trim() ?? ''
-  if (!name) return null
-  if (input?.id) return input.id
-  const newId = `t-${Date.now()}-L${level}-${Math.random().toString(36).slice(2, 6)}`
-  const newTag: MockTag = {
-    id: newId,
-    level,
-    name,
-    status: 'active',
-    enabled: true,
-    parentId,
-  }
-  setTags((prev) => [newTag, ...prev])
-  return newId
-}
-
-// ── mock 阶段:本地引用清单(与 backend _MOCK_STRATEGY_REFS 对齐) ──
-// TODO: 后端真实接入后,改回调 tagsApi.getReferences
-const MOCK_STRATEGY_REFS: Record<string, TagReferenceStrategy[]> = {
-  'l3-leader1-cartoon-image': [
-    {
-      strategy_id: 'st-001',
-      strategy_name: '图文审核主策略',
-      status: 'active',
-      services: ['text-image'],
-    },
-    {
-      strategy_id: 'st-002',
-      strategy_name: '备用策略·视频',
-      status: 'deprecated',
-      services: ['video'],
-    },
-  ],
-  'l3-leader2-text-text': [
-    {
-      strategy_id: 'st-003',
-      strategy_name: '文本-图像混合策略',
-      status: 'active',
-      services: ['text-image'],
-    },
-  ],
-  'l3-nude-face': [
-    {
-      strategy_id: 'st-004',
-      strategy_name: '人脸审核策略',
-      status: 'active',
-      services: ['image'],
-    },
-  ],
-  'l3-absolute-text': [
-    {
-      strategy_id: 'st-005',
-      strategy_name: '广告法词库',
-      status: 'deprecated',
-      services: ['text'],
-    },
-  ],
-}
-
-function mockGetReferences(tagId: string, allTags: MockTag[]): TagReferences {
-  const tag = allTags.find((t) => t.id === tagId)
-  if (!tag) {
-    // mock 阶段不会发生;若发生,直接放行避免阻塞操作
-    return {
-      tag_id: tagId,
-      tag_name: '',
-      tag_level: 1,
-      tag_path: '',
-      strategies: [],
-      models: [],
-      can_deactivate: true,
-      can_delete: true,
-      total_references: 0,
-    }
-  }
-  // 构建路径
-  const parts = [tag.name]
-  let cur = allTags.find((t) => t.id === tag.parentId)
-  while (cur) {
-    parts.unshift(cur.name)
-    cur = allTags.find((t) => t.id === cur?.parentId)
-  }
-  const path = parts.join(' / ')
-
-  // 模型引用
-  const models: TagReferenceModel[] = []
-  if (tag.boundModelId) {
-    const m = MOCK_MODELS.find((mm) => mm.id === tag.boundModelId)
-    if (m) {
-      models.push({
-        model_id: m.id,
-        model_name: m.name,
-        model_version: m.version,
-      })
-    }
-  }
-
-  // 策略引用(mock)
-  const strategies = MOCK_STRATEGY_REFS[tagId] ?? []
-
-  const total = strategies.length + models.length
-  const hasActiveStrategy = strategies.some((s) => s.status === 'active')
-
-  return {
-    tag_id: tag.id,
-    tag_name: tag.name,
-    tag_level: tag.level,
-    tag_path: path,
-    strategies,
-    models,
-    can_deactivate: !hasActiveStrategy,
-    can_delete: total === 0,
-    total_references: total,
-  }
+/** 后端 code 正则：^[A-Za-z][A-Za-z0-9_\-]{1,95}$ */
+function genTagCode(): string {
+  return `tag_u_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
 export default function TagsAdminPage() {
   const { message } = App.useApp()
 
-  const [tags, setTags] = useState<MockTag[]>(INITIAL_MOCK_TAGS)
+  const [tags, setTags] = useState<TagRow[]>([])
+  const [loading, setLoading] = useState(false)
   const [q, setQ] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | Status>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | TagStatus>('all')
   const [level1Filter, setLevel1Filter] = useState<string>('')
   const [level2Filter, setLevel2Filter] = useState<string>('')
   const [level3Filter, setLevel3Filter] = useState<string>('')
-  const [drawer, setDrawer] = useState<DrawerState>({
-    open: false,
-    editing: null,
-  })
+  const [drawer, setDrawer] = useState<DrawerState>({ open: false, editing: null })
   // 父级标签(combobox): id 存在 = 选了已有;仅 name = 用户输入新值
   const [parentL1Input, setParentL1Input] = useState<{ id?: string; name: string } | null>(null)
   const [parentL2Input, setParentL2Input] = useState<{ id?: string; name: string } | null>(null)
@@ -318,6 +141,23 @@ export default function TagsAdminPage() {
   const [saving, setSaving] = useState(false)
   const [checkingRefs, setCheckingRefs] = useState(false)
   const [form] = Form.useForm()
+
+  // ── 数据加载 ──
+  const reload = useCallback(async () => {
+    setLoading(true)
+    try {
+      const tree = await tagsApi.tree()
+      setTags(flattenTree(tree))
+    } catch {
+      message.error('标签树加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [message])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
 
   // ── 派生：扁平行 ──
   const flatRows = useMemo<FlatRow[]>(() => {
@@ -394,19 +234,40 @@ export default function TagsAdminPage() {
       if (level2Filter && l2?.id !== level2Filter) return false
       if (level3Filter && l3?.id !== level3Filter) return false
       if (!trimmed) return true
-      const model = MOCK_MODELS.find((m) => m.id === l3?.boundModelId)
       const haystack = [
         l1?.name ?? '',
         l2?.name ?? '',
         l3?.name ?? '',
-        model?.name ?? '',
-        l3?.modality ?? '',
+        l3?.boundModelLabel ?? '',
+        l3?.modality ? MODALITY_LABELS[l3.modality] : '',
       ]
         .join(' ')
         .toLowerCase()
       return haystack.includes(trimmed)
     })
   }, [flatRows, q, statusFilter, level1Filter, level2Filter, level3Filter])
+
+  // ── 确保父级存在：有 id 直接用；仅 name 先创建再返回 id ──
+  const ensureParentTag = async (
+    input: { id?: string; name: string } | null,
+    level: 1 | 2,
+    parentId: string | null,
+    domain: string,
+  ): Promise<string | null> => {
+    const name = input?.name.trim() ?? ''
+    if (!name) return null
+    if (input?.id) return input.id
+    const created = await tagsApi.create({
+      code: genTagCode(),
+      name,
+      domain: domain as TagTreeNode['domain'],
+      category: 'custom',
+      status: 'active',
+      level,
+      parent_id: parentId,
+    })
+    return created.id
+  }
 
   // ── Drawer 操作 ──
   const openCreate = () => {
@@ -417,7 +278,7 @@ export default function TagsAdminPage() {
     setDrawer({ open: true, editing: null })
   }
 
-  const openEdit = (row: MockTag) => {
+  const openEdit = (row: TagRow) => {
     form.resetFields()
     let p_l1: { id?: string; name: string } | null = null
     let p_l2: { id?: string; name: string } | null = null
@@ -463,26 +324,17 @@ export default function TagsAdminPage() {
       const v = await form.validateFields()
       setSaving(true)
       const editing = drawer.editing
-      const timestamp = Date.now()
 
-      // ── 编辑场景:只改当前记录(Q2 不合并) ──
+      // ── 编辑场景:只改当前三级记录（名称 + 模态；层级后端不允许改） ──
       if (editing) {
-        if (!parentL1Input?.name.trim() || !parentL2Input?.name.trim()) {
-          message.error('一级、二级标签都必须填写')
-          return
-        }
-        const l1Id = await ensureParentTag(parentL1Input, 1, null, setTags)
-        const l2Id = await ensureParentTag(parentL2Input, 2, l1Id, setTags)
-        const updated: MockTag = {
-          ...editing,
-          name: v.name,
-          parentId: l2Id,
-          modality: ((v.modalities as Modality[] | undefined) ?? [])[0],
-          enabled: editing.enabled,
-        }
-        setTags((prev) => prev.map((t) => (t.id === editing.id ? updated : t)))
+        const mods = (v.modalities as TagModality[] | undefined) ?? []
+        await tagsApi.update(editing.id, {
+          name: (v.name as string).trim(),
+          modality: mods[0] ?? null,
+        })
         message.success('已保存')
         closeDrawer()
+        await reload()
         return
       }
 
@@ -490,94 +342,90 @@ export default function TagsAdminPage() {
       const l1Name = parentL1Input?.name.trim() ?? ''
       const l2Name = parentL2Input?.name.trim() ?? ''
       const l3Name = (v.name as string | undefined)?.trim() ?? ''
-      const mods = (v.modalities as Modality[] | undefined) ?? []
+      const mods = (v.modalities as TagModality[] | undefined) ?? []
       if (!l1Name || !l2Name || !l3Name || mods.length === 0) {
         message.error('一级、二级、三级标签和适用模态都必须填写')
         return
       }
 
-      // ensureParentTag: 有 id 返回;只有 name 创建新条目
-      const l1Id = await ensureParentTag(parentL1Input, 1, null, setTags)
-      const l2Id = await ensureParentTag(parentL2Input, 2, l1Id, setTags)
+      // 新建一级时 domain 落 custom；已有/新建二级继承一级 domain
+      const l1Existing = parentL1Input?.id ? findById(tags, parentL1Input.id) : null
+      const domain = l1Existing?.domain ?? 'custom'
+      const l1Id = await ensureParentTag(parentL1Input, 1, null, 'custom')
+      if (!l1Id) return
+      const l2Id = await ensureParentTag(parentL2Input, 2, l1Id, domain)
+      if (!l2Id) return
 
       // 按 modalities 展开为 N 条三级记录
-      const l3Records: MockTag[] = mods.map((mod, idx) => ({
-        id: idx === 0 ? `t-${timestamp}-L3` : `t-${timestamp}-L3-${mod}`,
-        level: 3,
-        name: l3Name,
-        status: 'active',
-        enabled: false, // α 规则:模型未绑定前不可启用
-        parentId: l2Id,
-        modality: mod,
-      }))
-      setTags((prev) => [...l3Records, ...prev])
+      for (const mod of mods) {
+        await tagsApi.create({
+          code: genTagCode(),
+          name: l3Name,
+          domain: domain as TagTreeNode['domain'],
+          category: 'custom',
+          status: 'active',
+          level: 3,
+          parent_id: l2Id,
+          modality: mod,
+        })
+      }
       message.success(`已新增 1 个三级标签 × ${mods.length} 个模态`)
       closeDrawer()
-    } catch {
-      // 校验失败
+      await reload()
+    } catch (err) {
+      if (err && typeof err === 'object' && 'response' in err) {
+        const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+        message.error(detail ?? '保存失败')
+      }
+      // 表单校验失败静默
     } finally {
       setSaving(false)
     }
   }
 
-  // ── 引用检查 + 停用 ──
-  const handleToggleStatus = async (row: MockTag) => {
-    if (row.status === 'active') {
-      // mock 阶段:用本地 mockGetReferences;真实接入后改回 tagsApi.getReferences
-      setCheckingRefs(true)
-      try {
-        const refs = mockGetReferences(row.id, tags)
+  // ── 引用检查 + 停用/启用 ──
+  const handleToggleStatus = async (row: TagRow) => {
+    setCheckingRefs(true)
+    try {
+      if (row.status === 'active') {
+        const refs = await tagsApi.getReferences(row.id)
         if (!refs.can_deactivate) {
           await TagReferenceConfirmModal.open({ refs, scope: 'strategy' })
           return
         }
-      } catch {
-        // mock 阶段不应该出错,真接入后改为 409 兜底
-      } finally {
-        setCheckingRefs(false)
+        await tagsApi.deprecate(row.id)
+        message.success('已停用')
+      } else {
+        await tagsApi.activate(row.id)
+        message.success('已启用')
       }
+      await reload()
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(typeof detail === 'string' ? detail : '操作失败')
+    } finally {
+      setCheckingRefs(false)
     }
-    setTags((prev) =>
-      prev.map((t) =>
-        t.id === row.id
-          ? { ...t, status: t.status === 'active' ? 'inactive' : 'active' }
-          : t,
-      ),
-    )
-    message.success(row.status === 'active' ? '已停用' : '已启用')
   }
 
-  // ── 引用检查 + 删除(cascade) ──
-  const performCascadeDelete = (id: string): number => {
-    const toDelete = new Set<string>([id])
-    let frontier: string[] = [id]
-    while (frontier.length) {
-      const children = tags
-        .filter((t) => t.parentId && frontier.includes(t.parentId))
-        .map((t) => t.id)
-      if (children.length === 0) break
-      children.forEach((c) => toDelete.add(c))
-      frontier = children
-    }
-    setTags((prev) => prev.filter((t) => !toDelete.has(t.id)))
-    return toDelete.size
-  }
-
-  const handleDelete = async (id: string) => {
+  // ── 引用检查 + 删除(后端级联软删后代) ──
+  const handleDelete = async (row: TagRow) => {
     setCheckingRefs(true)
     try {
-      // mock 阶段:用本地 mockGetReferences;真实接入后改回 tagsApi.getReferences
-      const refs = mockGetReferences(id, tags)
+      const refs = await tagsApi.getReferences(row.id)
       if (!refs.can_delete) {
         await TagReferenceConfirmModal.open({ refs, scope: 'all' })
         return
       }
+      await tagsApi.remove(row.id)
+      message.success('已删除（含全部子标签）')
+      await reload()
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(typeof detail === 'string' ? detail : '删除失败')
     } finally {
       setCheckingRefs(false)
     }
-
-    const count = performCascadeDelete(id)
-    message.success(`已删除（${count} 个）`)
   }
 
   // 父级联动:一级变更时清空二级
@@ -605,9 +453,6 @@ export default function TagsAdminPage() {
         if (segments.length === 0) return <Text type="secondary">—</Text>
 
         const subjectL3 = row.rowTag.level === 3 ? row.rowTag : null
-        const m = subjectL3
-          ? MOCK_MODELS.find((mm) => mm.id === subjectL3.boundModelId)
-          : null
 
         return (
           <Space direction="vertical" size={0}>
@@ -619,7 +464,7 @@ export default function TagsAdminPage() {
                 </span>
               ))}
             </Text>
-            {subjectL3 && !m && (
+            {subjectL3 && !subjectL3.boundModelId && (
               <Text type="secondary" style={{ fontSize: 11 }}>
                 未绑定模型 · 无阈值
               </Text>
@@ -642,9 +487,8 @@ export default function TagsAdminPage() {
       minWidth: 140,
       render: (_, row) => {
         if (!row.l3) return <Text type="secondary">—</Text>
-        const m = MOCK_MODELS.find((mm) => mm.id === row.l3?.boundModelId)
-        if (!m) return <Text type="danger">未绑定</Text>
-        return <Text>{m.name}</Text>
+        if (!row.l3.boundModelId) return <Text type="danger">未绑定</Text>
+        return <Text>{row.l3.boundModelLabel ?? `#${row.l3.boundModelId}`}</Text>
       },
     },
     {
@@ -652,24 +496,20 @@ export default function TagsAdminPage() {
       minWidth: 140,
       render: (_, row) => {
         const t = row.rowTag
-        const isL3NoModel = t.level === 3 && t.boundModelId == null
-        if (isL3NoModel) {
-          return (
-            <Space size={4}>
-              <AntdTag color="default">未启用</AntdTag>
-            </Space>
+        const label =
+          t.status === 'active' ? (
+            <AntdTag color="green">已启用</AntdTag>
+          ) : t.status === 'draft' ? (
+            <AntdTag color="default">草稿</AntdTag>
+          ) : (
+            <AntdTag>已停用</AntdTag>
           )
-        }
         return (
           <a
             onClick={() => handleToggleStatus(t)}
             style={{ cursor: checkingRefs ? 'wait' : 'pointer' }}
           >
-            {t.status === 'active' ? (
-              <AntdTag color="green">{t.enabled ? '已启用' : '未启用'}</AntdTag>
-            ) : (
-              <AntdTag>已停用</AntdTag>
-            )}
+            {label}
           </a>
         )
       },
@@ -696,7 +536,7 @@ export default function TagsAdminPage() {
             danger
             icon={<DeleteOutlined />}
             disabled={checkingRefs}
-            onClick={() => handleDelete(row.rowTag.id)}
+            onClick={() => handleDelete(row.rowTag)}
           >
             删除
           </Button>
@@ -787,7 +627,7 @@ export default function TagsAdminPage() {
             },
           },
         ]}
-        tooltip="该标签适用的输入模态(可多选);每个模态生成一行独立记录,模型绑定由其他模块维护"
+        tooltip="该标签适用的输入模态(可多选);每个模态生成一行独立记录,模型绑定由模型模块维护"
       >
         <Select
           mode="multiple"
@@ -839,9 +679,14 @@ export default function TagsAdminPage() {
             标签管理
           </Title>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新增标签
-        </Button>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={() => void reload()} loading={loading}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新增标签
+          </Button>
+        </Space>
       </div>
 
       {/* 过滤栏 */}
@@ -911,7 +756,8 @@ export default function TagsAdminPage() {
           options={[
             { value: 'all', label: '全部状态' },
             { value: 'active', label: '已启用' },
-            { value: 'inactive', label: '已停用' },
+            { value: 'draft', label: '草稿' },
+            { value: 'deprecated', label: '已停用' },
           ]}
         />
         <div style={{ flex: 1 }} />
@@ -920,17 +766,19 @@ export default function TagsAdminPage() {
         </Text>
       </div>
 
-      <Table<FlatRow>
-        rowKey="key"
-        columns={columns}
-        dataSource={filteredRows}
-        tableLayout="auto"
-        pagination={{ pageSize: 20, showSizeChanger: true }}
-        scroll={{ x: '100%' }}
-        locale={{
-          emptyText: <Empty description="暂无标签" />,
-        }}
-      />
+      <Spin spinning={loading && tags.length === 0}>
+        <Table<FlatRow>
+          rowKey="key"
+          columns={columns}
+          dataSource={filteredRows}
+          tableLayout="auto"
+          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 行` }}
+          scroll={{ x: '100%' }}
+          locale={{
+            emptyText: <Empty description="暂无标签" />,
+          }}
+        />
+      </Spin>
 
       <Drawer
         title={watchEditing ? `编辑标签 · ${watchEditing.name}` : '新增标签'}
