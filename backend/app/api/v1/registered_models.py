@@ -1431,7 +1431,7 @@ async def precheck_artifact(
 ) -> RegisteredModelValidationLog:
     """保存前测试小模型文件 + 审核点 JSON 是否就绪。
 
-    Demo 阶段不做真实 inference，仅校验：
+    不执行真实推理，仅校验：
     - 文件存在、SHA256 重新计算成功
     - 文件大小 ≤ 上限
     - config_points JSON 结构合法

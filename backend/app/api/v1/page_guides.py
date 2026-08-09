@@ -1,4 +1,4 @@
-"""PageGuide API — server-side override of the frontend prototype guide.
+"""PageGuide API — server-side override of the frontend page guide.
 
 Endpoints
 ---------
@@ -7,7 +7,7 @@ Endpoints
   PUT    /api/v1/page-guides/{path:path}           upsert one (any logged-in user)
   DELETE /api/v1/page-guides/{path:path}           delete override (any logged-in user)
 
-The "any logged-in user" policy is by design — the prototype guide is meant
+The "any logged-in user" policy is by design — the page guide is meant
 to be a shared, self-serve knowledge surface, not a privileged config. The
 ``updated_by_id`` column records who last touched each row for transparency.
 """

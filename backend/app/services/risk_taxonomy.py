@@ -13,7 +13,7 @@
   - 当 hit.risk ∈ {高风险, 中风险} 时, _normalize_label_cn 从 label_cn
     中剔除"敏感"两个字, 避免 "涉政敏感" 这种合成词.
   - 当 hit.risk ≠ 敏感 时, hit 上的 sensitive_grade 强制回写为 S0,
-    防止演示数据跨档挂高 S 等级.
+    防止数据跨档挂高 S 等级。
 """
 from __future__ import annotations
 

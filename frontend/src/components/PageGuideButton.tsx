@@ -293,7 +293,7 @@ export function PageGuideButton() {
     setSaving(true)
     try {
       const res = await pageGuidesApi.upsert(location.pathname, {
-        title: draftTitle.trim() || (guide?.title ?? '原型说明'),
+        title: draftTitle.trim() || (guide?.title ?? '页面说明'),
         markdown_md: draft,
       })
       setOverrides((prev) => ({ ...prev, [location.pathname]: res.data }))
@@ -336,10 +336,10 @@ export function PageGuideButton() {
         onClick={() => setOpen(true)}
         style={{ color: '#fff' }}
       >
-        原型说明
+        页面说明
       </Button>
       <Drawer
-        title={effective?.title ?? '原型说明'}
+        title={effective?.title ?? '页面说明'}
         placement="right"
         width={isMobile ? '100%' : '55vw'}
         open={open}

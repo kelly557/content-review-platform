@@ -1,4 +1,4 @@
-"""PageGuide schemas — request/response shapes for the prototype guide API.
+"""PageGuide schemas — request/response shapes for the page guide API.
 
 The frontend stores the entire page as one Markdown string; we mirror that
 flat shape on the wire so the round-trip is lossless.

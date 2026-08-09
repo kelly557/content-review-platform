@@ -32,7 +32,7 @@ adreview-platform/
 │   │   ├── services/                 # 业务服务（storage/audit/workflow_engine）
 │   │   ├── tasks/                    # 内存后台任务
 │   │   └── main.py                   # FastAPI 入口
-│   ├── alembic/                      # 迁移（占位，待完善）
+│   ├── alembic/                      # 数据库迁移
 │   ├── scripts/
 │   │   ├── dev.sh                    # 一键启动开发服务
 │   │   └── seed.py                   # 种子数据
@@ -99,9 +99,9 @@ API 文档：
 - Redoc:     <http://localhost:8000/redoc>
 - OpenAPI:   <http://localhost:8000/openapi.json>
 
-### 3.2 数据库迁移（占位）
+### 3.2 数据库迁移
 
-当前 `app.db.session` 暴露 `Base` + 异步 engine。生产建议引入 Alembic：
+当前 `app.db.session` 暴露 `Base` + 异步 engine。使用 Alembic 管理迁移：
 
 ```bash
 alembic init alembic
@@ -292,17 +292,7 @@ npm run lint
 npm run build
 ```
 
-## 8. 后续可扩展点
-
-按需演进，不在本次脚手架范围内：
-
-- **AI 智能预审**：OCR/VLM/ASR 多模态预处理、规则引擎、风险评分 → 已预留 `RuleTrigger` 钩子（在 `models/review.py` / `services/workflow_engine.py` 附近扩展）
-- **微服务拆分**：审核引擎 / 文件服务可独立部署（FastAPI 无状态）
-- **消息通知**：当前 `tasks/background.send_notification` 为占位，可接 Email/企业 IM webhook
-- **Celery / ARQ**：将 `app/tasks/background.spawn` 替换为外部队列
-- **审计报表**：当前仅导出 CSV；可扩展为 Excel + 可视化看板（前端已有 Reports 页面占位）
-
-## 9. 开发约定
+## 8. 开发约定
 
 - 后端：所有公开方法 `async`；跨模块导入使用绝对路径 `from app.xxx import yyy`。
 - 前端：`@/` 路径别名指向 `src/`；状态以 Zustand store 形式集中；API 客户端统一从 `@/api/*` 调用。

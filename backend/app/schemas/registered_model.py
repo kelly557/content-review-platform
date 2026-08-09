@@ -33,7 +33,7 @@ class ModelPrecheckRequest(BaseModel):
 class ModelArtifactPrecheckRequest(BaseModel):
     """小模型文件保存前连通性测试：校验文件元信息 + JSON 结构 + 模态一致性。
 
-    不实际跑 inference（demo 阶段），仅做：
+    不执行真实推理，仅做：
     - 文件存在 + SHA256 重算一致
     - 文件大小 ≤ 上限
     - 扩展名合法

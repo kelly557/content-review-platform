@@ -1,4 +1,4 @@
-"""PageGuide — server-side override for the frontend prototype guide text.
+"""PageGuide — server-side override for the frontend page guide text.
 
 Each row represents a single frontend route (e.g. ``/strategies/:id/edit``)
 whose prototype-guide markdown has been customized by a user. When the

@@ -15,7 +15,7 @@
     * SensitiveLevel（S0~S3）        → 决定**"敏感"档内** PII 严重度
 - 仅当 risk_level == "敏感" 时, hit 才会携带 non-zero sensitive_grade.
   其他 risk_level 档位下默认 S0, 并由 risk_taxonomy.coerce_sensitive_grade_for_hit
-  强制回写 (避免演示数据跨档挂高 S 等级).
+  强制回写（避免数据跨档挂高 S 等级）。
 """
 from __future__ import annotations
 
