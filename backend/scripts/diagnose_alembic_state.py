@@ -52,7 +52,7 @@ from app.db.session import SessionLocal
 # new migration that changes DDL, update this constant too.
 # ─────────────────────────────────────────────────────────────────────
 
-REVISION_HEAD = "20260811_add_alert_rules"
+REVISION_HEAD = "20260812_add_strategy_tag_refs"
 
 
 @dataclass(frozen=True)
@@ -97,6 +97,7 @@ EXPECTED_TABLES: tuple[str, ...] = (
     "review_agents",              # added by 20260811
     "review_agent_versions",      # added by 20260811
     "alert_rules",                # added by 20260811
+    "strategy_tag_refs",          # added by 20260812
 )
 
 EXPECTED_COLUMNS: tuple[ExpectedColumn, ...] = (

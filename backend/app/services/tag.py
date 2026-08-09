@@ -8,6 +8,8 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.registered_model import RegisteredModel, RegisteredModelKind
+from app.models.strategy import Strategy
+from app.models.strategy_tag_ref import StrategyTagRef
 from app.models.tag import (
     TAG_LEVEL_LEAF,
     TAG_LEVEL_MID,
@@ -39,44 +41,6 @@ class TagReferenceBlockError(Exception):
         super().__init__(message)
         self.message = message
         self.references = references
-
-
-# ── mock 阶段：策略引用清单 ──
-# TODO: 替换为 strategy_tag_refs 关联表 + JOIN 查询
-# 当前 mock 模拟"哪些 tag 被启用中的策略 / 已停用的策略引用",
-# 仅用于演示前端 TagReferenceConfirmModal;真实接入后删除。
-_MOCK_STRATEGY_REFS: dict[str, list[TagReferenceStrategy]] = {
-    "l3-leader1-cartoon": [
-        TagReferenceStrategy(
-            strategy_id="st-001",
-            strategy_name="图文审核主策略",
-            status="active",
-            services=["text-image"],
-        ),
-        TagReferenceStrategy(
-            strategy_id="st-002",
-            strategy_name="备用策略·视频",
-            status="deprecated",
-            services=["video"],
-        ),
-    ],
-    "l3-nude-face": [
-        TagReferenceStrategy(
-            strategy_id="st-003",
-            strategy_name="人脸审核策略",
-            status="active",
-            services=["image"],
-        ),
-    ],
-    "l3-absolute-text": [
-        TagReferenceStrategy(
-            strategy_id="st-004",
-            strategy_name="广告法词库",
-            status="deprecated",
-            services=["text"],
-        ),
-    ],
-}
 
 
 # ───────────────────────── CRUD ─────────────────────────
@@ -480,11 +444,30 @@ async def build_references_for_tag(
                 )
             )
 
-    # 2) 策略引用:mock 阶段读固定映射
-    # TODO: 替换为关联表查询
-    strategies: list[TagReferenceStrategy] = list(
-        _MOCK_STRATEGY_REFS.get(tag_id, [])
-    )
+    # 2) 策略引用：查 strategy_tag_refs 关联表，再逐个取 Strategy
+    strategies: list[TagReferenceStrategy] = []
+    ref_rows = (
+        await db.execute(
+            select(StrategyTagRef.strategy_id).where(StrategyTagRef.tag_id == tag_id)
+        )
+    ).scalars().all()
+    for sid in ref_rows:
+        strat = await db.get(Strategy, sid)
+        if strat is None:
+            continue
+        services: list[str] = []
+        if isinstance(strat.definition, dict):
+            svcs = strat.definition.get("services")
+            if isinstance(svcs, list):
+                services = [str(s.get("code") if isinstance(s, dict) else s) for s in svcs if s]
+        strategies.append(
+            TagReferenceStrategy(
+                strategy_id=strat.public_id,
+                strategy_name=strat.name,
+                status="active" if strat.is_active else "deprecated",
+                services=services,
+            )
+        )
 
     # 3) 路径
     path = await _build_tag_path(db, tag)

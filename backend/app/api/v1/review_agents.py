@@ -1,4 +1,4 @@
-"""Review Agents router — 审核智能体 CRUD + 版本 + 测试 + AI 优化."""
+"""Review Agents router — 审核智能体 CRUD + 版本 + 测试 + AI 优化 + 文档解析."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,7 @@ from app.core.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models.review_agent import ReviewAgent, ReviewAgentVersion
 from app.models.user import User
+from app.services.document_parser import extract_text_from_file
 from app.schemas.review_agent import (
     AgentTestRequest,
     AgentTestResult,
@@ -333,3 +335,90 @@ async def ai_optimize(
         direction=direction,
         finalTag={"name": original or "新规则", "description": direction},
     )
+
+
+# ──────────────────────────────────────────────────────────────
+# 文档解析 — 从上传文档中提取审核点（供智能体配置引用）
+# ──────────────────────────────────────────────────────────────
+
+
+class ParsedAgentPoint(BaseModel):
+    label: str
+    desc: str = ""
+
+
+class AgentParseDocResult(BaseModel):
+    points: List[ParsedAgentPoint]
+    source_info: str
+    preview: str = ""
+    char_count: int = 0
+
+
+@router.post("/parse-doc", response_model=AgentParseDocResult)
+async def parse_agent_doc(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("admin", "superadmin")),
+) -> AgentParseDocResult:
+    """解析上传的 .txt/.xls/.xlsx 文档，LLM 提取审核点。
+
+    前端将解析结果作为智能体的审核点候选项。LLM 失败时返回空列表 +
+    source_info 提示，前端可降级为手动输入。
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="文件为空")
+
+    try:
+        text = extract_text_from_file(content, file.filename or "doc.txt")
+    except Exception as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"文件解析失败: {e}")
+
+    if not text.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="文件内容为空")
+
+    preview = "\n".join(text.splitlines()[:50])[:10000]
+
+    if not settings.maas_api_key:
+        return AgentParseDocResult(
+            points=[], source_info="未配置 LLM，请手动输入", preview=preview, char_count=len(text)
+        )
+
+    try:
+        from app.services.llm.client import get_llm_client
+
+        llm = get_llm_client()
+        prompt = (
+            "请从以下文档内容中提取审核点。每个审核点包含：\n"
+            "- label: 审核点名称（简短描述要审核的内容）\n"
+            "- desc: 审核内容描述（具体的审核标准或判断依据）\n\n"
+            "请以 JSON 数组格式返回，每个元素包含 label 和 desc 字段。"
+            "如果无法提取到有效的审核点，返回空数组 []。\n\n"
+            f"文档内容：\n{text[:10000]}"
+        )
+        response = await llm.chat(
+            messages=[{"role": "user", "content": prompt}], temperature=0.1
+        )
+
+        import re
+
+        json_match = re.search(r"\[[\s\S]*\]", response)
+        raw = json.loads(json_match.group()) if json_match else json.loads(response)
+        points = [
+            ParsedAgentPoint(label=str(item.get("label", "")), desc=str(item.get("desc", "")))
+            for item in raw
+            if isinstance(item, dict) and item.get("label")
+        ]
+        return AgentParseDocResult(
+            points=points,
+            source_info=f"从 {file.filename} 解析",
+            preview=preview,
+            char_count=len(text),
+        )
+    except Exception as e:
+        return AgentParseDocResult(
+            points=[],
+            source_info=f"AI 解析失败，请手动输入。错误: {e}",
+            preview=preview,
+            char_count=len(text),
+        )
