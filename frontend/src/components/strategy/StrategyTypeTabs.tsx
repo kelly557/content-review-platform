@@ -229,14 +229,10 @@ export default function StrategyTypeTabs({
 
   // 语音 tab 独立模式才显示规则树
   const showAudioRulesTree = voiceRuleMode === 'independent'
-  // 文档 tab：任一段切到独立就显示独立规则树
+  // 文档/视频 tab：段独立判定已下放到各 RulesTreeView 渲染条件
+  // （按段映射到 text/image 树），不再用单一 show* 开关。
   const docSegments = buildDocSegments()
-  const showDocRulesTree =
-    !!docSegments && docSegments.some((s) => s.mode === s.independentValue)
-  // 视频 tab：任一段切到独立就显示独立规则树；抽帧频率始终可见
   const videoSegments = buildVideoSegments()
-  const showVideoRulesTree =
-    !!videoSegments && videoSegments.some((s) => s.mode === s.independentValue)
 
   const items: TabsProps['items'] = CATEGORIES.map((cat) => {
     const selectedItems = enabledItemIds[cat.key] ?? []
@@ -314,11 +310,16 @@ export default function StrategyTypeTabs({
               )}
             </>
           )}
-          {/* 规则树：仅在对应 tab 处于「独立」状态时渲染 */}
+          {/* 规则树：仅在对应 tab 处于「独立」状态时渲染
+              语音/文档/视频的「独立规则」按组合来源映射到 text/image 标签树
+              （语音审转写文本→文本树；文档文本段→文本树、图片段→图片树；
+               视频画面段→图片树、语音段→文本树），保证处处三级标签。
+              mediaKey 显式传 tab 自身 key，pointOverrides/pointMap 不与文/图 tab 串数据。 */}
           {cat.key === 'audio' && showAudioRulesTree && (
             <RulesTreeView
               key={`${cat.key}-${voiceRuleMode}`}
-              packageCode={PACKAGE_BY_MEDIA.audio}
+              packageCode={PACKAGE_BY_MEDIA.text}
+              mediaKey="audio"
               enabledItemIds={enabledItemIds.audio ?? []}
               getPointMap={(itemId) => pointMap.audio?.[itemId] ?? {}}
               onPointMapChange={(itemId, next) => setPointsForItem('audio', itemId, next)}
@@ -334,10 +335,11 @@ export default function StrategyTypeTabs({
               intensity={intensity}
             />
           )}
-          {cat.key === 'doc' && showDocRulesTree && (
+          {cat.key === 'doc' && docSegments && docSegments[0].mode === 'independent' && (
             <RulesTreeView
-              key={`${cat.key}-independent`}
-              packageCode={PACKAGE_BY_MEDIA.doc}
+              key={`${cat.key}-text`}
+              packageCode={PACKAGE_BY_MEDIA.text}
+              mediaKey="doc"
               enabledItemIds={enabledItemIds.doc ?? []}
               getPointMap={(itemId) => pointMap.doc?.[itemId] ?? {}}
               onPointMapChange={(itemId, next) => setPointsForItem('doc', itemId, next)}
@@ -353,10 +355,51 @@ export default function StrategyTypeTabs({
               intensity={intensity}
             />
           )}
-          {cat.key === 'video' && showVideoRulesTree && (
+          {cat.key === 'doc' && docSegments && docSegments[1].mode === 'independent' && (
             <RulesTreeView
-              key={`${cat.key}-independent`}
-              packageCode={PACKAGE_BY_MEDIA.video}
+              key={`${cat.key}-image`}
+              packageCode={PACKAGE_BY_MEDIA.image}
+              mediaKey="doc"
+              enabledItemIds={enabledItemIds.doc ?? []}
+              getPointMap={(itemId) => pointMap.doc?.[itemId] ?? {}}
+              onPointMapChange={(itemId, next) => setPointsForItem('doc', itemId, next)}
+              pointOverrides={pointOverrides}
+              onPointOverrideChange={(itemId, pointId, override) =>
+                onPointOverrideChange('doc', itemId, pointId, override)
+              }
+              onPointToggle={(itemId, pointId, checked) =>
+                onPointToggle('doc', itemId, pointId, checked)
+              }
+              onItemLibraryLink={onItemLibraryLink}
+              refreshKey={libraryRefreshTick}
+              intensity={intensity}
+            />
+          )}
+          {cat.key === 'video' && videoSegments && videoSegments[0].mode === 'independent' && (
+            <RulesTreeView
+              key={`${cat.key}-frame`}
+              packageCode={PACKAGE_BY_MEDIA.image}
+              mediaKey="video"
+              enabledItemIds={enabledItemIds.video ?? []}
+              getPointMap={(itemId) => pointMap.video?.[itemId] ?? {}}
+              onPointMapChange={(itemId, next) => setPointsForItem('video', itemId, next)}
+              pointOverrides={pointOverrides}
+              onPointOverrideChange={(itemId, pointId, override) =>
+                onPointOverrideChange('video', itemId, pointId, override)
+              }
+              onPointToggle={(itemId, pointId, checked) =>
+                onPointToggle('video', itemId, pointId, checked)
+              }
+              onItemLibraryLink={onItemLibraryLink}
+              refreshKey={libraryRefreshTick}
+              intensity={intensity}
+            />
+          )}
+          {cat.key === 'video' && videoSegments && videoSegments[1].mode === 'independent' && (
+            <RulesTreeView
+              key={`${cat.key}-audio`}
+              packageCode={PACKAGE_BY_MEDIA.text}
+              mediaKey="video"
               enabledItemIds={enabledItemIds.video ?? []}
               getPointMap={(itemId) => pointMap.video?.[itemId] ?? {}}
               onPointMapChange={(itemId, next) => setPointsForItem('video', itemId, next)}

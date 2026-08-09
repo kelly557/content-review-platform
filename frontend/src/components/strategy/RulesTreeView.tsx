@@ -82,6 +82,13 @@ interface Props {
   }
   /** 当前检测强度档位：用于 sub 阈值在没有用户 override 时作为显示回退 */
   intensity?: Intensity
+  /**
+   * 显式指定 mediaKey（覆盖 packageCode 反推）。
+   * 用于「语音/文档/视频」独立规则树渲染 text/image 包数据时：
+   * packageCode=text_audit_pro 但 pointOverrides/pointMap 仍按 tab 自身 key
+   * （audio/doc/video）存取，避免与文本 tab 的阈值覆盖串数据。
+   */
+  mediaKey?: CategoryKey
 }
 
 const PACKAGE_TO_MEDIA: Record<string, CategoryKey> = {
@@ -105,6 +112,7 @@ export default function RulesTreeView({
   onSelectedItemChange,
   imageTextConfig,
   intensity = DEFAULT_INTENSITY,
+  mediaKey: mediaKeyOverride,
 }: Props) {
   const [items, setItems] = useState<AuditItem[]>([])
   const [pointsByItem, setPointsByItem] = useState<Record<number, AuditPoint[]>>(
@@ -114,7 +122,7 @@ export default function RulesTreeView({
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
 
   const mediaKey: CategoryKey =
-    (packageCode ? PACKAGE_TO_MEDIA[packageCode] : null) ?? 'image'
+    mediaKeyOverride ?? (packageCode ? PACKAGE_TO_MEDIA[packageCode] : null) ?? 'image'
 
   useEffect(() => {
     if (!packageCode) return

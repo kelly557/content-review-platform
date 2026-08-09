@@ -164,7 +164,8 @@ async def run(apply: bool) -> None:
                         description=f"数美标签镜像：{l1.name}",
                         sort_order=sort_i,
                         is_enabled=True,
-                        is_builtin=False,
+                        # 通用规则（builtin）才进规则树左右两栏；否则掉进不渲染的「自定义」桶
+                        is_builtin=True,
                         tag_id=l1.id,
                     )
                     db.add(item)
@@ -190,7 +191,7 @@ async def run(apply: bool) -> None:
                             high_threshold=90.0,
                             risk_level=AuditPointRisk.MEDIUM,
                             is_enabled=True,
-                            is_builtin=False,
+                            is_builtin=True,
                             sort_order=sort_j,
                             tag_id=l2.id,
                         )
@@ -222,7 +223,7 @@ async def run(apply: bool) -> None:
                                 high_threshold=90.0,
                                 risk_level=AuditPointRisk.MEDIUM,
                                 is_enabled=True,
-                                is_builtin=False,
+                                is_builtin=True,
                                 sort_order=sort_k,
                                 parent_point_id=point.id,
                                 tag_id=l3.id,
