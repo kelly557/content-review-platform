@@ -128,24 +128,21 @@ export default function RulesTreeView({
     if (!packageCode) return
     let cancel = false
     setLoading(true)
-    auditItemsApi
-      .list(packageCode)
-      .then(async (itemsRes) => {
+    // 一次拉全包 points（后端 list 端点 item_id 可选，不带则返回全包），
+    // 前端按 item_id 分组，替代 N+1 逐 item 拉取（11 请求 → 1 请求）。
+    Promise.all([
+      auditItemsApi.list(packageCode),
+      auditPointsApi.list(packageCode),
+    ])
+      .then(([itemsRes, allPoints]) => {
         if (cancel) return
         setItems(itemsRes)
         const map: Record<number, AuditPoint[]> = {}
-        await Promise.all(
-          itemsRes.map((it) =>
-            auditPointsApi
-              .list(packageCode, { item_id: it.id })
-              .then((ps) => {
-                map[it.id] = ps
-              })
-              .catch(() => {
-                map[it.id] = []
-              }),
-          ),
-        )
+        for (const p of allPoints) {
+          const iid = p.item_id
+          if (iid == null) continue
+          ;(map[iid] ??= []).push(p)
+        }
         if (!cancel) setPointsByItem(map)
       })
       .catch(() => {
@@ -542,50 +539,54 @@ function PointsColumn({
   /** 当前检测强度档位：sub 阈值无 override 时的显示回退 */
   intensity: Intensity
 }) {
-  const dataSource: FlatRowRecord[] = []
-  items.forEach((it) => {
-    const ps = pointsByItem[it.id] ?? []
-    dataSource.push({
-      kind: 'section',
-      key: `section-${it.id}`,
-      item: it,
-      pointCount: ps.length,
-    })
-    // 2026-07-30 「图文」item 不渲染下方的 parent row + sub row,
-    // 替代方案由 section header render 直接返回 imageTextBar
-    if (it.name_cn === '图文') return
-    const pm = getPointMap(it.id)
-    ps.forEach((p) => {
-      dataSource.push({
-        kind: 'point',
-        key: `point-${it.id}-${p.id}`,
-        item: it,
-        point: p,
-        checked: pm[p.id] === true,
-        override: pointOverrides[mediaKey]?.[it.id]?.[p.id] ?? {},
-        isCustom: !p.is_builtin,
-        editDisabled: pm[p.id] !== true,
+  const dataSource = useMemo<FlatRowRecord[]>(
+    () => {
+      const rows: FlatRowRecord[] = []
+      items.forEach((it) => {
+        const ps = pointsByItem[it.id] ?? []
+        rows.push({
+          kind: 'section',
+          key: `section-${it.id}`,
+          item: it,
+          pointCount: ps.length,
+        })
+        // 2026-07-30 「图文」item 不渲染下方的 parent row + sub row,
+        // 替代方案由 section header render 直接返回 imageTextBar
+        if (it.name_cn === '图文') return
+        const pm = getPointMap(it.id)
+        ps.forEach((p) => {
+          rows.push({
+            kind: 'point',
+            key: `point-${it.id}-${p.id}`,
+            item: it,
+            point: p,
+            checked: pm[p.id] === true,
+            override: pointOverrides[mediaKey]?.[it.id]?.[p.id] ?? {},
+            isCustom: !p.is_builtin,
+            editDisabled: pm[p.id] !== true,
+          })
+        })
       })
-    })
-  })
+      return rows
+    },
+    [items, pointsByItem, getPointMap, pointOverrides, mediaKey],
+  )
 
-const COL_TOTAL = 2
+  const COL_TOTAL = 2
   const [subEnabledMap, setSubEnabledMap] = useState<Record<number, boolean>>({})
 
   // 每个父审核点下的三级 sub 列表 — 从后端拉取（真实数据）
   const [subsByPointId, setSubsByPointId] = useState<Record<number, SubAuditPoint[]>>({})
 
-  // dataSource 是渲染期现算的数组，每次 render 都是新引用，不能直接做依赖，
-  // 否则 effect 会在「拉取 → setState → 重渲染」间死循环（404 时会弹窗风暴）。
-  // 用「包+点 id 列表」的字符串 key 作为稳定依赖。
+  // dataSource 现在是 useMemo 包裹的稳定引用（依赖 items/pointsByItem/getPointMap/pointOverrides/mediaKey）。
+  // pointIdsKey 基于 dataSource 派生，作为 sub-points 拉取 effect 的稳定依赖。
   const pointIdsKey = useMemo(
     () =>
       dataSource
         .filter((r) => r.kind === 'point')
         .map((r) => `${r.point.package_code}:${r.point.id}`)
         .join(','),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pointsByItem],
+    [dataSource],
   )
 
   useEffect(() => {
@@ -641,291 +642,309 @@ const COL_TOTAL = 2
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointIdsKey])
 
-  const columns: TableColumnsType<FlatRowRecord> = [
-    {
-      title: '',
-      dataIndex: 'checked',
-      width: 40,
-      onCell: (record) => {
-        if (record.kind === 'section') return { colSpan: COL_TOTAL }
-        // 2026-07-30 对齐 fix：td 不再固定高度，由内容撑开（避免截断 sub 多行）
-        // ☐ ↔ label 对齐改为 ☐ cell / label cell 内部 div 强制 40px
-        return { style: { verticalAlign: 'top', padding: 0 } }
-      },
-      render: (_, record) => {
-        if (record.kind === 'section') {
-          // 2026-07-30 「图文」item: 不渲染普通 section header(图文 [N 全选]),
-          // 也不渲染下方的 parent row + sub row(由 PointsColumn dataSource 中的 point row 渲染);
-          // 替代方案:渲染 imageTextBar(图文 + Switch + ComposeRuleCard)
-          if (record.item.name_cn === '图文') {
+  const columns = useMemo<TableColumnsType<FlatRowRecord>>(
+    () => [
+      {
+        title: '',
+        dataIndex: 'checked',
+        width: 40,
+        onCell: (record) => {
+          if (record.kind === 'section') return { colSpan: COL_TOTAL }
+          // 2026-07-30 对齐 fix：td 不再固定高度，由内容撑开（避免截断 sub 多行）
+          // ☐ ↔ label 对齐改为 ☐ cell / label cell 内部 div 强制 40px
+          return { style: { verticalAlign: 'top', padding: 0 } }
+        },
+        render: (_, record) => {
+          if (record.kind === 'section') {
+            // 2026-07-30 「图文」item: 不渲染普通 section header(图文 [N 全选]),
+            // 也不渲染下方的 parent row + sub row(由 PointsColumn dataSource 中的 point row 渲染);
+            // 替代方案:渲染 imageTextBar(图文 + Switch + ComposeRuleCard)
+            if (record.item.name_cn === '图文') {
+              return (
+                <div
+                  style={{
+                    padding: '20px 0 10px',
+                  }}
+                >
+                  {imageTextBar}
+                </div>
+              )
+            }
+            const pm = getPointMap(record.item.id)
+            const points = pointsByItem[record.item.id] ?? []
+            const selected = points.filter((p) => pm[p.id] === true).length
+            const allSelected = points.length > 0 && selected === points.length
             return (
               <div
                 style={{
                   padding: '20px 0 10px',
                 }}
               >
-                {imageTextBar}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    flexWrap: 'wrap',
+                    paddingLeft: 10,
+                  }}
+                >
+                  <Text strong style={{ fontSize: 15, color: '#0F172A' }}>
+                    {record.item.name_cn}
+                  </Text>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: '1px 8px',
+                      color: '#64748B',
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {record.pointCount}
+                  </span>
+                  <Button
+                    type="link"
+                    size="small"
+                    disabled={points.length === 0}
+                    style={{ padding: '0 6px', height: 22, fontSize: 12 }}
+                    onClick={() => {
+                      const nextAll = !allSelected
+                      const nextMap: PointMap = {}
+                      points.forEach((p) => {
+                        nextMap[p.id] = nextAll
+                      })
+                      onPointMapChange(record.item.id, nextMap)
+                    }}
+                  >
+                    {allSelected ? '取消选中' : '全选'}
+                  </Button>
+                </div>
               </div>
             )
           }
-          const pm = getPointMap(record.item.id)
-          const points = pointsByItem[record.item.id] ?? []
-          const selected = points.filter((p) => pm[p.id] === true).length
-          const allSelected = points.length > 0 && selected === points.length
-          return (
-            <div
-              style={{
-                padding: '20px 0 10px',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  flexWrap: 'wrap',
-                  paddingLeft: 10,
-                }}
-              >
-                <Text strong style={{ fontSize: 15, color: '#0F172A' }}>
-                  {record.item.name_cn}
-                </Text>
-                <span
-                  style={{
-                    fontSize: 11,
-                    padding: '1px 8px',
-                    color: '#64748B',
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {record.pointCount}
-                </span>
-                <Button
-                  type="link"
-                  size="small"
-                  disabled={points.length === 0}
-                  style={{ padding: '0 6px', height: 22, fontSize: 12 }}
-                  onClick={() => {
-                    const nextAll = !allSelected
-                    const nextMap: PointMap = {}
-                    points.forEach((p) => {
-                      nextMap[p.id] = nextAll
-                    })
-                    onPointMapChange(record.item.id, nextMap)
-                  }}
-                >
-                  {allSelected ? '取消选中' : '全选'}
-                </Button>
-              </div>
-            </div>
-          )
-        }
-        // 2026-07-30 对齐 fix + 三态联动：☐ cell 内 div 强制 40px，让 checkbox
-        // 视觉中心与右侧 label cell 内 div 顶部 40px 同基线
-        // 子审核点全选/部分选 联动 父点 checkbox 视觉态：
-        //   - sub 全选  -> 父点 checked (打勾)
-        //   - sub 部分选 -> 父点 indeterminate (回字中间填充)
-        //   - sub 全不选 -> 父点 unchecked (空)
-        // 2026-07-30 点击父点 ☐ 联动 toggle 所有 sub:
-        //   - 当前全选 / 部分选 -> 全部取消
-        //   - 当前全不选 -> 全部选中
-        const pointSubs = subsByPointId[record.point.id] ?? []
-        const enabledCount = pointSubs.filter(
-          (s) => subEnabledMap[s.id] ?? s.is_enabled,
-        ).length
-        const totalCount = pointSubs.length
-        const allSubsSelected =
-          totalCount > 0 && enabledCount === totalCount
-        const partiallySelected =
-          enabledCount > 0 && enabledCount < totalCount
-        const onToggleSubs = () => {
-          const nextAll = !(allSubsSelected || partiallySelected)
-          setSubEnabledMap((m) => {
-            const next = { ...m }
-            pointSubs.forEach((s) => {
-              next[s.id] = nextAll
+          // 2026-07-30 对齐 fix + 三态联动：☐ cell 内 div 强制 40px，让 checkbox
+          // 视觉中心与右侧 label cell 内 div 顶部 40px 同基线
+          // 子审核点全选/部分选 联动 父点 checkbox 视觉态：
+          //   - sub 全选  -> 父点 checked (打勾)
+          //   - sub 部分选 -> 父点 indeterminate (回字中间填充)
+          //   - sub 全不选 -> 父点 unchecked (空)
+          // 2026-07-30 点击父点 ☐ 联动 toggle 所有 sub:
+          //   - 当前全选 / 部分选 -> 全部取消
+          //   - 当前全不选 -> 全部选中
+          const pointSubs = subsByPointId[record.point.id] ?? []
+          const enabledCount = pointSubs.filter(
+            (s) => subEnabledMap[s.id] ?? s.is_enabled,
+          ).length
+          const totalCount = pointSubs.length
+          const allSubsSelected =
+            totalCount > 0 && enabledCount === totalCount
+          const partiallySelected =
+            enabledCount > 0 && enabledCount < totalCount
+          const onToggleSubs = () => {
+            const nextAll = !(allSubsSelected || partiallySelected)
+            setSubEnabledMap((m) => {
+              const next = { ...m }
+              pointSubs.forEach((s) => {
+                next[s.id] = nextAll
+              })
+              return next
             })
-            return next
-          })
-        }
-        return (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '100%',
-              height: 40,
-            }}
-          >
-            <input
-              type="checkbox"
-              ref={(el) => {
-                if (el) el.indeterminate = partiallySelected
-              }}
-              checked={record.checked || allSubsSelected}
-              onChange={onToggleSubs}
-              aria-label={`启用审核点 ${record.point.label_cn}`}
-              style={{ margin: 0 }}
-            />
-          </div>
-        )
-      },
-    },
-    {
-      title: '',
-      dataIndex: 'point',
-      onCell: (record) => {
-        if (record.kind === 'point') {
-          // 2026-07-30 对齐 fix：td 顶部对齐，由内容（label 40px + subs 自然撑开）撑高
-          return { style: { verticalAlign: 'top', padding: 0 } }
-        }
-        return { colSpan: 0 }
-      },
-      render: (_, record) => {
-        if (record.kind !== 'point') return null
-        const name = record.point.label_cn || record.point.label || record.point.code
-        const subs = subsByPointId[record.point.id] ?? []
-        return (
-          <Space size={6} direction="vertical" align="start" style={{ width: '100%' }}>
-            {/* 父行 label：与 ☐ 同基线对齐（div 强制 height: 40 + flex center） */}
+          }
+          return (
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                padding: '0 16px',
+                justifyContent: 'center',
                 width: '100%',
                 height: 40,
               }}
             >
-              <Text strong style={{ color: '#0F172A' }} ellipsis={{ tooltip: name }}>
-                {name}
-              </Text>
+              <input
+                type="checkbox"
+                ref={(el) => {
+                  if (el) el.indeterminate = partiallySelected
+                }}
+                checked={record.checked || allSubsSelected}
+                onChange={onToggleSubs}
+                aria-label={`启用审核点 ${record.point.label_cn}`}
+                style={{ margin: 0 }}
+              />
             </div>
-            {subs.length > 0 && (
+          )
+        },
+      },
+      {
+        title: '',
+        dataIndex: 'point',
+        onCell: (record) => {
+          if (record.kind === 'point') {
+            // 2026-07-30 对齐 fix：td 顶部对齐，由内容（label 40px + subs 自然撑开）撑高
+            return { style: { verticalAlign: 'top', padding: 0 } }
+          }
+          return { colSpan: 0 }
+        },
+        render: (_, record) => {
+          if (record.kind !== 'point') return null
+          const name = record.point.label_cn || record.point.label || record.point.code
+          const subs = subsByPointId[record.point.id] ?? []
+          return (
+            <Space size={6} direction="vertical" align="start" style={{ width: '100%' }}>
+              {/* 父行 label：与 ☐ 同基线对齐（div 强制 height: 40 + flex center） */}
               <div
                 style={{
-                  marginTop: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '0 16px',
                   width: '100%',
+                  height: 40,
                 }}
               >
-                <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                  {subs.map((sub) => {
-                    const enabled = subEnabledMap[sub.id] ?? sub.is_enabled
-                    const fallback = getIntensityFallback(intensity)
-                    const parentOv =
-                      pointOverrides[mediaKey]?.[record.item.id]?.[record.point.id] ?? {}
-                    const lowMin = parentOv.low_threshold_min ?? fallback.low_min
-                    const medMin =
-                      parentOv.medium_threshold_min ?? fallback.medium_min
-                    const highMin =
-                      parentOv.high_threshold_min ?? fallback.high_min
-                    const lowMaxDisplay =
-                      typeof medMin === 'number'
-                        ? Math.max(0, medMin - 0.01)
-                        : null
-                    const lowMaxConstraint = lowMaxDisplay ?? 99.99
-                    const mediumMaxDisplay =
-                      typeof highMin === 'number'
-                        ? Math.max(0, highMin - 0.01)
-                        : null
-                    const mediumMaxConstraint =
-                      typeof highMin === 'number'
-                        ? Math.max(0, highMin - 0.01)
-                        : 99.99
-                    const warning = checkThresholdConsistency(
-                      medMin,
-                      parentOv.medium_threshold_max,
-                      highMin,
-                      parentOv.high_threshold_max,
-                    )
-                    return (
-                      <div
-                        key={sub.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: 12,
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        <Space size={6} align="center">
-                          <input
-                            type="checkbox"
-                            checked={enabled}
-                            onChange={(e) =>
-                              setSubEnabledMap((m) => ({
-                                ...m,
-                                [sub.id]: e.target.checked,
-                              }))
-                            }
-                            aria-label={`启用 sub-审核点 ${sub.label_cn}`}
-                            style={{ margin: 0 }}
-                          />
-                          <Text style={{ fontSize: 12, color: '#0F172A' }}>
-                            {sub.label_cn}
-                          </Text>
-                        </Space>
-                        <Space size={10} align="center" wrap>
-                          <RangeMinOnlyInput
-                            disabled={!enabled}
-                            minValue={lowMin}
-                            maxDisplay={lowMaxDisplay}
-                            maxConstraint={lowMaxConstraint}
-                            onMinChange={(v) =>
-                              onPointOverrideChange(record.item.id, record.point.id, {
-                                low_threshold_min: v ?? undefined,
-                                low_threshold_max: undefined,
-                              })
-                            }
-                            label="低风险分"
-                          />
-                          <RangeMinOnlyInput
-                            disabled={!enabled}
-                            minValue={medMin}
-                            maxDisplay={mediumMaxDisplay}
-                            maxConstraint={mediumMaxConstraint}
-                            onMinChange={(v) =>
-                              onPointOverrideChange(record.item.id, record.point.id, {
-                                medium_threshold_min: v ?? undefined,
-                                medium_threshold_max: undefined,
-                              })
-                            }
-                            label="中风险分"
-                          />
-                          <RangeMinOnlyInput
-                            disabled={!enabled}
-                            minValue={highMin}
-                            maxDisplay={100}
-                            maxConstraint={100}
-                            onMinChange={(v) =>
-                              onPointOverrideChange(record.item.id, record.point.id, {
-                                high_threshold_min: v ?? undefined,
-                                high_threshold_max: undefined,
-                              })
-                            }
-                            label="高风险分"
-                          />
-                        </Space>
-                        {warning && (
-                          <Alert
-                            type="warning"
-                            showIcon
-                            message={warning}
-                            style={{ padding: '2px 8px', fontSize: 11, flexBasis: '100%' }}
-                          />
-                        )}
-                      </div>
-                    )
-                  })}
-                </Space>
+                <Text strong style={{ color: '#0F172A' }} ellipsis={{ tooltip: name }}>
+                  {name}
+                </Text>
               </div>
-            )}
-          </Space>
-        )
+              {subs.length > 0 && (
+                <div
+                  style={{
+                    marginTop: 4,
+                    width: '100%',
+                  }}
+                >
+                  <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                    {subs.map((sub) => {
+                      const enabled = subEnabledMap[sub.id] ?? sub.is_enabled
+                      const fallback = getIntensityFallback(intensity)
+                      const parentOv =
+                        pointOverrides[mediaKey]?.[record.item.id]?.[record.point.id] ?? {}
+                      const lowMin = parentOv.low_threshold_min ?? fallback.low_min
+                      const medMin =
+                        parentOv.medium_threshold_min ?? fallback.medium_min
+                      const highMin =
+                        parentOv.high_threshold_min ?? fallback.high_min
+                      const lowMaxDisplay =
+                        typeof medMin === 'number'
+                          ? Math.max(0, medMin - 0.01)
+                          : null
+                      const lowMaxConstraint = lowMaxDisplay ?? 99.99
+                      const mediumMaxDisplay =
+                        typeof highMin === 'number'
+                          ? Math.max(0, highMin - 0.01)
+                          : null
+                      const mediumMaxConstraint =
+                        typeof highMin === 'number'
+                          ? Math.max(0, highMin - 0.01)
+                          : 99.99
+                      const warning = checkThresholdConsistency(
+                        medMin,
+                        parentOv.medium_threshold_max,
+                        highMin,
+                        parentOv.high_threshold_max,
+                      )
+                      return (
+                        <div
+                          key={sub.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 12,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <Space size={6} align="center">
+                            <input
+                              type="checkbox"
+                              checked={enabled}
+                              onChange={(e) =>
+                                setSubEnabledMap((m) => ({
+                                  ...m,
+                                  [sub.id]: e.target.checked,
+                                }))
+                              }
+                              aria-label={`启用 sub-审核点 ${sub.label_cn}`}
+                              style={{ margin: 0 }}
+                            />
+                            <Text style={{ fontSize: 12, color: '#0F172A' }}>
+                              {sub.label_cn}
+                            </Text>
+                          </Space>
+                          <Space size={10} align="center" wrap>
+                            <RangeMinOnlyInput
+                              disabled={!enabled}
+                              minValue={lowMin}
+                              maxDisplay={lowMaxDisplay}
+                              maxConstraint={lowMaxConstraint}
+                              onMinChange={(v) =>
+                                onPointOverrideChange(record.item.id, record.point.id, {
+                                  low_threshold_min: v ?? undefined,
+                                  low_threshold_max: undefined,
+                                })
+                              }
+                              label="低风险分"
+                            />
+                            <RangeMinOnlyInput
+                              disabled={!enabled}
+                              minValue={medMin}
+                              maxDisplay={mediumMaxDisplay}
+                              maxConstraint={mediumMaxConstraint}
+                              onMinChange={(v) =>
+                                onPointOverrideChange(record.item.id, record.point.id, {
+                                  medium_threshold_min: v ?? undefined,
+                                  medium_threshold_max: undefined,
+                                })
+                              }
+                              label="中风险分"
+                            />
+                            <RangeMinOnlyInput
+                              disabled={!enabled}
+                              minValue={highMin}
+                              maxDisplay={100}
+                              maxConstraint={100}
+                              onMinChange={(v) =>
+                                onPointOverrideChange(record.item.id, record.point.id, {
+                                  high_threshold_min: v ?? undefined,
+                                  high_threshold_max: undefined,
+                                })
+                              }
+                              label="高风险分"
+                            />
+                          </Space>
+                          {warning && (
+                            <Alert
+                              type="warning"
+                              showIcon
+                              message={warning}
+                              style={{ padding: '2px 8px', fontSize: 11, flexBasis: '100%' }}
+                            />
+                          )}
+                        </div>
+                      )
+                    })}
+                  </Space>
+                </div>
+              )}
+            </Space>
+          )
+        },
       },
-    },
-  ]
+    ],
+    // columns 的两个 render 闭包用到的外部变量：
+    // col1: imageTextBar, getPointMap, pointsByItem, onPointMapChange, subsByPointId, subEnabledMap
+    // col2: subsByPointId, subEnabledMap, intensity, pointOverrides, mediaKey, onPointOverrideChange
+    // setSubEnabledMap 是 state setter（稳定），COL_TOTAL 是常量，均无需进依赖。
+    [
+      imageTextBar,
+      getPointMap,
+      pointsByItem,
+      onPointMapChange,
+      subsByPointId,
+      subEnabledMap,
+      intensity,
+      pointOverrides,
+      mediaKey,
+      onPointOverrideChange,
+    ],
+  )
 
   return (
     <div style={{ width: '100%', minWidth: 0, textAlign: 'left' }}>
@@ -936,7 +955,8 @@ const COL_TOTAL = 2
         pagination={false}
         size="small"
         rowKey="key"
-        scroll={{ x: 600 }}
+        scroll={{ x: 600, y: 600 }}
+        virtual
         rowClassName={(record) => {
           if (record.kind === 'section') {
             if (highlightItemId != null && record.item.id === highlightItemId) {
