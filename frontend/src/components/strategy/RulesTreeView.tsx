@@ -13,6 +13,7 @@ import {
   Typography,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
+import type { Reference as TableRef } from 'rc-table'
 import { CheckOutlined } from '@ant-design/icons'
 import { auditItemsApi } from '@/api/auditItems'
 import { auditPointsApi } from '@/api/auditPoints'
@@ -181,21 +182,15 @@ export default function RulesTreeView({
 
   // 左栏点击 → 滚到右栏 section + 1.5s 闪烁高亮
   const [highlightItemId, setHighlightItemId] = useState<number | null>(null)
+  // antd Table ref：虚拟滚动模式下用 ref.scrollTo({ key }) 定位行
+  // （getElementById 在虚拟滚动下拿不到未渲染的行 DOM）
+  const tableRef = useRef<TableRef>(null)
   const rightPaneRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (selectedItemId == null) return
-    const el = document.getElementById(`rules-section-${selectedItemId}`)
-    if (!el) return
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    const rect = rightPaneRef.current?.getBoundingClientRect()
-    if (rect) {
-      const elRect = el.getBoundingClientRect()
-      const headerH = rect.top
-      const offset = elRect.top - headerH
-      if (Math.abs(offset) > 4) {
-        rightPaneRef.current?.scrollBy({ top: offset - 8, behavior: 'smooth' })
-      }
-    }
+    // 虚拟滚动：用 antd Table 官方 scrollTo API 按 rowKey 定位
+    tableRef.current?.scrollTo({ key: `section-${selectedItemId}` })
+    // 高亮延后设置：scrollTo 是异步动画，目标行需先渲染到 DOM 才能显示 flash class
     setHighlightItemId(selectedItemId)
     const t = window.setTimeout(() => setHighlightItemId(null), 1500)
     return () => window.clearTimeout(t)
@@ -296,6 +291,7 @@ export default function RulesTreeView({
                   mediaKey={mediaKey}
                   imageTextBar={imageTextBar}
                   intensity={intensity}
+                  tableRef={tableRef}
                 />
               ) : (
                 <Empty
@@ -516,6 +512,7 @@ function PointsColumn({
   mediaKey,
   imageTextBar,
   intensity,
+  tableRef,
 }: {
   items: AuditItem[]
   pointsByItem: Record<number, AuditPoint[]>
@@ -538,6 +535,8 @@ function PointsColumn({
   imageTextBar?: ReactNode
   /** 当前检测强度档位：sub 阈值无 override 时的显示回退 */
   intensity: Intensity
+  /** antd Table ref：供外层 RulesTreeView 调用 scrollTo 定位行 */
+  tableRef: React.RefObject<TableRef>
 }) {
   const dataSource = useMemo<FlatRowRecord[]>(
     () => {
@@ -804,7 +803,7 @@ function PointsColumn({
                   {name}
                 </Text>
               </div>
-              {subs.length > 0 && (
+              {subs.length > 0 && record.checked && (
                 <div
                   style={{
                     marginTop: 4,
@@ -949,6 +948,7 @@ function PointsColumn({
   return (
     <div style={{ width: '100%', minWidth: 0, textAlign: 'left' }}>
       <Table<FlatRowRecord>
+        ref={tableRef}
         className="rules-tree-table"
         columns={columns}
         dataSource={dataSource}
@@ -1007,6 +1007,8 @@ function IndependentTextRulesBlock({
   const [items, setItems] = useState<AuditItem[]>([])
   const [pointsByItem, setPointsByItem] = useState<Record<number, AuditPoint[]>>({})
   const [loading, setLoading] = useState(false)
+  // 图文独立规则块不需要左栏点击定位，ref 仅满足 PointsColumn 的 prop 要求
+  const tableRef = useRef<TableRef>(null)
 
   useEffect(() => {
     const packageCode = 'text_audit_pro'
@@ -1091,6 +1093,7 @@ function IndependentTextRulesBlock({
         highlightItemId={null}
         mediaKey="text"
         intensity={DEFAULT_INTENSITY}
+        tableRef={tableRef}
       />
     </div>
   )
