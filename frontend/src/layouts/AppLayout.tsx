@@ -163,8 +163,8 @@ const NAV_SECTIONS: Array<{
         roles: ['superadmin', 'root_admin'],
         platformOnly: true,
         children: [
-          { key: 'admin-tenants', path: '/admin/tenants', label: '租户管理', platformOnly: true },
-          { key: 'admin-api-keys', path: '/admin/api-keys', label: 'API Keys' },
+          { key: 'admin-tenants', path: '/admin/tenants', label: '租户管理', platformOnly: true, roles: ['root_admin'] },
+          { key: 'admin-api-keys', path: '/admin/api-keys', label: 'API Keys', roles: ['superadmin', 'root_admin'] },
         ],
       },
     ],
@@ -202,12 +202,14 @@ export default function AppLayout() {
 
   const platform = isPlatformAdmin(user)
 
+  // root_admin（平台租户管理员）：只看 platformOnly 项（租户管理 / API Keys）。
+  // superadmin（超级管理员）：业务菜单 + platformOnly 项都按 roles 放行（含 API Keys）。
+  // admin / 其他：只看业务菜单，platformOnly 项隐藏。
   const filterByRole = (items: NavNode[]): NavNode[] =>
     items.filter((n) => {
       if (platform) {
         return n.platformOnly === true && n.roles.includes(user.role)
       }
-      if (n.platformOnly === true) return false
       return n.roles.includes(user.role)
     })
 
@@ -217,7 +219,6 @@ export default function AppLayout() {
       if (platform) {
         return c.platformOnly === true && c.roles.includes(user.role)
       }
-      if (c.platformOnly === true) return false
       return c.roles.includes(user.role)
     })
 

@@ -73,30 +73,23 @@ PLATFORM_TENANT_ID = "tnt_default"
 def is_platform_admin(user: User | None) -> bool:
     """Plain boolean check (no dependency). 与 require_platform_admin 同语义。
 
-    平台管理员 = root_admin 或 tenant_id 为空(平台租户)的 superadmin。
+    平台租户管理员（platform admin）= root_admin。
+    superadmin 是超级管理员（除租户管理外的所有权限），不再被视为平台管理员。
     供路由内部按平台/业务管理员分支返回不同数据范围时使用。
     """
     if user is None:
         return False
-    if user.role == UserRole.ROOT_ADMIN:
-        return True
-    if user.role == UserRole.SUPERADMIN:
-        return getattr(user, "tenant_id", None) is None
-    return False
+    return user.role == UserRole.ROOT_ADMIN
 
 
 async def require_platform_admin(user: User = Depends(get_current_user)) -> User:
-    """Dependency: platform operator (tenants / API keys management).
+    """Dependency: platform operator (tenants management).
 
-    平台管理员 = root_admin 或归属平台租户(``tnt_default``)的 superadmin。
-    与前端 ``tenantAuth.isPlatformAdmin`` 语义一致。tenant_id 为空视为平台租户。
+    平台租户管理员 = root_admin。
+    superadmin 不再拥有租户管理权限（与前端 ``tenantAuth.isPlatformAdmin`` 语义一致）。
     """
     if user.role == UserRole.ROOT_ADMIN:
         return user
-    if user.role == UserRole.SUPERADMIN:
-        tenant_id = getattr(user, "tenant_id", None)
-        if tenant_id is None or tenant_id == PLATFORM_TENANT_ID:
-            return user
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Requires platform admin role",

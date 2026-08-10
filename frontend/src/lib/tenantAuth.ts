@@ -3,12 +3,12 @@ import type { User } from '@/types/auth'
 // 平台租户：tenant_id 为 NULL 的用户（root_admin 或平台 superadmin）视为归属平台租户。
 export const PLATFORM_TENANT_ID: number | null = null
 
+// 平台租户管理员（platform admin）= root_admin。
+// superadmin（含平台 superadmin）是超级管理员，拥有除租户管理外的所有权限，
+// 不再被视为平台管理员。
 export function isPlatformAdmin(user: User | null | undefined): boolean {
   if (!user) return false
-  if (user.role === 'root_admin') return true
-  if (user.role !== 'superadmin') return false
-  // superadmin 且 tenant_id 为 null（平台租户）才是平台管理员
-  return user.tenant_id == null
+  return user.role === 'root_admin'
 }
 
 export function getCurrentUserTenantId(user: User | null | undefined): number | null {
