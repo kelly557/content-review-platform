@@ -107,7 +107,7 @@ export default function RulesTreeView({
   onPointMapChange,
   pointOverrides,
   onPointOverrideChange,
-  onPointToggle: _onPointToggle,
+  onPointToggle,
   refreshKey,
   imageTextBar,
   onSelectedItemChange,
@@ -287,6 +287,7 @@ export default function RulesTreeView({
                   pointOverrides={pointOverrides}
                   onPointMapChange={onPointMapChange}
                   onPointOverrideChange={onPointOverrideChange}
+                  onPointToggle={onPointToggle}
                   highlightItemId={highlightItemId}
                   mediaKey={mediaKey}
                   imageTextBar={imageTextBar}
@@ -508,6 +509,7 @@ function PointsColumn({
   pointOverrides,
   onPointMapChange,
   onPointOverrideChange,
+  onPointToggle,
   highlightItemId,
   mediaKey,
   imageTextBar,
@@ -529,6 +531,8 @@ function PointsColumn({
     high_threshold_min?: number | null
     high_threshold_max?: number | null
   }) => void
+  /** 父点勾选时通知父级维护 enabledItemIds 集合 */
+  onPointToggle: (itemId: number, pointId: number, checked: boolean) => void
   highlightItemId: number | null
   mediaKey: CategoryKey
   /** 「图文」bar;当 record.item.name_cn === '图文' 时,在 section header 位置渲染 */
@@ -727,9 +731,6 @@ function PointsColumn({
           //   - sub 全选  -> 父点 checked (打勾)
           //   - sub 部分选 -> 父点 indeterminate (回字中间填充)
           //   - sub 全不选 -> 父点 unchecked (空)
-          // 2026-07-30 点击父点 ☐ 联动 toggle 所有 sub:
-          //   - 当前全选 / 部分选 -> 全部取消
-          //   - 当前全不选 -> 全部选中
           const pointSubs = subsByPointId[record.point.id] ?? []
           const enabledCount = pointSubs.filter(
             (s) => subEnabledMap[s.id] ?? s.is_enabled,
@@ -739,15 +740,13 @@ function PointsColumn({
             totalCount > 0 && enabledCount === totalCount
           const partiallySelected =
             enabledCount > 0 && enabledCount < totalCount
-          const onToggleSubs = () => {
-            const nextAll = !(allSubsSelected || partiallySelected)
-            setSubEnabledMap((m) => {
-              const next = { ...m }
-              pointSubs.forEach((s) => {
-                next[s.id] = nextAll
-              })
-              return next
-            })
+          // 点击父点 ☐：只切换父点 checked 状态（展开/收起 sub），不自动全选 sub。
+          // sub 由用户展开后逐个勾选。更新 pointMap → record.checked 变 true → sub 展开。
+          const onToggle = () => {
+            const nextChecked = !(record.checked || allSubsSelected || partiallySelected)
+            const pm = getPointMap(record.item.id)
+            onPointMapChange(record.item.id, { ...pm, [record.point.id]: nextChecked })
+            onPointToggle(record.item.id, record.point.id, nextChecked)
           }
           return (
             <div
@@ -765,7 +764,7 @@ function PointsColumn({
                   if (el) el.indeterminate = partiallySelected
                 }}
                 checked={record.checked || allSubsSelected}
-                onChange={onToggleSubs}
+                onChange={onToggle}
                 aria-label={`启用审核点 ${record.point.label_cn}`}
                 style={{ margin: 0 }}
               />
@@ -936,6 +935,7 @@ function PointsColumn({
       getPointMap,
       pointsByItem,
       onPointMapChange,
+      onPointToggle,
       subsByPointId,
       subEnabledMap,
       intensity,
@@ -1089,6 +1089,9 @@ function IndependentTextRulesBlock({
         onPointMapChange={onPointMapChange}
         onPointOverrideChange={() => {
           /* 图文独立规则暂不支持阈值 override，no-op */
+        }}
+        onPointToggle={() => {
+          /* 图文独立规则不需要通知父级 enabledItems，no-op */
         }}
         highlightItemId={null}
         mediaKey="text"
