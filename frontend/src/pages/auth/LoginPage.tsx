@@ -112,7 +112,7 @@ export default function LoginPage() {
               <Space wrap size={[8, 8]}>
                 {DEV_ACCOUNTS.map((acc: DevAccount) => (
                   <Tooltip
-                    key={acc.role}
+                    key={acc.identifier}
                     title={`${acc.identifier} / ${acc.password}`}
                   >
                     <Button

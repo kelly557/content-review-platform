@@ -340,7 +340,7 @@ export default function AppLayout() {
           ...DEV_ACCOUNTS.map((acc) => {
             const isCurrent = user.role === acc.role
             return {
-              key: `switch-${acc.role}`,
+              key: `switch-${acc.identifier}`,
               label: isCurrent
                 ? `✓ 当前 ${acc.label}`
                 : `⇄ ${acc.label}`,

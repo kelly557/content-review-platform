@@ -733,17 +733,15 @@ function PointsColumn({
           //   - sub 全不选 -> 父点 unchecked (空)
           const pointSubs = subsByPointId[record.point.id] ?? []
           const enabledCount = pointSubs.filter(
-            (s) => subEnabledMap[s.id] ?? s.is_enabled,
+            (s) => subEnabledMap[s.id] ?? false,
           ).length
           const totalCount = pointSubs.length
-          const allSubsSelected =
-            totalCount > 0 && enabledCount === totalCount
           const partiallySelected =
             enabledCount > 0 && enabledCount < totalCount
           // 点击父点 ☐：只切换父点 checked 状态（展开/收起 sub），不自动全选 sub。
           // sub 由用户展开后逐个勾选。更新 pointMap → record.checked 变 true → sub 展开。
           const onToggle = () => {
-            const nextChecked = !(record.checked || allSubsSelected || partiallySelected)
+            const nextChecked = !record.checked
             const pm = getPointMap(record.item.id)
             onPointMapChange(record.item.id, { ...pm, [record.point.id]: nextChecked })
             onPointToggle(record.item.id, record.point.id, nextChecked)
@@ -763,7 +761,7 @@ function PointsColumn({
                 ref={(el) => {
                   if (el) el.indeterminate = partiallySelected
                 }}
-                checked={record.checked || allSubsSelected}
+                checked={record.checked}
                 onChange={onToggle}
                 aria-label={`启用审核点 ${record.point.label_cn}`}
                 style={{ margin: 0 }}
@@ -811,7 +809,7 @@ function PointsColumn({
                 >
                   <Space direction="vertical" size={10} style={{ width: '100%' }}>
                     {subs.map((sub) => {
-                      const enabled = subEnabledMap[sub.id] ?? sub.is_enabled
+                      const enabled = subEnabledMap[sub.id] ?? false
                       const fallback = getIntensityFallback(intensity)
                       const parentOv =
                         pointOverrides[mediaKey]?.[record.item.id]?.[record.point.id] ?? {}
