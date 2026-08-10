@@ -7,9 +7,13 @@ text + the enabled services list + a JSON schema that exactly matches
 from __future__ import annotations
 
 import json
-from typing import Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import settings
+
+
+# 单次 prompt 内最多下发的审核点条数, 防 prompt 膨胀.
+_MAX_AUDIT_POINTS_IN_PROMPT = 50
 
 
 _SYSTEM = """你是 AdReview 平台的内容合规审核引擎，基于中国《广告法》《互联网广告管理办法》、
@@ -20,7 +24,11 @@ _SYSTEM = """你是 AdReview 平台的内容合规审核引擎，基于中国《
 命中片段的 quote 必须是输入文本中真实存在的子串，禁止臆造。"""
 
 
-def build_moderation_prompt(text_body: str, enabled_services: list[str]) -> Tuple[str, str]:
+def build_moderation_prompt(
+    text_body: str,
+    enabled_services: list[str],
+    audit_points: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[str, str]:
     truncated = text_body
     if len(text_body) > settings.maas_max_text_chars:
         truncated = text_body[: settings.maas_max_text_chars]
@@ -37,13 +45,15 @@ def build_moderation_prompt(text_body: str, enabled_services: list[str]) -> Tupl
         ensure_ascii=False,
     )
 
+    rules_block = _format_audit_points(audit_points)
+
     user = f"""待审核文本（已截断到 {len(truncated)} 字符）：
 
 \"\"\"{truncated}\"\"\"
 
 启用的检测服务（每个服务负责一类风险）：
 {services_json}
-
+{rules_block}
 请输出 JSON，schema 严格如下：
 
 {{

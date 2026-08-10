@@ -581,6 +581,17 @@ function PointsColumn({
   // 每个父审核点下的三级 sub 列表 — 从后端拉取（真实数据）
   const [subsByPointId, setSubsByPointId] = useState<Record<number, SubAuditPoint[]>>({})
 
+  // 展开/收起状态：与勾选状态分离。点击二级 label 列切换展开，点击 checkbox 切换全选。
+  const [expandedPointIds, setExpandedPointIds] = useState<Set<number>>(new Set())
+  const toggleExpand = (pointId: number) => {
+    setExpandedPointIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(pointId)) next.delete(pointId)
+      else next.add(pointId)
+      return next
+    })
+  }
+
   // dataSource 现在是 useMemo 包裹的稳定引用（依赖 items/pointsByItem/getPointMap/pointOverrides/mediaKey）。
   // pointIdsKey 基于 dataSource 派生，作为 sub-points 拉取 effect 的稳定依赖。
   const pointIdsKey = useMemo(
@@ -736,15 +747,24 @@ function PointsColumn({
             (s) => subEnabledMap[s.id] ?? false,
           ).length
           const totalCount = pointSubs.length
+          const allSubsSelected =
+            totalCount > 0 && enabledCount === totalCount
           const partiallySelected =
             enabledCount > 0 && enabledCount < totalCount
-          // 点击父点 ☐：只切换父点 checked 状态（展开/收起 sub），不自动全选 sub。
-          // sub 由用户展开后逐个勾选。更新 pointMap → record.checked 变 true → sub 展开。
+          // 点击父点 ☐：全选/全不选三级 sub（不展开/收起，展开由 label 列点击控制）。
+          // 同步 pointMap 用于策略提交校验 + 通知父级维护 enabledItems。
           const onToggle = () => {
-            const nextChecked = !record.checked
+            const nextAll = !(record.checked || allSubsSelected)
+            setSubEnabledMap((m) => {
+              const next = { ...m }
+              pointSubs.forEach((s) => {
+                next[s.id] = nextAll
+              })
+              return next
+            })
             const pm = getPointMap(record.item.id)
-            onPointMapChange(record.item.id, { ...pm, [record.point.id]: nextChecked })
-            onPointToggle(record.item.id, record.point.id, nextChecked)
+            onPointMapChange(record.item.id, { ...pm, [record.point.id]: nextAll })
+            onPointToggle(record.item.id, record.point.id, nextAll)
           }
           return (
             <div
@@ -761,7 +781,7 @@ function PointsColumn({
                 ref={(el) => {
                   if (el) el.indeterminate = partiallySelected
                 }}
-                checked={record.checked}
+                checked={record.checked || allSubsSelected}
                 onChange={onToggle}
                 aria-label={`启用审核点 ${record.point.label_cn}`}
                 style={{ margin: 0 }}
@@ -784,23 +804,32 @@ function PointsColumn({
           if (record.kind !== 'point') return null
           const name = record.point.label_cn || record.point.label || record.point.code
           const subs = subsByPointId[record.point.id] ?? []
+          const expanded = expandedPointIds.has(record.point.id)
           return (
             <Space size={6} direction="vertical" align="start" style={{ width: '100%' }}>
-              {/* 父行 label：与 ☐ 同基线对齐（div 强制 height: 40 + flex center） */}
+              {/* 父行 label：点击展开/收起三级 sub（与 checkbox 勾选分离） */}
               <div
+                onClick={() => subs.length > 0 && toggleExpand(record.point.id)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
+                  gap: 8,
                   padding: '0 16px',
                   width: '100%',
                   height: 40,
+                  cursor: subs.length > 0 ? 'pointer' : 'default',
                 }}
               >
                 <Text strong style={{ color: '#0F172A' }} ellipsis={{ tooltip: name }}>
                   {name}
                 </Text>
+                {subs.length > 0 && (
+                  <span style={{ color: '#94A3B8', fontSize: 12, flexShrink: 0 }}>
+                    {expanded ? '▼' : '▶'} {subs.length}
+                  </span>
+                )}
               </div>
-              {subs.length > 0 && record.checked && (
+              {subs.length > 0 && expanded && (
                 <div
                   style={{
                     marginTop: 4,
@@ -936,6 +965,7 @@ function PointsColumn({
       onPointToggle,
       subsByPointId,
       subEnabledMap,
+      expandedPointIds,
       intensity,
       pointOverrides,
       mediaKey,
