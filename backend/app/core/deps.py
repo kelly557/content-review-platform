@@ -51,16 +51,16 @@ def require_roles(*roles: str):
 
 
 async def require_superadmin(user: User = Depends(get_current_user)) -> User:
-    """Dependency: ensure the caller is the superadmin or root_admin role.
+    """Dependency: ensure the caller is the root_admin role.
 
-    Used to gate administrative actions that should only be reachable by the
-    platform operator (e.g. editing 通用 AuditItem/AuditPoint, viewing the
-    通用 platform libraries).
+    Used to gate platform-level administrative actions (e.g. API Keys CRUD).
+    superadmin（业务超级管理员）不再拥有平台级写权限。
+    注：risk_categories 有自己的本地 _require_superadmin，仍放行 superadmin。
     """
-    if user.role not in (UserRole.SUPERADMIN, UserRole.ROOT_ADMIN):
+    if user.role != UserRole.ROOT_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Requires role: superadmin",
+            detail="Requires role: root_admin",
         )
     return user
 

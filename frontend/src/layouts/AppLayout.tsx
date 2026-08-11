@@ -160,11 +160,11 @@ const NAV_SECTIONS: Array<{
         path: '/admin/tenants',
         label: '平台管理',
         icon: <KeyOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['superadmin', 'root_admin'],
+        roles: ['root_admin'],
         platformOnly: true,
         children: [
           { key: 'admin-tenants', path: '/admin/tenants', label: '租户管理', platformOnly: true, roles: ['root_admin'] },
-          { key: 'admin-api-keys', path: '/admin/api-keys', label: 'API Keys', platformOnly: true, roles: ['superadmin', 'root_admin'] },
+          { key: 'admin-api-keys', path: '/admin/api-keys', label: 'API Keys', platformOnly: true, roles: ['root_admin'] },
         ],
       },
     ],
