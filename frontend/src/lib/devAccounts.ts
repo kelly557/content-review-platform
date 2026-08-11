@@ -22,9 +22,9 @@ export interface DevAccount {
 
 export const DEV_ACCOUNTS: DevAccount[] = [
   {
-    role: 'superadmin',
-    identifier: 'superadmin@adreview.example.com',
-    password: 'superadmin123',
+    role: 'root_admin',
+    identifier: 'rootadmin@adreview.example.com',
+    password: 'rootadmin123',
     label: '租户管理员（平台）',
     tenantCode: null,
   },

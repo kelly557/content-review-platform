@@ -72,8 +72,8 @@ const NAV_SECTIONS: Array<{
     key: 'workspace',
     label: '工作区',
     items: [
-      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
-      { kind: 'leaf', key: 'online-review', path: '/online-review', label: '在线审核', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
+      { kind: 'leaf', key: 'overview', path: '/overview', label: '总览', icon: <DashboardOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin'] },
+      { kind: 'leaf', key: 'online-review', path: '/online-review', label: '在线审核', icon: <AuditOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['submitter', 'reviewer', 'mlr', 'admin', 'superadmin'] },
     ],
   },
   {
@@ -87,10 +87,10 @@ const NAV_SECTIONS: Array<{
         path: '/strategies',
         label: '审核策略',
         icon: <SettingOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'mlr', 'reviewer', 'superadmin', 'root_admin'],
+        roles: ['admin', 'mlr', 'reviewer', 'superadmin'],
         children: [
           { key: 'strategies-list', path: '/strategies', label: '策略管理' },
-          { key: 'strategies-agents', path: '/strategies/agents', label: '审核智能体', roles: ['superadmin', 'admin', 'root_admin'] },
+          { key: 'strategies-agents', path: '/strategies/agents', label: '审核智能体', roles: ['superadmin', 'admin'] },
         ],
       },
       {
@@ -99,7 +99,7 @@ const NAV_SECTIONS: Array<{
         path: '/resources/words',
         label: '资源库',
         icon: <DatabaseOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'mlr', 'reviewer', 'superadmin', 'root_admin'],
+        roles: ['admin', 'mlr', 'reviewer', 'superadmin'],
         children: [
           { key: 'strategies-words', path: '/resources/words', label: '词库管理' },
           { key: 'strategies-replies', path: '/resources/replies', label: '代答库管理' },
@@ -112,8 +112,8 @@ const NAV_SECTIONS: Array<{
     key: 'analytics',
     label: '审核结果',
     items: [
-      { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
-      { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'superadmin', 'root_admin'] },
+      { kind: 'leaf', key: 'query', path: '/query', label: '数据查询', icon: <SearchOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'superadmin'] },
+      { kind: 'leaf', key: 'reports', path: '/reports', label: '数据报表', icon: <BarChartOutlined style={{ fontSize: ICON_SIZE }} />, roles: ['reviewer', 'mlr', 'admin', 'superadmin'] },
     ],
   },
   {
@@ -127,7 +127,7 @@ const NAV_SECTIONS: Array<{
         path: '/admin/users',
         label: '账号管理',
         icon: <TeamOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'superadmin', 'root_admin'],
+        roles: ['admin', 'superadmin'],
         children: [
           { key: 'admin-users', path: '/admin/users', label: '用户管理' },
           { key: 'admin-roles', path: '/admin/roles', label: '角色管理' },
@@ -140,7 +140,7 @@ const NAV_SECTIONS: Array<{
         path: '/admin/models/large',
         label: '模型管理',
         icon: <RobotOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'superadmin', 'root_admin'],
+        roles: ['admin', 'superadmin'],
         children: [
           { key: 'admin-models-large', path: '/admin/models/large', label: '大模型' },
           { key: 'admin-models-small', path: '/admin/models/small', label: '小模型' },
@@ -152,7 +152,7 @@ const NAV_SECTIONS: Array<{
         path: '/admin/tags',
         label: '标签管理',
         icon: <TagsOutlined style={{ fontSize: ICON_SIZE }} />,
-        roles: ['admin', 'superadmin', 'root_admin'],
+        roles: ['admin', 'superadmin'],
       },
       {
         kind: 'group',
@@ -164,7 +164,7 @@ const NAV_SECTIONS: Array<{
         platformOnly: true,
         children: [
           { key: 'admin-tenants', path: '/admin/tenants', label: '租户管理', platformOnly: true, roles: ['root_admin'] },
-          { key: 'admin-api-keys', path: '/admin/api-keys', label: 'API Keys', roles: ['superadmin', 'root_admin'] },
+          { key: 'admin-api-keys', path: '/admin/api-keys', label: 'API Keys', platformOnly: true, roles: ['superadmin', 'root_admin'] },
         ],
       },
     ],
