@@ -38,9 +38,11 @@ tsconfig.tsbuildinfo
 storage/uploads/*
 storage/thumbnails/*
 storage/exports/*
+backend/storage/models/*
 !storage/uploads/.gitkeep
 !storage/thumbnails/.gitkeep
 !storage/exports/.gitkeep
+!backend/storage/models/.gitkeep
 
 # PG dumps produced by start_backend_safe.sh (rotate ADREVIEW_BACKUP_KEEP)
 storage/backups/

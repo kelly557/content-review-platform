@@ -2122,6 +2122,19 @@ export function extractImageTextPoints(definition?: {
   return out
 }
 
+/**
+ * 从 definition.review_agent_ids 反序列化为 number[]。
+ * 持久化到 strategy.definition.review_agent_ids (JSONB)。
+ * 后端 schema 不解析,仅透传。
+ */
+export function extractReviewAgentIds(definition?: {
+  review_agent_ids?: unknown
+}): number[] {
+  const raw = definition?.review_agent_ids
+  if (!Array.isArray(raw)) return []
+  return raw.filter((v): v is number => typeof v === 'number')
+}
+
 export const DEFAULT_VIDEO_FRAME_INTERVAL_SEC = 5
 export const MIN_VIDEO_FRAME_INTERVAL_SEC = 1
 export const MAX_VIDEO_FRAME_INTERVAL_SEC = 1000
@@ -2298,15 +2311,14 @@ export const MACHINE_REVIEW_FEEDBACK_OPTIONS: {
 export interface MachineHit {
   service_code?: string | null
   service_name?: string | null
+  audit_point_code?: string | null
   label?: string | null
   label_cn?: string | null
   score?: number | null
   quote?: string | null
-  risk_category_code?: string | null
-  risk_category_label?: string | null
   audit_item_code?: string | null
   audit_item_label?: string | null
-  audit_point_code?: string | null
+  audit_point_label?: string | null
 }
 
 export interface RiskTaxonomy {

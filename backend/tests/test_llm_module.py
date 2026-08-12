@@ -18,7 +18,7 @@ from app.services.llm.client import (
 )
 from app.services.llm.parser import (
     ModerationParseError,
-    _quote_appears_in,
+    _reconstruct_quote,
     parse_moderation_result,
 )
 from app.services.llm.prompts import build_moderation_prompt
@@ -41,7 +41,8 @@ def test_parse_happy_path():
                     "label": "medical_absolute_claim",
                     "label_cn": "医疗绝对化宣称",
                     "score": 0.92,
-                    "quote": "本产品是最好的保健品",
+                    "start": 0,
+                    "length": 10,
                     "sensitive_grade": "S3",
                 }
             ],
@@ -64,12 +65,13 @@ def test_parse_happy_path():
     assert result.risk_level == "高风险"
     assert result.sensitive_level == "S3"
     assert len(result.hits) == 1
+    # quote 由后端从 start/length 重建 (LLM 不再回传原文, 避免网关输出审查拦截)
     assert result.hits[0].quote == "本产品是最好的保健品"
     assert result.hits[0].score == 0.92
     assert result.summary == "命中医疗绝对化宣称 1 条"
 
 
-def test_parse_quote_not_in_text_is_dropped():
+def test_parse_quote_out_of_range_is_dropped():
     raw = json.dumps(
         {
             "risk_level": "高风险",
@@ -77,16 +79,17 @@ def test_parse_quote_not_in_text_is_dropped():
                 {
                     "service_code": "text_detection_pro",
                     "label": "x",
-                    "label_cn": "虚构引用",
+                    "label_cn": "位置越界",
                     "score": 0.9,
-                    "quote": "THIS STRING DOES NOT EXIST IN THE TEXT",
+                    "start": 999,
+                    "length": 5,
                 }
             ],
         },
         ensure_ascii=False,
     )
     result = parse_moderation_result(raw, original_text="正常文字")
-    # Hit survives but quote is nulled to defend against fabricated evidence.
+    # Hit survives but quote is nulled (位置越界, 无法重建).
     assert len(result.hits) == 1
     assert result.hits[0].quote is None
 
@@ -125,12 +128,18 @@ def test_parse_rejects_non_object():
         parse_moderation_result("[1,2,3]", original_text="x")
 
 
-def test_quote_appears_in_strips_quotes_and_whitespace():
+def test_reconstruct_quote_from_position():
     text = "本产品 100% 安全。立即下单！"
-    assert _quote_appears_in("“本产品 100% 安全”", text) is True
-    assert _quote_appears_in("虚构", text) is False
-    assert _quote_appears_in("", text) is False
-    assert _quote_appears_in("abc", "") is False
+    # 正常切片 (位置 0, 长度 3 = "本产品")
+    assert _reconstruct_quote(0, 3, text) == "本产品"
+    # 越界 / 非法 → None
+    assert _reconstruct_quote(999, 5, text) is None
+    assert _reconstruct_quote(-1, 3, text) is None
+    assert _reconstruct_quote(0, 0, text) is None
+    assert _reconstruct_quote(0, 3, "") is None
+    assert _reconstruct_quote(None, 3, text) is None
+    # length 超出尾部自动截断 (尾部 5 字 = "立即下单！")
+    assert _reconstruct_quote(len(text) - 5, 10, text) == "立即下单！"
 
 
 # ----------------------------------------------------------------------------
@@ -150,7 +159,7 @@ def test_prompt_includes_text_and_services():
 def test_prompt_truncates_oversize_text():
     long_body = "x" * 20000
     _system, user = build_moderation_prompt(long_body, [])
-    assert len(user) < 13000
+    assert len(user) < 14000
     assert "[…原文已截断" in user
 
 

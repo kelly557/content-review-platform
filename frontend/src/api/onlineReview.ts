@@ -1,7 +1,7 @@
 import { api } from './client'
 import type { MaterialType } from '@/types/domain'
 import type { UploadItem } from '@/components/task-create/UploadArea'
-import type { OnlineReviewRequest, OnlineReviewResponse } from '@/api/onlineReviewTypes'
+import type { OnlineReviewRequest, OnlineReviewResponse, OnlineReviewLogListItem, OnlineReviewLogDetail } from '@/api/onlineReviewTypes'
 
 export interface OnlineDetectionResult {
   request: OnlineReviewRequest
@@ -15,6 +15,10 @@ interface DetectApiResponse {
   conclusionType: number
   data: Array<{ msg: string; conclusion: string; hits: OnlineReviewResponse['data'][number]['hits'] }>
   latency_ms: number
+  strategy: { id: number; name: string } | null
+  engines_used: string[]
+  model: string | null
+  llm_error: string | null
 }
 
 function buildRequestSummary(
@@ -85,9 +89,11 @@ export async function runOnlineDetection(
   const response: OnlineReviewResponse = {
     conclusion: data.conclusion,
     log_id: data.log_id,
-    phoneRisk: {},
-    isHitMd5: false,
     conclusionType: data.conclusionType,
+    strategy: data.strategy ?? null,
+    engines_used: data.engines_used ?? [],
+    model: data.model ?? null,
+    llm_error: data.llm_error ?? null,
     data: data.data,
   }
 
@@ -102,4 +108,39 @@ export async function runOnlineDetection(
     response,
     latencyMs: data.latency_ms,
   }
+}
+
+// ---------------------------------------------------------------------------
+// 历史记录
+// ---------------------------------------------------------------------------
+
+export interface ListLogsParams {
+  media_type?: string
+  strategy_id?: number
+  conclusion?: string
+  limit?: number
+  offset?: number
+}
+
+export async function listOnlineReviewLogs(
+  params: ListLogsParams = {},
+): Promise<OnlineReviewLogListItem[]> {
+  const search = new URLSearchParams()
+  if (params.media_type) search.set('media_type', params.media_type)
+  if (params.strategy_id) search.set('strategy_id', String(params.strategy_id))
+  if (params.conclusion) search.set('conclusion', params.conclusion)
+  if (params.limit) search.set('limit', String(params.limit))
+  if (params.offset) search.set('offset', String(params.offset))
+  const qs = search.toString()
+  const { data } = await api.get<OnlineReviewLogListItem[]>(
+    `/online-review/logs${qs ? `?${qs}` : ''}`,
+  )
+  return data
+}
+
+export async function getOnlineReviewLog(
+  id: number,
+): Promise<OnlineReviewLogDetail> {
+  const { data } = await api.get<OnlineReviewLogDetail>(`/online-review/logs/${id}`)
+  return data
 }

@@ -48,7 +48,7 @@ import { useUiStore } from '@/store'
 const { Title, Text } = Typography
 
 type AgentStatus = '已发布' | '未发布' | '已下线'
-type AgentModality = '文本' | '图像' | '图文' | '音频' | '视频'
+type AgentModality = '文本' | '图片' | '图文' | '音频' | '视频'
 
 interface AgentRow {
   /** 后端数值 id（API 调用用） */
@@ -107,7 +107,7 @@ const STEPS = [
     title: '1.创建智能体',
     icon: <PlusOutlined />,
     description:
-      '根据待审核内容模态，创建新建智能体应用。目前可支持文本、图像、图文多模态智能体。',
+      '根据待审核内容模态，创建新建智能体应用。目前可支持文本、图片、图文多模态智能体。',
   },
   {
     key: 'config',
@@ -160,7 +160,7 @@ export default function ReviewAgentsPage() {
   // 测试抽屉的实时表单 points（新建态也可用）
   const [testPoints, setTestPoints] = useState<{ id: string; label: string }[]>([])
   const [testAgentName, setTestAgentName] = useState<string>('')
-  const [testModality, setTestModality] = useState<'文本' | '图文'>('文本')
+  const [testModality, setTestModality] = useState<'文本' | '图片' | '图文'>('文本')
   // 发布 / 下线
   const [publishOpen, setPublishOpen] = useState(false)
   const [unpublishOpen, setUnpublishOpen] = useState(false)
@@ -268,7 +268,7 @@ export default function ReviewAgentsPage() {
 
     const validRows = state.rows.filter((r) => r.label.trim() && r.desc.trim())
     const modality = (step1Payload?.modality ??
-      (editingAgent && ['文本', '图文'].includes(editingAgent.modality)
+      (editingAgent && ['文本', '图片', '图文'].includes(editingAgent.modality)
         ? editingAgent.modality
         : '文本')) as AgentVersionSnapshot['modality']
 
@@ -613,7 +613,7 @@ export default function ReviewAgentsPage() {
           }
           initialModality={
             editingAgent
-              ? (['文本', '图文'].includes(editingAgent.modality)
+              ? (['文本', '图片', '图文'].includes(editingAgent.modality)
                   ? (editingAgent.modality as Step1Modality)
                   : '文本')
               : step1Payload
@@ -638,7 +638,7 @@ export default function ReviewAgentsPage() {
               )
               setTestAgentName(state.name)
               const m = step1Payload?.modality ?? editingAgent?.modality ?? '文本'
-              setTestModality((['文本', '图文'].includes(m) ? m : '文本') as '文本' | '图文')
+              setTestModality((['文本', '图片', '图文'].includes(m) ? m : '文本') as '文本' | '图片' | '图文')
             }
             setTestOpen(true)
           }}

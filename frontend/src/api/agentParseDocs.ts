@@ -15,6 +15,8 @@ export interface AgentParseDocument {
   charCount?: number
   durationMs?: number
   startedAt?: number
+  /** 解析出的结构化审核点 (审核标签 + 审核描述) */
+  points?: { label: string; desc: string }[]
 }
 
 export const ACCEPT_MIME = ['.txt', '.xls', '.xlsx']
@@ -85,7 +87,7 @@ interface ParseDocApiResponse {
 export async function runParseDoc(
   doc: AgentParseDocument,
   opts: RunParseOptions = {},
-): Promise<Pick<AgentParseDocument, 'status' | 'preview' | 'charCount' | 'durationMs' | 'message'>> {
+): Promise<Pick<AgentParseDocument, 'status' | 'preview' | 'charCount' | 'durationMs' | 'message' | 'points'>> {
   const startedAt = Date.now()
   opts.onProgress?.(30)
   const fd = new FormData()
@@ -100,6 +102,7 @@ export async function runParseDoc(
       preview: data.preview || (await readTextPreview(doc.file)),
       charCount: data.char_count,
       durationMs: Date.now() - startedAt,
+      points: data.points ?? [],
     }
   } catch (e) {
     const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail

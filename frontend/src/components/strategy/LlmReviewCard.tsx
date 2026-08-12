@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Empty, Select, Space, Spin, Switch, Tag, Typography } from 'antd'
-import { ExperimentOutlined, WarningOutlined } from '@ant-design/icons'
+import { App, Empty, Select, Space, Spin, Switch, Tag, Typography } from 'antd'
+import { ExperimentOutlined } from '@ant-design/icons'
 import { registeredModelsApi, type ActiveModelOption } from '@/api/registered-models'
 import {
   LARGE_MODEL_CATEGORY_LABEL,
@@ -14,18 +14,21 @@ const { Text } = Typography
 interface Props {
   value: LlmReviewConfig
   onChange: (next: LlmReviewConfig) => void
+  /** 当前策略启用的审核模态列表（如 ['text','image']）；用于自动过滤大模型列表 */
+  enabledMediaTypes?: string[]
 }
 
 /**
  * 策略级「大模型审核能力」卡片 — 单一开关、不区分素材类型。
  *
- * - 资源库候选：已激活 (`status=active`) 且 `scale_class=large` 的所有模型，含纯文本与多模态。
- * - 当策略启用项覆盖图片 / 音频 / 视频 / 文档，且所选模型缺少对应 modality 时，
- *   后端会把 ``needs_multimodal_hint=true`` 写回；这里以 Alert 提示用户切换到多模态模型。
+ * - 资源库候选：已激活 (`status=active`) 且 `scale_class=large` 的所有模型。
+ * - 根据策略启用的审核模态自动过滤：
+ *   只启用文本审核 → 显示所有大模型（text + multimodal）；
+ *   启用了图片/音频/视频/文档 → 只显示 multimodal 大模型（多模态兼容文本）。
  */
-export function LlmReviewCard({ value, onChange }: Props) {
+export function LlmReviewCard({ value, onChange, enabledMediaTypes = [] }: Props) {
   const { message } = App.useApp()
-  const [options, setOptions] = useState<ActiveModelOption[]>([])
+  const [allOptions, setAllOptions] = useState<ActiveModelOption[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -34,10 +37,10 @@ export function LlmReviewCard({ value, onChange }: Props) {
     registeredModelsApi
       .listActiveModels({ kind: 'large' }) // 列出已激活的大模型
       .then((list) => {
-        if (!cancelled) setOptions(list)
+        if (!cancelled) setAllOptions(list)
       })
       .catch(() => {
-        if (!cancelled) setOptions([])
+        if (!cancelled) setAllOptions([])
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -46,6 +49,28 @@ export function LlmReviewCard({ value, onChange }: Props) {
       cancelled = true
     }
   }, [])
+
+  // 是否需要多模态：启用了非 text 模态（image/audio/doc/video）时只显示 multimodal
+  const needsMultimodal = useMemo(() => {
+    const nonText = enabledMediaTypes.filter((m) => m !== 'text')
+    return nonText.length > 0
+  }, [enabledMediaTypes])
+
+  // 按模态需求过滤：多模态兼容文本，故 needsMultimodal 时只保留 multimodal
+  const options = useMemo(() => {
+    if (!needsMultimodal) return allOptions
+    return allOptions.filter((m) => m.large_category === 'multimodal')
+  }, [allOptions, needsMultimodal])
+
+  // 过滤后当前选中模型不在列表中 → 自动清空（多模态兼容文本，无需提示）
+  useEffect(() => {
+    if (value.model_id && needsMultimodal) {
+      const stillValid = options.some((m) => m.id === value.model_id)
+      if (!stillValid) {
+        onChange({ ...value, model_id: null, needs_multimodal_hint: false })
+      }
+    }
+  }, [options, value.model_id, needsMultimodal])
 
   const pickedModel = useMemo(
     () => (value.model_id ? options.find((m) => m.id === value.model_id) ?? null : null),
@@ -132,23 +157,6 @@ export function LlmReviewCard({ value, onChange }: Props) {
         <Text type="secondary" style={{ fontSize: 12 }}>
           开启后，策略下所有启用的通用审核规则在机审时都会叠加大模型的审核能力。
         </Text>
-
-        {/* 多模态提示：仅在策略启用项覆盖图片/音频/视频/文档且所选模型不覆盖时显示 */}
-        {value.is_enabled && value.needs_multimodal_hint && (
-          <Alert
-            type="warning"
-            showIcon
-            icon={<WarningOutlined />}
-            message="所选大模型缺少此策略所需的模态能力"
-            description={
-              <span>
-                此策略启用的规则覆盖了图片 / 音频 / 视频 / 文档等非纯文本媒体，
-                当前选定的大模型未同时覆盖这些模态。建议选择「图文多模态」以避免
-                「文本大模型去处理图片审核」的不匹配。
-              </span>
-            }
-          />
-        )}
 
         {value.is_enabled && (
           <Space direction="vertical" size={4} style={{ width: '100%' }}>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { App, Button, Card, Select, Space, Tabs, Typography } from 'antd'
 import { strategiesApi } from '@/api/strategies'
 import { runOnlineDetection } from '@/api/onlineReview'
@@ -43,6 +43,7 @@ interface DetectionResult {
 export default function CreateTaskPage() {
   const { message } = App.useApp()
   const [params] = useSearchParams()
+  const navigate = useNavigate()
 
   const initialType = (params.get('type') as TabKind | null) || 'text'
 
@@ -160,6 +161,12 @@ export default function CreateTaskPage() {
         <Typography.Title level={3} style={{ margin: 0 }}>
           在线审核
         </Typography.Title>
+        <Button
+          onClick={() => navigate('/online-review/history')}
+          style={{ marginLeft: 'auto' }}
+        >
+          历史记录
+        </Button>
       </div>
 
       <Tabs

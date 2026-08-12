@@ -8,13 +8,11 @@ import {
   Space,
   Spin,
   Table,
-  Tag,
   Tooltip,
   Typography,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import type { Reference as TableRef } from 'rc-table'
-import { CheckOutlined } from '@ant-design/icons'
 import { auditItemsApi } from '@/api/auditItems'
 import { auditPointsApi } from '@/api/auditPoints'
 import type {
@@ -31,7 +29,7 @@ import {
   type MediaPointOverrideMap,
   type PointMap,
 } from './pointLevel'
-import AgentCardsColumn from './AgentCardsColumn'
+import ReviewAgentCardsColumn from './ReviewAgentCardsColumn'
 
 const { Text } = Typography
 
@@ -90,6 +88,12 @@ interface Props {
    * （audio/doc/video）存取，避免与文本 tab 的阈值覆盖串数据。
    */
   mediaKey?: CategoryKey
+  /** 当前 tab 的 cat.key，用于过滤审核智能体的 modality */
+  categoryKey?: CategoryKey
+  /** 已启用的审核智能体 id 列表（由父级 definition.review_agent_ids 持有） */
+  enabledAgentIds?: number[]
+  /** 审核智能体开关切换时通知父级更新 definition.review_agent_ids */
+  onToggleAgent?: (agentId: number, checked: boolean) => void
 }
 
 const PACKAGE_TO_MEDIA: Record<string, CategoryKey> = {
@@ -102,7 +106,6 @@ const PACKAGE_TO_MEDIA: Record<string, CategoryKey> = {
 
 export default function RulesTreeView({
   packageCode,
-  enabledItemIds,
   getPointMap,
   onPointMapChange,
   pointOverrides,
@@ -114,6 +117,9 @@ export default function RulesTreeView({
   imageTextConfig,
   intensity = DEFAULT_INTENSITY,
   mediaKey: mediaKeyOverride,
+  categoryKey,
+  enabledAgentIds = [],
+  onToggleAgent,
 }: Props) {
   const [items, setItems] = useState<AuditItem[]>([])
   const [pointsByItem, setPointsByItem] = useState<Record<number, AuditPoint[]>>(
@@ -160,25 +166,11 @@ export default function RulesTreeView({
     }
   }, [packageCode, refreshKey])
 
-  const { builtinItems, customItems } = useMemo(() => {
+  const { builtinItems } = useMemo(() => {
     const b: AuditItem[] = []
-    const c: AuditItem[] = []
-    items.forEach((it) => (it.is_builtin ? b.push(it) : c.push(it)))
-    return { builtinItems: b, customItems: c }
+    items.forEach((it) => it.is_builtin && b.push(it))
+    return { builtinItems: b }
   }, [items])
-
-  const enabledSet = useMemo(() => new Set(enabledItemIds), [enabledItemIds])
-
-  // 计算每个 item 下"已选 point 数"用于左栏视觉标记
-  const enabledPointCountByItem = useMemo(() => {
-    const out: Record<number, number> = {}
-    for (const it of items) {
-      const pMap = getPointMap(it.id)
-      const points = pointsByItem[it.id] ?? []
-      out[it.id] = points.filter((p) => pMap[p.id] === true).length
-    }
-    return out
-  }, [items, pointsByItem, getPointMap])
 
   // 左栏点击 → 滚到右栏 section + 1.5s 闪烁高亮
   const [highlightItemId, setHighlightItemId] = useState<number | null>(null)
@@ -208,9 +200,9 @@ export default function RulesTreeView({
   const screens = Grid.useBreakpoint()
   const isStacked = !screens.md
   const leftColTemplate = screens.xl
-    ? '300px 1fr'
+    ? '150px 1fr'
     : screens.md
-    ? '260px 1fr'
+    ? '130px 1fr'
     : '1fr'
 
   return (
@@ -234,7 +226,7 @@ export default function RulesTreeView({
               左栏冗余。customItems 仍用作 Box B 的 items,保留计算与传参。 */}
           <div
             style={{
-              paddingRight: isStacked ? 0 : 16,
+              paddingRight: isStacked ? 0 : 12,
               borderRight: isStacked ? 'none' : '1px solid var(--color-border)',
               maxHeight: isStacked ? 'none' : 540,
               overflowY: isStacked ? 'visible' : 'auto',
@@ -244,8 +236,6 @@ export default function RulesTreeView({
               title=""
               icon={null}
               items={builtinItems}
-              enabledSet={enabledSet}
-              enabledPointCountByItem={enabledPointCountByItem}
               activeItemId={selectedItemId}
               onPick={(id) => {
                 setSelectedItemId(id)
@@ -263,7 +253,7 @@ export default function RulesTreeView({
                2026-07-30 「图文」bar 已挪到 PointsColumn 内部 section header 位置(替代「图文通用」module)。 */}
           <div
             style={{
-              paddingLeft: isStacked ? 0 : 16,
+              paddingLeft: isStacked ? 0 : 20,
               minWidth: 0,
               display: 'flex',
               flexDirection: 'column',
@@ -318,14 +308,15 @@ export default function RulesTreeView({
         </div>
       </div>
 
-      {/* Box B: 审核 Agent(独立 box,32px gap,2026-07-29) */}
-      {customItems.length > 0 && (
+      {/* Box B: 审核智能体（按模态拉取已发布智能体，独立 box） */}
+      {categoryKey && onToggleAgent && (
         <>
           <div className="module-gap" />
           <div className="module-box">
-            <AgentCardsColumn
-              packageCode={packageCode}
-              items={customItems}
+            <ReviewAgentCardsColumn
+              categoryKey={categoryKey}
+              enabledAgentIds={enabledAgentIds}
+              onToggleAgent={onToggleAgent}
             />
           </div>
         </>
@@ -338,8 +329,6 @@ function ItemGroup({
   title,
   icon,
   items,
-  enabledSet,
-  enabledPointCountByItem,
   activeItemId,
   onPick,
   loading,
@@ -348,8 +337,6 @@ function ItemGroup({
   title: string
   icon: React.ReactNode
   items: AuditItem[]
-  enabledSet: Set<number>
-  enabledPointCountByItem: Record<number, number>
   activeItemId: number | null
   onPick: (id: number) => void
   loading: boolean
@@ -361,7 +348,7 @@ function ItemGroup({
       {(icon || title) && (
         <div
           style={{
-            padding: '4px 16px 8px',
+            padding: '4px 12px 8px',
             fontSize: 12,
             color: '#64748B',
             fontWeight: 500,
@@ -378,7 +365,7 @@ function ItemGroup({
       {items.length === 0 ? (
         <div
           style={{
-            padding: '8px 16px',
+            padding: '8px 12px',
             fontSize: 12,
             color: '#94A3B8',
           }}
@@ -387,7 +374,6 @@ function ItemGroup({
         </div>
       ) : (
         items.map((it) => {
-          const picked = enabledPointCountByItem[it.id] > 0
           const active = activeItemId === it.id
           return (
             <div
@@ -397,7 +383,7 @@ function ItemGroup({
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                padding: '8px 16px',
+                padding: '8px 12px',
                 cursor: 'pointer',
                 background: active ? '#EFF6FF' : 'transparent',
                 borderLeft: active
@@ -418,21 +404,6 @@ function ItemGroup({
               >
                 {it.name_cn}
               </Text>
-              {picked && (
-                <Tooltip title={`已选 ${enabledPointCountByItem[it.id]} 个审核点`}>
-                  <CheckOutlined
-                    style={{ color: '#16A34A', fontSize: 13 }}
-                  />
-                </Tooltip>
-              )}
-              {picked && enabledSet.has(it.id) && (
-                <Tag
-                  color="blue"
-                  style={{ margin: 0, fontSize: 11, padding: '0 6px' }}
-                >
-                  启用
-                </Tag>
-              )}
             </div>
           )
         })
@@ -872,7 +843,7 @@ function PointsColumn({
                           style={{
                             display: 'flex',
                             alignItems: 'flex-start',
-                            gap: 12,
+                            gap: 16,
                             flexWrap: 'wrap',
                           }}
                         >
@@ -893,7 +864,7 @@ function PointsColumn({
                               {sub.label_cn}
                             </Text>
                           </Space>
-                          <Space size={10} align="center" wrap>
+                          <Space size={14} align="center" wrap>
                             <RangeMinOnlyInput
                               disabled={!enabled}
                               minValue={lowMin}
@@ -1158,7 +1129,8 @@ function RangeMinOnlyInput({
 }) {
   const safeMax = maxDisplay
   return (
-    <Space size={6} align="center">
+    <Space size={8} align="center">
+      <span style={{ fontSize: 12, color: '#475569', whiteSpace: 'nowrap' }}>{label}</span>
       <Tooltip title={`${label} 下限`}>
         <InputNumber
           size="small"

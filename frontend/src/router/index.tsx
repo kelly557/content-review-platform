@@ -32,6 +32,8 @@ const OverviewPage = lazy(() => import('@/pages/overview/OverviewPage'))
 const PackageDetailPage = lazy(() => import('@/pages/packages/PackageDetailPage'))
 const TaskDetailPage = lazy(() => import('@/pages/tasks/TaskDetailPage'))
 const CreateTaskPage = lazy(() => import('@/pages/tasks/CreateTaskPage'))
+const OnlineReviewHistoryPage = lazy(() => import('@/pages/tasks/OnlineReviewHistoryPage'))
+const OnlineReviewDetailPage = lazy(() => import('@/pages/tasks/OnlineReviewDetailPage'))
 const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage'))
 const QueryPage = lazy(() => import('@/pages/query/QueryPage'))
 const UsersAdminPage = lazy(() => import('@/pages/admin/UsersAdminPage'))
@@ -91,6 +93,8 @@ export default function AppRoutes() {
             <Route path="/materials/:id" element={<Navigate to="/overview" replace />} />
 
             <Route path="/online-review" element={<CreateTaskPage />} />
+            <Route path="/online-review/history" element={<OnlineReviewHistoryPage />} />
+            <Route path="/online-review/history/:id" element={<OnlineReviewDetailPage />} />
             <Route path="/tasks/:id" element={<TaskDetailPage />} />
             <Route path="/tasks/package/:id" element={<PackageDetailPage />} />
 

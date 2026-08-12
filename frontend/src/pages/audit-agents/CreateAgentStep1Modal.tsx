@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Form, Input, Modal, Radio } from 'antd'
 import { CloseOutlined } from '@ant-design/icons'
 
-export type Step1Modality = '文本' | '图文'
+export type Step1Modality = '文本' | '图片' | '图文'
 
 export interface CreateAgentStep1Payload {
   modality: Step1Modality
@@ -18,6 +18,7 @@ interface CreateAgentStep1ModalProps {
 
 const MODALITY_OPTIONS: { label: string; value: Step1Modality }[] = [
   { label: '文本', value: '文本' },
+  { label: '图片', value: '图片' },
   { label: '图文', value: '图文' },
 ]
 

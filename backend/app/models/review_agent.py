@@ -21,7 +21,7 @@ class ReviewAgent(Base):
     )
     app_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
-    modality: Mapped[str] = mapped_column(String(16), nullable=False)  # 文本/图像/图文/音频/视频
+    modality: Mapped[str] = mapped_column(String(16), nullable=False)  # 文本/图片/图文/音频/视频
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="未发布")  # 已发布/未发布/已下线
     model_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("registered_models.id", ondelete="SET NULL"), nullable=True, index=True

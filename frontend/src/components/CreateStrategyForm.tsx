@@ -30,6 +30,7 @@ import {
   extractDocComposeModes,
   extractImageTextConfig,
   extractImageTextPoints,
+  extractReviewAgentIds,
   extractVideoComposeModes,
   extractVideoFrameInterval,
   extractVoiceRuleMode,
@@ -178,6 +179,8 @@ export default function CreateStrategyForm({
    * 2026-07-30 新增。
    */
   const [imageTextPointMap, setImageTextPointMap] = useState<ItemPointMap>({})
+  /** 已启用的审核智能体 id 列表（持久化到 definition.review_agent_ids） */
+  const [reviewAgentIds, setReviewAgentIds] = useState<number[]>([])
   /** 左栏「图文」item 选中状态;null=未选中,bar 不显示 */
   const [selectedImageItem, setSelectedImageItem] = useState<AuditItem | null>(null)
   const [llmReview, setLlmReview] = useState<LlmReviewConfig>({
@@ -265,6 +268,7 @@ export default function CreateStrategyForm({
     setVideoFrameInterval(extractVideoFrameInterval(initial.definition))
     setImageTextConfig(extractImageTextConfig(initial.definition))
     setImageTextPointMap(extractImageTextPoints(initial.definition))
+    setReviewAgentIds(extractReviewAgentIds(initial.definition))
     const from = initial.effective_from ? dayjs(initial.effective_from) : null
     const until = initial.effective_until ? dayjs(initial.effective_until) : null
     const useRange = !!(from && until)
@@ -449,6 +453,8 @@ export default function CreateStrategyForm({
     if (imageTextConfig.mode === 'independent') {
       out.image_text_points = imageTextPointMap
     }
+    // 审核智能体（按模态启用的已发布智能体 id 列表）
+    out.review_agent_ids = reviewAgentIds
 
     return Object.keys(out).length > 0 ? out : undefined
   }
@@ -693,8 +699,14 @@ export default function CreateStrategyForm({
               width: '100%',
             }}
           >
-            {/* 大模型审核能力：单一开关，置于通用规则上方。needs_multimodal_hint 由后端按 enabled_items 回填 */}
-            <LlmReviewCard value={llmReview} onChange={setLlmReview} />
+            {/* 大模型审核能力：单一开关，置于通用规则上方。按启用模态自动过滤大模型列表 */}
+            <LlmReviewCard
+              value={llmReview}
+              onChange={setLlmReview}
+              enabledMediaTypes={Object.entries(enabledItems)
+                .filter(([, ids]) => ids.length > 0)
+                .map(([k]) => k)}
+            />
             {/* 检测强度：开关控制是否启用；恢复默认独立于开关，回退到加载快照 */}
             <IntensityToolbar
               enabled={intensityEnabled}
@@ -787,6 +799,14 @@ export default function CreateStrategyForm({
                     }
                   : undefined
               }
+              reviewAgentIds={reviewAgentIds}
+              onToggleAgent={(agentId, checked) => {
+                setReviewAgentIds((prev) =>
+                  checked
+                    ? Array.from(new Set([...prev, agentId]))
+                    : prev.filter((id) => id !== agentId),
+                )
+              }}
             />
 
             {/* 「策略下启用审核项时为其绑词库」入口。即时 PATCH 写 audit_item_libraries。 */}

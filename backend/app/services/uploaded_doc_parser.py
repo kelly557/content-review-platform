@@ -2,10 +2,12 @@
 
 按文件 kind 分发：
 
-- ``llm``（.pdf/.docx/.txt/.md）：调用 MaaS 大模型，使用 Markdown Prompt 提取审核点。
+- ``llm``（.pdf/.docx/.txt/.md）：调用大模型（走模型注册库），使用 Markdown Prompt 提取审核点。
 - ``structured``（.xlsx/.csv）：直接按列映射导入，无 LLM 调用。
 
 注意：此模块是纯函数/类，不直接操作数据库；调用方在 worker 中加载/写入。
+LLM 调用走 ``app.services.llm.resolver.resolve_llm_client`` 解析注册库模型 +
+``MaaSClient.chat`` 统一审计。
 """
 from __future__ import annotations
 
@@ -13,10 +15,9 @@ import io
 import json
 import logging
 import re
+import uuid
 from pathlib import Path
-from typing import Optional, Protocol
-
-import httpx
+from typing import Any, Optional, Protocol
 
 from app.core.config import settings
 from app.schemas.uploaded_document import DEFAULT_LLM_PROMPT
@@ -180,6 +181,7 @@ def parse_structured(content: bytes, filename: str) -> list[ParsedAuditPointCand
 class LLMChatFn(Protocol):
     async def __call__(
         self,
+        db: Any,
         *,
         system: str,
         user: str,
@@ -189,47 +191,38 @@ class LLMChatFn(Protocol):
 
 
 async def _default_maas_chat(
+    db: Any,
     *,
     system: str,
     user: str,
     temperature: float,
     max_tokens: int,
 ) -> str:
-    """调用 MaaS /v1/chat/completions 端点（非 moderation 任务）。
+    """通用对话调用: 走模型注册库解析默认文本大模型 + MaaSClient.chat.
 
-    与 ``app.services.llm.client.MaaSClient.moderate`` 不同，这里是通用对话调用，
-    用于「从文档提取审核点」类任务。鉴权与超时复用 settings。
+    与 ``app.services.llm.client.MaaSClient.moderate`` 不同, 这里是通用对话,
+    用于「从文档提取审核点」类任务. 复用 MaaSClient 重试 + record_llm_call 审计.
+    db 用于解析模型 + 落审计行 (调用方负责 commit).
     """
-    if not settings.maas_api_key:
-        raise RuntimeError("MAAS_API_KEY 未配置，无法调用 LLM")
-    base = settings.maas_base_url.rstrip("/")
-    url = f"{base}/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {settings.maas_api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": settings.maas_model,
-        "messages": [
+    from app.services.llm.resolver import resolve_llm_client
+
+    client, _model_name, err = await resolve_llm_client(db, model_id=None)
+    if not client:
+        raise RuntimeError(f"大模型不可用: {err}")
+
+    correlation_id = uuid.uuid4().hex
+    content = await client.chat(
+        db=db,
+        messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
-    }
-    timeout = float(settings.maas_timeout)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, headers=headers, json=payload)
-    if resp.status_code >= 400:
-        raise RuntimeError(
-            f"MaaS 调用失败 HTTP {resp.status_code}: {resp.text[:300]}"
-        )
-    data = resp.json()
-    try:
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"MaaS 返回结构异常: {data}") from exc
+        temperature=temperature,
+        max_tokens=max_tokens,
+        correlation_id=correlation_id,
+        response_format={"type": "json_object"},
+    )
+    return content
 
 
 def _default_user_message(prompt_markdown: str, text: str) -> tuple[str, str]:
@@ -278,6 +271,7 @@ def _extract_json_array(text: str) -> list[dict]:
 
 
 async def parse_llm(
+    db: Any,
     content: bytes,
     filename: str,
     *,
@@ -286,7 +280,8 @@ async def parse_llm(
 ) -> list[ParsedAuditPointCandidate]:
     """调用 LLM 解析文档，返回候选审核点列表。
 
-    ``chat`` 可注入；默认使用 ``_default_maas_chat``。
+    ``chat`` 可注入；默认使用 ``_default_maas_chat`` (走模型注册库)。
+    ``db`` 用于 LLM 调用审计 + 模型解析 (调用方负责 commit)。
     """
     text = extract_text_from_file(content, filename)
     if not text.strip():
@@ -295,6 +290,7 @@ async def parse_llm(
     system_msg, user_msg = _default_user_message(prompt_markdown or "", text)
     chat_fn = chat or _default_maas_chat
     raw = await chat_fn(
+        db,
         system=system_msg,
         user=user_msg,
         temperature=0.1,
@@ -324,6 +320,7 @@ async def parse_llm(
 
 
 async def parse_uploaded_file(
+    db: Any,
     *,
     kind: str,
     content: bytes,
@@ -336,6 +333,6 @@ async def parse_uploaded_file(
         return parse_structured(content, filename)
     if kind == "llm":
         return await parse_llm(
-            content, filename, prompt_markdown=prompt_markdown, chat=chat
+            db, content, filename, prompt_markdown=prompt_markdown, chat=chat
         )
     raise ValueError(f"unknown kind: {kind}")

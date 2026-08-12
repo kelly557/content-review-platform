@@ -55,7 +55,7 @@ export default function RiskLabelCascade({
   taxonomy,
   value,
   onChange,
-  placeholder = '审核项 / 审核点 / sub 审核点',
+  placeholder = '风险标签',
 }: Props) {
   const options = useMemo(() => toOptions(taxonomy), [taxonomy])
   const nestedValue = useMemo(
@@ -68,6 +68,7 @@ export default function RiskLabelCascade({
       multiple
       changeOnSelect
       expandTrigger="hover"
+      showSearch
       value={nestedValue}
       options={options}
       onChange={(v) => {

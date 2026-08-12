@@ -83,10 +83,10 @@ function feedbackLabel(v?: string | null) {
 }
 
 function riskLabelPath(h: MachineHit): string {
-  const cat = h.risk_category_label || ''
   const item = h.audit_item_label || ''
-  const point = h.label_cn || h.label || ''
-  return [cat, item, point].filter(Boolean).join(' / ')
+  const point = h.audit_point_label || ''
+  const sub = h.label_cn || h.label || ''
+  return [item, point, sub].filter(Boolean).join(' / ')
 }
 
 export default function QueryPage() {
@@ -221,7 +221,7 @@ export default function QueryPage() {
       render: (_, r) => renderUuidCell(r.material_version_public_id, r.material_version_id),
     },
     {
-      title: <ColumnTitle text="风险标签" tip="三级路径：审核项 / 审核点 / sub 审核点" />,
+      title: <ColumnTitle text="风险标签" tip="审核项 / 审核点 / sub审核点" />,
       key: 'labels',
       render: (_, r) => {
         if (!r.hits?.length) return '-'

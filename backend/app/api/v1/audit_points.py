@@ -498,6 +498,7 @@ class DocumentParseResult(BaseModel):
 @router.post("/points/parse-document", response_model=DocumentParseResult)
 async def parse_document(
     file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Parse a document (PDF/DOC/DOCX/TXT) into audit points using AI.
@@ -535,46 +536,32 @@ async def parse_document(
     if not text.strip():
         raise HTTPException(status_code=400, detail="文件内容为空")
 
-    # Use LLM to parse audit points from the document text
+    # Use LLM (走模型注册库 + uploaded_doc_parser) to parse audit points
     try:
-        from app.services.llm.client import get_llm_client
-
-        llm = get_llm_client()
-        prompt = f"""请从以下文档内容中提取审核点。每个审核点包含：
-- label_cn: 审核点名称（简短描述要审核的内容）
-- scope_text: 审核内容描述（具体的审核标准或判断依据）
-
-请以 JSON 数组格式返回，每个元素包含 label_cn 和 scope_text 字段。
-如果无法提取到有效的审核点，返回空数组 []。
-
-文档内容：
-{text[:10000]}
-"""
-        response = await llm.chat(
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
+        from app.services.uploaded_doc_parser import (
+            classify_file_kind,
+            parse_uploaded_file,
         )
 
-        import json
-        import re
-
-        # Try to extract JSON from the response
-        json_match = re.search(r"\[[\s\S]*\]", response)
-        if json_match:
-            raw_points = json.loads(json_match.group())
-        else:
-            raw_points = json.loads(response)
-
-        points = []
-        for item in raw_points:
-            if isinstance(item, dict) and "label_cn" in item:
-                points.append(
-                    ParsedAuditPoint(
-                        label_cn=str(item.get("label_cn", "")),
-                        scope_text=str(item.get("scope_text", "")),
-                    )
-                )
-
+        kind = classify_file_kind(file.filename)
+        candidates = await parse_uploaded_file(
+            db,
+            kind=kind,
+            content=content,
+            filename=file.filename,
+        )
+        points = [
+            ParsedAuditPoint(
+                label_cn=c.label_cn,
+                scope_text=c.scope_text or "",
+            )
+            for c in candidates
+            if c.is_valid()
+        ]
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
         return DocumentParseResult(
             points=points,
             source_info=f"从 {file.filename} 解析",
@@ -582,6 +569,10 @@ async def parse_document(
 
     except Exception as e:
         logger.error("LLM parsing failed for %s: %s", file.filename, e)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
         # Return empty result instead of error, so user can manually input
         return DocumentParseResult(
             points=[],

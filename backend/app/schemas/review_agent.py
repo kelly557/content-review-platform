@@ -64,6 +64,8 @@ class ReviewAgentVersionOut(ORMBase):
 class AgentTestRequest(BaseModel):
     modality: str = "文本"
     text: str = ""
+    # 图片模态: base64 编码图片内容 (data:image/...;base64,... 或纯 base64)
+    image_base64: Optional[str] = None
     mode: str = "single"  # single | multi
     points: List[AgentPoint] = Field(default_factory=list)
 

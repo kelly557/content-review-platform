@@ -390,7 +390,7 @@ export default function AnomalyTab() {
             taxonomy={options?.risk_taxonomy ?? []}
             value={riskLabelPaths}
             onChange={setRiskLabelPaths}
-            placeholder="审核项 / 审核点 / sub 审核点"
+            placeholder="风险标签"
           />
         </div>
         <Button onClick={() => void refresh()}>刷新</Button>

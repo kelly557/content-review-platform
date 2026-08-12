@@ -14,8 +14,6 @@ from sqlalchemy.orm import aliased
 
 from app.core.deps import require_roles
 from app.db.session import get_db
-from app.models.audit_item import AuditItem
-from app.models.audit_point import AuditPoint
 from app.models.machine_review_feedback import MachineReviewFeedback
 from app.models.material import Material, MaterialType, MaterialVersion
 from app.models.review import (
@@ -25,7 +23,6 @@ from app.models.review import (
     ReviewTask,
     ReviewType,
 )
-from app.models.risk_category import RiskCategory
 from app.models.strategy import Strategy
 from app.models.user import User
 from app.schemas.query import (
@@ -45,6 +42,10 @@ from app.schemas.query import (
     derive_content_media,
 )
 from app.services import audit as audit_service
+from app.services.risk_taxonomy_service import (
+    load_risk_taxonomy,
+    collect_point_codes_under_paths,
+)
 
 router = APIRouter(prefix="/query", tags=["query"])
 
@@ -62,112 +63,55 @@ def _enum_value(value: Any) -> Optional[str]:
 
 def _format_risk_label_path(h: MachineHitOut) -> str:
     """Render a single hit as a three-level Chinese label path."""
-    cat = getattr(h, "risk_category_label", None) or ""
     item = getattr(h, "audit_item_label", None) or ""
-    point = h.label_cn or h.label or ""
-    parts = [p for p in (cat, item, point) if p]
+    point = getattr(h, "audit_point_label", None) or ""
+    sub = h.label_cn or h.label or ""
+    parts = [p for p in (item, point, sub) if p]
     return " / ".join(parts)
-
-
-async def _load_risk_taxonomy(db: AsyncSession) -> List[RiskTaxonomyNode]:
-    """Build the three-level risk label tree.
-
-    Hierarchy: ``risk_categories`` (一级) → ``audit_items`` via
-    ``audit_items.small_category`` (二级) → ``audit_points.label`` /
-    ``audit_points.label_cn`` (三级).
-
-    Leaf node ``path`` is the slash-joined wire identifier chain, e.g.
-    ``politics/ai_3/ap_3_1``; ``label`` prefers the third-level Chinese label
-    so the front-end can show a friendly path directly.
-    """
-    category_rows = (
-        await db.execute(
-            select(RiskCategory).order_by(RiskCategory.sort_order.asc(), RiskCategory.id.asc())
-        )
-    ).scalars().all()
-    item_rows = (
-        await db.execute(
-            select(AuditItem)
-            .where(AuditItem.small_category.is_not(None))
-            .order_by(AuditItem.sort_order.asc(), AuditItem.id.asc())
-        )
-    ).scalars().all()
-    item_ids = [i.id for i in item_rows]
-    point_rows: List[AuditPoint] = []
-    if item_ids:
-        point_rows = list(
-            (
-                await db.execute(
-                    select(AuditPoint)
-                    .where(AuditPoint.item_id.in_(item_ids))
-                    .order_by(AuditPoint.sort_order.asc(), AuditPoint.id.asc())
-                )
-            ).scalars()
-        )
-
-    points_by_item: Dict[int, List[AuditPoint]] = {}
-    for p in point_rows:
-        points_by_item.setdefault(p.item_id, []).append(p)
-
-    nodes_by_category: Dict[str, RiskTaxonomyNode] = {}
-    for cat in category_rows:
-        nodes_by_category[cat.code] = RiskTaxonomyNode(
-            code=cat.code, label=cat.label, path=cat.code, children=[]
-        )
-
-    bucket_by_code: Dict[str, RiskTaxonomyNode] = {c.code: c for c in nodes_by_category.values()}
-    for item in item_rows:
-        parent = bucket_by_code.get(item.small_category or "")
-        if parent is None:
-            continue
-        item_node = RiskTaxonomyNode(
-            code=item.code,
-            label=item.name_cn or item.code,
-            path=f"{parent.path}/{item.code}",
-            children=[],
-        )
-        for p in points_by_item.get(item.id, []):
-            point_label = p.label_cn or p.label or p.code
-            item_node.children.append(
-                RiskTaxonomyNode(
-                    code=p.code,
-                    label=point_label,
-                    path=f"{item_node.path}/{p.code}",
-                )
-            )
-        parent.children.append(item_node)
-
-    return list(nodes_by_category.values())
 
 
 def _build_label_index(
     db_taxonomy: List[RiskTaxonomyNode],
 ) -> Dict[str, Dict[str, Any]]:
-    """Flatten the taxonomy into a lookup keyed by ``label_cn`` / ``label``."""
+    """Flatten the three-level taxonomy into a lookup keyed by ``code``.
+
+    Indexes level-2 (审核点) and level-3 (sub审核点) codes. Each entry maps
+    to its parent chain: ``item_code/label`` + ``point_code/label`` (+ optional
+    ``sub_point_code/label``).
+    """
 
     index: Dict[str, Dict[str, Any]] = {}
-    for cat in db_taxonomy:
-        for item in cat.children:
-            for pt in item.children:
-                if pt.label and pt.label not in index:
-                    index[pt.label] = {
-                        "category_code": cat.code,
-                        "category_label": cat.label,
+    for item in db_taxonomy:
+        for pt in item.children:
+            # Level-2 node
+            if pt.code and pt.code not in index:
+                index[pt.code] = {
+                    "item_code": item.code,
+                    "item_label": item.label,
+                    "point_code": pt.code,
+                    "point_label": pt.label,
+                }
+            # Level-3 nodes
+            for sub in pt.children:
+                if sub.code and sub.code not in index:
+                    index[sub.code] = {
                         "item_code": item.code,
                         "item_label": item.label,
                         "point_code": pt.code,
-                        "point_path": pt.path,
                         "point_label": pt.label,
+                        "sub_point_code": sub.code,
+                        "sub_point_label": sub.label,
                     }
     return index
 
 
 def _resolve_taxonomy(
-    label_cn: Optional[str], label: Optional[str], index: Dict[str, Dict[str, Any]]
+    audit_point_code: Optional[str],
+    index: Dict[str, Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    for key in (label_cn, label):
-        if key and key in index:
-            return index[key]
+    """Resolve a hit's ``audit_point_code`` to its taxonomy metadata."""
+    if audit_point_code and audit_point_code in index:
+        return index[audit_point_code]
     return None
 
 
@@ -202,21 +146,20 @@ def _to_record(
                 continue
     if label_index is not None:
         for idx, h in enumerate(list(hits)):
-            meta = _resolve_taxonomy(h.label_cn, h.label, label_index)
+            meta = _resolve_taxonomy(h.audit_point_code, label_index)
             if meta is None:
                 continue
             hits[idx] = MachineHitOut(
                 service_code=h.service_code,
                 service_name=h.service_name,
+                audit_point_code=h.audit_point_code,
                 label=h.label,
                 label_cn=h.label_cn,
                 score=h.score,
                 quote=h.quote,
-                risk_category_code=meta["category_code"],
-                risk_category_label=meta["category_label"],
                 audit_item_code=meta["item_code"],
                 audit_item_label=meta["item_label"],
-                audit_point_code=meta["point_code"],
+                audit_point_label=meta.get("point_label"),
             )
 
     # 优先级：FK 真名 > machine_result.strategy JSONB 快照 > stage_key
@@ -308,41 +251,6 @@ def _split_csv(raw: Optional[str]) -> List[str]:
     return [s.strip() for s in raw.split(",") if s.strip()]
 
 
-def _collect_labels_under_paths(
-    taxonomy: List[RiskTaxonomyNode],
-    selected_paths: List[str],
-) -> List[str]:
-    """Resolve ``risk_label_paths`` selection against the taxonomy snapshot.
-
-    Returns the flat list of leaf labels that fall under the selected paths,
-    so the SQL ``ILIKE %label%`` filter can match against stored hits.
-    """
-    if not selected_paths:
-        return []
-    by_path: Dict[str, RiskTaxonomyNode] = {}
-    queue: List[RiskTaxonomyNode] = list(taxonomy)
-    while queue:
-        node = queue.pop()
-        by_path[node.path] = node
-        queue.extend(node.children)
-    out: List[str] = []
-    seen: set[str] = set()
-    for path in selected_paths:
-        node = by_path.get(path)
-        if node is None:
-            continue
-        stack: List[RiskTaxonomyNode] = [node]
-        while stack:
-            cur = stack.pop()
-            if not cur.children:
-                if cur.label and cur.label not in seen:
-                    seen.add(cur.label)
-                    out.append(cur.label)
-                continue
-            stack.extend(cur.children)
-    return out
-
-
 def _apply_filters(
     stmt,
     *,
@@ -394,21 +302,23 @@ def _apply_filters(
         if target_risks:
             stmt = stmt.where(ReviewTask.machine_result["risk_level"].astext.in_(target_risks))
     if risk_label_paths:
-        # taxonomy 里叶子 path 是 “category/item/point”。
-        # 任意一级被选中时，命中的 label 只要落在这棵子树内即可。
-        leaf_labels = (
-            _collect_labels_under_paths(taxonomy, risk_label_paths)
+        # taxonomy 里叶子 path 是 "item_code/point_code"。
+        # 任意一级被选中时，命中的 audit_point_code 只要落在这棵子树内即可。
+        # 用 JSONB containment: machine_result->'hits' @> [{"audit_point_code":"..."}]
+        point_codes = (
+            collect_point_codes_under_paths(taxonomy, risk_label_paths)
             if taxonomy is not None
             else []
         )
-        if not leaf_labels:
+        if not point_codes:
             stmt = stmt.where(False)
         else:
-            clauses = []
-            for needle in leaf_labels:
-                clauses.append(
-                    func.cast(ReviewTask.machine_result, String).ilike(f"%{needle}%")
+            clauses = [
+                ReviewTask.machine_result.contains(
+                    {"hits": [{"audit_point_code": code}]}
                 )
+                for code in point_codes
+            ]
             stmt = stmt.where(or_(*clauses))
     if channels:
         ch = Material.extra_metadata["channel"].astext
@@ -524,7 +434,7 @@ async def _run_query(
 
     if label_index is None:
         if taxonomy is None:
-            taxonomy = await _load_risk_taxonomy(db)
+            taxonomy = await load_risk_taxonomy(db)
         label_index = _build_label_index(taxonomy)
 
     out: List[MachineReviewRecordOut] = []
@@ -576,7 +486,7 @@ async def list_results(
     req_ids = [int(x) for x in _split_csv(request_ids)]
     t_ids = [int(x) for x in _split_csv(task_ids)]
 
-    taxonomy = await _load_risk_taxonomy(db) if risk_label_paths else None
+    taxonomy = await load_risk_taxonomy(db) if risk_label_paths else None
     label_index = _build_label_index(taxonomy) if taxonomy is not None else None
 
     base_count = select(func.count(ReviewTask.id)).join(Material, Material.id == ReviewTask.material_id)
@@ -627,7 +537,7 @@ async def list_risk_taxonomy(
 ) -> RiskTaxonomyOut:
     """三级风险标签树 (风险类型 → 审核项 → 审核点)."""
 
-    items = await _load_risk_taxonomy(db)
+    items = await load_risk_taxonomy(db)
     return RiskTaxonomyOut(items=items)
 
 
@@ -698,7 +608,7 @@ async def export_results(
     req_ids = [int(x) for x in _split_csv(request_ids)]
     t_ids = [int(x) for x in _split_csv(task_ids)]
 
-    taxonomy = await _load_risk_taxonomy(db) if risk_label_paths else None
+    taxonomy = await load_risk_taxonomy(db) if risk_label_paths else None
     label_index = _build_label_index(taxonomy) if taxonomy is not None else None
 
     all_items: List[MachineReviewRecordOut] = []

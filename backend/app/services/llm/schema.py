@@ -11,9 +11,17 @@ class ModerationHit(BaseModel):
 
     service_code: str
     service_name: Optional[str] = None
+    # LLM 必须输出注入 prompt 的审核点 code 之一, 用于后端精确匹配标签树.
+    # 校验在 parser 层做 (需拿到 audit_points 上下文); schema 层仅声明.
+    # 默认空字符串: 兼容旧测试数据 / 无 audit_points 注入的场景.
+    audit_point_code: str = ""
     label: str
     label_cn: str
     score: float = Field(ge=0.0, le=1.0)
+    # 违规片段定位: LLM 只输出 start/length (不复述原文, 避免网关输出审查拦截).
+    # 后端用 original_text[start:start+length] 重建 quote.
+    start: Optional[int] = None
+    length: Optional[int] = None
     quote: Optional[str] = None
     sensitive_grade: str = Field(default="S0")
     # LLM 自评的单 hit 风险等级 (高风险|中风险|低风险|敏感|无风险).

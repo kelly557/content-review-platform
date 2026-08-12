@@ -12,11 +12,13 @@ import {
   Tag,
   Tooltip,
   Typography,
+  Upload,
 } from 'antd'
 import {
   CheckCircleFilled,
   CloseCircleFilled,
   ExclamationCircleOutlined,
+  InboxOutlined,
 } from '@ant-design/icons'
 import { getPresetSamples, runTest, type TestResult, type TestSample } from '@/api/agentTestRun'
 
@@ -26,12 +28,24 @@ const { TextArea } = Input
 export interface AgentTestRunDrawerProps {
   open: boolean
   onClose: () => void
-  modality: '文本' | '图像' | '图文'
+  modality: '文本' | '图片' | '图文'
   /** 后端数值 id（字符串形式）。新建草稿态可能为空。 */
   agentId?: string
   agentName: string
   points: { id: string; label: string }[]
   ready: boolean
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('读取文件失败'))
+    reader.onload = () => {
+      const dataUrl = String(reader.result ?? '')
+      resolve(dataUrl)
+    }
+    reader.readAsDataURL(file)
+  })
 }
 
 export default function AgentTestRunDrawer({
@@ -46,13 +60,21 @@ export default function AgentTestRunDrawer({
   const { message } = App.useApp()
   const [mode, setMode] = useState<'single' | 'multi'>('single')
   const [text, setText] = useState('')
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imageBase64, setImageBase64] = useState<string>('')
+  const [imagePreview, setImagePreview] = useState<string>('')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<TestResult | null>(null)
   const presets = getPresetSamples()
 
+  const isImage = modality === '图片' || modality === '图文'
+
   useEffect(() => {
     if (open) {
       setText('')
+      setImageFile(null)
+      setImageBase64('')
+      setImagePreview('')
       setResult(null)
       setRunning(false)
       setMode('single')
@@ -62,8 +84,10 @@ export default function AgentTestRunDrawer({
   const charCount = text.length
   const maxLen = 600
 
+  const canRun = isImage ? !!imageBase64 : !!text.trim()
+
   const handleRun = async () => {
-    if (!text.trim()) return
+    if (!canRun) return
     if (!agentId) {
       message.warning('请先保存智能体后再测试')
       return
@@ -71,7 +95,14 @@ export default function AgentTestRunDrawer({
     setRunning(true)
     setResult(null)
     try {
-      const r = await runTest({ agentId, modality, text, mode, points })
+      const r = await runTest({
+        agentId,
+        modality,
+        text,
+        imageBase64: imageBase64 || undefined,
+        mode,
+        points,
+      })
       setResult(r)
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -83,11 +114,34 @@ export default function AgentTestRunDrawer({
 
   const handleReset = () => {
     setText('')
+    setImageFile(null)
+    setImageBase64('')
+    setImagePreview('')
     setResult(null)
   }
 
   const handlePreset = (s: TestSample) => {
     setText(s.content)
+  }
+
+  const handleImageSelect = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      message.error('仅支持图片文件 (jpg/png/webp 等)')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      message.error('图片大小超过 10MB 限制')
+      return
+    }
+    setImageFile(file)
+    try {
+      const b64 = await fileToBase64(file)
+      setImageBase64(b64)
+      setImagePreview(b64)
+      message.success(`已选择 ${file.name}`)
+    } catch {
+      message.error('读取图片失败')
+    }
   }
 
   return (
@@ -110,36 +164,105 @@ export default function AgentTestRunDrawer({
         style={{ marginBottom: 16 }}
         styles={{ body: { padding: 16 } }}
       >
-        <Space style={{ marginBottom: 12 }}>
-          <Text strong>审核文本：</Text>
-          <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)}>
-            <Radio value="single">单条文本</Radio>
-            <Radio value="multi">多条文本</Radio>
-          </Radio.Group>
-        </Space>
+        {isImage ? (
+          <>
+            {/* 图片/图文模态: 图片上传 */}
+            <Space style={{ marginBottom: 12 }}>
+              <Text strong>上传图片：</Text>
+            </Space>
+            <Upload.Dragger
+              accept="image/*"
+              multiple={false}
+              beforeUpload={(file) => {
+                handleImageSelect(file)
+                return false
+              }}
+              showUploadList={false}
+              style={{ marginBottom: 8 }}
+            >
+              <p>
+                <InboxOutlined style={{ fontSize: 28, color: '#1677FF' }} />
+              </p>
+              <p>点击或拖拽图片到此处上传</p>
+              <p style={{ fontSize: 12, color: '#999' }}>支持 jpg / png / webp，不超过 10MB</p>
+            </Upload.Dragger>
 
-        <TextArea
-          rows={8}
-          value={text}
-          onChange={(e) => setText(e.target.value.slice(0, maxLen))}
-          maxLength={maxLen}
-          showCount={{ formatter: ({ count }) => `${count}/${maxLen}` }}
-          placeholder={
-            mode === 'single'
-              ? '请输入需要审核的文本内容，单条文本，最多可以输入600字'
-              : '请输入需要审核的文本内容，多条文本请用换行分隔，每行最多 600 字'
-          }
-          style={{ resize: 'vertical' }}
-        />
+            {imagePreview && (
+              <div style={{ marginTop: 12 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {imageFile?.name} ({((imageFile?.size ?? 0) / 1024).toFixed(1)} KB)
+                </Text>
+                <div
+                  style={{
+                    marginTop: 8,
+                    border: '1px solid #F0F0F0',
+                    borderRadius: 6,
+                    overflow: 'hidden',
+                    maxWidth: 300,
+                  }}
+                >
+                  <img
+                    src={imagePreview}
+                    alt="预览"
+                    style={{ width: '100%', display: 'block' }}
+                  />
+                </div>
+              </div>
+            )}
 
-        <Space wrap style={{ marginTop: 12 }}>
-          <Text type="secondary">预置样本：</Text>
-          {presets.map((s) => (
-            <Button key={s.id} size="small" onClick={() => handlePreset(s)}>
-              {s.label}
-            </Button>
-          ))}
-        </Space>
+            {/* 图文模态: 补充可选文本 */}
+            {modality === '图文' && (
+              <div style={{ marginTop: 16 }}>
+                <Space style={{ marginBottom: 8 }}>
+                  <Text strong>补充文本（可选）：</Text>
+                </Space>
+                <TextArea
+                  rows={4}
+                  value={text}
+                  onChange={(e) => setText(e.target.value.slice(0, maxLen))}
+                  maxLength={maxLen}
+                  showCount={{ formatter: ({ count }) => `${count}/${maxLen}` }}
+                  placeholder="可选: 输入图片中的文字说明或待审核文案"
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {/* 文本模态: 纯文本输入 */}
+            <Space style={{ marginBottom: 12 }}>
+              <Text strong>审核文本：</Text>
+              <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)}>
+                <Radio value="single">单条文本</Radio>
+                <Radio value="multi">多条文本</Radio>
+              </Radio.Group>
+            </Space>
+
+            <TextArea
+              rows={8}
+              value={text}
+              onChange={(e) => setText(e.target.value.slice(0, maxLen))}
+              maxLength={maxLen}
+              showCount={{ formatter: ({ count }) => `${count}/${maxLen}` }}
+              placeholder={
+                mode === 'single'
+                  ? '请输入需要审核的文本内容，单条文本，最多可以输入600字'
+                  : '请输入需要审核的文本内容，多条文本请用换行分隔，每行最多 600 字'
+              }
+              style={{ resize: 'vertical' }}
+            />
+
+            <Space wrap style={{ marginTop: 12 }}>
+              <Text type="secondary">预置样本：</Text>
+              {presets.map((s) => (
+                <Button key={s.id} size="small" onClick={() => handlePreset(s)}>
+                  {s.label}
+                </Button>
+              ))}
+            </Space>
+          </>
+        )}
 
         <Space style={{ marginTop: 16 }}>
           {!ready ? (
@@ -149,14 +272,16 @@ export default function AgentTestRunDrawer({
               </Button>
             </Tooltip>
           ) : (
-            <Button type="primary" loading={running} disabled={!text.trim()} onClick={handleRun}>
+            <Button type="primary" loading={running} disabled={!canRun} onClick={handleRun}>
               测试
             </Button>
           )}
           <Button onClick={handleReset} disabled={running}>
             重置
           </Button>
-          <Text type="secondary">字符数：{charCount}/{maxLen}</Text>
+          {!isImage && (
+            <Text type="secondary">字符数：{charCount}/{maxLen}</Text>
+          )}
         </Space>
       </Card>
 
@@ -181,7 +306,7 @@ export default function AgentTestRunDrawer({
   )
 }
 
-function ResultPanel({ result, modality }: { result: TestResult; modality: '文本' | '图像' | '图文' }) {
+function ResultPanel({ result, modality }: { result: TestResult; modality: '文本' | '图片' | '图文' }) {
   const triggered = result.triggered.filter((t) => t.triggered)
   const notTriggered = result.triggered.filter((t) => !t.triggered)
   const passed = result.decision === 'pass'

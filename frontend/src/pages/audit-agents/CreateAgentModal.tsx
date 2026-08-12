@@ -22,6 +22,7 @@ import {
   QuestionCircleOutlined,
 } from '@ant-design/icons'
 import AiOptimizeDrawer from './AiOptimizeDrawer'
+import { registeredModelsApi, type ActiveModelOption } from '@/api/registered-models'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -33,7 +34,7 @@ export interface AgentPromptRow {
 }
 
 export interface CreateAgentPayload {
-  modality: '文本' | '图文'
+  modality: '文本' | '图片' | '图文'
   name: string
   largeModel: string
   rows: AgentPromptRow[]
@@ -56,7 +57,7 @@ export interface CreateAgentFormProps {
   onAiDrawerOpenChange: (open: boolean) => void
   onAddOptimizedConfig?: (cfg: { label: string; desc: string }) => void
   initialName?: string
-  initialModality?: '文本' | '图文'
+  initialModality?: '文本' | '图片' | '图文'
   initialLargeModel?: string
   initialRows?: AgentPromptRow[]
   draftSavedAt?: string | null
@@ -69,14 +70,11 @@ export interface CreateAgentFormProps {
   onPublish?: () => void
 }
 
-const LARGE_MODEL_OPTIONS: {
+interface LargeModelOption {
   label: string
   value: string
-  modality: ('文本' | '图文')[]
-}[] = [
-  { label: '文本大模型', value: 'text_audit_llm', modality: ['文本'] },
-  { label: '图文多模态', value: 'multimodal_audit_llm', modality: ['图文'] },
-]  
+  largeCategory: 'text' | 'multimodal' | 'other' | null
+}
 
 const DEFAULT_ROWS: AgentPromptRow[] = [
   {
@@ -134,14 +132,57 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
   onPublish,
 }, ref) {
   const { message } = App.useApp()
-  const filteredLargeModels = LARGE_MODEL_OPTIONS.filter((o) =>
-    o.modality.includes(initialModality ?? '文本'),
-  )
-  const defaultLargeModel = filteredLargeModels[0]?.value ?? LARGE_MODEL_OPTIONS[0].value
+  const [largeModelOptions, setLargeModelOptions] = useState<LargeModelOption[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setModelsLoading(true)
+    registeredModelsApi
+      .listActiveModels({ kind: 'large' })
+      .then((rows: ActiveModelOption[]) => {
+        if (cancelled) return
+        setLargeModelOptions(
+          rows.map((m) => ({
+            label: m.name + (m.model_name ? `（${m.model_name}）` : ''),
+            value: String(m.id),
+            largeCategory: m.large_category,
+          })),
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setLargeModelOptions([])
+      })
+      .finally(() => {
+        if (!cancelled) setModelsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // 按模态过滤: 文本 → 仅 text; 图片 → 仅 multimodal; 图文 → text + multimodal; 其他 → 全部
+  const modality = initialModality ?? '文本'
+  const filteredLargeModels = largeModelOptions.filter((o) => {
+    if (modality === '文本') return o.largeCategory === 'text'
+    if (modality === '图片') return o.largeCategory === 'multimodal'
+    if (modality === '图文') return o.largeCategory === 'text' || o.largeCategory === 'multimodal'
+    return true
+  })
+  const defaultLargeModel = filteredLargeModels[0]?.value ?? ''
   const [name, setName] = useState(initialName || '未命名审核智能体')
   const [editingName, setEditingName] = useState(false)
   const [largeModel, setLargeModel] = useState<string>(initialLargeModel ?? defaultLargeModel)
   const [rows, setRows] = useState<AgentPromptRow[]>(initialRows ?? DEFAULT_ROWS)
+
+  // 选项加载完成或模态切换后, 若当前 largeModel 不在可选列表里, 自动选第一个
+  useEffect(() => {
+    if (filteredLargeModels.length === 0) return
+    const exists = filteredLargeModels.some((o) => o.value === largeModel)
+    if (!exists) {
+      setLargeModel(filteredLargeModels[0].value)
+    }
+  }, [filteredLargeModels, largeModel])
 
   useImperativeHandle(
     ref,
@@ -165,7 +206,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
   useEffect(() => {
     setName(initialName || '未命名审核智能体')
     setEditingName(false)
-    setLargeModel(initialLargeModel ?? (filteredLargeModels[0]?.value ?? LARGE_MODEL_OPTIONS[0].value))
+    setLargeModel(initialLargeModel ?? (filteredLargeModels[0]?.value ?? ''))
     setRows(initialRows ?? DEFAULT_ROWS)
   }, [initialName, initialModality, initialLargeModel, initialRows])
 
@@ -310,11 +351,13 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
           </Text>
         </div>
         <Select
-          value={largeModel}
+          value={largeModel || undefined}
           onChange={setLargeModel}
           options={filteredLargeModels.map((o) => ({ label: o.label, value: o.value }))}
           style={{ width: '100%' }}
           placeholder="请选择大模型"
+          loading={modelsLoading}
+          notFoundContent={modelsLoading ? '加载中…' : '暂无可用大模型，请先在「模型管理」注册并激活大模型'}
         />
       </Card>
 

@@ -82,6 +82,7 @@ class MachineHitOut(BaseModel):
 
     service_code: Optional[str] = None
     service_name: Optional[str] = None
+    audit_point_code: Optional[str] = None
     label: Optional[str] = None
     label_cn: Optional[str] = None
     score: Optional[float] = None
@@ -90,16 +91,16 @@ class MachineHitOut(BaseModel):
     risk_category_label: Optional[str] = None
     audit_item_code: Optional[str] = None
     audit_item_label: Optional[str] = None
-    audit_point_code: Optional[str] = None
+    audit_point_label: Optional[str] = None
 
 
 class RiskTaxonomyNode(BaseModel):
     """Tree node used by ``GET /query/risk-taxonomy``.
 
-    Each level of the three-level tree (risk type → audit item → audit point)
-    exposes ``code`` (wire identifier) and ``label`` (display). The leaf level
-    also carries ``path`` which is the slash-joined path of codes; this is the
-    value sent back in ``risk_label_paths`` query filter.
+    Two-level tree: audit_item (一级, 审核项) → audit_point (二级, 审核点).
+    Each level exposes ``code`` (wire identifier) and ``label`` (display).
+    The leaf level also carries ``path`` which is the slash-joined path of
+    codes; this is the value sent back in ``risk_label_paths`` query filter.
     """
 
     code: str

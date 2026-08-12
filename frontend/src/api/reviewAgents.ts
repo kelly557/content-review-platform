@@ -94,7 +94,7 @@ export const reviewAgentsApi = {
       .post<ReviewAgentVersion>(`/review-agents/${agentId}/unpublish`)
       .then((r) => r.data)
   },
-  test(agentId: number, body: { modality: string; text: string; mode: string; points: AgentPoint[] }) {
+  test(agentId: number, body: { modality: string; text: string; image_base64?: string; mode: string; points: AgentPoint[] }) {
     return api
       .post<AgentTestResult>(`/review-agents/${agentId}/test`, body)
       .then((r) => r.data)

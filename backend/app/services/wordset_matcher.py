@@ -22,7 +22,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.human_review_config import RiskLevel
@@ -81,8 +81,13 @@ def _service_applies(
 
 async def _load_active_word_libraries(
     db: AsyncSession,
+    library_ids: Optional[Iterable[int]] = None,
 ) -> List[Library]:
     """拉取所有启用的 word 库 (is_active=True, is_deleted=False).
+
+    ``library_ids`` (可选) 用于策略联动: 传入时有效库 = 平台预置库
+    (``is_platform=True``) ∪ ``library_ids``; 不传时维持旧行为 (全量启用库),
+    供 run_machine_review 兼容.
 
     标签链 (含 parent) 走单独一条 query 批量加载, 避免 selectinload 嵌套触发的
     跨测试 schema 串号 (per-test schema isolation 已经在 conftest 处理;但
@@ -95,6 +100,18 @@ async def _load_active_word_libraries(
             Library.is_deleted.is_(False),
         )
     )
+    if library_ids is not None:
+        ids_set = [i for i in library_ids if i is not None]
+        if ids_set:
+            stmt = stmt.where(
+                or_(
+                    Library.is_platform.is_(True),
+                    Library.id.in_(ids_set),
+                )
+            )
+        else:
+            # 传了空集合: 仅平台库.
+            stmt = stmt.where(Library.is_platform.is_(True))
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
@@ -241,15 +258,20 @@ async def match_active_words(
     db: AsyncSession,
     text: str,
     enabled_services: Iterable[str],
+    library_ids: Optional[Iterable[int]] = None,
 ) -> List[Dict[str, Any]]:
     """在 text 中匹配所有启用的 word 库, 返回 hit 列表.
 
     enabled_services 用于过滤 lib.ignored_services; 但本地黑名单
     通常不绑 service, 所以这里只在 ignored 非空且**全屏蔽**时跳过.
+
+    library_ids (可选) 用于策略联动: 传入时匹配范围 = 平台预置库 ∪
+    指定 id (通常来自策略勾选审核点/项关联的 audit_point_libraries /
+    audit_item_libraries); 不传时维持全量启用库的旧行为.
     """
     if not text or not text.strip():
         return []
-    libs = await _load_active_word_libraries(db)
+    libs = await _load_active_word_libraries(db, library_ids=library_ids)
     if not libs:
         return []
     moment = _now_utc()

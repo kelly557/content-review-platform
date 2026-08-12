@@ -407,6 +407,7 @@ async def _run_parse_document(doc_id: int) -> None:
             await db.flush()
 
             candidates: list[ParsedAuditPointCandidate] = await parse_uploaded_file(
+                db,
                 kind=doc.kind.value,
                 content=content,
                 filename=doc.original_filename,

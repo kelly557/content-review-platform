@@ -35,11 +35,52 @@ export interface OnlineReviewDataItem {
   hits: OnlineReviewHit[]
 }
 
+export interface OnlineReviewStrategyBrief {
+  id: number
+  name: string
+}
+
 export interface OnlineReviewResponse {
   conclusion: string
   log_id: number
-  phoneRisk: Record<string, never>
-  isHitMd5: boolean
   conclusionType: number
   data: OnlineReviewDataItem[]
+  strategy: OnlineReviewStrategyBrief | null
+  engines_used: string[]
+  model: string | null
+  llm_error: string | null
+}
+
+// ---------------------------------------------------------------------------
+// 历史记录
+// ---------------------------------------------------------------------------
+
+export interface OnlineReviewLogListItem {
+  id: number
+  media_type: string
+  conclusion: string
+  conclusion_type: number
+  risk_level: string
+  model: string | null
+  engines_used: string[]
+  latency_ms: number
+  input_preview: string
+  strategy_id: number | null
+  llm_error: string | null
+  created_at: string
+}
+
+export interface OnlineReviewInputItem {
+  kind: string
+  name?: string
+  text?: string
+  // 图片/视频帧: storage_key 等 (后续扩展)
+  [key: string]: unknown
+}
+
+export interface OnlineReviewLogDetail extends OnlineReviewLogListItem {
+  hits: Array<Record<string, unknown>>
+  correlation_id: string | null
+  input_items: OnlineReviewInputItem[]
+  user_id: number | null
 }

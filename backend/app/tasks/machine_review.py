@@ -25,7 +25,7 @@ from __future__ import annotations
 import random
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -245,6 +245,7 @@ async def call_llm_detection(
     version_id: int,
     enabled_services: List[str],
     text_body: str,
+    audit_points: Optional[List[Dict[str, Any]]] = None,
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Single source of truth for moderation: call MaaS, no fallback.
 
@@ -258,6 +259,9 @@ async def call_llm_detection(
     Raises ``ModerationAPIError`` (from ``app.services.llm.client``) when
     the API key is missing or the call fails. The catch-all in
     ``run_machine_review`` records the failure into ``machine_result``.
+
+    ``audit_points`` 可选: 策略启用的审核点清单, 注入 prompt 让大模型按
+    真实规则判; 不传时 prompt 与旧版一致 (run_machine_review 不传).
     """
     if not settings.maas_api_key:
         # Hard fail — missing key must NOT silently produce fake results.
@@ -280,6 +284,7 @@ async def call_llm_detection(
         text_body=text_body,
         enabled_services=enabled_services,
         correlation_id=correlation_id,
+        audit_points=audit_points,
     )
     hits = _result_to_hits(result, enabled_services)
     meta.update(
@@ -309,6 +314,7 @@ def _result_to_hits(
                     enabled_services[0] if enabled_services else "text_detection_pro"
                 ),
                 "service_name": hit.service_name or "MaaS Moderation",
+                "audit_point_code": getattr(hit, "audit_point_code", "") or "",
                 "label": hit.label,
                 "label_cn": hit.label_cn,
                 "score": max(0.0, min(1.0, float(hit.score))),

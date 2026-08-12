@@ -24,10 +24,10 @@ function decisionMeta(v?: string | null) {
 }
 
 function riskLabelPath(h: MachineHit): string {
-  const cat = h.risk_category_label || ''
   const item = h.audit_item_label || ''
-  const point = h.label_cn || h.label || ''
-  return [cat, item, point].filter(Boolean).join(' / ')
+  const point = h.audit_point_label || ''
+  const sub = h.label_cn || h.label || ''
+  return [item, point, sub].filter(Boolean).join(' / ')
 }
 
 function formatScore(score?: number | null): string | null {

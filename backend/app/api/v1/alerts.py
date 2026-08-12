@@ -122,6 +122,7 @@ def _apply_alerts_filters(
     ips: Optional[List[str]],
     channels: Optional[List[str]],
     risk_label_paths: Optional[List[str]],
+    taxonomy=None,
 ) -> Select:
     """Apply the time + 5-dimensional filters to a SELECT over AlertEvent.
 
@@ -203,19 +204,25 @@ def _apply_alerts_filters(
         )
 
     if risk_label_paths:
-        label_predicates = []
-        for p in risk_label_paths:
-            segments = [seg for seg in p.split("/") if seg and seg != "*"]
-            for seg in segments:
-                like = f'%"{seg}"%'
-                label_predicates.append(
-                    func.cast(ReviewTask.machine_result, _String).like(like)
+        from app.services.risk_taxonomy_service import collect_point_codes_under_paths
+
+        point_codes = (
+            collect_point_codes_under_paths(taxonomy, risk_label_paths)
+            if taxonomy is not None else []
+        )
+        if not point_codes:
+            base = base.where(False)
+        else:
+            clauses = [
+                ReviewTask.machine_result.contains(
+                    {"hits": [{"audit_point_code": code}]}
                 )
-        if label_predicates:
+                for code in point_codes
+            ]
             base = base.where(
                 _exists().where(
                     (ReviewTask.material_id == Material.id)
-                    & and_(*label_predicates)
+                    & or_(*clauses)
                 )
             )
 
@@ -254,12 +261,18 @@ async def list_alerts(
     ),
     risk_label_paths: Optional[List[str]] = Query(
         None,
-        description="风险标签路径 (一级/二级/三级 code, 用 '/' 拼接), 可重复. 支持前缀匹配.",
+        description="风险标签路径 (审核项/审核点/sub审核点 code, 用 '/' 拼接), 可重复. 支持前缀匹配.",
     ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> AlertPage:
     win = _resolve_optional_window(start, end, window)
+    # 按需加载标签树
+    taxonomy = None
+    if risk_label_paths:
+        from app.services.risk_taxonomy_service import load_risk_taxonomy
+
+        taxonomy = await load_risk_taxonomy(db)
     base = select(AlertEvent)
     count_base = select(func.count(AlertEvent.id))
     base = _apply_alerts_filters(
@@ -273,6 +286,7 @@ async def list_alerts(
         ips=ips,
         channels=channels,
         risk_label_paths=risk_label_paths,
+        taxonomy=taxonomy,
     )
     count_base = _apply_alerts_filters(
         count_base,
@@ -285,6 +299,7 @@ async def list_alerts(
         ips=ips,
         channels=channels,
         risk_label_paths=risk_label_paths,
+        taxonomy=taxonomy,
     )
 
     total = await db.scalar(count_base) or 0

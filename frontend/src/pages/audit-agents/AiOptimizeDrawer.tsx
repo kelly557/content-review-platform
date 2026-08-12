@@ -151,6 +151,7 @@ export default function AiOptimizeDrawer({
               preview: r.preview,
               charCount: r.charCount,
               durationMs: r.durationMs,
+              points: r.points,
             })
           } else if (r.status === 'failed') {
             updateDoc(doc.id, {
@@ -184,6 +185,7 @@ export default function AiOptimizeDrawer({
             preview: r.preview,
             charCount: r.charCount,
             durationMs: r.durationMs,
+            points: r.points,
           })
           message.success(`${doc.name} 解析成功`)
         } else if (r.status === 'failed') {

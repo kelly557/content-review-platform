@@ -713,6 +713,7 @@ async def anomaly(
     ips: Optional[Sequence[str]] = None,
     channels: Optional[Sequence[str]] = None,
     risk_label_paths: Optional[Sequence[str]] = None,
+    taxonomy: Optional[List] = None,
 ) -> dict:
     """Return current snapshot + series of core metrics + recent alerts.
 
@@ -811,16 +812,22 @@ async def anomaly(
             )
         )
     if risk_label_paths:
-        label_predicates = []
-        for p in risk_label_paths:
-            segments = [seg for seg in p.split("/") if seg and seg != "*"]
-            for seg in segments:
-                like = f'%"{seg}"%'
-                label_predicates.append(
-                    func.cast(ReviewTask.machine_result, _String).like(like)
+        from app.services.risk_taxonomy_service import collect_point_codes_under_paths
+
+        point_codes = (
+            collect_point_codes_under_paths(taxonomy, list(risk_label_paths))
+            if taxonomy is not None else []
+        )
+        if not point_codes:
+            rev_stmt = rev_stmt.where(False)
+        else:
+            clauses = [
+                ReviewTask.machine_result.contains(
+                    {"hits": [{"audit_point_code": code}]}
                 )
-        if label_predicates:
-            rev_stmt = rev_stmt.where(_and_(*label_predicates))
+                for code in point_codes
+            ]
+            rev_stmt = rev_stmt.where(_or_(*clauses))
     rev_stmt = rev_stmt.group_by("b")
     rev_rows = (await db.execute(rev_stmt)).all()
     rev_map = {r.b: int(r.c) for r in rev_rows}
@@ -909,16 +916,22 @@ async def anomaly(
         .where(ReviewTask.machine_completed_at < window.end)
     )
     if risk_label_paths:
-        label_predicates = []
-        for p in risk_label_paths:
-            segments = [seg for seg in p.split("/") if seg and seg != "*"]
-            for seg in segments:
-                like = f'%"{seg}"%'
-                label_predicates.append(
-                    func.cast(ReviewTask.machine_result, _String).like(like)
+        from app.services.risk_taxonomy_service import collect_point_codes_under_paths
+
+        point_codes = (
+            collect_point_codes_under_paths(taxonomy, list(risk_label_paths))
+            if taxonomy is not None else []
+        )
+        if not point_codes:
+            hr_content_q = hr_content_q.where(False)
+        else:
+            clauses = [
+                ReviewTask.machine_result.contains(
+                    {"hits": [{"audit_point_code": code}]}
                 )
-        if label_predicates:
-            hr_content_q = hr_content_q.where(_and_(*label_predicates))
+                for code in point_codes
+            ]
+            hr_content_q = hr_content_q.where(_or_(*clauses))
     current["high_risk_content_count"] = int(await db.scalar(hr_content_q) or 0)
 
     # Recent alerts (top 20)
@@ -1204,6 +1217,7 @@ async def risk_trend(
     ips: Optional[Sequence[str]] = None,
     channels: Optional[Sequence[str]] = None,
     risk_label_paths: Optional[Sequence[str]] = None,
+    taxonomy: Optional[List] = None,
 ) -> dict:
     """Trend of completed machine reviews, split by risk level.
 
@@ -1304,30 +1318,22 @@ async def risk_trend(
         stmt = stmt.where(channel_match)
 
     if risk_label_paths:
-        # Match any hit whose audit_point_code / audit_item_code / risk_category_code
-        # belongs to one of the selected paths. Path semantics: a path is
-        # 'a' (root only) / 'a/b' (root + child) / 'a/b/c' (leaf). Selecting a
-        # parent path also keeps its descendants.
-        #
-        # Implementation: scan the serialized JSONB with a LIKE clause for
-        # each non-empty segment. All segments must appear in the same row
-        # (AND). The serialized JSONB output is not stable between keys, so
-        # we add quotes around the segment to ensure exact-segment matching.
-        label_predicates = []
-        for p in risk_label_paths:
-            segments = [seg for seg in p.split("/") if seg]
-            for seg in segments:
-                # Also allow the empty `*` segment as a wildcard for any level.
-                if seg == "*":
-                    continue
-                # Wrap in quotes so we match the JSONB-encoded value, not a
-                # substring of a sibling key.
-                like = f'%"{seg}"%'
-                label_predicates.append(
-                    func.cast(ReviewTask.machine_result, String).like(like)
+        from app.services.risk_taxonomy_service import collect_point_codes_under_paths
+
+        point_codes = (
+            collect_point_codes_under_paths(taxonomy, list(risk_label_paths))
+            if taxonomy is not None else []
+        )
+        if not point_codes:
+            stmt = stmt.where(False)
+        else:
+            clauses = [
+                ReviewTask.machine_result.contains(
+                    {"hits": [{"audit_point_code": code}]}
                 )
-        if label_predicates:
-            stmt = stmt.where(and_(*label_predicates))
+                for code in point_codes
+            ]
+            stmt = stmt.where(or_(*clauses))
 
     stmt = stmt.group_by("b").order_by("b")
     rows = (await db.execute(stmt)).all()
@@ -1479,7 +1485,19 @@ async def risk_distribution(db: AsyncSession, *, days: int) -> dict:
     return {"days": days, "buckets": buckets}
 
 
-async def top_risk_labels(db: AsyncSession, *, days: int, limit: int) -> dict:
+async def top_risk_labels(
+    db: AsyncSession,
+    *,
+    days: int = 7,
+    limit: int = 10,
+    modalities: Optional[Sequence[str]] = None,
+    strategy_codes: Optional[Sequence[str]] = None,
+    account_ids: Optional[Sequence[str]] = None,
+    ips: Optional[Sequence[str]] = None,
+    channels: Optional[Sequence[str]] = None,
+    risk_label_paths: Optional[Sequence[str]] = None,
+    taxonomy: Optional[List] = None,
+) -> dict:
     """Top ``limit`` risk-type labels by hit count in the window.
 
     Iterates each completed task's ``machine_result['hits']`` array and
@@ -1490,6 +1508,9 @@ async def top_risk_labels(db: AsyncSession, *, days: int, limit: int) -> dict:
       * ``last_hit_at`` — most-recent hit timestamp
 
     Sorted by count DESC then last_hit_at DESC.
+
+    ``modalities`` / ``strategy_codes`` / ``account_ids`` / ``ips`` /
+    ``channels`` apply the same EXISTS-based filters as ``risk_trend``.
     """
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=days)
@@ -1519,6 +1540,78 @@ async def top_risk_labels(db: AsyncSession, *, days: int, limit: int) -> dict:
         .where(ReviewTask.machine_completed_at.is_not(None))
         .order_by(severity_rank.asc(), ReviewTask.machine_completed_at.desc())
     )
+
+    if modalities:
+        valid = set(AUDIT_MODALITIES)
+        unknown = [m for m in modalities if m not in valid]
+        if unknown:
+            raise ValueError(f"unsupported modality: {', '.join(unknown)}")
+        material_match = _build_modality_exists(list(modalities))
+        if material_match is not None:
+            stmt = stmt.where(material_match)
+
+    if strategy_codes:
+        from app.models.strategy import Strategy as _Strategy
+
+        stmt = stmt.where(
+            or_(
+                ReviewTask.machine_result["strategy"]["code"].astext.in_(
+                    list(strategy_codes)
+                ),
+                ReviewTask.strategy_id.in_(
+                    select(_Strategy.id).where(
+                        _Strategy.code.in_(list(strategy_codes))
+                    )
+                ),
+            )
+        )
+
+    if account_ids or ips or channels:
+        from sqlalchemy import exists as _exists
+
+        if account_ids:
+            acct_clauses = [
+                Material.extra_metadata["account_id"].astext == a for a in account_ids
+            ]
+            acct_match = _exists().where(
+                (Material.id == ReviewTask.material_id) & or_(*acct_clauses)
+            )
+            stmt = stmt.where(acct_match)
+
+        if ips:
+            ip_clauses = [Material.extra_metadata["ip"].astext == i for i in ips]
+            ip_match = _exists().where(
+                (Material.id == ReviewTask.material_id) & or_(*ip_clauses)
+            )
+            stmt = stmt.where(ip_match)
+
+        if channels:
+            ch_clauses = [
+                Material.extra_metadata["channel"].astext == c for c in channels
+            ]
+            ch_match = _exists().where(
+                (Material.id == ReviewTask.material_id) & or_(*ch_clauses)
+            )
+            stmt = stmt.where(ch_match)
+
+    if risk_label_paths:
+        from app.services.risk_taxonomy_service import collect_point_codes_under_paths
+
+        point_codes = (
+            collect_point_codes_under_paths(taxonomy, list(risk_label_paths))
+            if taxonomy is not None else []
+        )
+        if not point_codes:
+            stmt = stmt.where(False)
+        else:
+            clauses = [
+                ReviewTask.machine_result.contains(
+                    {"hits": [{"audit_point_code": code}]}
+                )
+                for code in point_codes
+            ]
+            stmt = stmt.where(or_(*clauses))
+
     rows = (await db.execute(stmt)).all()
 
     # Aggregate: label -> {count, last_hit_at, latest_risk_level}
@@ -1640,114 +1733,25 @@ async def distinct_ips(db: AsyncSession, *, limit: int = 500) -> List[str]:
 
 
 async def risk_label_taxonomy(db: AsyncSession) -> List[dict]:
-    """Build a three-level taxonomy from ``machine_result.hits``.
-    Each hit carries ``risk_category_code`` / ``audit_item_code`` / ``audit_point_code``;
-    we de-dup into a root → middle → leaf tree.
+    """Build the three-level risk label tree from audit_items + audit_points.
 
-    Returns a list of dicts shaped like::
-
-        [{"code": "politics", "label": "涉政",
-          "children": [
-            {"code": "politics/sensitive_term", "label": "敏感词",
-             "children": [
-               {"code": "politics/sensitive_term/xxx", "label": "...", "path": "..."}
-             ]}
-          ]}, ...]
+    Delegates to the shared ``risk_taxonomy_service.load_risk_taxonomy``
+    and converts ``RiskTaxonomyNode`` objects to plain dicts for JSON
+    serialization.
     """
-    from sqlalchemy import String as _String
+    from app.services.risk_taxonomy_service import load_risk_taxonomy
 
-    raw_stmt = select(ReviewTask.machine_result).where(
-        ReviewTask.machine_result.is_not(None)
-    )
-    rows = (await db.execute(raw_stmt)).all()
+    nodes = await load_risk_taxonomy(db)
 
-    # root_label is keyed off the existing TagDomain enum (or fall back to the
-    # code itself for unmapped categories).
-    from app.models.tag import TagDomain
+    def _node_to_dict(node) -> dict:
+        return {
+            "code": node.code,
+            "label": node.label,
+            "path": node.path,
+            "children": [_node_to_dict(c) for c in node.children],
+        }
 
-    root_label = {
-        "politics": "涉政",
-        "porn": "涉黄",
-        "violence": "涉暴",
-        "ads_law": "广告法",
-        "medical": "医药",
-        "finance": "金融",
-        "minor": "未成年人",
-        "privacy": "隐私",
-        "ip": "知识产权",
-        "gambling": "赌博",
-        "fraud": "欺诈",
-        "custom": "自定义",
-    }
-
-    roots: dict[str, dict] = {}
-    for (mr_raw,) in rows:
-        if not isinstance(mr_raw, dict):
-            continue
-        hits = mr_raw.get("hits")
-        if not isinstance(hits, list):
-            continue
-        for h in hits:
-            if not isinstance(h, dict):
-                continue
-            cat = (
-                h.get("risk_category_code")
-                or h.get("domain")
-                or "custom"
-            )
-            item = (
-                h.get("audit_item_code")
-                or h.get("audit_item_name")
-                or "*"
-            )
-            point = (
-                h.get("audit_point_code")
-                or h.get("label_cn")
-                or h.get("label")
-                or "*"
-            )
-            cat_label = h.get("risk_category_label") or root_label.get(cat, cat)
-            item_label = h.get("audit_item_label") or h.get("audit_item_name") or item
-            point_label = h.get("label_cn") or h.get("label") or point
-
-            root = roots.setdefault(
-                cat,
-                {
-                    "code": cat,
-                    "label": cat_label,
-                    "path": cat,
-                    "children": {},
-                },
-            )
-            mid = root["children"].setdefault(
-                item,
-                {
-                    "code": f"{cat}/{item}",
-                    "label": item_label,
-                    "path": f"{cat}/{item}",
-                    "children": {},
-                },
-            )
-            mid["children"].setdefault(
-                point,
-                {
-                    "code": f"{cat}/{item}/{point}",
-                    "label": point_label,
-                    "path": f"{cat}/{item}/{point}",
-                },
-            )
-
-    # convert nested dicts to lists and sort
-    def _lower(entries: dict) -> list:
-        return [
-            {**v, "children": _lower(v["children"])} if "children" in v else v
-            for v in sorted(entries.values(), key=lambda x: x["code"])
-        ]
-
-    out = []
-    for v in sorted(roots.values(), key=lambda x: x["code"]):
-        out.append({**v, "children": _lower(v["children"])})
-    return out
+    return [_node_to_dict(n) for n in nodes]
 
 
 # ---------------------------------------------------------------------------

@@ -106,6 +106,10 @@ interface Props {
   libraryRefreshTick?: number
   /** 当前检测强度档位：透传给 RulesTreeView 用于 sub 阈值显示回退 */
   intensity?: Intensity
+  /** 已启用的审核智能体 id 列表（由父级 definition.review_agent_ids 持有） */
+  reviewAgentIds?: number[]
+  /** 审核智能体开关切换时通知父级更新 definition.review_agent_ids */
+  onToggleAgent?: (agentId: number, checked: boolean) => void
 }
 
 export default function StrategyTypeTabs({
@@ -132,6 +136,8 @@ export default function StrategyTypeTabs({
   onItemLibraryLink,
   libraryRefreshTick,
   intensity,
+  reviewAgentIds = [],
+  onToggleAgent,
 }: Props) {
   const [activeCategory, setActiveCategory] = useState<CategoryKey>(defaultActiveKey)
 
@@ -236,11 +242,6 @@ export default function StrategyTypeTabs({
 
   const items: TabsProps['items'] = CATEGORIES.map((cat) => {
     const selectedItems = enabledItemIds[cat.key] ?? []
-    const overriddenCount = Object.keys(pointMap[cat.key] ?? {}).filter((itemIdStr) => {
-      const itemId = Number(itemIdStr)
-      const itemMap = pointMap[cat.key]?.[itemId] ?? {}
-      return Object.values(itemMap).some((v) => v === false)
-    }).length
     const totalPoints = Object.values(pointMap[cat.key] ?? {}).reduce(
       (n, itemMap) => n + Object.values(itemMap).filter((v) => v === true).length,
       0,
@@ -252,11 +253,6 @@ export default function StrategyTypeTabs({
         <span>
           {cat.label}
           {totalPoints > 0 ? ` (${totalPoints})` : ''}
-          {overriddenCount > 0 ? (
-            <span style={{ color: '#F59E0B', marginLeft: 4 }}>
-              ·{overriddenCount} 已细化
-            </span>
-          ) : null}
         </span>
       ),
       children: (
@@ -335,6 +331,9 @@ export default function StrategyTypeTabs({
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
               intensity={intensity}
+              categoryKey="audio"
+              enabledAgentIds={reviewAgentIds}
+              onToggleAgent={onToggleAgent}
             />
           )}
           {cat.key === 'doc' && activeCategory === 'doc' && docSegments && docSegments[0].mode === 'independent' && (
@@ -355,6 +354,9 @@ export default function StrategyTypeTabs({
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
               intensity={intensity}
+              categoryKey="doc"
+              enabledAgentIds={reviewAgentIds}
+              onToggleAgent={onToggleAgent}
             />
           )}
           {cat.key === 'doc' && activeCategory === 'doc' && docSegments && docSegments[1].mode === 'independent' && (
@@ -375,6 +377,9 @@ export default function StrategyTypeTabs({
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
               intensity={intensity}
+              categoryKey="doc"
+              enabledAgentIds={reviewAgentIds}
+              onToggleAgent={onToggleAgent}
             />
           )}
           {cat.key === 'video' && activeCategory === 'video' && videoSegments && videoSegments[0].mode === 'independent' && (
@@ -395,6 +400,9 @@ export default function StrategyTypeTabs({
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
               intensity={intensity}
+              categoryKey="video"
+              enabledAgentIds={reviewAgentIds}
+              onToggleAgent={onToggleAgent}
             />
           )}
           {cat.key === 'video' && activeCategory === 'video' && videoSegments && videoSegments[1].mode === 'independent' && (
@@ -415,6 +423,9 @@ export default function StrategyTypeTabs({
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
               intensity={intensity}
+              categoryKey="video"
+              enabledAgentIds={reviewAgentIds}
+              onToggleAgent={onToggleAgent}
             />
           )}
           {/* 普通 tab（非合成类）的规则树 — 仅活动 tab 挂载 */}
@@ -441,6 +452,9 @@ export default function StrategyTypeTabs({
                 onSelectedItemChange={cat.key === 'image' ? onSelectedItemChange : undefined}
                 imageTextConfig={cat.key === 'image' ? imageTextConfig : undefined}
                 intensity={intensity}
+                categoryKey={cat.key}
+                enabledAgentIds={reviewAgentIds}
+                onToggleAgent={onToggleAgent}
               />
             </>
           )}

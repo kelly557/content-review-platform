@@ -50,14 +50,16 @@ export function getPresetSamples(): TestSample[] {
  */
 export async function runTest(input: {
   agentId: string
-  modality: '文本' | '图像' | '图文'
+  modality: '文本' | '图片' | '图文'
   text: string
+  imageBase64?: string
   mode: TestModality
   points: { id: string; label: string }[]
 }): Promise<TestResult> {
   const r = await reviewAgentsApi.test(Number(input.agentId), {
     modality: input.modality,
     text: input.text,
+    image_base64: input.imageBase64,
     mode: input.mode,
     points: input.points.map((p) => ({ id: p.id, label: p.label })),
   })

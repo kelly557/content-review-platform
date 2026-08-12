@@ -1,7 +1,7 @@
 import { reviewAgentsApi, type ReviewAgentVersion } from './reviewAgents'
 
 export interface AgentVersionSnapshot {
-  modality: '文本' | '图像' | '图文'
+  modality: '文本' | '图片' | '图文'
   name: string
   modelId: string
   points: { id: string; label: string; desc: string }[]

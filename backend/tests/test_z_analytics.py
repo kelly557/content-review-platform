@@ -863,6 +863,34 @@ async def test_risk_trend_filter_by_strategy_code(client, db_session):
 
 @pytest.mark.asyncio
 async def test_risk_trend_filter_by_risk_label_path(client, db_session):
+    from app.models.audit_item import AuditItem
+    from app.models.audit_point import AuditPoint
+    from app.models.service import Service
+
+    # Create service + audit_item + audit_point so the taxonomy tree can resolve the path
+    svc = Service(code="text_audit_pro", name="Text Audit Pro")
+    db_session.add(svc)
+    await db_session.flush()
+    ai = AuditItem(
+        package_code="text_audit_pro",
+        code="sensitive_term",
+        name_cn="敏感词",
+        is_builtin=True,
+        is_enabled=True,
+    )
+    db_session.add(ai)
+    await db_session.flush()
+    ap = AuditPoint(
+        package_code="text_audit_pro",
+        item_id=ai.id,
+        code="leader",
+        label="leader",
+        label_cn="一号领导",
+        is_enabled=True,
+    )
+    db_session.add(ap)
+    await db_session.flush()
+
     sub = await _get_user(db_session, "submitter@adreview.example.com")
     # Two hits, one matching the label path; one not.
     matches = ReviewTask
@@ -960,13 +988,13 @@ async def test_risk_trend_filter_by_risk_label_path(client, db_session):
     await _login(client, "mlr@adreview.example.com", "mlr12345")
     resp = await client.get(
         "/api/v1/reports/risk/trend",
-        params=[("window", "7d"), ("risk_label_paths", "politics/sensitive_term")],
+        params=[("window", "7d"), ("risk_label_paths", "sensitive_term/leader")],
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     high_total = sum(p["high"] for p in body["points"])
     assert high_total == 1
-    assert body["applied"]["risk_label_paths"] == ["politics/sensitive_term"]
+    assert body["applied"]["risk_label_paths"] == ["sensitive_term/leader"]
 
 
 @pytest.mark.asyncio

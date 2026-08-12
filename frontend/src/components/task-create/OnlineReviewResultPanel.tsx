@@ -1,4 +1,4 @@
-import { Collapse, Spin, Tag, Typography } from 'antd'
+import { Alert, Collapse, Spin, Tag, Typography } from 'antd'
 import JsonTreeView from './JsonTreeView'
 import type { OnlineReviewRequest, OnlineReviewResponse } from '@/api/onlineReviewTypes'
 import { colors } from '@/styles/theme'
@@ -62,7 +62,7 @@ function LoadingState() {
   )
 }
 
-function _ConclusionTag({ value }: { value?: string }) {
+function ConclusionTag({ value }: { value?: string }) {
   if (!value) return null
   const isNonCompliant = value === '不合规'
   return (
@@ -75,9 +75,39 @@ function _ConclusionTag({ value }: { value?: string }) {
   )
 }
 
-// Kept around for the next iteration of the result summary footer.
-// Touched via void so TS noUnusedLocals accepts the declaration until then.
-void _ConclusionTag
+function ResultSummary({ response, latencyMs }: { response: OnlineReviewResponse; latencyMs?: number }) {
+  const conclusion = response.conclusion ?? response.data?.[0]?.conclusion
+  const hitCount = response.data?.[0]?.hits?.length ?? 0
+  const engines = response.engines_used ?? []
+  const llmUsed = engines.includes('llm')
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 4px',
+        fontSize: 12,
+        color: colors.secondary,
+      }}
+    >
+      <ConclusionTag value={conclusion} />
+      {response.strategy && (
+        <Tag bordered={false} color="blue">
+          策略：{response.strategy.name}
+        </Tag>
+      )}
+      <Tag bordered={false}>
+        命中 {hitCount} 条
+      </Tag>
+      <Tag bordered={false} color={llmUsed ? 'geekblue' : 'default'}>
+        {llmUsed ? `大模型：${response.model ?? '已启用'}` : '仅词库'}
+      </Tag>
+      {typeof latencyMs === 'number' && <Tag bordered={false}>{latencyMs} ms</Tag>}
+    </div>
+  )
+}
 
 export default function OnlineReviewResultPanel({
   state,
@@ -101,15 +131,6 @@ export default function OnlineReviewResultPanel({
       </div>
     )
   }
-
-  // Reserved for the next iteration of the result summary footer.
-  // Kept live (no underscore prefix) and read once via void so TS
-  // noUnusedLocals / noUnusedParameters stays happy until then.
-  const _conclusion = response?.conclusion ?? response?.data?.[0]?.conclusion
-  const _itemCount = response?.data?.[0]?.hits?.length ?? 0
-  void _conclusion
-  void _itemCount
-  void latencyMs
 
   const items = [
     {
@@ -178,6 +199,16 @@ export default function OnlineReviewResultPanel({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {response && <ResultSummary response={response} latencyMs={latencyMs} />}
+      {response?.llm_error && (
+        <Alert
+          type="warning"
+          showIcon
+          message="大模型未参与本次检测"
+          description={response.llm_error}
+          style={{ fontSize: 12 }}
+        />
+      )}
       <Collapse
         accordion
         defaultActiveKey={['response']}

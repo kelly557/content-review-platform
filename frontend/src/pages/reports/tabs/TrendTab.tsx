@@ -264,7 +264,7 @@ export default function TrendTab() {
               taxonomy={options?.risk_taxonomy ?? []}
               value={riskLabelPaths}
               onChange={setRiskLabelPaths}
-              placeholder="审核项 / 审核点 / sub 审核点"
+              placeholder="风险标签"
             />
           </div>
         </Space>

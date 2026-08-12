@@ -167,7 +167,7 @@ async def anomaly(
     ),
     risk_label_paths: Optional[List[str]] = Query(
         None,
-        description="风险标签路径 (一级/二级/三级 code, 用 '/' 拼接), 可重复. 支持前缀匹配.",
+        description="风险标签路径 (审核项/审核点/sub审核点 code, 用 '/' 拼接), 可重复. 支持前缀匹配.",
     ),
 ) -> AnomalyResponse:
     custom = _resolve_optional_range(start, end)
@@ -187,6 +187,12 @@ async def anomaly(
         gran = "hour" if hours <= 6 else "day"
     else:
         gran = granularity
+    # 按需加载标签树
+    taxonomy = None
+    if risk_label_paths:
+        from app.services.risk_taxonomy_service import load_risk_taxonomy
+
+        taxonomy = await load_risk_taxonomy(db)
     try:
         data = await anomaly_metric(
             db,
@@ -198,6 +204,7 @@ async def anomaly(
             ips=ips,
             channels=channels,
             risk_label_paths=risk_label_paths,
+            taxonomy=taxonomy,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -312,7 +319,7 @@ async def risk_trend(
     ),
     risk_label_paths: Optional[List[str]] = Query(
         None,
-        description="风险标签路径 (一级/二级/三级 code, 用 '/' 拼接), 可重复. 支持前缀匹配.",
+        description="风险标签路径 (审核项/审核点/sub审核点 code, 用 '/' 拼接), 可重复. 支持前缀匹配.",
     ),
 ) -> RiskTrendResponse:
     custom = _resolve_optional_range(start, end)
@@ -323,6 +330,12 @@ async def risk_trend(
             detail=f"unsupported granularity: {granularity}",
         )
     gran = granularity or pick_risk_trend_granularity(w)
+    # 按需加载标签树 (供 risk_label_paths 解析为 audit_point_code)
+    taxonomy = None
+    if risk_label_paths:
+        from app.services.risk_taxonomy_service import load_risk_taxonomy
+
+        taxonomy = await load_risk_taxonomy(db)
     try:
         data = await risk_trend_metric(
             db,
@@ -334,6 +347,7 @@ async def risk_trend(
             ips=ips,
             channels=channels,
             risk_label_paths=risk_label_paths,
+            taxonomy=taxonomy,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -396,8 +410,54 @@ async def risk_top_labels(
     _current: User = Depends(get_current_user),
     days: int = Query(7, ge=1, le=90),
     limit: int = Query(5, ge=1, le=20),
+    window: Optional[str] = Query(
+        None, description="时间窗: today|7d|30d (覆盖 days)"
+    ),
+    modalities: Optional[List[str]] = Query(
+        None,
+        description="审核模态过滤 (image/text/video/audio/document), 可重复.",
+    ),
+    strategy_codes: Optional[List[str]] = Query(
+        None, description="策略 code, 可重复"
+    ),
+    account_ids: Optional[List[str]] = Query(
+        None, description="业务账号, 可重复"
+    ),
+    ips: Optional[List[str]] = Query(
+        None, description="IP, 可重复"
+    ),
+    channels: Optional[List[str]] = Query(
+        None, description="渠道, 可重复"
+    ),
+    risk_label_paths: Optional[List[str]] = Query(
+        None,
+        description="风险标签路径 (审核项/审核点/sub审核点 code, 用 '/' 拼接), 可重复",
+    ),
 ) -> TopRiskLabelsResponse:
-    data = await top_risk_labels_metric(db, days=days, limit=limit)
+    # window 优先于 days
+    if window:
+        w = resolve_window(window)
+        actual_days = max(1, min(90, (w.end - w.start).days))
+    else:
+        actual_days = days
+    # 按需加载标签树
+    taxonomy = None
+    if risk_label_paths:
+        from app.services.risk_taxonomy_service import load_risk_taxonomy
+
+        taxonomy = await load_risk_taxonomy(db)
+    data = await top_risk_labels_metric(
+        db,
+        days=actual_days,
+        limit=limit,
+        modalities=modalities,
+        strategy_codes=strategy_codes,
+        account_ids=account_ids,
+        ips=ips,
+        channels=channels,
+        risk_label_paths=risk_label_paths,
+        taxonomy=taxonomy,
+    )
     return TopRiskLabelsResponse(**data)
 
 
