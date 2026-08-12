@@ -3,7 +3,7 @@ services:
     name: content-review-platform-api
     runtime: python
     plan: free
-    rootDir: adreview-platform/backend
+    rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: bash scripts/render_start.sh
     healthCheckPath: /health
