@@ -221,7 +221,10 @@ async def download_version(
     version = await db.get(MaterialVersion, version_id)
     if not version or version.material_id != material_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="version not found")
-    stream = storage.open_stream(version.storage_key)
+    try:
+        stream = storage.open_stream(version.storage_key)
+    except storage.StorageError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="file not found on disk")
     # 图片/音频/视频内联展示, 其他类型下载
     is_inline = (version.mime_type or "").startswith(("image/", "audio/", "video/", "text/"))
     disposition = "inline" if is_inline else "attachment"
