@@ -1,25 +1,12 @@
-import { Alert, Collapse, Spin, Table, Tag, Typography } from 'antd'
+import { Alert, Collapse, Spin, Tag, Typography } from 'antd'
 import JsonTreeView from './JsonTreeView'
-import type { OnlineReviewHit, OnlineReviewRequest, OnlineReviewResponse } from '@/api/onlineReviewTypes'
+import type { OnlineReviewRequest, OnlineReviewResponse } from '@/api/onlineReviewTypes'
 import { colors } from '@/styles/theme'
 
 const { Text } = Typography
 
 const MONO_FONT =
   'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
-
-const RISK_COLOR: Record<string, string> = {
-  高风险: 'red',
-  中风险: 'orange',
-  低风险: 'gold',
-  敏感: 'magenta',
-  无风险: 'default',
-}
-
-const SOURCE_LABEL: Record<string, string> = {
-  'rules.llm': '大模型',
-  'rules.local_wordset': '词库',
-}
 
 export type OnlineReviewResultState = 'idle' | 'loading' | 'done' | 'error'
 
@@ -75,24 +62,10 @@ function LoadingState() {
   )
 }
 
-function ConclusionTag({ value }: { value?: string }) {
-  if (!value) return null
-  const isNonCompliant = value === '不合规'
-  return (
-    <Tag
-      color={isNonCompliant ? 'error' : 'success'}
-      style={{ marginInlineEnd: 0, fontWeight: 500 }}
-    >
-      {value}
-    </Tag>
-  )
-}
-
-function ResultSummary({ response, latencyMs }: { response: OnlineReviewResponse; latencyMs?: number }) {
-  const conclusion = response.conclusion ?? response.data?.[0]?.conclusion
-  const hitCount = response.data?.[0]?.hits?.length ?? 0
-  const engines = response.engines_used ?? []
-  const llmUsed = engines.includes('llm')
+function ResultSummary({ response }: { response: OnlineReviewResponse }) {
+  const hits = response.data?.[0]?.hits ?? []
+  const riskLevel = response.data?.[0]?.hits?.[0]?.risk_level ?? '高风险'
+  const isHit = hits.length > 0
   return (
     <div
       style={{
@@ -105,75 +78,26 @@ function ResultSummary({ response, latencyMs }: { response: OnlineReviewResponse
         color: colors.secondary,
       }}
     >
-      <ConclusionTag value={conclusion} />
+      {/* 风险等级替换"不合规": 命中显示风险等级(高风险红), 未命中显示合规(绿) */}
+      <Tag color={isHit ? 'error' : 'success'} style={{ marginInlineEnd: 0, fontWeight: 500 }}>
+        {isHit ? riskLevel : '合规'}
+      </Tag>
       {response.strategy && (
         <Tag bordered={false} color="blue">
           策略：{response.strategy.name}
         </Tag>
       )}
-      <Tag bordered={false}>
-        命中 {hitCount} 条
-      </Tag>
-      <Tag bordered={false} color={llmUsed ? 'geekblue' : 'default'}>
-        {llmUsed ? `大模型：${response.model ?? '已启用'}` : '仅词库'}
-      </Tag>
-      {typeof latencyMs === 'number' && <Tag bordered={false}>{latencyMs} ms</Tag>}
+      {/* 命中标签值: 多条命中 → 多个红色 Tag 横排; 无命中 → "未命中" */}
+      {isHit ? (
+        hits.map((h, i) => (
+          <Tag key={`${h.rule_code}-${i}`} color="red" bordered={false}>
+            {h.rule_label}
+          </Tag>
+        ))
+      ) : (
+        <Tag bordered={false}>未命中</Tag>
+      )}
     </div>
-  )
-}
-
-/** 命中标签结果列表: 直接展示命中的审核标签 + 违规原文 + 风险等级 + 来源 */
-function HitList({ hits }: { hits: OnlineReviewHit[] }) {
-  if (hits.length === 0) {
-    return (
-      <div style={{ padding: '16px 0', textAlign: 'center' }}>
-        <Text type="secondary">未检测到风险内容</Text>
-      </div>
-    )
-  }
-  return (
-    <Table<OnlineReviewHit>
-      size="small"
-      rowKey={(r, i) => `${r.rule_code}-${i}`}
-      pagination={false}
-      dataSource={hits}
-      columns={[
-        {
-          title: '审核标签',
-          dataIndex: 'rule_label',
-          width: '24%',
-          render: (v: string) => <Text strong>{v}</Text>,
-        },
-        {
-          title: '违规原文',
-          dataIndex: 'matched_text',
-          render: (v?: string) =>
-            v ? (
-              <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
-                {v}
-              </Text>
-            ) : (
-              <Text type="secondary">—</Text>
-            ),
-        },
-        {
-          title: '风险等级',
-          dataIndex: 'risk_level',
-          width: 90,
-          render: (v: string) => (
-            <Tag color={RISK_COLOR[v] ?? 'default'} bordered={false}>
-              {v}
-            </Tag>
-          ),
-        },
-        {
-          title: '来源',
-          dataIndex: 'source',
-          width: 80,
-          render: (v: string) => SOURCE_LABEL[v] ?? v,
-        },
-      ]}
-    />
   )
 }
 
@@ -181,7 +105,6 @@ export default function OnlineReviewResultPanel({
   state,
   request,
   response,
-  latencyMs,
   errorMessage,
 }: OnlineReviewResultPanelProps) {
   if (state === 'idle') return <EmptyState />
@@ -200,7 +123,6 @@ export default function OnlineReviewResultPanel({
     )
   }
 
-  const hits = response?.data?.[0]?.hits ?? []
   const items = [
     {
       key: 'request',
@@ -268,7 +190,7 @@ export default function OnlineReviewResultPanel({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {response && <ResultSummary response={response} latencyMs={latencyMs} />}
+      {response && <ResultSummary response={response} />}
       {response?.llm_error && (
         <Alert
           type="warning"
@@ -277,22 +199,6 @@ export default function OnlineReviewResultPanel({
           description={response.llm_error}
           style={{ fontSize: 12 }}
         />
-      )}
-      {/* 命中标签结果直接展示 (不再只藏在 JSON 树里) */}
-      {response && (
-        <div
-          style={{
-            background: colors.surface,
-            border: `1px solid ${colors.border}`,
-            borderRadius: 6,
-            padding: 12,
-          }}
-        >
-          <div style={{ marginBottom: 8 }}>
-            <Text strong>命中标签结果</Text>
-          </div>
-          <HitList hits={hits} />
-        </div>
       )}
       <Collapse
         accordion
