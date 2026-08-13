@@ -556,17 +556,22 @@ async def _run_agent_detection(
 
     from app.models.review_agent import ReviewAgent
 
-    # 加载所有智能体的 points 合并
+    # 加载所有智能体的 points 合并 (带智能体名称, 命中时作为标签前缀)
     all_points: List[Dict[str, Any]] = []
     agent_model_id: Optional[int] = None
     for aid in agent_ids:
         agent = await db.get(ReviewAgent, aid)
         if not agent:
             continue
+        agent_name = agent.name or f"智能体{aid}"
         if agent.points and isinstance(agent.points, list):
             for p in agent.points:
                 if isinstance(p, dict) and p.get("label"):
-                    all_points.append({"label_cn": p["label"], "description": p.get("desc", "")})
+                    all_points.append({
+                        "label_cn": p["label"],
+                        "description": p.get("desc", ""),
+                        "agent_name": agent_name,
+                    })
         if agent.model_id and not agent_model_id:
             agent_model_id = agent.model_id
 
@@ -607,11 +612,10 @@ async def _run_agent_detection(
             temperature=0.1,
             max_tokens=2048,
             correlation_id=correlation_id,
-            response_format={"type": "json_object"},
         )
         m = re.search(r"\{.*\}", content, re.DOTALL)
         if not m:
-            return [], model_name, "大模型返回非 JSON", correlation_id if False else None
+            return [], model_name, "大模型返回非 JSON", None
         payload = json.loads(m.group(0))
         hit_points = payload.get("hit_points") or []
         hits: List[Dict[str, Any]] = []
@@ -627,11 +631,18 @@ async def _run_agent_detection(
                 end = min(start + length, len(text_body))
                 snippet = text_body[start:end].strip().strip("“”\"'")
                 quote = snippet or None
+            # 找到命中标签对应的智能体名称, 作为前缀
+            agent_name = ""
+            for p in all_points:
+                if p["label_cn"] == label:
+                    agent_name = p.get("agent_name", "")
+                    break
+            prefixed_label = f"{agent_name}:{label}" if agent_name and label else (label or "智能体违规")
             hits.append({
                 "service_code": "agent",
-                "service_name": "审核智能体",
+                "service_name": agent_name or "审核智能体",
                 "label": label or "agent_violation",
-                "label_cn": label or "智能体违规",
+                "label_cn": prefixed_label,
                 "score": 1.0,
                 "quote": quote,
                 "bbox": None,
