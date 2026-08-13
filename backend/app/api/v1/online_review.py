@@ -700,8 +700,9 @@ _DETECT_CACHE_MAX = 200
 _detect_cache: dict[str, tuple[float, OnlineReviewResponse]] = {}
 
 
-def _cache_key(text: str, strategy_id: Optional[int], model_id: Optional[int]) -> str:
-    raw = f"{text}|{strategy_id}|{model_id}"
+def _cache_key(text: str, strategy_id: Optional[int], model_id: Optional[int], image_hash: Optional[str] = None) -> str:
+    """缓存 key: 文本模式按 text; 图片模式按 image_hash (sha256)."""
+    raw = f"{text}|{strategy_id}|{model_id}|{image_hash or ''}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -730,8 +731,22 @@ async def detect(
     enabled_services = _services_from_strategy(strat)
     llm_enabled, model_id = _llm_review_config(strat)
 
-    # 缓存命中: 相同 (文本+策略+模型) 在 TTL 内直接返回, 跳过词库+LLM
-    ck = _cache_key(full_text, strat.id if strat else None, model_id)
+    # 缓存命中: 相同 (文本/图片+策略+模型) 在 TTL 内直接返回, 跳过词库+LLM
+    # 图片模式按 image_base64 的 sha256 做 key, 避免不同图片共享缓存
+    image_b64_list = [it.image_base64 for it in body.items if it.image_base64]
+    image_hash = None
+    if image_b64_list:
+        from app.services.image_matcher import decode_base64_to_bytes, compute_sha256_from_bytes
+
+        image_hashes = []
+        for b64 in image_b64_list:
+            try:
+                img_bytes = decode_base64_to_bytes(b64)
+                image_hashes.append(compute_sha256_from_bytes(img_bytes))
+            except Exception:
+                pass
+        image_hash = "|".join(image_hashes) if image_hashes else None
+    ck = _cache_key(full_text, strat.id if strat else None, model_id, image_hash)
     now_ts = time.time()
     cached = _detect_cache.get(ck)
     if cached and (now_ts - cached[0]) < _DETECT_CACHE_TTL_SEC:

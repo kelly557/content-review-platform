@@ -740,12 +740,26 @@ async def anomaly(
 
     bucket = _bucket_expr(granularity)
 
+    # 统计维度改为 machine_result.suggested_action (block/review/pass),
+    # 而非 Material.status — 在线审核不改 Material.status (始终 IN_REVIEW),
+    # 但 machine_result 已有机审判定.
     base = select(
         bucket.label("b"),
-        func.sum(case((Material.status.in_(REJECTED_STATUSES), 1), else_=0)).label("rej"),
-        func.sum(case((Material.status.in_(APPROVED_STATUSES), 1), else_=0)).label("apr"),
-        func.sum(case((Material.status.in_(SUBMITTED_STATUSES), 1), else_=0)).label("sub"),
-    ).where(Material.created_at >= window.start).where(Material.created_at < window.end)
+        func.sum(case((ReviewTask.machine_result["suggested_action"].astext == "block", 1), else_=0)).label("rej"),
+        func.sum(case((ReviewTask.machine_result["suggested_action"].astext == "pass", 1), else_=0)).label("apr"),
+        func.count().label("sub"),
+    ).select_from(
+        Material.__table__.join(
+            ReviewTask.__table__,
+            ReviewTask.material_id == Material.id,
+        )
+    ).where(
+        Material.created_at >= window.start
+    ).where(
+        Material.created_at < window.end
+    ).where(
+        ReviewTask.machine_status == MachineStatus.COMPLETED
+    )
 
     if modalities:
         valid = set(AUDIT_MODALITIES)
@@ -788,56 +802,16 @@ async def anomaly(
     stmt = base.group_by("b").order_by("b")
     rows = (await db.execute(stmt)).all()
 
-    # Reviewed counts (join to ReviewTask) — apply the same filter set so the
-    # review_rate per bucket reflects the selected cohort.
-    if granularity == "hour":
-        task_b = func.date_trunc("hour", ReviewTask.created_at)
-    else:
-        task_b = func.date_trunc("day", ReviewTask.created_at)
-    rev_stmt = (
-        select(task_b.label("b"), func.count(ReviewTask.id).label("c"))
-        .where(ReviewTask.created_at >= window.start)
-        .where(ReviewTask.created_at < window.end)
-        .where(ReviewTask.final_decision != ReviewDecision.PENDING)
-    )
-    if strategy_codes:
-        from app.models.strategy import Strategy
-
-        rev_stmt = rev_stmt.where(
-            _or_(
-                ReviewTask.machine_result["strategy"]["code"].astext.in_(list(strategy_codes)),
-                ReviewTask.strategy_id.in_(
-                    select(Strategy.id).where(Strategy.code.in_(list(strategy_codes)))
-                ),
-            )
-        )
-    if risk_label_paths:
-        from app.services.risk_taxonomy_service import collect_point_codes_under_paths
-
-        point_codes = (
-            collect_point_codes_under_paths(taxonomy, list(risk_label_paths))
-            if taxonomy is not None else []
-        )
-        if not point_codes:
-            rev_stmt = rev_stmt.where(False)
-        else:
-            clauses = [
-                ReviewTask.machine_result.contains(
-                    {"hits": [{"audit_point_code": code}]}
-                )
-                for code in point_codes
-            ]
-            rev_stmt = rev_stmt.where(_or_(*clauses))
-    rev_stmt = rev_stmt.group_by("b")
-    rev_rows = (await db.execute(rev_stmt)).all()
-    rev_map = {r.b: int(r.c) for r in rev_rows}
+    # Reviewed counts — 不再单独查 ReviewTask (已在 base 中 JOIN),
+    # review_rate 用 suggested_action='review' 的比例.
+    rev_map: dict = {}
 
     series: List[dict] = []
     for r in rows:
         sub = int(r.sub or 0)
         rej = int(r.rej or 0)
         apr = int(r.apr or 0)
-        rev = rev_map.get(r.b, 0)
+        rev = sub - rej - apr  # review = total - block - pass
         series.append(
             {
                 "bucket": r.b.isoformat() if isinstance(r.b, datetime) else str(r.b),
@@ -872,15 +846,21 @@ async def anomaly(
             "high_risk_content_count": 0,
         }
 
-    # Distinct submitters with at least 1 rejected material in the most-recent
-    # 1h slice. Apply the same filter set so the headline number reflects the
-    # selected cohort.
+    # Distinct submitters with at least 1 blocked (high-risk) material in the
+    # most-recent 1h slice. Based on machine_result.suggested_action='block'.
     last_hour_start = max(window.end - timedelta(hours=1), window.start)
     hr_q = (
         select(func.count(func.distinct(Material.submitter_id)))
+        .select_from(
+            Material.__table__.join(
+                ReviewTask.__table__,
+                ReviewTask.material_id == Material.id,
+            )
+        )
         .where(Material.created_at >= last_hour_start)
         .where(Material.created_at < window.end)
-        .where(Material.status.in_(REJECTED_STATUSES))
+        .where(ReviewTask.machine_status == MachineStatus.COMPLETED)
+        .where(ReviewTask.machine_result["suggested_action"].astext == "block")
     )
     if modalities:
         material_match = _build_modality_exists(list(modalities))
