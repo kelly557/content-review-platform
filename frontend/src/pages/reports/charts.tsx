@@ -111,7 +111,7 @@ export function MultiMetricLineChart({
   }
   const data = series.flatMap((p) => [
     { bucket: labelFor(p.bucket), metric: '拒绝率', value: p.reject_rate },
-    { bucket: labelFor(p.bucket), metric: '待复核率', value: p.review_rate },
+    { bucket: labelFor(p.bucket), metric: '审核率', value: p.review_rate },
     { bucket: labelFor(p.bucket), metric: '通过率', value: p.approve_rate },
     { bucket: labelFor(p.bucket), metric: '提交数', value: p.submitted },
   ])

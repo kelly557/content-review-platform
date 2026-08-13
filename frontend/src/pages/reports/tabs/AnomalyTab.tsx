@@ -472,7 +472,7 @@ export default function AnomalyTab() {
           </Col>
           <Col xs={12} md={6}>
             <Statistic
-              title="当前待复核率"
+              title="当前审核率"
               value={anomaly?.current.review_rate ?? 0}
               precision={2}
               suffix="%"
@@ -496,7 +496,7 @@ export default function AnomalyTab() {
               valueStyle={{ color: '#2563EB' }}
             />
             <Text type="secondary" style={{ fontSize: 11 }}>
-              高风险 {anomaly?.current.high_risk_content_count ?? 0} 条 · 已机审 100%
+              高风险 {anomaly?.current.high_risk_content_count ?? 0} 条
             </Text>
           </Col>
         </Row>

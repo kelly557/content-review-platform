@@ -740,15 +740,15 @@ async def anomaly(
 
     bucket = _bucket_expr(granularity)
 
-    # 统计维度: machine_result.risk_level (高风险/中风险/低风险/无风险)
-    # - reject_rate (拒绝率) = 高风险 / total
-    # - review_rate (待复核率) = (高风险 + 中风险) / total  (需要人审的)
-    # - approve_rate (通过率) = (无风险 + 低风险) / total
+    # 指标公式 (与页面说明一致):
+    # - 拒绝率 = 阻断(高风险) / total
+    # - 通过率 = 通过(无风险+低风险) / total
+    # - 审核率 = (阻断 + 通过) / total  (已有明确结论的比例)
     base = select(
         bucket.label("b"),
         func.sum(case((ReviewTask.machine_result["risk_level"].astext == "高风险", 1), else_=0)).label("rej"),
-        func.sum(case((ReviewTask.machine_result["risk_level"].astext == "无风险", 1), else_=0)).label("apr"),
-        func.sum(case((ReviewTask.machine_result["risk_level"].astext == "低风险", 1), else_=0)).label("low"),
+        func.sum(case((ReviewTask.machine_result["risk_level"].astext == "无风险", 1), else_=0)).label("apr_none"),
+        func.sum(case((ReviewTask.machine_result["risk_level"].astext == "低风险", 1), else_=0)).label("apr_low"),
         func.count().label("sub"),
     ).select_from(
         Material.__table__.join(
@@ -804,23 +804,22 @@ async def anomaly(
     stmt = base.group_by("b").order_by("b")
     rows = (await db.execute(stmt)).all()
 
-    # Reviewed counts — review_rate = (高风险 + 中风险) / total = 需要人审的比例
+    # 审核率 = (阻断 + 通过) / total = (rej + apr) / total
     rev_map: dict = {}
 
     series: List[dict] = []
     for r in rows:
         sub = int(r.sub or 0)
-        rej = int(r.rej or 0)  # 高风险
-        apr = int(r.apr or 0)  # 无风险
-        low = int(r.low or 0)  # 低风险
-        # 待复核 = 高风险 + 中风险 = total - 无风险 - 低风险
-        rev = sub - apr - low
+        rej = int(r.rej or 0)  # 高风险 = 阻断
+        apr = int(r.apr_none or 0) + int(r.apr_low or 0)  # 无风险 + 低风险 = 通过
+        # 审核率 = (阻断 + 通过) / total
+        reviewed = rej + apr
         series.append(
             {
                 "bucket": r.b.isoformat() if isinstance(r.b, datetime) else str(r.b),
                 "reject_rate": _safe_pct(rej, sub),
-                "review_rate": _safe_pct(rev, sub),
-                "approve_rate": _safe_pct(apr + low, sub),
+                "review_rate": _safe_pct(reviewed, sub),
+                "approve_rate": _safe_pct(apr, sub),
                 "submitted": sub,
             }
         )
