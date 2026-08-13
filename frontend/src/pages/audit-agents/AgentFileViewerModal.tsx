@@ -52,7 +52,7 @@ export default function AgentFileViewerModal({
             <Table
               size="small"
               pagination={false}
-              rowKey={(r) => r.label}
+              rowKey={(r, i) => `${r.label}-${i}`}
               style={{ marginTop: 12 }}
               dataSource={points}
               columns={[

@@ -241,6 +241,18 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
     onAddOptimizedConfig?.(cfg)
   }
 
+  const handleAddPoints = (points: { label: string; desc: string }[]) => {
+    const newRows = points
+      .filter((p) => p.label.trim())
+      .map((p) => ({ id: genId(), label: p.label.trim(), desc: p.desc ?? '' }))
+    if (newRows.length === 0) {
+      message.warning('没有可用的审核点')
+      return
+    }
+    setRows((prev) => [...prev, ...newRows])
+    message.success(`已加入 ${newRows.length} 条审核标签到配置`)
+  }
+
   const handleOk = () => {
     if (!name.trim()) {
       message.warning('请输入智能体名称')
@@ -476,6 +488,7 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
         open={aiDrawerOpen}
         onClose={() => onAiDrawerOpenChange(false)}
         onAddConfig={handleAddOptimizedConfig}
+        onAddPoints={handleAddPoints}
         rowsCount={rows.length}
         initialOriginal={
           rows[0]?.label && rows[0]?.desc ? `${rows[0].label}:${rows[0].desc}` : undefined

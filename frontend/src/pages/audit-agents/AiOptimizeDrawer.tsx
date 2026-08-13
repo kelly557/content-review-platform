@@ -47,6 +47,7 @@ interface AiOptimizeDrawerProps {
   open: boolean
   onClose: () => void
   onAddConfig: (cfg: { label: string; desc: string }) => void
+  onAddPoints?: (points: { label: string; desc: string }[]) => void
   initialOriginal?: string
   rowsCount: number
 }
@@ -83,6 +84,7 @@ export default function AiOptimizeDrawer({
   open,
   onClose,
   onAddConfig,
+  onAddPoints,
   initialOriginal,
   rowsCount,
 }: AiOptimizeDrawerProps) {
@@ -386,6 +388,7 @@ export default function AiOptimizeDrawer({
                       onRemove={handleRemoveDoc}
                       onDownload={handleDownloadDoc}
                       onView={(doc) => setViewingDoc(doc)}
+                      onAddPoints={onAddPoints}
                     />
                   ) : (
                     <TextArea
