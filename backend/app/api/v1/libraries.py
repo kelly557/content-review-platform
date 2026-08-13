@@ -690,7 +690,7 @@ async def create_library(
     if bound_tag is not None:
         from app.models.library_tag import LibraryTag
 
-        db.add(LibraryTag(library_id=lib.id, tag_id=bound_tag.id))
+        db.add(LibraryTag(library_id=lib.id, tag_id=bound_tag["id"]))
 
     if body.library_type == LibraryType.WORD and body.words:
         seen: set[str] = set()
@@ -791,7 +791,7 @@ async def batch_create_libraries(
             if bound_tag is not None:
                 from app.models.library_tag import LibraryTag
 
-                db.add(LibraryTag(library_id=lib.id, tag_id=bound_tag.id))
+                db.add(LibraryTag(library_id=lib.id, tag_id=bound_tag["id"]))
 
             if item.library_type in (LibraryType.WORD, LibraryType.REPLY) and item.words:
                 seen: set[str] = set()
@@ -923,7 +923,7 @@ async def update_library(
                     LibraryTag.library_id == lib.id
                 )
             )
-            db.add(LibraryTag(library_id=lib.id, tag_id=new_tag.id))
+            db.add(LibraryTag(library_id=lib.id, tag_id=new_tag["id"]))
 
     await db.flush()
     await db.refresh(lib)
