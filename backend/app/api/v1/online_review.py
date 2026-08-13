@@ -637,10 +637,10 @@ async def _run_agent_detection(
                 if p["label_cn"] == label:
                     agent_name = p.get("agent_name", "")
                     break
-            prefixed_label = f"{agent_name}:{label}" if agent_name and label else (label or "智能体违规")
+            prefixed_label = f"{agent_name}智能体/{label}" if agent_name and label else (label or "智能体违规")
             hits.append({
                 "service_code": "agent",
-                "service_name": agent_name or "审核智能体",
+                "service_name": f"{agent_name}智能体" if agent_name else "审核智能体",
                 "label": label or "agent_violation",
                 "label_cn": prefixed_label,
                 "score": 1.0,
