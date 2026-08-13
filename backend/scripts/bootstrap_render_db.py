@@ -3,7 +3,9 @@
 Strategy:
 - Fresh empty DB: create current schema from ORM metadata, stamp alembic head,
   then run one-time seed.
-- Existing DB: run normal ``alembic upgrade head`` and never auto-seed.
+- Existing DB with valid alembic version: run normal ``alembic upgrade head``.
+- Existing DB with partial/broken schema (no alembic version or upgrade fails):
+  DROP schema and rebuild from ORM models.
 """
 from __future__ import annotations
 
@@ -35,12 +37,21 @@ async def _table_exists(table_name: str) -> bool:
 
 
 async def _is_fresh_db() -> bool:
-    # Treat the DB as fresh only when neither alembic state nor core app tables exist.
+    """Fresh = no core tables at all."""
     has_alembic = await _table_exists("alembic_version")
     has_users = await _table_exists("users")
     has_strategies = await _table_exists("strategies")
     has_libraries = await _table_exists("libraries")
     return not any((has_alembic, has_users, has_strategies, has_libraries))
+
+
+async def _drop_and_rebuild() -> None:
+    """DROP public schema and recreate from ORM models (nuclear option)."""
+    print("[bootstrap_render_db] DROP SCHEMA public CASCADE + create_all", flush=True)
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+        await conn.run_sync(Base.metadata.create_all)
 
 
 async def _create_schema_from_models() -> None:
@@ -64,7 +75,6 @@ def _run(cmd: list[str], *, extra_env: dict[str, str] | None = None) -> None:
         raise subprocess.CalledProcessError(
             result.returncode, cmd, result.stdout, result.stderr
         )
-    # 打印成功时的 stdout/stderr 供 Render 日志排查
     if result.stdout.strip():
         print(f"[bootstrap_render_db] {' '.join(cmd)} stdout:\n{result.stdout}", flush=True)
     if result.stderr.strip():
@@ -74,10 +84,10 @@ def _run(cmd: list[str], *, extra_env: dict[str, str] | None = None) -> None:
 async def main() -> int:
     fresh = await _is_fresh_db()
     if fresh:
-        print("[bootstrap_render_db] fresh DB detected; create_all + alembic stamp head + seed")
+        print("[bootstrap_render_db] fresh DB; create_all + stamp head + seed")
         await _create_schema_from_models()
     else:
-        print("[bootstrap_render_db] existing DB detected; alembic upgrade head")
+        print("[bootstrap_render_db] existing DB; alembic upgrade head")
     await engine.dispose()
 
     if fresh:
@@ -90,12 +100,13 @@ async def main() -> int:
         try:
             _run(["alembic", "upgrade", "head"])
         except subprocess.CalledProcessError:
-            print("[bootstrap_render_db] alembic upgrade failed; falling back to create_all + stamp head", flush=True)
-            # 如果迁移链有问题, 回退到从 ORM 模型直接建表 + stamp head
-            # 这对于 Render 全新部署后部分迁移失败的场景更可靠
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
+            print("[bootstrap_render_db] alembic upgrade failed; DROP+rebuild from models", flush=True)
+            await _drop_and_rebuild()
             _run(["alembic", "stamp", "head"])
+            _run(
+                [sys.executable, "scripts/seed.py", "--allow-reseed"],
+                extra_env={"RESEED_ALLOWED": "YES"},
+            )
 
     _run(
         [
