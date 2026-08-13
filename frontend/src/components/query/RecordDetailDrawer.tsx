@@ -60,7 +60,9 @@ function FilePreview({ record }: { record: DetailRecord }) {
       return
     }
     let revoke: string | null = null
-    api.get(url, { responseType: 'blob' })
+    // url 含 /api/v1 前缀, api baseURL 也是 /api/v1 → 去掉前缀避免重复
+    const fetchUrl = url.replace(/^\/api\/v1/, '')
+    api.get(fetchUrl, { responseType: 'blob' })
       .then((res) => {
         const u = URL.createObjectURL(res.data)
         revoke = u

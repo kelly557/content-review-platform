@@ -63,11 +63,13 @@ export default function ContentPreviewCell({ record, onPreview }: Props) {
       return
     }
     let revoke: string | null = null
-    api.get(previewUrl, { responseType: 'blob' })
+    // previewUrl 含 /api/v1 前缀, api baseURL 也是 /api/v1 → 去掉前缀避免重复
+    const url = previewUrl.replace(/^\/api\/v1/, '')
+    api.get(url, { responseType: 'blob' })
       .then((res) => {
-        const url = URL.createObjectURL(res.data)
-        revoke = url
-        setBlobUrl(url)
+        const u = URL.createObjectURL(res.data)
+        revoke = u
+        setBlobUrl(u)
       })
       .catch(() => setImgFailed(true))
     return () => {
