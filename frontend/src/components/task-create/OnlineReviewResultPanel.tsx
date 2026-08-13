@@ -1,12 +1,25 @@
-import { Alert, Collapse, Spin, Tag, Typography } from 'antd'
+import { Alert, Collapse, Spin, Table, Tag, Typography } from 'antd'
 import JsonTreeView from './JsonTreeView'
-import type { OnlineReviewRequest, OnlineReviewResponse } from '@/api/onlineReviewTypes'
+import type { OnlineReviewHit, OnlineReviewRequest, OnlineReviewResponse } from '@/api/onlineReviewTypes'
 import { colors } from '@/styles/theme'
 
 const { Text } = Typography
 
 const MONO_FONT =
   'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
+
+const RISK_COLOR: Record<string, string> = {
+  高风险: 'red',
+  中风险: 'orange',
+  低风险: 'gold',
+  敏感: 'magenta',
+  无风险: 'default',
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  'rules.llm': '大模型',
+  'rules.local_wordset': '词库',
+}
 
 export type OnlineReviewResultState = 'idle' | 'loading' | 'done' | 'error'
 
@@ -38,7 +51,7 @@ function EmptyState() {
         }}
       />
       <Text style={{ color: colors.secondary, fontSize: 13, display: 'block' }}>
-        点击「检测」后，请求与响应数据将出现在此
+        点击「检测」后，结果将出现在此
       </Text>
     </div>
   )
@@ -109,6 +122,61 @@ function ResultSummary({ response, latencyMs }: { response: OnlineReviewResponse
   )
 }
 
+/** 命中标签结果列表: 直接展示命中的审核标签 + 违规原文 + 风险等级 + 来源 */
+function HitList({ hits }: { hits: OnlineReviewHit[] }) {
+  if (hits.length === 0) {
+    return (
+      <div style={{ padding: '16px 0', textAlign: 'center' }}>
+        <Text type="secondary">未检测到风险内容</Text>
+      </div>
+    )
+  }
+  return (
+    <Table<OnlineReviewHit>
+      size="small"
+      rowKey={(r, i) => `${r.rule_code}-${i}`}
+      pagination={false}
+      dataSource={hits}
+      columns={[
+        {
+          title: '审核标签',
+          dataIndex: 'rule_label',
+          width: '24%',
+          render: (v: string) => <Text strong>{v}</Text>,
+        },
+        {
+          title: '违规原文',
+          dataIndex: 'matched_text',
+          render: (v?: string) =>
+            v ? (
+              <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                {v}
+              </Text>
+            ) : (
+              <Text type="secondary">—</Text>
+            ),
+        },
+        {
+          title: '风险等级',
+          dataIndex: 'risk_level',
+          width: 90,
+          render: (v: string) => (
+            <Tag color={RISK_COLOR[v] ?? 'default'} bordered={false}>
+              {v}
+            </Tag>
+          ),
+        },
+        {
+          title: '来源',
+          dataIndex: 'source',
+          width: 80,
+          render: (v: string) => SOURCE_LABEL[v] ?? v,
+        },
+      ]}
+    />
+  )
+}
+
 export default function OnlineReviewResultPanel({
   state,
   request,
@@ -132,6 +200,7 @@ export default function OnlineReviewResultPanel({
     )
   }
 
+  const hits = response?.data?.[0]?.hits ?? []
   const items = [
     {
       key: 'request',
@@ -209,9 +278,24 @@ export default function OnlineReviewResultPanel({
           style={{ fontSize: 12 }}
         />
       )}
+      {/* 命中标签结果直接展示 (不再只藏在 JSON 树里) */}
+      {response && (
+        <div
+          style={{
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 6,
+            padding: 12,
+          }}
+        >
+          <div style={{ marginBottom: 8 }}>
+            <Text strong>命中标签结果</Text>
+          </div>
+          <HitList hits={hits} />
+        </div>
+      )}
       <Collapse
         accordion
-        defaultActiveKey={['response']}
         items={items}
         size="small"
         style={{

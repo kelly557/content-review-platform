@@ -525,6 +525,25 @@ async def _persist_to_review_task(
 # 主入口
 # ---------------------------------------------------------------------------
 
+# 在线审核结果缓存: 相同 (文本+策略+模型) 短期内直接返回, 避免重复调 LLM.
+# TTL 10 分钟, 最多 200 条 (LRU 淘汰). 仅缓存成功结果 (llm_error=None).
+import hashlib
+from datetime import timedelta
+
+_DETECT_CACHE_TTL_SEC = 600
+_DETECT_CACHE_MAX = 200
+_detect_cache: dict[str, tuple[float, OnlineReviewResponse]] = {}
+
+
+def _cache_key(text: str, strategy_id: Optional[int], model_id: Optional[int]) -> str:
+    raw = f"{text}|{strategy_id}|{model_id}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def clear_detect_cache() -> None:
+    """清空在线审核结果缓存 (测试用)."""
+    _detect_cache.clear()
+
 
 @router.post("/detect", response_model=OnlineReviewResponse)
 async def detect(
@@ -545,6 +564,18 @@ async def detect(
     strat, strat_id_for_brief = await _load_strategy(db, body.strategy_id)
     enabled_services = _services_from_strategy(strat)
     llm_enabled, model_id = _llm_review_config(strat)
+
+    # 缓存命中: 相同 (文本+策略+模型) 在 TTL 内直接返回, 跳过词库+LLM
+    ck = _cache_key(full_text, strat.id if strat else None, model_id)
+    now_ts = time.time()
+    cached = _detect_cache.get(ck)
+    if cached and (now_ts - cached[0]) < _DETECT_CACHE_TTL_SEC:
+        cached_resp = cached[1]
+        # 重新算 latency (展示为缓存命中, 近似 0)
+        cached_resp.latency_ms = max(1, int((time.time() - started) * 1000))
+        log.info("online-review cache hit key=%s..", ck[:12])
+        return cached_resp
+
     audit_points = await _load_strategy_audit_points(db, strat)
     linked_library_ids = await _load_strategy_linked_library_ids(db, strat)
 
@@ -581,14 +612,16 @@ async def detect(
     if llm_enabled and not llm_error:
         engines_used.append("llm")
 
-    # 聚合风险等级
-    from app.tasks.machine_review import aggregate_risk_level
-
-    risk_level = aggregate_risk_level(hits) if hits else RiskLevel.NONE.value
+    # 聚合风险等级: 命中即高风险 (按需求, 命中直接展示高风险)
+    risk_level = RiskLevel.HIGH.value if hits else RiskLevel.NONE.value
     conclusion, conclusion_type = _risk_level_to_conclusion(risk_level)
 
     data: List[OnlineReviewDataItem] = []
     if hits:
+        # 命中的 risk_level 统一为高风险展示
+        for h in hits:
+            if not h.get("risk") and not h.get("risk_level"):
+                h["risk"] = RiskLevel.HIGH.value
         resp_hits = [_hit_to_response(h) for h in hits]
         msg = f"检测到 {len(hits)} 条命中，风险等级：{risk_level}"
         data.append(OnlineReviewDataItem(msg=msg, conclusion=conclusion, hits=resp_hits))
@@ -629,7 +662,7 @@ async def detect(
     except Exception as exc:
         log.warning("online-review audit commit failed: %s", exc)
 
-    return OnlineReviewResponse(
+    response = OnlineReviewResponse(
         conclusion=conclusion,
         log_id=task_id,
         conclusionType=conclusion_type,
@@ -640,6 +673,16 @@ async def detect(
         model=model_name,
         llm_error=llm_error,
     )
+
+    # 写缓存: 仅缓存无 LLM 错误的成功结果 (LRU 淘汰)
+    if not llm_error:
+        if len(_detect_cache) >= _DETECT_CACHE_MAX:
+            # 淘汰最旧的一条
+            oldest = min(_detect_cache, key=lambda k: _detect_cache[k][0])
+            _detect_cache.pop(oldest, None)
+        _detect_cache[ck] = (time.time(), response)
+
+    return response
 
 
 # ---------------------------------------------------------------------------

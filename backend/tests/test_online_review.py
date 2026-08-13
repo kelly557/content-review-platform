@@ -7,12 +7,20 @@ from __future__ import annotations
 
 import pytest
 
+from app.api.v1.online_review import clear_detect_cache
 from app.models.library import Library, LibraryKind, LibraryType
 from app.models.library_item import LibraryItem
 from app.models.strategy import Strategy, StrategyScope
 from app.models.workflow import WorkflowTemplate
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """每个测试前清空在线审核结果缓存, 避免跨测试污染."""
+    clear_detect_cache()
+    yield
 
 
 async def _login(client, email: str, password: str) -> None:
