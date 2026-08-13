@@ -62,15 +62,8 @@ export function LlmReviewCard({ value, onChange, enabledMediaTypes = [] }: Props
     return allOptions.filter((m) => m.large_category === 'multimodal')
   }, [allOptions, needsMultimodal])
 
-  // 过滤后当前选中模型不在列表中 → 自动清空（多模态兼容文本，无需提示）
-  useEffect(() => {
-    if (value.model_id && needsMultimodal) {
-      const stillValid = options.some((m) => m.id === value.model_id)
-      if (!stillValid) {
-        onChange({ ...value, model_id: null, needs_multimodal_hint: false })
-      }
-    }
-  }, [options, value.model_id, needsMultimodal])
+  // 注意: 不在加载时自动清空 model_id — 即使策略需要多模态而当前选的是文本模型,
+  // 也只做提示, 由用户决定是否更换. 自动清空会导致编辑已保存策略时大模型被重置.
 
   const pickedModel = useMemo(
     () => (value.model_id ? options.find((m) => m.id === value.model_id) ?? null : null),
@@ -157,6 +150,12 @@ export function LlmReviewCard({ value, onChange, enabledMediaTypes = [] }: Props
         <Text type="secondary" style={{ fontSize: 12 }}>
           开启后，策略下所有启用的通用审核规则在机审时都会叠加大模型的审核能力。
         </Text>
+
+        {value.is_enabled && needsMultimodal && pickedModel?.large_category === 'text' && (
+          <Tag color="orange" bordered={false}>
+            当前策略含图片/音视频审核，建议选择多模态大模型
+          </Tag>
+        )}
 
         {value.is_enabled && (
           <Space direction="vertical" size={4} style={{ width: '100%' }}>

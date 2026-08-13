@@ -269,6 +269,14 @@ export default function CreateStrategyForm({
     setImageTextConfig(extractImageTextConfig(initial.definition))
     setImageTextPointMap(extractImageTextPoints(initial.definition))
     setReviewAgentIds(extractReviewAgentIds(initial.definition))
+    // 检测强度: 从 definition 恢复档位 + 开关 (未存则默认 中档/关)
+    const defObj = (initial.definition ?? {}) as Record<string, unknown>
+    if (defObj.intensity === 'low' || defObj.intensity === 'medium' || defObj.intensity === 'high') {
+      setIntensity(defObj.intensity as Intensity)
+    } else {
+      setIntensity(DEFAULT_INTENSITY)
+    }
+    setIntensityEnabled(!!defObj.intensity_enabled)
     const from = initial.effective_from ? dayjs(initial.effective_from) : null
     const until = initial.effective_until ? dayjs(initial.effective_until) : null
     const useRange = !!(from && until)
@@ -455,6 +463,9 @@ export default function CreateStrategyForm({
     }
     // 审核智能体（按模态启用的已发布智能体 id 列表）
     out.review_agent_ids = reviewAgentIds
+    // 检测强度档位 + 开关 (持久化, 否则编辑时被重置)
+    out.intensity = intensity
+    out.intensity_enabled = intensityEnabled
 
     return Object.keys(out).length > 0 ? out : undefined
   }

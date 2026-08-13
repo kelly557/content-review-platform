@@ -880,6 +880,20 @@ async def update_strategy(
         merged_def = _merge_doc_modes(merged_def, doc_modes)
         merged_def = _merge_video_modes(merged_def, video_modes)
         merged_def = _merge_video_frame_interval(merged_def, video_frame_interval)
+        # 检测强度档位 + 开关: 透传前端提交值 (缺省保留旧值)
+        if "intensity" in def_in:
+            merged_def["intensity"] = def_in["intensity"]
+        if "intensity_enabled" in def_in:
+            merged_def["intensity_enabled"] = def_in["intensity_enabled"]
+        # review_agent_ids / image_text_* 等前端透传字段也保留 (非破坏性)
+        for passthrough_key in (
+            "review_agent_ids",
+            "image_text_enabled",
+            "image_text_mode",
+            "image_text_points",
+        ):
+            if passthrough_key in def_in:
+                merged_def[passthrough_key] = def_in[passthrough_key]
         # 保留 enabled_point_overrides（已被 _replace_enabled_points 写过）
         strategy.definition = merged_def
 
