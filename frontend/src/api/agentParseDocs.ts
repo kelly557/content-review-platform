@@ -81,7 +81,27 @@ interface ParseDocApiResponse {
 }
 
 /**
+ * 文件内容 hash → 解析结果缓存 (会话级, 避免同一文件反复上传重复调 LLM).
+ * key = 文件内容的 SHA-256, value = 解析结果.
+ */
+interface CachedParseResult {
+  preview: string
+  charCount: number
+  points: { label: string; desc: string }[]
+}
+const _parseCache = new Map<string, CachedParseResult>()
+
+async function _hashFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer()
+  const digest = await crypto.subtle.digest('SHA-256', buf)
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+/**
  * 调用后端文档解析端点，返回解析出的文本预览与审核点。
+ * 同一文件内容 (SHA-256 相同) 会命中会话缓存, 不重复调 LLM。
  * onProgress 仅在开始/结束回调（后端一次性返回，无中间进度）。
  */
 export async function runParseDoc(
@@ -90,6 +110,26 @@ export async function runParseDoc(
 ): Promise<Pick<AgentParseDocument, 'status' | 'preview' | 'charCount' | 'durationMs' | 'message' | 'points'>> {
   const startedAt = Date.now()
   opts.onProgress?.(30)
+
+  // 1) 命中缓存: 同文件内容直接返回, 不调后端
+  try {
+    const hash = await _hashFile(doc.file)
+    const cached = _parseCache.get(hash)
+    if (cached) {
+      opts.onProgress?.(100)
+      return {
+        status: 'success',
+        preview: cached.preview,
+        charCount: cached.charCount,
+        durationMs: Date.now() - startedAt,
+        points: cached.points,
+      }
+    }
+  } catch {
+    // hash 失败 (如 crypto 不可用) 降级为正常请求
+  }
+
+  // 2) 未命中: 调后端解析
   const fd = new FormData()
   fd.append('file', doc.file)
   try {
@@ -97,13 +137,25 @@ export async function runParseDoc(
       headers: { 'Content-Type': 'multipart/form-data' },
     })
     opts.onProgress?.(100)
-    return {
-      status: 'success',
+    const result = {
+      status: 'success' as const,
       preview: data.preview || (await readTextPreview(doc.file)),
       charCount: data.char_count,
       durationMs: Date.now() - startedAt,
       points: data.points ?? [],
     }
+    // 写入缓存
+    try {
+      const hash = await _hashFile(doc.file)
+      _parseCache.set(hash, {
+        preview: result.preview,
+        charCount: result.charCount,
+        points: result.points,
+      })
+    } catch {
+      // ignore
+    }
+    return result
   } catch (e) {
     const err = e as { response?: { data?: { detail?: string } }; code?: string; message?: string }
     const detail = err?.response?.data?.detail

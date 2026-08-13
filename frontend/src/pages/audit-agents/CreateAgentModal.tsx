@@ -245,19 +245,26 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
           next = prev.map((r, i) => (i === 0 ? { ...r, label: cfg.label, desc: cfg.desc } : r))
         }
       }
-      // 追加解析出的审核点为新行
+      // 追加解析出的审核点为新行; 按 (label+desc) 去重, 已存在的不重复加
       if (points && points.length > 0) {
-        const newRows = points
+        const existing = new Set(next.map((r) => `${r.label.trim()}|${(r.desc ?? '').trim()}`))
+        const deduped = points
           .filter((p) => p.label.trim())
+          .filter((p) => {
+            const key = `${p.label.trim()}|${(p.desc ?? '').trim()}`
+            if (existing.has(key)) return false
+            existing.add(key)
+            return true
+          })
           .map((p) => ({ id: genId(), label: p.label.trim(), desc: p.desc ?? '' }))
-        next = [...next, ...newRows]
+        next = [...next, ...deduped]
       }
       return next
     })
     onAiDrawerOpenChange(false)
     const parts: string[] = []
     if (cfg.label.trim() || cfg.desc.trim()) parts.push('已替换首条审核标签')
-    if (points && points.length > 0) parts.push(`加入 ${points.length} 条解析审核点`)
+    if (points && points.length > 0) parts.push('已加入解析审核点（重复已跳过）')
     message.success(parts.join('，') || '已添加配置')
     onAddOptimizedConfig?.(cfg)
   }
