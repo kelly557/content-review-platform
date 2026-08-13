@@ -618,10 +618,10 @@ async def detect(
 
     data: List[OnlineReviewDataItem] = []
     if hits:
-        # 命中的 risk_level 统一为高风险展示
+        # 命中即高风险: 强制所有 hit 的风险等级统一为高风险 (覆盖 LLM 自评的中/低风险)
         for h in hits:
-            if not h.get("risk") and not h.get("risk_level"):
-                h["risk"] = RiskLevel.HIGH.value
+            h["risk"] = RiskLevel.HIGH.value
+            h["risk_level"] = RiskLevel.HIGH.value
         resp_hits = [_hit_to_response(h) for h in hits]
         msg = f"检测到 {len(hits)} 条命中，风险等级：{risk_level}"
         data.append(OnlineReviewDataItem(msg=msg, conclusion=conclusion, hits=resp_hits))
