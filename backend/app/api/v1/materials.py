@@ -222,10 +222,13 @@ async def download_version(
     if not version or version.material_id != material_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="version not found")
     stream = storage.open_stream(version.storage_key)
+    # 图片/音频/视频内联展示, 其他类型下载
+    is_inline = (version.mime_type or "").startswith(("image/", "audio/", "video/", "text/"))
+    disposition = "inline" if is_inline else "attachment"
     return StreamingResponse(
         stream,
         media_type=version.mime_type,
-        headers={"Content-Disposition": f'attachment; filename="{version.original_filename}"'},
+        headers={"Content-Disposition": f'{disposition}; filename="{version.original_filename}"'},
     )
 
 

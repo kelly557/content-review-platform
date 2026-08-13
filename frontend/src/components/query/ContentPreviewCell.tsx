@@ -1,5 +1,6 @@
 import { ZoomInOutlined } from '@ant-design/icons'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { api } from '@/api/client'
 import type { MachineReviewRecord } from '@/types/domain'
 
 const TEXT_PREVIEW_LIMIT = 64
@@ -53,6 +54,26 @@ export default function ContentPreviewCell({ record, onPreview }: Props) {
   const media = record.content_media
   const previewUrl = record.preview_url
   const [imgFailed, setImgFailed] = useState(false)
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+
+  // 图片需要 auth header, <img> 标签不带 token → 用 axios 取 blob URL
+  useEffect(() => {
+    if (media !== 'image' || !previewUrl || imgFailed) {
+      setBlobUrl(null)
+      return
+    }
+    let revoke: string | null = null
+    api.get(previewUrl, { responseType: 'blob' })
+      .then((res) => {
+        const url = URL.createObjectURL(res.data)
+        revoke = url
+        setBlobUrl(url)
+      })
+      .catch(() => setImgFailed(true))
+    return () => {
+      if (revoke) URL.revokeObjectURL(revoke)
+    }
+  }, [media, previewUrl, imgFailed])
 
   if (!media) {
     return <span style={{ color: '#94A3B8' }}>—</span>
@@ -62,7 +83,7 @@ export default function ContentPreviewCell({ record, onPreview }: Props) {
 
   // 文本素材, 或图片素材无预览/图片加载失败时回退到文本展示
   const textSummary = summarizeText(record.text_body)
-  if (media === 'text' || (media === 'image' && (!previewUrl || imgFailed))) {
+  if (media === 'text' || (media === 'image' && (!previewUrl || imgFailed || !blobUrl))) {
     return (
       <span
         role="button"
@@ -109,7 +130,7 @@ export default function ContentPreviewCell({ record, onPreview }: Props) {
         style={wrapperStyle}
       >
         <img
-          src={previewUrl ?? undefined}
+          src={blobUrl ?? undefined}
           alt="缩略图"
           onError={() => setImgFailed(true)}
           style={{

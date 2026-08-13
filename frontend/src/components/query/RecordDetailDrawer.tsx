@@ -1,6 +1,7 @@
 import { Button, Drawer, Empty, Space, Tag, message } from 'antd'
 import { CopyOutlined } from '@ant-design/icons'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { api } from '@/api/client'
 import type { MachineHit, MachineReviewRecord, ReviewRecord } from '@/types/domain'
 import { MACHINE_DECISION_OPTIONS } from '@/types/domain'
 
@@ -50,11 +51,31 @@ function FilePreview({ record }: { record: DetailRecord }) {
   const media = r.content_media
   const url = previewUrlFor(record)
   const [imgFailed, setImgFailed] = useState(false)
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+
+  // 图片需要 auth header, <img> 不带 token → axios 取 blob URL
+  useEffect(() => {
+    if (media !== 'image' || !url || imgFailed) {
+      setBlobUrl(null)
+      return
+    }
+    let revoke: string | null = null
+    api.get(url, { responseType: 'blob' })
+      .then((res) => {
+        const u = URL.createObjectURL(res.data)
+        revoke = u
+        setBlobUrl(u)
+      })
+      .catch(() => setImgFailed(true))
+    return () => {
+      if (revoke) URL.revokeObjectURL(revoke)
+    }
+  }, [media, url, imgFailed])
 
   if (!media) return <Empty description="无素材信息" />
 
   // 图片素材但无有效预览 URL 或加载失败 → 回退到文本展示
-  if (media === 'image' && (!url || imgFailed)) {
+  if (media === 'image' && (!url || imgFailed || !blobUrl)) {
     const body = (r.text_body ?? '').trim()
     return (
       <div
@@ -101,11 +122,11 @@ function FilePreview({ record }: { record: DetailRecord }) {
 
   if (!url) return <Empty description="无可用预览" />
 
-  if (media === 'image') {
+  if (media === 'image' && blobUrl) {
     return (
       <div style={{ padding: 8, background: '#0F172A', borderRadius: 6, textAlign: 'center' }}>
         <img
-          src={url}
+          src={blobUrl}
           alt="素材"
           onError={() => setImgFailed(true)}
           style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain', borderRadius: 4 }}

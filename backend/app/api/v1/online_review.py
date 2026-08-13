@@ -567,6 +567,7 @@ async def _persist_to_review_task(
     correlation_id: Optional[str],
     input_items: List[OnlineReviewItem],
     input_preview: str,
+    image_base64: Optional[str] = None,
 ) -> int:
     """将在线审核结果落 review_tasks (统一审核结果存储).
 
@@ -617,15 +618,53 @@ async def _persist_to_review_task(
     db.add(material)
     await db.flush()
 
-    # 2) 占位 MaterialVersion (text_body 存完整输入文本)
+    # 2) MaterialVersion — 图片模式保存图片文件, 文本模式存 text_body
+    storage_key = f"online-review/{material.id}"
+    mime_type = "text/plain"
+    file_size = len(input_preview.encode("utf-8")) if input_preview else 0
+    text_body = input_preview
+    original_filename = preview[:255] or "online-review.txt"
+
+    if image_base64 and mat_type in (MaterialType.IMAGE, MaterialType.VIDEO):
+        # 解码 base64 保存到 storage/uploads/materials/{id}/v1/
+        import base64
+        import hashlib
+        from app.services import storage as storage_svc
+
+        # 去掉 data:image/xxx;base64, 前缀
+        raw_b64 = image_base64
+        if "," in raw_b64 and raw_b64.startswith("data:"):
+            header, raw_b64 = raw_b64.split(",", 1)
+            # 从 data:image/jpeg;base64 提取 mime
+            if "image/" in header:
+                mime_type = header.split("image/")[1].split(";")[0]
+                mime_type = f"image/{mime_type}"
+        try:
+            img_bytes = base64.b64decode(raw_b64)
+            file_size = len(img_bytes)
+            sha = hashlib.sha256(img_bytes).hexdigest()[:12]
+            ext = "jpg"
+            if mime_type == "image/png":
+                ext = "png"
+            elif mime_type == "image/webp":
+                ext = "webp"
+            storage_key = f"materials/{material.id}/v1/{sha}.{ext}"
+            dest = settings.storage_root / "uploads" / storage_key
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(img_bytes)
+            original_filename = f"online-review-{sha}.{ext}"
+            # 图片模式不存 text_body (text_body 是输入文本, 不是图片内容)
+        except Exception as exc:
+            log.warning("online-review: failed to save image file: %s", exc)
+
     version = MaterialVersion(
         material_id=material.id,
         version_no=1,
-        storage_key=f"online-review/{material.id}",
-        original_filename=preview[:255],
-        mime_type="text/plain",
-        file_size=len(input_preview.encode("utf-8")) if input_preview else 0,
-        text_body=input_preview,
+        storage_key=storage_key,
+        original_filename=original_filename,
+        mime_type=mime_type,
+        file_size=file_size,
+        text_body=text_body if mat_type == MaterialType.TEXT else None,
         created_by_id=user.id,
     )
     db.add(version)
@@ -867,6 +906,12 @@ async def detect(
         strat_brief = StrategyBrief(id=strat.id, name=strat.name)
 
     # 落 review_tasks (统一审核结果存储, /query 和 /reports 直接可读)
+    # 图片模式: 传第一张图片的 base64 用于保存文件
+    first_image_b64 = None
+    if is_image_mode:
+        first_image_b64 = next(
+            (it.image_base64 for it in body.items if it.image_base64), None
+        )
     task_id = await _persist_to_review_task(
         db,
         user=user,
@@ -883,6 +928,7 @@ async def detect(
         correlation_id=correlation_id,
         input_items=body.items,
         input_preview=full_text,
+        image_base64=first_image_b64,
     )
 
     # 提交以落 llm_calls 审计行 + review_tasks (record_llm_call 只 flush
