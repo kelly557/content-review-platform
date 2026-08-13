@@ -239,21 +239,21 @@ export default function AiOptimizeDrawer({
         original_label: originalLabel,
         docs_context: docsContext || undefined,
       })
-      // 后端返回结构与 AiOptimizeResult 对齐；cases.kind 需收窄为字面量
+      // 后端返回结构与 AiOptimizeResult 对齐；cases.kind 兼容中英文 ('compliant'/'合规' → 合规)
       setResult({
         original: next.original,
-        issues: next.issues,
-        checklist: next.checklist,
-        scenarioNote: next.scenarioNote,
+        issues: next.issues ?? [],
+        checklist: next.checklist ?? [],
+        scenarioNote: next.scenarioNote ?? '',
         cases: {
           note: next.cases?.note ?? '',
           examples: (next.cases?.examples ?? []).map((e) => ({
-            kind: (e.kind === 'compliant' ? 'compliant' : 'violation') as 'compliant' | 'violation',
+            kind: (e.kind === 'compliant' || e.kind === '合规' ? 'compliant' : 'violation') as 'compliant' | 'violation',
             text: e.text,
           })),
         },
         direction: next.direction,
-        finalTag: next.finalTag,
+        finalTag: next.finalTag ?? { name: '', description: '' },
       })
       message.success(
         successDocs.length > 0

@@ -442,7 +442,9 @@ async def ai_optimize(
         f"方向：{direction}\n原始标签：{original}\n"
         "直接输出 JSON 对象（不要任何思考过程、解释或 markdown 围栏），schema：\n"
         '{"issues":[{"label":"","text":""}],"checklist":[""],"scenarioNote":"",'
-        '"cases":{"note":"","examples":[{"kind":"","text":""}]},"finalTag":{"name":"","description":""}}'
+        '"cases":{"note":"","examples":[{"kind":"","text":""}]},"finalTag":{"name":"","description":""}}\n'
+        "约束：cases.examples[].kind 只能是英文 'compliant'（合规）或 'violation'（违规），"
+        "不得用中文；finalTag.name 精简到 15 字以内。"
     )
     correlation_id = uuid.uuid4().hex
     try:
