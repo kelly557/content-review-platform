@@ -26,9 +26,12 @@ function decisionMeta(v?: string | null) {
 }
 
 function riskLabelPath(h: MachineHit): string {
+  // label_cn 已含级联分隔符(如"药品广告法智能体/特殊管理药品禁止网售")时直接返回
+  const sub = h.label_cn || h.label || ''
+  if (sub.includes('/')) return sub
+  // 否则用 audit_item/audit_point/label_cn 三段拼级联
   const item = h.audit_item_label || ''
   const point = h.audit_point_label || ''
-  const sub = h.label_cn || h.label || ''
   return [item, point, sub].filter(Boolean).join(' / ')
 }
 
