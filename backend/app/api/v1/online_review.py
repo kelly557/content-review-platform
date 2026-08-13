@@ -357,8 +357,12 @@ async def _run_image_llm_detection(
     audit_points: List[Dict[str, Any]],
     llm_enabled: bool,
     model_id: Optional[int],
+    text_audit_points: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[Dict[str, Any]], Optional[str], Optional[str], Optional[str]]:
     """图片多模态 LLM 检测.
+
+    text_audit_points (可选): 图文审核维度(策略 image_text_enabled=true 时传入),
+    让 LLM 同时审核图片中可见的文字是否违反文本审核规则.
 
     返回 (hits, model_name, llm_error, correlation_id):
       - llm 未开启 → ([], None, None, None)
@@ -437,6 +441,25 @@ async def _run_image_llm_detection(
         f"- label: {p.get('label_cn', '')}" + (f" | 描述: {p.get('description', '')}" if p.get('description') else "")
         for p in effective_points
     )
+    # 图文审核: 策略开启了 image_text_enabled 时, 追加文本审核维度
+    # 让 LLM 同时审核图片中可见的文字内容
+    # 限制文本审核点数量, 避免 prompt 过长分散 LLM 注意力 (最多 20 条)
+    _MAX_TEXT_POINTS = 20
+    text_points_block = ""
+    has_text_audit = bool(text_audit_points)
+    if has_text_audit:
+        limited_text_points = text_audit_points[:_MAX_TEXT_POINTS]
+        text_points_lines = "\n".join(
+            f"- label: {p.get('label_cn', '')}" + (f" | 描述: {p.get('description', '')}" if p.get('description') else "")
+            for p in limited_text_points
+        )
+        skipped = len(text_audit_points) - len(limited_text_points)
+        text_points_block = (
+            f"\n\n图片中可见文字的审核维度（同时审核图片画面和图片中出现的文字）:\n{text_points_lines}\n"
+            + (f"（还有 {skipped} 条维度未列出）\n" if skipped > 0 else "")
+            + "命中图片中文字违规时, evidence 需注明'图片中文字:具体违规内容描述'。"
+        )
+
     system_msg = (
         "你是内容合规审核引擎, 基于中国《网络安全法》《广告法》等法规, 严格判断输入图片是否违规。"
         "重点识别: 涉政(国家领导人/政治敏感人物/政治标语)、暴恐、色情、违法标识等高风险内容。"
@@ -444,12 +467,15 @@ async def _run_image_llm_detection(
         "请先仔细观察并描述图片内容(含可见文字、人物、场景), 再逐条核对审核维度判断。"
         "输出必须是严格 JSON, 严禁复述违规原文。"
     )
+    if has_text_audit:
+        system_msg += "同时审核图片中可见的文字内容是否违反文字审核维度。"
     user_text = (
-        f"审核维度:\n{points_block}\n\n"
+        f"审核维度:\n{points_block}{text_points_block}\n\n"
         "请按以下步骤审核:\n"
         "1. 先描述图片内容(画面、文字、人物等)\n"
-        "2. 逐条核对每个审核维度, 判断图片是否违规\n"
-        "请输出 JSON: {\"description\":\"图片内容描述\",\"hit_points\":[{\"label\":\"对应维度label\","
+        "2. 逐条核对每个审核维度, 判断图片画面是否违规\n"
+        + ("3. 核对图片中可见的文字是否违反文字审核维度\n" if has_text_audit else "")
+        + "请输出 JSON: {\"description\":\"图片内容描述\",\"hit_points\":[{\"label\":\"对应维度label\","
         "\"risk\":\"高风险|中风险|低风险\",\"evidence\":\"画面中的违规元素描述\"}],"
         "\"summary\":\"类别化摘要\"}\n"
         "命中任一维度即输出 hit_points; 未命中则 hit_points=[]。直接以 { 开头。"
@@ -472,7 +498,7 @@ async def _run_image_llm_detection(
             db=db,
             messages=messages,
             temperature=0.1,
-            max_tokens=2048,
+            max_tokens=4096,
             correlation_id=correlation_id,
         )
         m = re.search(r"\{.*\}", content, re.DOTALL)
@@ -485,13 +511,17 @@ async def _run_image_llm_detection(
             if not isinstance(hp, dict):
                 continue
             label = (hp.get("label") or "").strip()
+            evidence = hp.get("evidence") or ""
+            # 图文文字命中: evidence 含"图片中文字"时, label_cn 加"图文:"前缀
+            is_text_hit = "图片中文字" in evidence or "文字" in evidence and has_text_audit
+            display_label = f"图文:{label}" if is_text_hit and label else (label or "图片违规")
             hits.append({
                 "service_code": "llm",
                 "service_name": "多模态大模型",
                 "label": label or "image_violation",
-                "label_cn": label or "图片违规",
+                "label_cn": display_label,
                 "score": 1.0,
-                "quote": hp.get("evidence"),
+                "quote": evidence,
                 "bbox": None,
                 "page": None,
                 "timestamp_ms": None,
@@ -710,6 +740,9 @@ async def _enrich_hits_with_label_path(db: AsyncSession, hits: List[Dict[str, An
         # 智能体命中的 label_cn 是 "智能体名/标签" 格式, 取 / 后面的标签部分
         if "/" in lbl:
             lbl = lbl.rsplit("/", 1)[-1].strip()
+        # 图文命中的 label_cn 是 "图文:标签" 格式, 去掉 "图文:" 前缀
+        if lbl.startswith("图文:"):
+            lbl = lbl[3:].strip()
         if lbl:
             labels_to_find[lbl] = None
     if not labels_to_find:
@@ -752,6 +785,8 @@ async def _enrich_hits_with_label_path(db: AsyncSession, hits: List[Dict[str, An
         lbl = (h.get("label_cn") or h.get("label") or "").strip()
         if "/" in lbl:
             lbl = lbl.rsplit("/", 1)[-1].strip()
+        if lbl.startswith("图文:"):
+            lbl = lbl[3:].strip()
         ap = ap_map.get(lbl)
         if not ap:
             continue
@@ -1090,12 +1125,49 @@ async def detect(
         engines_used.append("image_library")
 
         # 2) 多模态 LLM 检测 (校验模型是多模态)
+        # 图文审核: 策略开启 image_text_enabled 时, 把文本审核点注入 LLM prompt,
+        # 让多模态 LLM 同时审核图片画面 + 图片中可见文字
+        text_audit_points_for_image: List[Dict[str, Any]] = []
+        if strat and strat.definition and isinstance(strat.definition, dict):
+            ite = strat.definition.get("image_text_enabled")
+            if ite:
+                itm = strat.definition.get("image_text_mode", "reuse_text")
+                if itm == "reuse_text":
+                    # 复用文本审核规则: 用策略已启用的 text 包审核点
+                    text_audit_points_for_image = audit_points
+                elif itm == "independent":
+                    # 独立规则: 从 image_text_points 加载勾选的审核点
+                    itp = strat.definition.get("image_text_points") or {}
+                    if isinstance(itp, dict):
+                        indep_point_ids: List[int] = []
+                        for _iid, pts in itp.items():
+                            if isinstance(pts, dict):
+                                for pid_str, checked in pts.items():
+                                    if checked and pid_str.isdigit():
+                                        indep_point_ids.append(int(pid_str))
+                        if indep_point_ids:
+                            from app.models.audit_point import AuditPoint as _AP
+
+                            indep_rows = await db.execute(
+                                select(_AP).where(_AP.id.in_(indep_point_ids))
+                            )
+                            for ap in indep_rows.scalars():
+                                risk = getattr(ap, "risk_level", None)
+                                risk_val = risk.value if hasattr(risk, "value") else (str(risk) if risk else None)
+                                text_audit_points_for_image.append({
+                                    "code": ap.code,
+                                    "label_cn": ap.label_cn,
+                                    "description": ap.description,
+                                    "risk_level": risk_val,
+                                })
+
         llm_hits, model_name, llm_error, correlation_id = await _run_image_llm_detection(
             db,
             image_base64_list=[it.image_base64 for it in image_items if it.image_base64],
             audit_points=audit_points,
             llm_enabled=llm_enabled,
             model_id=model_id,
+            text_audit_points=text_audit_points_for_image,
         )
         if llm_hits:
             hits.extend(llm_hits)
