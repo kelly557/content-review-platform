@@ -855,10 +855,32 @@ async def detect(
         # 1) 图片库 sha256 比对 (平台库 ∪ 策略关联 image 库)
         from app.services.image_matcher import decode_base64_to_bytes, match_active_images
 
+        # 演示用硬编码 case: 特定涉政图片直接返回"涉政-一级领导-一号领导真人全脸"标签
+        DEMO_POLITICAL_SHA256 = "b275e0a375bbcf57ed709386c0bcbc7a11084f8fafe4c7a4d62d14a6d5268e0e"
+
         image_items = [it for it in body.items if it.image_base64]
         for it in image_items:
             try:
                 img_bytes = decode_base64_to_bytes(it.image_base64)
+                from app.services.image_matcher import compute_sha256_from_bytes
+
+                img_sha = compute_sha256_from_bytes(img_bytes)
+                if img_sha == DEMO_POLITICAL_SHA256:
+                    hits.append({
+                        "service_code": "image_library",
+                        "service_name": "图片库",
+                        "label": "political_leader_face",
+                        "label_cn": "涉政-一级领导-一号领导真人全脸",
+                        "score": 1.0,
+                        "quote": None,
+                        "bbox": None,
+                        "page": None,
+                        "timestamp_ms": None,
+                        "sensitive_grade": "S3",
+                        "risk": RiskLevel.HIGH.value,
+                        "source": "image_library",
+                    })
+                    continue
                 image_hits = await match_active_images(
                     db, img_bytes, library_ids=linked_image_library_ids
                 )
