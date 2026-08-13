@@ -412,20 +412,33 @@ async def _run_image_llm_detection(
             )
 
     # 构造多模态 prompt (审核维度 + 图片)
+    # 策略无 image 审核点时, 注入通用内容合规审核维度, 确保 LLM 有判断依据
+    DEFAULT_IMAGE_POINTS = [
+        {"label_cn": "涉政违规", "description": "含国家领导人肖像/政治敏感人物/政治标语/反动内容等"},
+        {"label_cn": "暴恐违规", "description": "含暴力/恐怖/血腥/武器/恐怖组织标识等"},
+        {"label_cn": "色情违规", "description": "含色情/低俗/裸露/性暗示等"},
+        {"label_cn": "广告法违规", "description": "含绝对化用语/虚假宣传/医疗宣称/未审批广告等"},
+        {"label_cn": "违法违规标识", "description": "含国家机关标识/国旗国徽滥用/违法违规符号等"},
+        {"label_cn": "未成年人保护", "description": "含未成年人不良引导/儿童色情/未成年人危险行为等"},
+    ]
+    effective_points = audit_points if audit_points else DEFAULT_IMAGE_POINTS
     points_block = "\n".join(
         f"- label: {p.get('label_cn', '')}" + (f" | 描述: {p.get('description', '')}" if p.get('description') else "")
-        for p in audit_points
-    ) or "(无审核维度, 按通用内容合规判断)"
+        for p in effective_points
+    )
     system_msg = (
-        "你是内容合规审核引擎。基于中国法规, 判断输入图片是否违规。"
+        "你是内容合规审核引擎, 基于中国《网络安全法》《广告法》等法规, 严格判断输入图片是否违规。"
+        "重点识别: 涉政(国家领导人/政治敏感人物/政治标语)、暴恐、色情、违法标识等高风险内容。"
+        "画面中出现政治人物肖像、国家领导人形象、政治标语、反动言论均判为高风险违规。"
         "输出必须是严格 JSON, 严禁复述违规原文。"
     )
     user_text = (
         f"审核维度:\n{points_block}\n\n"
+        "请逐条核对每个维度, 判断图片是否违规。"
         "请输出 JSON: {\"hit_points\":[{\"label\":\"对应维度label\","
         "\"risk\":\"高风险|中风险|低风险\",\"evidence\":\"画面中的违规元素描述\"}],"
         "\"summary\":\"类别化摘要\"}\n"
-        "未命中则 hit_points=[]。直接以 { 开头。"
+        "命中任一维度即输出 hit_points; 未命中则 hit_points=[]。直接以 { 开头。"
     )
     # 多模态 messages: text + 每张图片一个 image_url
     user_content: List[Dict[str, Any]] = [{"type": "text", "text": user_text}]

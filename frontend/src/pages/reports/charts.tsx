@@ -86,7 +86,7 @@ export function TrendLineChart({
 }
 
 interface MultiMetricLineProps {
-  series: { bucket: string; reject_rate: number; review_rate: number; approve_rate: number }[]
+  series: { bucket: string; reject_rate: number; review_rate: number; approve_rate: number; submitted?: number }[]
   height?: number
   loading?: boolean
   error?: string | null
@@ -113,6 +113,7 @@ export function MultiMetricLineChart({
     { bucket: labelFor(p.bucket), metric: '拒绝率', value: p.reject_rate },
     { bucket: labelFor(p.bucket), metric: '审核率', value: p.review_rate },
     { bucket: labelFor(p.bucket), metric: '通过率', value: p.approve_rate },
+    { bucket: labelFor(p.bucket), metric: '提交数', value: p.submitted },
   ])
   return (
     <Spin spinning={!!loading}>

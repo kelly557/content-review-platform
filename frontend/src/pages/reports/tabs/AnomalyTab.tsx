@@ -488,6 +488,17 @@ export default function AnomalyTab() {
               valueStyle={{ color: '#16A34A' }}
             />
           </Col>
+          <Col xs={12} md={6}>
+            <Statistic
+              title="提交素材数"
+              value={anomaly?.current.submitted ?? 0}
+              suffix="条"
+              valueStyle={{ color: '#2563EB' }}
+            />
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              高风险内容 {anomaly?.current.high_risk_content_count ?? 0} 条
+            </Text>
+          </Col>
         </Row>
         <div style={{ height: 320, marginTop: 16 }}>
           <MultiMetricLineChart
