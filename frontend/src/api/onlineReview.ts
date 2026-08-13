@@ -59,6 +59,19 @@ function buildRequestSummary(
   }
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('读取图片失败'))
+    reader.onload = () => {
+      const result = String(reader.result ?? '')
+      // 保留 data:image/...;base64, 前缀, 后端兼容
+      resolve(result)
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 export async function runOnlineDetection(
   req: {
     strategyId?: number
@@ -69,9 +82,30 @@ export async function runOnlineDetection(
   },
   signal?: AbortSignal,
 ): Promise<OnlineDetectionResult> {
-  const texts = req.items
-    .filter((it) => it.textBody && it.textBody.trim())
-    .map((it) => it.textBody)
+  // 图片模式: 转 base64 发送; 文本模式: 走原逻辑
+  const isImage = req.backendType === 'image'
+  let postItems: Array<{ kind: string; name: string; text?: string; image_base64?: string }>
+
+  if (isImage) {
+    const imageItems = req.items.filter((it) => it.file)
+    if (imageItems.length === 0) {
+      postItems = [{ kind: 'image', name: '空图片', image_base64: '' }]
+    } else {
+      const base64List = await Promise.all(imageItems.map((it) => fileToBase64(it.file!)))
+      postItems = imageItems.map((it, i) => ({
+        kind: 'image',
+        name: it.file!.name,
+        image_base64: base64List[i],
+      }))
+    }
+  } else {
+    const texts = req.items
+      .filter((it) => it.textBody && it.textBody.trim())
+      .map((it) => it.textBody)
+    postItems = texts.length
+      ? texts.map((t, i) => ({ kind: 'text', name: `文本-${i + 1}`, text: t }))
+      : [{ kind: 'text', name: '空文本', text: '' }]
+  }
 
   const { data } = await api.post<DetectApiResponse>(
     '/online-review/detect',
@@ -79,9 +113,7 @@ export async function runOnlineDetection(
       strategy_id: req.strategyId ?? null,
       media_type: req.backendType,
       mode: req.mode,
-      items: texts.length
-        ? texts.map((t, i) => ({ kind: 'text', name: `文本-${i + 1}`, text: t }))
-        : [{ kind: 'text', name: '空文本', text: '' }],
+      items: postItems,
     },
     { signal },
   )

@@ -20,7 +20,10 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -42,9 +45,11 @@ log = logging.getLogger(__name__)
 
 
 class OnlineReviewItem(BaseModel):
-    kind: str = Field(default="text", description="file | text")
+    kind: str = Field(default="text", description="file | text | image")
     name: str = ""
     text: Optional[str] = None
+    # 图片 base64 (支持 data:image/...;base64, 前缀或纯 base64). kind=image 时必填.
+    image_base64: Optional[str] = None
 
 
 class OnlineReviewRequest(BaseModel):
@@ -213,16 +218,29 @@ async def _load_strategy_audit_points(
 async def _load_strategy_linked_library_ids(
     db: AsyncSession, strat: Optional[Any]
 ) -> Optional[set[int]]:
-    """收集策略勾选审核点/项关联的 word 库 id.
+    """收集策略勾选审核点/项关联的 word 库 id (词库匹配用).
 
     返回 None 表示策略为 None (调用方应回退全量); 返回 set (可能空) 表示策略
     已解析, 词库范围 = 平台库 ∪ 该集合.
     """
+    word_ids, _image_ids = await _load_strategy_linked_library_ids_split(db, strat)
+    return word_ids
+
+
+async def _load_strategy_linked_library_ids_split(
+    db: AsyncSession, strat: Optional[Any]
+) -> tuple[Optional[set[int]], Optional[set[int]]]:
+    """收集策略勾选审核点/项关联的 word 库 + image 库 id.
+
+    返回 (word_ids, image_ids):
+      - 策略为 None → (None, None) (调用方回退全量)
+      - 策略已解析 → (set, set) (可能空)
+    """
     if not strat:
-        return None
+        return None, None
     from app.models.audit_item_library import AuditItemLibrary
     from app.models.audit_point_library import AuditPointLibrary
-    from app.models.library import LibraryType
+    from app.models.library import Library, LibraryType
     from app.models.strategy_item import StrategyItem
     from app.models.strategy_point import StrategyPoint
 
@@ -244,7 +262,6 @@ async def _load_strategy_linked_library_ids(
 
     linked: set[int] = set()
     if point_ids:
-        # 仅取 word 类型库, 与 match_active_words 的口径一致
         lib_rows = await db.execute(
             select(AuditPointLibrary.library_id).where(
                 AuditPointLibrary.audit_point_id.in_(point_ids)
@@ -260,17 +277,22 @@ async def _load_strategy_linked_library_ids(
         linked.update(r[0] for r in lib_rows.all() if r[0])
 
     if not linked:
-        return set()
-    # 过滤为 word 库 (避免把 image/reply 库 id 带进 wordset_matcher)
-    from app.models.library import Library
-
+        return set(), set()
+    # 按 library_type 拆分 word / image 库
     lib_rows = await db.execute(
-        select(Library.id).where(
+        select(Library.id, Library.library_type).where(
             Library.id.in_(linked),
-            Library.library_type == LibraryType.WORD.value,
+            Library.library_type.in_([LibraryType.WORD.value, LibraryType.IMAGE.value]),
         )
     )
-    return {r[0] for r in lib_rows.all() if r[0]}
+    word_ids: set[int] = set()
+    image_ids: set[int] = set()
+    for lib_id, ltype in lib_rows.all():
+        if ltype == LibraryType.WORD.value:
+            word_ids.add(lib_id)
+        elif ltype == LibraryType.IMAGE.value:
+            image_ids.add(lib_id)
+    return word_ids, image_ids
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +346,136 @@ async def _run_llm_detection(
     except Exception as exc:
         log.warning(
             "online-review llm detection failed corr=%s: %s", correlation_id, exc
+        )
+        return [], model_name, f"大模型调用失败: {exc}", correlation_id
+
+
+async def _run_image_llm_detection(
+    db: AsyncSession,
+    *,
+    image_base64_list: List[Optional[str]],
+    audit_points: List[Dict[str, Any]],
+    llm_enabled: bool,
+    model_id: Optional[int],
+) -> Tuple[List[Dict[str, Any]], Optional[str], Optional[str], Optional[str]]:
+    """图片多模态 LLM 检测.
+
+    返回 (hits, model_name, llm_error, correlation_id):
+      - llm 未开启 → ([], None, None, None)
+      - 开启但无图片 → ([], None, None, None)
+      - 开启但模型非多模态 → ([], model_name, error, None) (不调 LLM)
+      - 开启且调用失败 → ([], model_name, error, correlation_id)
+      - 开启且成功 → (hits, model_name, None, correlation_id)
+    """
+    if not llm_enabled:
+        return [], None, None, None
+    valid_images = [b for b in image_base64_list if b]
+    if not valid_images:
+        return [], None, None, None
+
+    from app.services.llm.resolver import resolve_llm_client
+
+    # 解析 client + 校验模型是多模态
+    client, model_name, resolve_err = await resolve_llm_client(db, model_id)
+    if not client:
+        return [], None, resolve_err or "大模型客户端未就绪", None
+
+    # 校验模型 large_category == multimodal (图片审核必须用多模态模型)
+    from app.models.registered_model import RegisteredModel
+
+    picked_model_id = model_id
+    if not picked_model_id:
+        # resolve_llm_client(model_id=None) 会挑默认文本模型; 图片场景需要多模态,
+        # 重新挑一个 active 多模态模型
+        mm_row = await db.execute(
+            select(RegisteredModel.id).where(
+                RegisteredModel.kind == "large",
+                RegisteredModel.large_category == "multimodal",
+                RegisteredModel.status == "active",
+                RegisteredModel.is_deleted.is_(False),
+            ).order_by(RegisteredModel.id.asc()).limit(1)
+        )
+        picked_model_id = mm_row.scalar_one_or_none()
+        if not picked_model_id:
+            return [], model_name, "图片审核需选择多模态大模型（注册库无 active 多模态模型），请到模型管理注册并激活", None
+        client, model_name, resolve_err = await resolve_llm_client(db, picked_model_id)
+        if not client:
+            return [], None, resolve_err or "大模型客户端未就绪", None
+    else:
+        model_row = await db.get(RegisteredModel, picked_model_id)
+        if model_row and model_row.large_category != "multimodal":
+            return (
+                [],
+                model_name,
+                "图片审核需选择多模态大模型（当前选的是文本模型），请到策略页更换为多模态模型（如 qwen3.7/3.8、kimi）",
+                None,
+            )
+
+    # 构造多模态 prompt (审核维度 + 图片)
+    points_block = "\n".join(
+        f"- label: {p.get('label_cn', '')}" + (f" | 描述: {p.get('description', '')}" if p.get('description') else "")
+        for p in audit_points
+    ) or "(无审核维度, 按通用内容合规判断)"
+    system_msg = (
+        "你是内容合规审核引擎。基于中国法规, 判断输入图片是否违规。"
+        "输出必须是严格 JSON, 严禁复述违规原文。"
+    )
+    user_text = (
+        f"审核维度:\n{points_block}\n\n"
+        "请输出 JSON: {\"hit_points\":[{\"label\":\"对应维度label\","
+        "\"risk\":\"高风险|中风险|低风险\",\"evidence\":\"画面中的违规元素描述\"}],"
+        "\"summary\":\"类别化摘要\"}\n"
+        "未命中则 hit_points=[]。直接以 { 开头。"
+    )
+    # 多模态 messages: text + 每张图片一个 image_url
+    user_content: List[Dict[str, Any]] = [{"type": "text", "text": user_text}]
+    for b64 in valid_images:
+        url = b64.strip()
+        if not url.startswith("data:"):
+            url = f"data:image/jpeg;base64,{url}"
+        user_content.append({"type": "image_url", "image_url": {"url": url}})
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": user_content},
+    ]
+
+    correlation_id = uuid.uuid4().hex
+    try:
+        content = await client.chat(
+            db=db,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=2048,
+            correlation_id=correlation_id,
+        )
+        m = re.search(r"\{.*\}", content, re.DOTALL)
+        if not m:
+            return [], model_name, "大模型返回非 JSON", correlation_id
+        payload = json.loads(m.group(0))
+        hit_points = payload.get("hit_points") or []
+        hits: List[Dict[str, Any]] = []
+        for hp in hit_points:
+            if not isinstance(hp, dict):
+                continue
+            label = (hp.get("label") or "").strip()
+            hits.append({
+                "service_code": "llm",
+                "service_name": "多模态大模型",
+                "label": label or "image_violation",
+                "label_cn": label or "图片违规",
+                "score": 1.0,
+                "quote": hp.get("evidence"),
+                "bbox": None,
+                "page": None,
+                "timestamp_ms": None,
+                "sensitive_grade": "S0",
+                "risk": hp.get("risk") or RiskLevel.HIGH.value,
+                "source": "llm",
+            })
+        return hits, model_name, None, correlation_id
+    except Exception as exc:
+        log.warning(
+            "online-review image llm detection failed corr=%s: %s", correlation_id, exc
         )
         return [], model_name, f"大模型调用失败: {exc}", correlation_id
 
@@ -577,40 +729,77 @@ async def detect(
         return cached_resp
 
     audit_points = await _load_strategy_audit_points(db, strat)
-    linked_library_ids = await _load_strategy_linked_library_ids(db, strat)
+    linked_library_ids, linked_image_library_ids = await _load_strategy_linked_library_ids_split(db, strat)
 
     hits: List[Dict[str, Any]] = []
     engines_used: List[str] = []
 
-    # 1) 本地词库匹配 (平台库 ∪ 策略关联库; 策略为 None 时全量)
-    try:
-        from app.services.wordset_matcher import match_active_words
-
-        local_hits = await match_active_words(
-            db,
-            full_text,
-            enabled_services,
-            library_ids=linked_library_ids,
-        )
-        if local_hits:
-            hits.extend(local_hits)
-        engines_used.append("wordset")
-    except Exception as exc:
-        log.warning("online-review wordset match failed: %s", exc)
-
-    # 2) 大模型检测 (策略化: 按策略选定模型或回退全局; 失败降级带 llm_error)
-    llm_hits, model_name, llm_error, correlation_id = await _run_llm_detection(
-        db,
-        text_body=full_text,
-        enabled_services=enabled_services,
-        audit_points=audit_points,
-        llm_enabled=llm_enabled,
-        model_id=model_id,
+    # 判断是否图片检测模式
+    is_image_mode = body.media_type == "image" or any(
+        it.image_base64 for it in body.items
     )
-    if llm_hits:
-        hits.extend(llm_hits)
-    if llm_enabled and not llm_error:
-        engines_used.append("llm")
+
+    if is_image_mode:
+        # ── 图片检测: sha256 比对 + 多模态 LLM ──
+        # 1) 图片库 sha256 比对 (平台库 ∪ 策略关联 image 库)
+        from app.services.image_matcher import decode_base64_to_bytes, match_active_images
+
+        image_items = [it for it in body.items if it.image_base64]
+        for it in image_items:
+            try:
+                img_bytes = decode_base64_to_bytes(it.image_base64)
+                image_hits = await match_active_images(
+                    db, img_bytes, library_ids=linked_image_library_ids
+                )
+                if image_hits:
+                    hits.extend(image_hits)
+            except Exception as exc:
+                log.warning("online-review image sha256 match failed: %s", exc)
+        engines_used.append("image_library")
+
+        # 2) 多模态 LLM 检测 (校验模型是多模态)
+        llm_hits, model_name, llm_error, correlation_id = await _run_image_llm_detection(
+            db,
+            image_base64_list=[it.image_base64 for it in image_items if it.image_base64],
+            audit_points=audit_points,
+            llm_enabled=llm_enabled,
+            model_id=model_id,
+        )
+        if llm_hits:
+            hits.extend(llm_hits)
+        if llm_enabled and not llm_error:
+            engines_used.append("llm")
+    else:
+        # ── 文本检测: 词库匹配 + 文本 LLM (原逻辑) ──
+        # 1) 本地词库匹配 (平台库 ∪ 策略关联库; 策略为 None 时全量)
+        try:
+            from app.services.wordset_matcher import match_active_words
+
+            local_hits = await match_active_words(
+                db,
+                full_text,
+                enabled_services,
+                library_ids=linked_library_ids,
+            )
+            if local_hits:
+                hits.extend(local_hits)
+            engines_used.append("wordset")
+        except Exception as exc:
+            log.warning("online-review wordset match failed: %s", exc)
+
+        # 2) 大模型检测 (策略化: 按策略选定模型或回退全局; 失败降级带 llm_error)
+        llm_hits, model_name, llm_error, correlation_id = await _run_llm_detection(
+            db,
+            text_body=full_text,
+            enabled_services=enabled_services,
+            audit_points=audit_points,
+            llm_enabled=llm_enabled,
+            model_id=model_id,
+        )
+        if llm_hits:
+            hits.extend(llm_hits)
+        if llm_enabled and not llm_error:
+            engines_used.append("llm")
 
     # 聚合风险等级: 命中即高风险 (按需求, 命中直接展示高风险)
     risk_level = RiskLevel.HIGH.value if hits else RiskLevel.NONE.value
