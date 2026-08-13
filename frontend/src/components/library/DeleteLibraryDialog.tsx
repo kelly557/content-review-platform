@@ -32,7 +32,7 @@ export default function DeleteLibraryDialog({
   onCancel,
   onSuccess,
 }: Props) {
-  const [mode, setMode] = useState<'transfer' | 'force' | 'cancel'>('cancel')
+  const [mode, setMode] = useState<'transfer' | 'force' | 'cancel'>('force')
   const [refs, setRefs] = useState<AuditPointRef[]>([])
   const [refsLoading, setRefsLoading] = useState(false)
   const [transferTo, setTransferTo] = useState<number | undefined>()
@@ -44,7 +44,7 @@ export default function DeleteLibraryDialog({
 
   useEffect(() => {
     if (!open || !library) return
-    setMode('cancel')
+    setMode('force')
     setTransferTo(undefined)
     setRefsLoading(true)
     setCandidatesLoading(true)
@@ -99,22 +99,43 @@ export default function DeleteLibraryDialog({
     }
   }
 
+  // 无引用时直接删除, 不需要选转移/强制
+  const canDirectDelete = !hasRefs && !refsLoading
   const okDisabled =
     submitting ||
     (mode === 'transfer' && !transferTo) ||
     refsLoading ||
     candidatesLoading
 
+  const handleOk = () => {
+    if (canDirectDelete) {
+      // 无引用: 直接删除, 跳过 mode 选择
+      setSubmitting(true)
+      librariesApi
+        .delete(library!.id, { force: false })
+        .then((res) => {
+          onSuccess({
+            transferred_to: res.transferred_to,
+            forced: res.forced,
+            affected: res.affected_audit_points,
+          })
+        })
+        .finally(() => setSubmitting(false))
+      return
+    }
+    submit()
+  }
+
   return (
     <Modal
       open={open}
       title={library ? `删除「${library.name}」` : '删除'}
-      okText={mode === 'cancel' ? '关闭' : '确认删除'}
+      okText={canDirectDelete ? '确认删除' : (mode === 'cancel' ? '关闭' : '确认删除')}
       cancelText="返回"
       confirmLoading={submitting}
-      okButtonProps={{ danger: mode !== 'cancel', disabled: okDisabled }}
+      okButtonProps={{ danger: canDirectDelete || mode !== 'cancel', disabled: okDisabled }}
       onCancel={onCancel}
-      onOk={submit}
+      onOk={handleOk}
       destroyOnHidden
       width={560}
     >
