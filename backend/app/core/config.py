@@ -127,6 +127,9 @@ class Settings(BaseSettings):
     mq_consumer_group: str = "adreview-ingest"
     mq_consumer_name: str = "consumer-1"
     mq_stream_key: str = "adreview:task:requested"
+
+    # 性能日志: 响应时间超过此阈值(ms)的请求记 WARN, 否则 INFO
+    perf_log_threshold_ms: float = 100.0
     mq_block_ms: int = 5000
     mq_batch_count: int = 10
     mq_max_deliveries: int = 5

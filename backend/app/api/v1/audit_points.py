@@ -139,23 +139,13 @@ async def list_points(
     enabled: Optional[bool] = None,
     include_subs: bool = Query(False, description="是否包含 sub-审核点（默认仅返回顶级审核点）"),
 ) -> list[AuditPointOut]:
-    from sqlalchemy.orm import selectinload
-
     await _ensure_package(db, code)
-    stmt = (
-        select(AuditPoint)
-        .where(AuditPoint.package_code == code)
-        .options(
-            selectinload(AuditPoint.linked_library_links),
-            selectinload(AuditPoint.linked_libraries),
-        )
-    )
+    stmt = select(AuditPoint).where(AuditPoint.package_code == code)
     if item_id is not None:
         stmt = stmt.where(AuditPoint.item_id == item_id)
     if enabled is not None:
         stmt = stmt.where(AuditPoint.is_enabled.is_(enabled))
     if not include_subs:
-        # sub-审核点走 /points/{id}/sub-points 单独拉取，列表默认仅顶级点
         stmt = stmt.where(AuditPoint.parent_point_id.is_(None))
     stmt = stmt.order_by(AuditPoint.item_id.asc(), AuditPoint.sort_order.asc(), AuditPoint.id.asc())
     rows = list((await db.execute(stmt)).scalars())
@@ -197,8 +187,6 @@ async def list_all_sub_points(
     RulesTreeView 一次拉全包 subs 再按 parent_point_id 分组，替代逐点
     ``/points/{id}/sub-points`` 的 N+1 拉取（文本包 230 次 → 1 次）。
     """
-    from sqlalchemy.orm import selectinload
-
     await _ensure_package(db, code)
     stmt = (
         select(AuditPoint)
@@ -210,10 +198,6 @@ async def list_all_sub_points(
             AuditPoint.parent_point_id.asc(),
             AuditPoint.sort_order.asc(),
             AuditPoint.id.asc(),
-        )
-        .options(
-            selectinload(AuditPoint.linked_library_links),
-            selectinload(AuditPoint.linked_libraries),
         )
     )
     rows = list((await db.execute(stmt)).scalars())

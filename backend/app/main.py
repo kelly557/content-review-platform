@@ -1,8 +1,9 @@
 """FastAPI application entry."""
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
@@ -140,6 +141,33 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # 性能日志中间件: 记录每个请求的耗时, > 阈值时 WARN
+    PERF_LOG_THRESHOLD_MS = getattr(settings, "perf_log_threshold_ms", 100)
+
+    @app.middleware("http")
+    async def perf_log_middleware(request: Request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        if elapsed_ms > PERF_LOG_THRESHOLD_MS:
+            log.warning(
+                "SLOW %s %s → %d %.1fms",
+                request.method,
+                request.url.path,
+                response.status_code,
+                elapsed_ms,
+            )
+        else:
+            log.info(
+                "%s %s → %d %.1fms",
+                request.method,
+                request.url.path,
+                response.status_code,
+                elapsed_ms,
+            )
+        response.headers["X-Response-Time-ms"] = f"{elapsed_ms:.1f}"
+        return response
 
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:

@@ -140,6 +140,14 @@ export default function RulesTreeView({
   const [loading, setLoading] = useState(false)
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
 
+  // 每个父审核点下的三级 sub 列表 — 从后端拉取（真实数据）
+  const [subsByPointIdFallback, setSubsByPointIdFallback] = useState<Record<number, SubAuditPoint[]>>({})
+  const subsByPointId = subsByPointIdProp ?? subsByPointIdFallback
+  const updateSubsByPointId = (next: Record<number, SubAuditPoint[]>) => {
+    setSubsByPointIdFallback(next)
+    onSubsLoadedProp?.(next)
+  }
+
   const mediaKey: CategoryKey =
     mediaKeyOverride ?? (packageCode ? PACKAGE_TO_MEDIA[packageCode] : null) ?? 'image'
 
@@ -147,13 +155,13 @@ export default function RulesTreeView({
     if (!packageCode) return
     let cancel = false
     setLoading(true)
-    // 一次拉全包 points（后端 list 端点 item_id 可选，不带则返回全包），
-    // 前端按 item_id 分组，替代 N+1 逐 item 拉取（11 请求 → 1 请求）。
+    // 并行拉取 items + points + sub-points (3 请求并行, 替代串行)
     Promise.all([
       auditItemsApi.list(packageCode),
       auditPointsApi.list(packageCode),
+      auditPointsApi.listAllSubPoints(packageCode),
     ])
-      .then(([itemsRes, allPoints]) => {
+      .then(([itemsRes, allPoints, allSubs]) => {
         if (cancel) return
         setItems(itemsRes)
         const map: Record<number, AuditPoint[]> = {}
@@ -163,6 +171,28 @@ export default function RulesTreeView({
           ;(map[iid] ??= []).push(p)
         }
         if (!cancel) setPointsByItem(map)
+        // 预填充 subsByPointId (避免后续单独请求)
+        if (allSubs.length > 0) {
+          const subMap: Record<number, SubAuditPoint[]> = {}
+          for (const s of allSubs) {
+            const pid = s.parent_point_id
+            if (pid == null) continue
+            ;(subMap[pid] ??= []).push({
+              id: s.id,
+              point_id: s.id,
+              l1_label: '',
+              l2_label: '',
+              l3_label: s.label_cn || s.label,
+              label_cn: s.label_cn || s.label,
+              low_threshold: 0,
+              medium_threshold: s.medium_threshold,
+              high_threshold: s.high_threshold,
+              is_enabled: s.is_enabled,
+              sort_order: s.sort_order,
+            })
+          }
+          if (!cancel) updateSubsByPointId(subMap)
+        }
       })
       .catch(() => {
         if (!cancel) {
@@ -297,7 +327,7 @@ export default function RulesTreeView({
                   tableRef={tableRef}
                   subEnabledMap={subEnabledMapProp}
                   onSubToggle={onSubToggleProp}
-                  subsByPointId={subsByPointIdProp}
+                  subsByPointId={subsByPointId}
                   onSubsLoaded={onSubsLoadedProp}
                 />
               ) : (
@@ -504,7 +534,7 @@ function PointsColumn({
   tableRef,
   subEnabledMap: subEnabledMapProp,
   onSubToggle: onSubToggleProp,
-  subsByPointId: subsByPointIdProp,
+  subsByPointId,
   onSubsLoaded: onSubsLoadedProp,
 }: {
   items: AuditItem[]
@@ -586,13 +616,7 @@ function PointsColumn({
     }
   }
 
-  // 每个父审核点下的三级 sub 列表 — 从后端拉取（真实数据）
-  const [subsByPointIdFallback, setSubsByPointIdFallback] = useState<Record<number, SubAuditPoint[]>>({})
-  const subsByPointId = subsByPointIdProp ?? subsByPointIdFallback
-  const updateSubsByPointId = (next: Record<number, SubAuditPoint[]>) => {
-    setSubsByPointIdFallback(next)
-    onSubsLoadedProp?.(next)
-  }
+  // 每个父审核点下的三级 sub 列表 — subsByPointId/updateSubsByPointId 已在上方声明
 
   // 展开/收起状态：与勾选状态分离。点击二级 label 列切换展开，点击 checkbox 切换全选。
   const [expandedPointIds, setExpandedPointIds] = useState<Set<number>>(new Set())
@@ -617,12 +641,16 @@ function PointsColumn({
   )
 
   useEffect(() => {
+    // sub-points 已在初始加载时与 items+points 并行拉取 (见上方 useEffect).
+    // 此 effect 仅在 subsByPointId 为空且 dataSource 已就绪时做兜底拉取.
     const points = dataSource.filter((r) => r.kind === 'point')
     const pkg = points[0]?.point.package_code
     if (points.length === 0 || !pkg) {
-      updateSubsByPointId({})
+      onSubsLoadedProp?.({})
       return
     }
+    // 如果已有 sub 数据 (初始并行加载的), 跳过
+    if (subsByPointId && Object.keys(subsByPointId).length > 0) return
     // 按 point.id 建索引，用于给 sub 回填 l1/l2 标签
     const pointCtx: Record<number, { l1: string; l2: string }> = {}
     for (const r of points) {
@@ -657,9 +685,9 @@ function PointsColumn({
             sort_order: s.sort_order,
           })
         }
-        if (alive) updateSubsByPointId(map)
+        if (alive) onSubsLoadedProp?.(map)
       } catch {
-        if (alive) updateSubsByPointId({})
+        if (alive) onSubsLoadedProp?.({})
       }
     }
     void load()
@@ -755,7 +783,7 @@ function PointsColumn({
           //   - sub 全选  -> 父点 checked (打勾)
           //   - sub 部分选 -> 父点 indeterminate (回字中间填充)
           //   - sub 全不选 -> 父点 unchecked (空)
-          const pointSubs = subsByPointId[record.point.id] ?? []
+          const pointSubs = (subsByPointId ?? {})[record.point.id] ?? []
           const enabledCount = pointSubs.filter(
             (s) => subEnabledMap[s.id] ?? false,
           ).length
@@ -813,7 +841,7 @@ function PointsColumn({
         render: (_, record) => {
           if (record.kind !== 'point') return null
           const name = record.point.label_cn || record.point.label || record.point.code
-          const subs = subsByPointId[record.point.id] ?? []
+          const subs = (subsByPointId ?? {})[record.point.id] ?? []
           const expanded = expandedPointIds.has(record.point.id)
           return (
             <Space size={6} direction="vertical" align="start" style={{ width: '100%' }}>
