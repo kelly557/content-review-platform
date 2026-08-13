@@ -46,7 +46,7 @@ export interface AiOptimizeResult {
 interface AiOptimizeDrawerProps {
   open: boolean
   onClose: () => void
-  onAddConfig: (cfg: { label: string; desc: string }) => void
+  onAddConfig: (cfg: { label: string; desc: string }, points?: { label: string; desc: string }[]) => void
   initialOriginal?: string
   rowsCount: number
 }
@@ -276,15 +276,24 @@ export default function AiOptimizeDrawer({
   }
 
   const handleAddConfig = () => {
-    if (!result) {
-      message.warning('请先点击「AI 优化」生成结果')
+    // 收集所有解析成功的审核点
+    const parsedPoints = documents
+      .filter((d) => d.status === 'success' && d.points && d.points.length > 0)
+      .flatMap((d) => d.points ?? [])
+      .filter((p) => p.label.trim())
+
+    if (!result && parsedPoints.length === 0) {
+      message.warning('请先点击「AI 优化」生成结果，或上传文件解析审核点')
       return
     }
-    if (rowsCount <= 0) {
+    if (rowsCount <= 0 && parsedPoints.length === 0) {
       message.warning('请先添加至少一个审核点')
       return
     }
-    onAddConfig({ label: result.finalTag.name, desc: result.finalTag.description })
+    const cfg = result
+      ? { label: result.finalTag.name, desc: result.finalTag.description }
+      : { label: '', desc: '' }
+    onAddConfig(cfg, parsedPoints.length > 0 ? parsedPoints : undefined)
   }
 
   const samplesLineCount = useMemo(() => (s: string) => s.split('\n').filter(Boolean).length, [])
@@ -304,7 +313,11 @@ export default function AiOptimizeDrawer({
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={onClose}>取消</Button>
-          <Button type="primary" onClick={handleAddConfig} disabled={!result}>
+          <Button
+            type="primary"
+            onClick={handleAddConfig}
+            disabled={!result && documents.every((d) => d.status !== 'success' || !d.points || d.points.length === 0)}
+          >
             添加配置
           </Button>
         </div>

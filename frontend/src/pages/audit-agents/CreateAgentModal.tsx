@@ -231,13 +231,34 @@ const CreateAgentForm = forwardRef<CreateAgentFormRef, CreateAgentFormProps>(fun
     onAiDrawerOpenChange(true)
   }
 
-  const handleAddOptimizedConfig = (cfg: { label: string; desc: string }) => {
+  const handleAddOptimizedConfig = (
+    cfg: { label: string; desc: string },
+    points?: { label: string; desc: string }[],
+  ) => {
     setRows((prev) => {
-      if (prev.length === 0) return prev
-      return prev.map((r, i) => (i === 0 ? { ...r, label: cfg.label, desc: cfg.desc } : r))
+      let next = prev
+      // 有 AI 优化结果时替换首条; 否则不动已有行
+      if (cfg.label.trim() || cfg.desc.trim()) {
+        if (prev.length === 0) {
+          next = [{ id: genId(), label: cfg.label, desc: cfg.desc }]
+        } else {
+          next = prev.map((r, i) => (i === 0 ? { ...r, label: cfg.label, desc: cfg.desc } : r))
+        }
+      }
+      // 追加解析出的审核点为新行
+      if (points && points.length > 0) {
+        const newRows = points
+          .filter((p) => p.label.trim())
+          .map((p) => ({ id: genId(), label: p.label.trim(), desc: p.desc ?? '' }))
+        next = [...next, ...newRows]
+      }
+      return next
     })
     onAiDrawerOpenChange(false)
-    message.success('已替换首条审核标签')
+    const parts: string[] = []
+    if (cfg.label.trim() || cfg.desc.trim()) parts.push('已替换首条审核标签')
+    if (points && points.length > 0) parts.push(`加入 ${points.length} 条解析审核点`)
+    message.success(parts.join('，') || '已添加配置')
     onAddOptimizedConfig?.(cfg)
   }
 
