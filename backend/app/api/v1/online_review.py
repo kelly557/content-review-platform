@@ -537,6 +537,116 @@ async def _run_image_llm_detection(
         return [], model_name, f"大模型调用失败: {exc}", correlation_id
 
 
+async def _run_agent_detection(
+    db: AsyncSession,
+    *,
+    text_body: str,
+    agent_ids: List[int],
+) -> Tuple[List[Dict[str, Any]], Optional[str], Optional[str]]:
+    """审核智能体检测: 加载智能体 points 作为审核维度, 调大模型判断.
+
+    返回 (hits, model_name, error):
+      - 无智能体/无文本 → ([], None, None)
+      - 智能体无 model_id → 用注册库默认文本模型
+      - 调用失败 → ([], model_name, error)
+      - 成功 → (hits, model_name, None)
+    """
+    if not agent_ids or not text_body or not text_body.strip():
+        return [], None, None
+
+    from app.models.review_agent import ReviewAgent
+
+    # 加载所有智能体的 points 合并
+    all_points: List[Dict[str, Any]] = []
+    agent_model_id: Optional[int] = None
+    for aid in agent_ids:
+        agent = await db.get(ReviewAgent, aid)
+        if not agent:
+            continue
+        if agent.points and isinstance(agent.points, list):
+            for p in agent.points:
+                if isinstance(p, dict) and p.get("label"):
+                    all_points.append({"label_cn": p["label"], "description": p.get("desc", "")})
+        if agent.model_id and not agent_model_id:
+            agent_model_id = agent.model_id
+
+    if not all_points:
+        return [], None, None
+
+    from app.services.llm.resolver import resolve_llm_client
+
+    # 智能体没绑模型 → 用注册库默认文本模型
+    client, model_name, resolve_err = await resolve_llm_client(db, agent_model_id)
+    if not client:
+        return [], None, resolve_err or "大模型客户端未就绪"
+
+    points_block = "\n".join(
+        f"- label: {p['label_cn']}" + (f" | 审核标准: {p['description']}" if p.get("description") else "")
+        for p in all_points
+    )
+    system_msg = (
+        "你是审核智能体执行引擎。基于用户配置的审核维度, 判断输入文本是否违规。"
+        "输出必须是严格 JSON, 严禁在输出中复述违规原文, 违规片段只用 start/length 定位。"
+    )
+    user_msg = (
+        f"审核维度:\n{points_block}\n\n"
+        f"待审核文本:\n\"\"\"{text_body[:settings.maas_max_text_chars]}\"\"\"\n\n"
+        "请输出 JSON: {\"hit_points\":[{\"label\":\"对应维度label\","
+        "\"start\":0,\"length\":0,\"risk\":\"高风险|中风险|低风险\"}],"
+        "\"summary\":\"类别化摘要\"}\n"
+        "未命中则 hit_points=[]。直接以 { 开头。"
+    )
+    correlation_id = uuid.uuid4().hex
+    try:
+        content = await client.chat(
+            db=db,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.1,
+            max_tokens=2048,
+            correlation_id=correlation_id,
+            response_format={"type": "json_object"},
+        )
+        m = re.search(r"\{.*\}", content, re.DOTALL)
+        if not m:
+            return [], model_name, "大模型返回非 JSON", correlation_id if False else None
+        payload = json.loads(m.group(0))
+        hit_points = payload.get("hit_points") or []
+        hits: List[Dict[str, Any]] = []
+        for hp in hit_points:
+            if not isinstance(hp, dict):
+                continue
+            label = (hp.get("label") or "").strip()
+            start = hp.get("start")
+            length = hp.get("length")
+            # 重建 quote
+            quote = None
+            if isinstance(start, int) and isinstance(length, int) and start >= 0 and length > 0:
+                end = min(start + length, len(text_body))
+                snippet = text_body[start:end].strip().strip("“”\"'")
+                quote = snippet or None
+            hits.append({
+                "service_code": "agent",
+                "service_name": "审核智能体",
+                "label": label or "agent_violation",
+                "label_cn": label or "智能体违规",
+                "score": 1.0,
+                "quote": quote,
+                "bbox": None,
+                "page": None,
+                "timestamp_ms": None,
+                "sensitive_grade": "S0",
+                "risk": hp.get("risk") or RiskLevel.HIGH.value,
+                "source": "agent",
+            })
+        return hits, model_name, None, correlation_id
+    except Exception as exc:
+        log.warning("online-review agent detection failed corr=%s: %s", correlation_id, exc)
+        return [], model_name, f"大模型调用失败: {exc}", correlation_id
+
+
 def _llm_result_to_hits(
     result: Any, enabled_services: List[str]
 ) -> List[Dict[str, Any]]:
@@ -933,6 +1043,27 @@ async def detect(
             hits.extend(llm_hits)
         if llm_enabled and not llm_error:
             engines_used.append("llm")
+
+        # 3) 审核智能体检测 (策略配了 review_agent_ids 时, 用智能体 points 走 LLM)
+        agent_ids: List[int] = []
+        if strat and strat.definition:
+            ra = strat.definition.get("review_agent_ids") if isinstance(strat.definition, dict) else None
+            if isinstance(ra, list):
+                agent_ids = [int(x) for x in ra if isinstance(x, (int, float))]
+        if agent_ids:
+            agent_hits, agent_model, agent_err, _agent_corr = await _run_agent_detection(
+                db,
+                text_body=full_text,
+                agent_ids=agent_ids,
+            )
+            if agent_hits:
+                hits.extend(agent_hits)
+                engines_used.append("agent")
+            # 智能体模型名回填 (如果策略级 LLM 没跑, 用智能体模型名展示)
+            if not model_name and agent_model:
+                model_name = agent_model
+            if agent_err and not llm_error:
+                llm_error = agent_err
 
     # 聚合风险等级: 命中即高风险 (按需求, 命中直接展示高风险)
     risk_level = RiskLevel.HIGH.value if hits else RiskLevel.NONE.value
