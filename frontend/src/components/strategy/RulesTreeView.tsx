@@ -94,6 +94,14 @@ interface Props {
   enabledAgentIds?: number[]
   /** 审核智能体开关切换时通知父级更新 definition.review_agent_ids */
   onToggleAgent?: (agentId: number, checked: boolean) => void
+  /** 三级 sub-point 勾选状态 (受控, 由父级持久化). 未传时用内部兜底 state. */
+  subEnabledMap?: Record<number, boolean>
+  /** 三级 sub-point 勾选切换回调 */
+  onSubToggle?: (subId: number, checked: boolean) => void
+  /** 父 point → sub 列表映射 (受控, 由父级持有供保存时用). 未传时用内部兜底 state. */
+  subsByPointId?: Record<number, SubAuditPoint[]>
+  /** sub 列表加载完成时通知父级 (父级保存时需要 subsByPointId) */
+  onSubsLoaded?: (subsByPointId: Record<number, SubAuditPoint[]>) => void
 }
 
 const PACKAGE_TO_MEDIA: Record<string, CategoryKey> = {
@@ -120,6 +128,10 @@ export default function RulesTreeView({
   categoryKey,
   enabledAgentIds = [],
   onToggleAgent,
+  subEnabledMap: subEnabledMapProp,
+  onSubToggle: onSubToggleProp,
+  subsByPointId: subsByPointIdProp,
+  onSubsLoaded: onSubsLoadedProp,
 }: Props) {
   const [items, setItems] = useState<AuditItem[]>([])
   const [pointsByItem, setPointsByItem] = useState<Record<number, AuditPoint[]>>(
@@ -283,6 +295,10 @@ export default function RulesTreeView({
                   imageTextBar={imageTextBar}
                   intensity={intensity}
                   tableRef={tableRef}
+                  subEnabledMap={subEnabledMapProp}
+                  onSubToggle={onSubToggleProp}
+                  subsByPointId={subsByPointIdProp}
+                  onSubsLoaded={onSubsLoadedProp}
                 />
               ) : (
                 <Empty
@@ -486,6 +502,10 @@ function PointsColumn({
   imageTextBar,
   intensity,
   tableRef,
+  subEnabledMap: subEnabledMapProp,
+  onSubToggle: onSubToggleProp,
+  subsByPointId: subsByPointIdProp,
+  onSubsLoaded: onSubsLoadedProp,
 }: {
   items: AuditItem[]
   pointsByItem: Record<number, AuditPoint[]>
@@ -512,6 +532,14 @@ function PointsColumn({
   intensity: Intensity
   /** antd Table ref：供外层 RulesTreeView 调用 scrollTo 定位行 */
   tableRef: React.RefObject<TableRef>
+  /** 三级 sub-point 勾选状态 (受控, 由父级持久化) */
+  subEnabledMap?: Record<number, boolean>
+  /** 三级 sub-point 勾选切换回调 */
+  onSubToggle?: (subId: number, checked: boolean) => void
+  /** 父 point → sub 列表映射 (受控, 由父级持有供保存时用) */
+  subsByPointId?: Record<number, SubAuditPoint[]>
+  /** sub 列表加载完成时通知父级 (父级保存时需要 subsByPointId) */
+  onSubsLoaded?: (subsByPointId: Record<number, SubAuditPoint[]>) => void
 }) {
   const dataSource = useMemo<FlatRowRecord[]>(
     () => {
@@ -547,10 +575,24 @@ function PointsColumn({
   )
 
   const COL_TOTAL = 2
-  const [subEnabledMap, setSubEnabledMap] = useState<Record<number, boolean>>({})
+  // 三级 sub-point 勾选: 受控(父级持久化) 优先, 否则用内部兜底
+  const [subEnabledMapFallback, setSubEnabledMapFallback] = useState<Record<number, boolean>>({})
+  const subEnabledMap = subEnabledMapProp ?? subEnabledMapFallback
+  const handleSubToggle = (subId: number, checked: boolean) => {
+    if (onSubToggleProp) {
+      onSubToggleProp(subId, checked)
+    } else {
+      setSubEnabledMapFallback((m) => ({ ...m, [subId]: checked }))
+    }
+  }
 
   // 每个父审核点下的三级 sub 列表 — 从后端拉取（真实数据）
-  const [subsByPointId, setSubsByPointId] = useState<Record<number, SubAuditPoint[]>>({})
+  const [subsByPointIdFallback, setSubsByPointIdFallback] = useState<Record<number, SubAuditPoint[]>>({})
+  const subsByPointId = subsByPointIdProp ?? subsByPointIdFallback
+  const updateSubsByPointId = (next: Record<number, SubAuditPoint[]>) => {
+    setSubsByPointIdFallback(next)
+    onSubsLoadedProp?.(next)
+  }
 
   // 展开/收起状态：与勾选状态分离。点击二级 label 列切换展开，点击 checkbox 切换全选。
   const [expandedPointIds, setExpandedPointIds] = useState<Set<number>>(new Set())
@@ -578,7 +620,7 @@ function PointsColumn({
     const points = dataSource.filter((r) => r.kind === 'point')
     const pkg = points[0]?.point.package_code
     if (points.length === 0 || !pkg) {
-      setSubsByPointId({})
+      updateSubsByPointId({})
       return
     }
     // 按 point.id 建索引，用于给 sub 回填 l1/l2 标签
@@ -615,9 +657,9 @@ function PointsColumn({
             sort_order: s.sort_order,
           })
         }
-        if (alive) setSubsByPointId(map)
+        if (alive) updateSubsByPointId(map)
       } catch {
-        if (alive) setSubsByPointId({})
+        if (alive) updateSubsByPointId({})
       }
     }
     void load()
@@ -726,12 +768,9 @@ function PointsColumn({
           // 同步 pointMap 用于策略提交校验 + 通知父级维护 enabledItems。
           const onToggle = () => {
             const nextAll = !(record.checked || allSubsSelected)
-            setSubEnabledMap((m) => {
-              const next = { ...m }
-              pointSubs.forEach((s) => {
-                next[s.id] = nextAll
-              })
-              return next
+            // 批量切换所有 sub (受控模式逐个通知父级)
+            pointSubs.forEach((s) => {
+              handleSubToggle(s.id, nextAll)
             })
             const pm = getPointMap(record.item.id)
             onPointMapChange(record.item.id, { ...pm, [record.point.id]: nextAll })
@@ -851,12 +890,7 @@ function PointsColumn({
                             <input
                               type="checkbox"
                               checked={enabled}
-                              onChange={(e) =>
-                                setSubEnabledMap((m) => ({
-                                  ...m,
-                                  [sub.id]: e.target.checked,
-                                }))
-                              }
+                              onChange={(e) => handleSubToggle(sub.id, e.target.checked)}
                               aria-label={`启用 sub-审核点 ${sub.label_cn}`}
                               style={{ margin: 0 }}
                             />
@@ -936,6 +970,7 @@ function PointsColumn({
       onPointToggle,
       subsByPointId,
       subEnabledMap,
+      handleSubToggle,
       expandedPointIds,
       intensity,
       pointOverrides,

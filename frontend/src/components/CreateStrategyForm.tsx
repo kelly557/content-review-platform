@@ -45,9 +45,11 @@ import {
 } from '@/types/domain'
 import type { Strategy } from '@/types/domain'
 import type { AuditItem } from '@/types/domain'
+import type { SubAuditPoint } from '@/types/domain'
 import { ItemLibrariesEditor } from '@/components/packages/ItemLibrariesEditor'
 import {
   buildPointMapFromStrategy,
+  buildSubEnabledMapFromStrategy,
   countEnabledPoints,
   EMPTY_MEDIA_OVERRIDES,
   flattenEnabledPointsWithOverride,
@@ -155,6 +157,10 @@ export default function CreateStrategyForm({
   const [pointOverrides, setPointOverrides] = useState<MediaPointOverrideMap>(
     EMPTY_MEDIA_OVERRIDES,
   )
+  /** 三级 sub-point 勾选状态 (持久化到 strategy_points, point_id=sub.id). */
+  const [subEnabledMap, setSubEnabledMap] = useState<Record<number, boolean>>({})
+  /** 父 point → sub 列表 (RulesTreeView 加载后回传, 保存时用于 flatten). */
+  const [subsByPointId, setSubsByPointId] = useState<Record<number, SubAuditPoint[]>>({})
   /** 检测强度档位：低/中/高。默认中档。仅记录选择，不主动改写阈值，需点应用/恢复才生效。 */
   const [intensity, setIntensity] = useState<Intensity>(DEFAULT_INTENSITY)
   /** 检测强度开关：默认关闭。关闭时隐藏 Radio/恢复按钮；开启后才可选档应用预设。 */
@@ -215,10 +221,11 @@ export default function CreateStrategyForm({
       }
     }
     setEnabledItems(map)
-    const points = buildPointMapFromStrategy(
-      Array.isArray(initial.enabled_points) ? initial.enabled_points : [],
-    )
+    const enabledPointsRef = Array.isArray(initial.enabled_points) ? initial.enabled_points : []
+    const points = buildPointMapFromStrategy(enabledPointsRef)
     setPointMap(points)
+    // 三级 sub-point 勾选状态从 enabled_points 还原 (parent_point_id != null 的项)
+    setSubEnabledMap(buildSubEnabledMapFromStrategy(enabledPointsRef))
     // 从 initial.enabled_points 还原 override（中/高风险分 + 关联库）
     const overridesFromBackend: MediaPointOverrideMap = {
       image: {},
@@ -489,7 +496,7 @@ export default function CreateStrategyForm({
     }
     const definition = buildDefinitionPayload()
     const enabledPointsPayload: StrategyPointRef[] =
-      flattenEnabledPointsWithOverride(pointMap, pointOverrides)
+      flattenEnabledPointsWithOverride(pointMap, pointOverrides, subEnabledMap, subsByPointId)
     // 策略级大模型审核：未开启或未选模型时，把开关一并清空；
     // needs_multimodal_hint 为后端回填字段，提交前丢弃以避免 stale 提示。
     const cleanedLlmReview: LlmReviewConfig = {
@@ -732,6 +739,12 @@ export default function CreateStrategyForm({
               pointMap={pointMap}
               pointOverrides={pointOverrides}
               intensity={intensity}
+              subEnabledMap={subEnabledMap}
+              onSubToggle={(subId, checked) =>
+                setSubEnabledMap((prev) => ({ ...prev, [subId]: checked }))
+              }
+              subsByPointId={subsByPointId}
+              onSubsLoaded={setSubsByPointId}
               onItemLibraryLink={onItemLibraryLink}
               libraryRefreshTick={libraryRefreshTick}
               onPointMapChange={setPointMap}

@@ -182,6 +182,9 @@ class StrategyPointRef(BaseModel):
     item_id: int
     point_id: int
     is_enabled: bool = True
+    # 标识该 point_id 是父审核点(二级, null)还是子审核点(三级, 指向父 point id).
+    # 输出用: 前端据区分 pointMap(二级) vs subEnabledMap(三级). 提交时可忽略.
+    parent_point_id: Optional[int] = None
     # 策略级 override；提交时透传到 strategies.definition.enabled_point_overrides，不写 audit_point
     medium_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)
     high_threshold: Optional[float] = Field(default=None, ge=50.0, le=100.0)

@@ -96,10 +96,15 @@ export function flattenEnabledPoints(
  * 同时把 MediaPointOverrideMap 中的覆盖（中/高风险分）合并到结果。
  * 仅对 is_enabled=true 的 point 输出 override；is_enabled=false 不带。
  * 「关联自定义图库词库」已从策略级 override 移除（已上移至审核项）。
+ *
+ * subEnabledMap + subsByPointId: 三级 sub-point 的勾选也输出为 StrategyPointRef
+ * (point_id = sub.id), 实现完整持久化.
  */
 export function flattenEnabledPointsWithOverride(
   pointMap: MediaPointMap,
   overrideMap: MediaPointOverrideMap,
+  subEnabledMap?: Record<number, boolean>,
+  subsByPointId?: Record<number, { id: number }[]>,
 ): StrategyPointRef[] {
   const out: StrategyPointRef[] = []
   for (const [media_type, byItem] of Object.entries(pointMap) as [
@@ -137,6 +142,22 @@ export function flattenEnabledPointsWithOverride(
             ref.high_threshold_max = ov.high_threshold_max
         }
         out.push(ref)
+
+        // 三级 sub-point: 父 point 启用时, 把勾选的 sub 也输出为 ref
+        if (is_enabled && subEnabledMap && subsByPointId) {
+          const subs = subsByPointId[point_id] ?? []
+          for (const sub of subs) {
+            if (subEnabledMap[sub.id]) {
+              out.push({
+                media_type,
+                item_id,
+                point_id: sub.id,
+                is_enabled: true,
+                parent_point_id: point_id,
+              })
+            }
+          }
+        }
       }
     }
   }
@@ -156,10 +177,27 @@ export function buildPointMapFromStrategy(
   if (!refs || refs.length === 0) return out
   for (const r of refs) {
     if (!r) continue
+    // 跳过三级 sub-point (parent_point_id != null), 只还原二级
+    if (r.parent_point_id != null) continue
     const media = r.media_type as CategoryKey
     if (!(media in out)) continue
     if (!out[media][r.item_id]) out[media][r.item_id] = {}
     out[media][r.item_id][r.point_id] = r.is_enabled
+  }
+  return out
+}
+
+/** 从 enabled_points 提取三级 sub-point 的勾选状态 (parent_point_id != null 的项). */
+export function buildSubEnabledMapFromStrategy(
+  refs: StrategyPointRef[] | undefined,
+): Record<number, boolean> {
+  const out: Record<number, boolean> = {}
+  if (!refs || refs.length === 0) return out
+  for (const r of refs) {
+    if (!r) continue
+    if (r.parent_point_id != null) {
+      out[r.point_id] = r.is_enabled
+    }
   }
   return out
 }

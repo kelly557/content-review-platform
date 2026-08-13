@@ -414,8 +414,21 @@ async def _load_enabled_points(
     if strat is not None:
         definition = strat.definition or {}
         overrides = dict(definition.get("enabled_point_overrides") or {})
+    sp_rows = list(rows.scalars().all())
+    # 批量拉 AuditPoint.parent_point_id, 区分父(二级)/子(三级) point
+    point_ids = [r.point_id for r in sp_rows]
+    parent_map: dict[int, int | None] = {}
+    if point_ids:
+        from app.models.audit_point import AuditPoint
+
+        ap_rows = await db.execute(
+            select(AuditPoint.id, AuditPoint.parent_point_id).where(
+                AuditPoint.id.in_(point_ids)
+            )
+        )
+        parent_map = {row[0]: row[1] for row in ap_rows.all()}
     out: list[StrategyPointRef] = []
-    for r in rows.scalars():
+    for r in sp_rows:
         patch = (
             overrides.get(r.media_type, {})
             .get(str(r.item_id), {})
@@ -427,6 +440,7 @@ async def _load_enabled_points(
                 item_id=r.item_id,
                 point_id=r.point_id,
                 is_enabled=r.is_enabled,
+                parent_point_id=parent_map.get(r.point_id),
                 medium_threshold=patch.get("medium_threshold"),
                 high_threshold=patch.get("high_threshold"),
                 low_threshold_min=patch.get("low_threshold_min"),

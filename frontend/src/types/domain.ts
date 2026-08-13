@@ -729,6 +729,8 @@ export interface StrategyPointRef {
   item_id: number
   point_id: number
   is_enabled: boolean
+  /** 标识该 point_id 是父(二级,null)还是子(三级,指向父 point id). 输出用. */
+  parent_point_id?: number | null
   /** 策略级 override（中/高风险分），范围 50~100 */
   medium_threshold?: number
   high_threshold?: number

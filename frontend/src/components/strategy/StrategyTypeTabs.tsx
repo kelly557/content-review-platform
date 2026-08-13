@@ -13,6 +13,7 @@ import type {
   DocImageMode,
   DocTextMode,
   ImageTextMode,
+  SubAuditPoint,
   VideoAudioMode,
   VideoComposeModes,
   VideoFrameMode,
@@ -110,6 +111,14 @@ interface Props {
   reviewAgentIds?: number[]
   /** 审核智能体开关切换时通知父级更新 definition.review_agent_ids */
   onToggleAgent?: (agentId: number, checked: boolean) => void
+  /** 三级 sub-point 勾选状态 (透传给 RulesTreeView, 受控持久化) */
+  subEnabledMap?: Record<number, boolean>
+  /** 三级 sub-point 勾选切换回调 */
+  onSubToggle?: (subId: number, checked: boolean) => void
+  /** 父 point → sub 列表 (透传给 RulesTreeView, 保存时用) */
+  subsByPointId?: Record<number, SubAuditPoint[]>
+  /** sub 列表加载完成回调 (父级保存时需要 subsByPointId) */
+  onSubsLoaded?: (subsByPointId: Record<number, SubAuditPoint[]>) => void
 }
 
 export default function StrategyTypeTabs({
@@ -138,6 +147,10 @@ export default function StrategyTypeTabs({
   intensity,
   reviewAgentIds = [],
   onToggleAgent,
+  subEnabledMap,
+  onSubToggle,
+  subsByPointId,
+  onSubsLoaded,
 }: Props) {
   const [activeCategory, setActiveCategory] = useState<CategoryKey>(defaultActiveKey)
 
@@ -331,6 +344,10 @@ export default function StrategyTypeTabs({
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
               intensity={intensity}
+              subEnabledMap={subEnabledMap}
+              onSubToggle={onSubToggle}
+              subsByPointId={subsByPointId}
+              onSubsLoaded={onSubsLoaded}
               categoryKey="audio"
               enabledAgentIds={reviewAgentIds}
               onToggleAgent={onToggleAgent}
@@ -354,6 +371,10 @@ export default function StrategyTypeTabs({
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
               intensity={intensity}
+              subEnabledMap={subEnabledMap}
+              onSubToggle={onSubToggle}
+              subsByPointId={subsByPointId}
+              onSubsLoaded={onSubsLoaded}
               categoryKey="doc"
               enabledAgentIds={reviewAgentIds}
               onToggleAgent={onToggleAgent}
@@ -377,6 +398,10 @@ export default function StrategyTypeTabs({
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
               intensity={intensity}
+              subEnabledMap={subEnabledMap}
+              onSubToggle={onSubToggle}
+              subsByPointId={subsByPointId}
+              onSubsLoaded={onSubsLoaded}
               categoryKey="doc"
               enabledAgentIds={reviewAgentIds}
               onToggleAgent={onToggleAgent}
@@ -400,6 +425,10 @@ export default function StrategyTypeTabs({
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
               intensity={intensity}
+              subEnabledMap={subEnabledMap}
+              onSubToggle={onSubToggle}
+              subsByPointId={subsByPointId}
+              onSubsLoaded={onSubsLoaded}
               categoryKey="video"
               enabledAgentIds={reviewAgentIds}
               onToggleAgent={onToggleAgent}
@@ -423,6 +452,10 @@ export default function StrategyTypeTabs({
               onItemLibraryLink={onItemLibraryLink}
               refreshKey={libraryRefreshTick}
               intensity={intensity}
+              subEnabledMap={subEnabledMap}
+              onSubToggle={onSubToggle}
+              subsByPointId={subsByPointId}
+              onSubsLoaded={onSubsLoaded}
               categoryKey="video"
               enabledAgentIds={reviewAgentIds}
               onToggleAgent={onToggleAgent}
@@ -452,6 +485,10 @@ export default function StrategyTypeTabs({
                 onSelectedItemChange={cat.key === 'image' ? onSelectedItemChange : undefined}
                 imageTextConfig={cat.key === 'image' ? imageTextConfig : undefined}
                 intensity={intensity}
+              subEnabledMap={subEnabledMap}
+              onSubToggle={onSubToggle}
+              subsByPointId={subsByPointId}
+              onSubsLoaded={onSubsLoaded}
                 categoryKey={cat.key}
                 enabledAgentIds={reviewAgentIds}
                 onToggleAgent={onToggleAgent}
