@@ -66,6 +66,8 @@ class OnlineReviewHit(BaseModel):
     risk_level: str
     rule_code: str
     rule_label: str
+    # 命中标签关联的代答答案 (从代答库查, 可空)
+    reply: Optional[str] = None
 
 
 class OnlineReviewDataItem(BaseModel):
@@ -111,6 +113,7 @@ def _hit_to_response(hit: Dict[str, Any]) -> OnlineReviewHit:
         risk_level=risk,
         rule_code=str(label).upper(),
         rule_label=label_cn,
+        reply=hit.get("reply"),
     )
 
 
@@ -797,6 +800,7 @@ async def _enrich_hits_with_label_path(db: AsyncSession, hits: List[Dict[str, An
         h["audit_item_label"] = item_label
         h["audit_point_label"] = point_label
         h["audit_point_code"] = ap.code
+        h["audit_point_id"] = ap.id
 
 
 # ---------------------------------------------------------------------------
@@ -806,6 +810,186 @@ async def _enrich_hits_with_label_path(db: AsyncSession, hits: List[Dict[str, An
 # 占位 workflow template code, 对应 auto_only 模板 (仅机审, 无人审).
 # 若模板不存在则跳过 workflow_instance 创建, 仅建 Material + ReviewTask.
 _PLACEHOLDER_TEMPLATE_CODE = "auto_only"
+
+
+async def _enrich_hits_with_reply(db: AsyncSession, hits: List[Dict[str, Any]]) -> None:
+    """根据命中的审核点/审核项, 查关联的代答库, 给 hit 补上 reply (代答答案).
+
+    代答库通过 audit_point_libraries / audit_item_libraries 关联到审核点/项.
+    命中后取关联代答库的第一条 reply 作为代答答案.
+    """
+    if not hits:
+        return
+    from app.models.audit_point_library import AuditPointLibrary
+    from app.models.audit_item_library import AuditItemLibrary
+    from app.models.library import Library, LibraryType
+    from app.models.library_item import LibraryItem
+
+    # 收集命中的审核点 id 和审核项 id
+    point_ids: set[int] = set()
+    item_ids: set[int] = set()
+    for h in hits:
+        pid = h.get("audit_point_id")
+        if isinstance(pid, int):
+            point_ids.add(pid)
+        iid = h.get("audit_item_id")
+        if isinstance(iid, int):
+            item_ids.add(iid)
+
+    # 通过 audit_point_code 反查 point_id
+    from app.models.audit_point import AuditPoint
+    from app.models.audit_item import AuditItem
+
+    codes = {h.get("audit_point_code") for h in hits if h.get("audit_point_code")}
+    if codes:
+        code_rows = await db.execute(
+            select(AuditPoint.id).where(AuditPoint.code.in_(list(codes)))
+        )
+        point_ids.update(r[0] for r in code_rows.all())
+
+    # 通过 audit_point_label 反查 point_id (LLM 命中标签可能不在表里, 但二级标签在)
+    point_labels = {h.get("audit_point_label") for h in hits if h.get("audit_point_label")}
+    if point_labels:
+        pl_rows = await db.execute(
+            select(AuditPoint.id).where(AuditPoint.label_cn.in_(list(point_labels)))
+        )
+        point_ids.update(r[0] for r in pl_rows.all())
+
+    # 通过 audit_item_label 反查 item_id (一级标签, 如"涉政")
+    item_labels = {h.get("audit_item_label") for h in hits if h.get("audit_item_label")}
+    if item_labels:
+        il_rows = await db.execute(
+            select(AuditItem.id).where(AuditItem.name_cn.in_(list(item_labels)))
+        )
+        item_ids.update(r[0] for r in il_rows.all())
+
+    if not point_ids and not item_ids:
+        # 没有审核点关联信息时, 查所有 active 代答库 (兜底)
+        all_reply_libs = await db.execute(
+            select(Library.id).where(
+                Library.library_type == LibraryType.REPLY.value,
+                Library.is_active.is_(True),
+                Library.is_deleted.is_(False),
+            )
+        )
+        reply_lib_ids = {r[0] for r in all_reply_libs.all()}
+        if not reply_lib_ids:
+            return
+        item_rows = await db.execute(
+            select(LibraryItem.library_id, LibraryItem.reply)
+            .where(
+                LibraryItem.library_id.in_(list(reply_lib_ids)),
+                LibraryItem.is_deleted.is_(False),
+                LibraryItem.reply.isnot(None),
+            )
+            .order_by(LibraryItem.library_id, LibraryItem.id)
+        )
+        first_reply = None
+        for _lib_id, reply in item_rows.all():
+            if reply:
+                first_reply = reply
+                break
+        if first_reply:
+            for h in hits:
+                if not h.get("reply"):
+                    h["reply"] = first_reply
+        return
+
+    # 查关联的代答库 id
+    reply_lib_ids: set[int] = set()
+    if point_ids:
+        rows = await db.execute(
+            select(AuditPointLibrary.library_id).where(
+                AuditPointLibrary.audit_point_id.in_(list(point_ids))
+            )
+        )
+        reply_lib_ids.update(r[0] for r in rows.all())
+    if item_ids:
+        rows = await db.execute(
+            select(AuditItemLibrary.library_id).where(
+                AuditItemLibrary.audit_item_id.in_(list(item_ids))
+            )
+        )
+        reply_lib_ids.update(r[0] for r in rows.all())
+
+    if not reply_lib_ids:
+        # 审核点关联的库里没有代答库 → 兜底: 查所有 active 代答库
+        all_reply_libs = await db.execute(
+            select(Library.id).where(
+                Library.library_type == LibraryType.REPLY.value,
+                Library.is_active.is_(True),
+                Library.is_deleted.is_(False),
+            )
+        )
+        reply_lib_ids = {r[0] for r in all_reply_libs.all()}
+
+    # 过滤出代答库
+    lib_rows = await db.execute(
+        select(Library.id).where(
+            Library.id.in_(list(reply_lib_ids)),
+            Library.library_type == LibraryType.REPLY.value,
+            Library.is_active.is_(True),
+            Library.is_deleted.is_(False),
+        )
+    )
+    reply_lib_ids = {r[0] for r in lib_rows.all()}
+    if not reply_lib_ids:
+        return
+
+    # 取每个代答库的第一条 reply
+    item_rows = await db.execute(
+        select(LibraryItem.library_id, LibraryItem.reply)
+        .where(
+            LibraryItem.library_id.in_(list(reply_lib_ids)),
+            LibraryItem.is_deleted.is_(False),
+            LibraryItem.reply.isnot(None),
+        )
+        .order_by(LibraryItem.library_id, LibraryItem.id)
+    )
+    lib_reply: dict[int, str] = {}
+    for lib_id, reply in item_rows.all():
+        if lib_id not in lib_reply and reply:
+            lib_reply[lib_id] = reply
+
+    if not lib_reply:
+        return
+
+    # 回填每个 hit (取第一个匹配的代答库的 reply)
+    # 如果 hit 没有关联审核点/项, 直接用第一个代答库的 reply
+    first_reply = next(iter(lib_reply.values()), None)
+    for h in hits:
+        if h.get("reply"):
+            continue
+        pid = h.get("audit_point_id")
+        iid = h.get("audit_item_id")
+        if not pid and not iid:
+            # 没有关联信息 → 直接用第一个代答
+            if first_reply:
+                h["reply"] = first_reply
+            continue
+        # 查该 hit 的审核点/项关联的代答库
+        matched_lib_ids: set[int] = set()
+        if pid:
+            rows = await db.execute(
+                select(AuditPointLibrary.library_id).where(
+                    AuditPointLibrary.audit_point_id == pid
+                )
+            )
+            matched_lib_ids.update(r[0] for r in rows.all())
+        if iid:
+            rows = await db.execute(
+                select(AuditItemLibrary.library_id).where(
+                    AuditItemLibrary.audit_item_id == iid
+                )
+            )
+            matched_lib_ids.update(r[0] for r in rows.all())
+        for lid in matched_lib_ids:
+            if lid in lib_reply:
+                h["reply"] = lib_reply[lid]
+                break
+        # 如果没匹配到, 也用第一个代答兜底
+        if not h.get("reply") and first_reply:
+            h["reply"] = first_reply
 
 
 async def _persist_to_review_task(
@@ -1223,6 +1407,8 @@ async def detect(
     # 聚合风险等级: 命中即高风险 (按需求, 命中直接展示高风险)
     # 先用 label_cn 反查审核点表, 给 LLM/智能体命中的 hit 补上 audit_item_label/audit_point_label
     await _enrich_hits_with_label_path(db, hits)
+    # 根据命中的审核点/审核项, 查关联的代答库, 给 hit 补上 reply (代答答案)
+    await _enrich_hits_with_reply(db, hits)
 
     risk_level = RiskLevel.HIGH.value if hits else RiskLevel.NONE.value
     conclusion, conclusion_type = _risk_level_to_conclusion(risk_level)

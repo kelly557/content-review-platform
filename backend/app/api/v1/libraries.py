@@ -702,18 +702,14 @@ async def create_library(
             db.add(LibraryItem(library_id=lib.id, word=w))
         await db.flush()
     elif body.library_type == LibraryType.REPLY and body.words:
-        seen_pair: set[tuple[str, str]] = set()
+        seen_reply: set[str] = set()
         for raw in body.words:
-            pair = _split_trigger_reply(raw)
-            if pair is None:
+            r = (raw or "").strip()
+            if not r or r in seen_reply:
                 continue
-            t, r = pair
-            key = (t, r)
-            if key in seen_pair:
-                continue
-            seen_pair.add(key)
+            seen_reply.add(r)
             db.add(
-                LibraryItem(library_id=lib.id, trigger=t, reply=r)
+                LibraryItem(library_id=lib.id, reply=r)
             )
         await db.flush()
 
@@ -1176,19 +1172,17 @@ async def add_items(
         added = 0
         skipped = 0
         inserted = []
-        seen: set[tuple[str, str]] = set()
+        seen: set[str] = set()
         for raw in body.words:
-            pair = _split_trigger_reply(raw)
-            if pair is None:
+            r = (raw or "").strip()
+            if not r:
                 skipped += 1
                 continue
-            t, r = pair
-            key = (t, r)
-            if key in seen or key in existing:
+            if r in seen or r in existing:
                 skipped += 1
                 continue
-            seen.add(key)
-            it = LibraryItem(library_id=library_id, trigger=t, reply=r)
+            seen.add(r)
+            it = LibraryItem(library_id=library_id, reply=r)
             db.add(it)
             inserted.append(it)
             added += 1
@@ -1548,21 +1542,21 @@ async def upload_words(
             added += 1
     else:
         # REPLY: each row "trigger<sep>reply" where <sep> is space(s) or '｜'
-        pairs: list[tuple[str, str]] = []
+        replies: list[str] = []
         for line in text.splitlines():
-            pair = _split_trigger_reply(line)
-            if pair is None:
+            r = line.strip()
+            if not r:
                 continue
-            pairs.append(pair)
-        if len(pairs) > MAX_WORDS:
+            replies.append(r)
+        if len(replies) > MAX_WORDS:
             raise HTTPException(
-                status_code=400, detail=f"单次最多 {MAX_WORDS} 对"
+                status_code=400, detail=f"单次最多 {MAX_WORDS} 条"
             )
         existing = {
-            (row[0], row[1])
+            row[0]
             for row in (
                 await db.execute(
-                    select(LibraryItem.trigger, LibraryItem.reply).where(
+                    select(LibraryItem.reply).where(
                         and_(
                             LibraryItem.library_id == library_id,
                             LibraryItem.is_deleted == False,  # noqa: E712
@@ -1570,16 +1564,16 @@ async def upload_words(
                     )
                 )
             ).all()
-            if row[0] and row[1]
+            if row[0]
         }
-        seen_pair: set[tuple[str, str]] = set()
-        for pair in pairs:
-            if pair in seen_pair or pair in existing:
+        seen_reply: set[str] = set()
+        for r in replies:
+            if r in seen_reply or r in existing:
                 skipped += 1
                 continue
-            seen_pair.add(pair)
+            seen_reply.add(r)
             it = LibraryItem(
-                library_id=library_id, trigger=pair[0], reply=pair[1]
+                library_id=library_id, reply=r
             )
             db.add(it)
             inserted.append(it)

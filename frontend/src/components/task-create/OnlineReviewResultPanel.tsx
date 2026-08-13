@@ -92,6 +92,9 @@ function ResultSummary({ response }: { response: OnlineReviewResponse }) {
         hits.map((h, i) => (
           <Tag key={`${h.rule_code}-${i}`} color="red" bordered={false}>
             {h.rule_label}
+            {h.reply && (
+              <span style={{ marginLeft: 4, color: '#1677ff' }}>→ {h.reply}</span>
+            )}
           </Tag>
         ))
       ) : (

@@ -27,6 +27,7 @@ export interface OnlineReviewHit {
   risk_level: string
   rule_code: string
   rule_label: string
+  reply?: string | null
 }
 
 export interface OnlineReviewDataItem {

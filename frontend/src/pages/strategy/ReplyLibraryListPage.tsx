@@ -353,7 +353,7 @@ export default function ReplyLibraryListPage() {
                     <Form.Item name="pairsText" noStyle>
                       <Input.TextArea
                         rows={8}
-                        placeholder={'您好,客官 您好,有什么可以帮您?\n发货时间 24小时内\n发货时间｜24小时内'}
+                        placeholder={'您好,客官\n发货时间:24小时内\n感谢您的关注'}
                         disabled={creatingImport}
                         onChange={(e) =>
                           createForm.setFieldValue(
@@ -400,12 +400,12 @@ export default function ReplyLibraryListPage() {
                             }
                             if (pairs.length > MAX_PAIRS) {
                               message.error(
-                                `单次最多 ${MAX_PAIRS} 对,检测到 ${pairs.length}`,
+                                `单次最多 ${MAX_PAIRS} 条,检测到 ${pairs.length}`,
                               )
                               return false
                             }
                             const text = pairs
-                              .map((p) => `${p.trigger} ${p.reply}`)
+                              .map((p) => p.reply || p.trigger || '')
                               .join('\n')
                             createForm.setFieldValue('pairsText', text)
                             message.success(
