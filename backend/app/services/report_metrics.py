@@ -740,13 +740,15 @@ async def anomaly(
 
     bucket = _bucket_expr(granularity)
 
-    # 统计维度改为 machine_result.suggested_action (block/review/pass),
-    # 而非 Material.status — 在线审核不改 Material.status (始终 IN_REVIEW),
-    # 但 machine_result 已有机审判定.
+    # 统计维度: machine_result.risk_level (高风险/中风险/低风险/无风险)
+    # - reject_rate (拒绝率) = 高风险 / total
+    # - review_rate (待复核率) = (高风险 + 中风险) / total  (需要人审的)
+    # - approve_rate (通过率) = (无风险 + 低风险) / total
     base = select(
         bucket.label("b"),
-        func.sum(case((ReviewTask.machine_result["suggested_action"].astext == "block", 1), else_=0)).label("rej"),
-        func.sum(case((ReviewTask.machine_result["suggested_action"].astext == "pass", 1), else_=0)).label("apr"),
+        func.sum(case((ReviewTask.machine_result["risk_level"].astext == "高风险", 1), else_=0)).label("rej"),
+        func.sum(case((ReviewTask.machine_result["risk_level"].astext == "无风险", 1), else_=0)).label("apr"),
+        func.sum(case((ReviewTask.machine_result["risk_level"].astext == "低风险", 1), else_=0)).label("low"),
         func.count().label("sub"),
     ).select_from(
         Material.__table__.join(
@@ -802,37 +804,40 @@ async def anomaly(
     stmt = base.group_by("b").order_by("b")
     rows = (await db.execute(stmt)).all()
 
-    # Reviewed counts — 不再单独查 ReviewTask (已在 base 中 JOIN),
-    # review_rate 用 suggested_action='review' 的比例.
+    # Reviewed counts — review_rate = (高风险 + 中风险) / total = 需要人审的比例
     rev_map: dict = {}
 
     series: List[dict] = []
     for r in rows:
         sub = int(r.sub or 0)
-        rej = int(r.rej or 0)
-        apr = int(r.apr or 0)
-        rev = sub - rej - apr  # review = total - block - pass
+        rej = int(r.rej or 0)  # 高风险
+        apr = int(r.apr or 0)  # 无风险
+        low = int(r.low or 0)  # 低风险
+        # 待复核 = 高风险 + 中风险 = total - 无风险 - 低风险
+        rev = sub - apr - low
         series.append(
             {
                 "bucket": r.b.isoformat() if isinstance(r.b, datetime) else str(r.b),
                 "reject_rate": _safe_pct(rej, sub),
                 "review_rate": _safe_pct(rev, sub),
-                "approve_rate": _safe_pct(apr, sub),
+                "approve_rate": _safe_pct(apr + low, sub),
                 "submitted": sub,
             }
         )
 
     if series:
         last = series[-1]
+        # 高风险内容数 = 当前 bucket 的高风险条数 (直接从查询结果取, 不用 rate 反算)
+        last_rej = int(rows[-1].rej or 0) if rows else 0
         current = {
             "bucket": last["bucket"],
             "reject_rate": last["reject_rate"],
             "review_rate": last["review_rate"],
             "approve_rate": last["approve_rate"],
             "submitted": last["submitted"],
-            "rejected": int(round(last["submitted"] * last["reject_rate"] / 100.0)),
+            "rejected": last_rej,
             "high_risk_accounts": 0,
-            "high_risk_content_count": 0,
+            "high_risk_content_count": last_rej,
         }
     else:
         current = {
@@ -846,8 +851,8 @@ async def anomaly(
             "high_risk_content_count": 0,
         }
 
-    # Distinct submitters with at least 1 blocked (high-risk) material in the
-    # most-recent 1h slice. Based on machine_result.suggested_action='block'.
+    # Distinct submitters with at least 1 high-risk material in the
+    # most-recent 1h slice. Based on machine_result.risk_level='高风险'.
     last_hour_start = max(window.end - timedelta(hours=1), window.start)
     hr_q = (
         select(func.count(func.distinct(Material.submitter_id)))
@@ -860,7 +865,7 @@ async def anomaly(
         .where(Material.created_at >= last_hour_start)
         .where(Material.created_at < window.end)
         .where(ReviewTask.machine_status == MachineStatus.COMPLETED)
-        .where(ReviewTask.machine_result["suggested_action"].astext == "block")
+        .where(ReviewTask.machine_result["risk_level"].astext == "高风险")
     )
     if modalities:
         material_match = _build_modality_exists(list(modalities))
@@ -884,35 +889,8 @@ async def anomaly(
         )
     current["high_risk_accounts"] = int(await db.scalar(hr_q) or 0)
 
-    # Distinct materials whose latest completed machine review has
-    # risk_level == '高风险' in the most-recent 1h slice. Same time anchor as
-    # high_risk_accounts so the two thresholds describe the same slice.
-    mr = ReviewTask.machine_result
-    hr_content_q = (
-        select(func.count(func.distinct(ReviewTask.material_id)))
-        .where(ReviewTask.machine_status == MachineStatus.COMPLETED)
-        .where(mr["risk_level"].astext == "高风险")
-        .where(ReviewTask.machine_completed_at >= last_hour_start)
-        .where(ReviewTask.machine_completed_at < window.end)
-    )
-    if risk_label_paths:
-        from app.services.risk_taxonomy_service import collect_point_codes_under_paths
-
-        point_codes = (
-            collect_point_codes_under_paths(taxonomy, list(risk_label_paths))
-            if taxonomy is not None else []
-        )
-        if not point_codes:
-            hr_content_q = hr_content_q.where(False)
-        else:
-            clauses = [
-                ReviewTask.machine_result.contains(
-                    {"hits": [{"audit_point_code": code}]}
-                )
-                for code in point_codes
-            ]
-            hr_content_q = hr_content_q.where(_or_(*clauses))
-    current["high_risk_content_count"] = int(await db.scalar(hr_content_q) or 0)
+    # high_risk_content_count 已从 series 最后一个 bucket 取值 (与 submitted 同口径),
+    # 不再单独查询.
 
     # Recent alerts (top 20)
     alert_stmt = (

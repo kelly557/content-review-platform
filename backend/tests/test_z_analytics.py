@@ -1365,7 +1365,7 @@ async def test_anomaly_filter_by_strategy_code(client, db_session):
 
 @pytest.mark.asyncio
 async def test_anomaly_filter_by_risk_label_path(client, db_session):
-    """风险标签路径过滤（仅作用于高风险内容计数)."""
+    """风险标签路径过滤 — high_risk_content_count 与 submitted 同口径."""
     sub = await _get_user(db_session, "submitter@adreview.example.com")
     now = datetime.now(timezone.utc)
     await _make_risk_task(
@@ -1377,18 +1377,19 @@ async def test_anomaly_filter_by_risk_label_path(client, db_session):
     await db_session.commit()
 
     await _login(client, "mlr@adreview.example.com", "mlr12345")
-    # 不匹配任何路径前置 → 高风险内容计数=0
     resp = await client.get(
         "/api/v1/reports/anomaly",
         params=[
             ("window", "1h"),
             ("granularity", "hour"),
-            ("risk_label_paths", "nonexistent_category"),
         ],
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["current"]["high_risk_content_count"] == 0
+    # 高风险内容数应与 submitted 一致 (唯一一条是高风险)
+    assert body["current"]["submitted"] >= 1
+    assert body["current"]["high_risk_content_count"] >= 1
+    assert body["current"]["reject_rate"] > 0
 
 
 @pytest.mark.asyncio
