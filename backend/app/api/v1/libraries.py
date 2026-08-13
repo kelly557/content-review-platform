@@ -336,7 +336,7 @@ async def _tags_brief_for_libraries(
     for lib_id, tag_id, name, level, path in rows:
         if lib_id in by_lib:
             continue  # 一库一标签 (取 created_at 最早)
-        by_lib[lib_id] = _tag_brief_from_row((tag_id, name, level, path))
+        by_lib[lib_id] = _tag_to_brief({"id": tag_id, "name": name, "level": level, "path": path})
     return by_lib
 
 
@@ -937,10 +937,12 @@ async def update_library(
 @router.delete("/{library_id}", response_model=LibraryDeleteResponse)
 async def delete_library(
     library_id: int,
-    body: LibraryDeletePayload,
+    body: Optional[LibraryDeletePayload] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> LibraryDeleteResponse:
+    if body is None:
+        body = LibraryDeletePayload()
     lib = await db.get(Library, library_id)
     if not lib or lib.is_deleted:
         raise HTTPException(status_code=404, detail="库不存在")
