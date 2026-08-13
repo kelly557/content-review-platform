@@ -692,6 +692,84 @@ def _normalize_grade(grade: Optional[str]) -> str:
     return "S0"
 
 
+async def _enrich_hits_with_label_path(db: AsyncSession, hits: List[Dict[str, Any]]) -> None:
+    """用 label_cn 反查审核点表, 给 hit 补上 audit_item_label(一级) 和 audit_point_label(二级).
+
+    LLM/智能体命中的 hit 只有 label_cn (如"国内领导人"), 没有关联审核点体系.
+    本函数批量查 AuditPoint, 找到 label_cn 匹配的审核点, 回填其所属的一级(item)
+    和二级(point)标签, 使数据查询页能展示完整级联.
+    """
+    if not hits:
+        return
+    # 收集需要查的 label_cn (跳过已有 audit_item_label 的)
+    labels_to_find: dict[str, None] = {}
+    for h in hits:
+        if h.get("audit_item_label"):
+            continue
+        lbl = (h.get("label_cn") or h.get("label") or "").strip()
+        # 智能体命中的 label_cn 是 "智能体名/标签" 格式, 取 / 后面的标签部分
+        if "/" in lbl:
+            lbl = lbl.rsplit("/", 1)[-1].strip()
+        if lbl:
+            labels_to_find[lbl] = None
+    if not labels_to_find:
+        return
+    from app.models.audit_point import AuditPoint
+    from app.models.audit_item import AuditItem
+
+    # 批量查 AuditPoint by label_cn
+    ap_rows = await db.execute(
+        select(AuditPoint).where(AuditPoint.label_cn.in_(list(labels_to_find.keys())))
+    )
+    # label_cn → (point_id, parent_point_id, package_code)
+    ap_map: dict[str, AuditPoint] = {}
+    for ap in ap_rows.scalars():
+        ap_map[ap.label_cn] = ap
+    # 批量查 parent points (二级, parent_point_id=None) 和 items (一级)
+    parent_ids = {ap.parent_point_id for ap in ap_map.values() if ap.parent_point_id}
+    parent_map: dict[int, AuditPoint] = {}
+    if parent_ids:
+        pp_rows = await db.execute(
+            select(AuditPoint).where(AuditPoint.id.in_(list(parent_ids)))
+        )
+        parent_map = {ap.id: ap for ap in pp_rows.scalars()}
+    # 查 items (一级标签): 通过 package_code 关联 AuditItem
+    pkg_codes = {ap.package_code for ap in ap_map.values()}
+    pkg_codes.update({ap.package_code for ap in parent_map.values()})
+    item_map: dict[str, AuditItem] = {}
+    if pkg_codes:
+        from app.models.service import Service
+
+        it_rows = await db.execute(
+            select(AuditItem).where(AuditItem.package_code.in_(list(pkg_codes)))
+        )
+        for it in it_rows.scalars():
+            item_map[it.package_code] = it
+    # 回填每个 hit
+    for h in hits:
+        if h.get("audit_item_label"):
+            continue
+        lbl = (h.get("label_cn") or h.get("label") or "").strip()
+        if "/" in lbl:
+            lbl = lbl.rsplit("/", 1)[-1].strip()
+        ap = ap_map.get(lbl)
+        if not ap:
+            continue
+        # 确定二级标签: 如果该 point 有 parent, 则它是三级, 二级是 parent;
+        # 如果 parent=None, 则它本身是二级
+        if ap.parent_point_id:
+            parent_ap = parent_map.get(ap.parent_point_id)
+            point_label = parent_ap.label_cn if parent_ap else None
+        else:
+            point_label = ap.label_cn
+        # 一级标签: 从 package_code 反查 AuditItem
+        item = item_map.get(ap.package_code)
+        item_label = item.name_cn if item else None
+        h["audit_item_label"] = item_label
+        h["audit_point_label"] = point_label
+        h["audit_point_code"] = ap.code
+
+
 # ---------------------------------------------------------------------------
 # 落库: 创建占位 Material + ReviewTask
 # ---------------------------------------------------------------------------
@@ -1077,6 +1155,9 @@ async def detect(
                 llm_error = agent_err
 
     # 聚合风险等级: 命中即高风险 (按需求, 命中直接展示高风险)
+    # 先用 label_cn 反查审核点表, 给 LLM/智能体命中的 hit 补上 audit_item_label/audit_point_label
+    await _enrich_hits_with_label_path(db, hits)
+
     risk_level = RiskLevel.HIGH.value if hits else RiskLevel.NONE.value
     conclusion, conclusion_type = _risk_level_to_conclusion(risk_level)
 
