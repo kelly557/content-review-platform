@@ -51,8 +51,21 @@ def derive_content_media(
 ) -> Optional[ContentMedia]:
     """把 ``MaterialType`` + ``mime_type`` 归一到 4 值呈现内容.
 
-    优先级: ``mime_type`` 前缀优先 (mime 更细), 在 mime 缺失时回退到 ``material_type``.
+    优先级: ``material_type`` 优先 (用户上传时声明的类型更可靠),
+    在缺失时回退到 ``mime_type`` 前缀.
+    在线审核创建的占位 Material 的 mime_type 可能为 text/plain 但 material_type 为 image,
+    此时按 material_type 归类.
     """
+    if material_type:
+        mt = str(material_type).lower()
+        if mt == "image":
+            return "image"
+        if mt == "video":
+            return "video"
+        if mt == "audio":
+            return "audio"
+        if mt in ("text", "pdf"):
+            return "text"
     if mime_type:
         mt = mime_type.lower()
         if mt.startswith("audio/"):
@@ -63,17 +76,6 @@ def derive_content_media(
             return "image"
         if mt.startswith("text/"):
             return "text"
-    if material_type is None:
-        return None
-    mt = str(material_type).lower()
-    if mt in ("text", "pdf"):
-        return "text"
-    if mt == "image":
-        return "image"
-    if mt == "video":
-        return "video"
-    if mt == "audio":
-        return "audio"
     return None
 
 

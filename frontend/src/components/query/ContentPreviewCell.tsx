@@ -58,8 +58,9 @@ export default function ContentPreviewCell({ record, onPreview }: Props) {
 
   const handleClick = () => onPreview(record)
 
-  if (media === 'text') {
-    const summary = summarizeText(record.text_body)
+  // 文本素材, 或图片素材无预览时回退到文本展示
+  const textSummary = summarizeText(record.text_body)
+  if (media === 'text' || (media === 'image' && !previewUrl)) {
     return (
       <span
         role="button"
@@ -83,15 +84,11 @@ export default function ContentPreviewCell({ record, onPreview }: Props) {
           }}
           title={record.text_body ?? ''}
         >
-          {summary || '无文本内容'}
+          {textSummary || (media === 'image' ? '图片素材(在线审核)' : '无文本内容')}
         </span>
         <ZoomInOutlined style={iconStyle} />
       </span>
     )
-  }
-
-  if (!previewUrl) {
-    return <span style={{ color: '#94A3B8' }}>无预览</span>
   }
 
   if (media === 'image') {
@@ -110,7 +107,7 @@ export default function ContentPreviewCell({ record, onPreview }: Props) {
         style={wrapperStyle}
       >
         <img
-          src={previewUrl}
+          src={previewUrl ?? undefined}
           alt="缩略图"
           style={{
             width: THUMB_SIZE,
@@ -123,6 +120,10 @@ export default function ContentPreviewCell({ record, onPreview }: Props) {
         <ZoomInOutlined style={iconStyle} />
       </span>
     )
+  }
+
+  if (!previewUrl) {
+    return <span style={{ color: '#94A3B8' }}>{fileLabelFor(record.mime_type)}</span>
   }
 
   if (media === 'audio') {

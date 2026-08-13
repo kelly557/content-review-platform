@@ -39,13 +39,37 @@ async def pick_default_text_model_id(db: AsyncSession) -> Optional[int]:
     return row.scalar_one_or_none()
 
 
+async def pick_default_multimodal_model_id(db: AsyncSession) -> Optional[int]:
+    """挑注册库里第一个 active 的多模态大模型 id (按 id 升序).
+
+    供图片/图文模态的智能体测试使用. 没有 active 多模态大模型时返回 None.
+    """
+    row = await db.execute(
+        select(RegisteredModel.id)
+        .where(
+            RegisteredModel.kind == "large",
+            RegisteredModel.large_category == "multimodal",
+            RegisteredModel.status == "active",
+            RegisteredModel.is_deleted.is_(False),
+        )
+        .order_by(RegisteredModel.id.asc())
+        .limit(1)
+    )
+    return row.scalar_one_or_none()
+
+
 async def resolve_llm_client(
-    db: AsyncSession, model_id: Optional[int]
+    db: AsyncSession,
+    model_id: Optional[int],
+    *,
+    prefer_multimodal: bool = False,
 ) -> Tuple[Optional[object], Optional[str], Optional[str]]:
     """根据 model_id 解析大模型 client.
 
     返回 (client, model_name, error):
-      - model_id 为空 → 挑注册库默认文本大模型; 都没有 → (None, None, error)
+      - model_id 为空 → 挑注册库默认大模型
+        (prefer_multimodal=True 时优先挑 multimodal, 否则挑 text);
+        都没有 → (None, None, error)
       - model_id 有值 → 加载 RegisteredModel → provider endpoint + credential 解密
         → MaaSClient 注入; 解析失败 → (None, None, error)
       - 成功 → (MaaSClient, model_name, None)
@@ -56,9 +80,14 @@ async def resolve_llm_client(
 
     # model_id 为空: 挑默认
     if not model_id:
-        model_id = await pick_default_text_model_id(db)
-        if not model_id:
-            return None, None, "未配置可用的大模型 (注册库无 active 文本大模型)"
+        if prefer_multimodal:
+            model_id = await pick_default_multimodal_model_id(db)
+            if not model_id:
+                return None, None, "未配置可用的多模态大模型 (注册库无 active multimodal 大模型)"
+        else:
+            model_id = await pick_default_text_model_id(db)
+            if not model_id:
+                return None, None, "未配置可用的大模型 (注册库无 active 文本大模型)"
 
     try:
         stmt = (

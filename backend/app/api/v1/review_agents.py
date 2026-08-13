@@ -275,7 +275,9 @@ async def test_agent(
             rawOutput=json.dumps(raw, ensure_ascii=False, indent=2),
         )
 
-    client, model_name, resolve_err = await resolve_llm_client(db, model_id)
+    client, model_name, resolve_err = await resolve_llm_client(
+        db, model_id, prefer_multimodal=is_image,
+    )
     if not client:
         raw["error"] = resolve_err or "大模型客户端未就绪"
         for p in body.points:
