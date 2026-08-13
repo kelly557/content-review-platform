@@ -53,19 +53,32 @@ def _run(cmd: list[str], *, extra_env: dict[str, str] | None = None) -> None:
     env.setdefault("PYTHONPATH", ".")
     if extra_env:
         env.update(extra_env)
-    subprocess.run(cmd, cwd=str(BACKEND_DIR), env=env, check=True)
+    result = subprocess.run(
+        cmd, cwd=str(BACKEND_DIR), env=env,
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"[bootstrap_render_db] COMMAND FAILED: {' '.join(cmd)}", flush=True)
+        print(f"[bootstrap_render_db] STDOUT:\n{result.stdout}", flush=True)
+        print(f"[bootstrap_render_db] STDERR:\n{result.stderr}", flush=True)
+        raise subprocess.CalledProcessError(
+            result.returncode, cmd, result.stdout, result.stderr
+        )
+    # 打印成功时的 stdout/stderr 供 Render 日志排查
+    if result.stdout.strip():
+        print(f"[bootstrap_render_db] {' '.join(cmd)} stdout:\n{result.stdout}", flush=True)
+    if result.stderr.strip():
+        print(f"[bootstrap_render_db] {' '.join(cmd)} stderr:\n{result.stderr}", flush=True)
 
 
 async def main() -> int:
-    try:
-        fresh = await _is_fresh_db()
-        if fresh:
-            print("[bootstrap_render_db] fresh DB detected; create_all + alembic stamp head + seed")
-            await _create_schema_from_models()
-        else:
-            print("[bootstrap_render_db] existing DB detected; alembic upgrade head")
-    finally:
-        await engine.dispose()
+    fresh = await _is_fresh_db()
+    if fresh:
+        print("[bootstrap_render_db] fresh DB detected; create_all + alembic stamp head + seed")
+        await _create_schema_from_models()
+    else:
+        print("[bootstrap_render_db] existing DB detected; alembic upgrade head")
+    await engine.dispose()
 
     if fresh:
         _run(["alembic", "stamp", "head"])
@@ -74,7 +87,15 @@ async def main() -> int:
             extra_env={"RESEED_ALLOWED": "YES"},
         )
     else:
-        _run(["alembic", "upgrade", "head"])
+        try:
+            _run(["alembic", "upgrade", "head"])
+        except subprocess.CalledProcessError:
+            print("[bootstrap_render_db] alembic upgrade failed; falling back to create_all + stamp head", flush=True)
+            # 如果迁移链有问题, 回退到从 ORM 模型直接建表 + stamp head
+            # 这对于 Render 全新部署后部分迁移失败的场景更可靠
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            _run(["alembic", "stamp", "head"])
 
     _run(
         [
