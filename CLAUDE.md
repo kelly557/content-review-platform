@@ -13,9 +13,10 @@
 ## 端口 & 进程
 
 - 前端 dev 端口：**5473**（5173 被其他项目占用；5273 曾用，2026-08-07 起改为 5473）
-- 后端 dev 端口：**9000**（8000 曾用，2026-08-07 起改为 9000）
-- 运行 PID 写在 `/tmp/adreview-*.pid`，日志 `/tmp/adreview-*.log`
+- 后端 dev 端口：**9001**（9000 被 `test/adreview-platform` 仓库占用，两个仓库同机并行会端口冲突 + JWT_SECRET/token key 不同导致互相登录失败；2026-08-13 起本仓库改用 9001）
+- 运行 PID 写在 `/tmp/adreview-csr-*.pid`，日志 `/tmp/adreview-csr-*.log`（避免与另一仓库的 `/tmp/adreview-*.pid` 混淆）
 - 虚拟环境：`backend/.venv`
+- 数据库：`adreview_csr`（另一仓库用 `adreview`，互不影响）
 
 ## 数据库重建
 
