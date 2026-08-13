@@ -1,4 +1,5 @@
 import { ZoomInOutlined } from '@ant-design/icons'
+import { useState } from 'react'
 import type { MachineReviewRecord } from '@/types/domain'
 
 const TEXT_PREVIEW_LIMIT = 64
@@ -51,6 +52,7 @@ const iconStyle: React.CSSProperties = {
 export default function ContentPreviewCell({ record, onPreview }: Props) {
   const media = record.content_media
   const previewUrl = record.preview_url
+  const [imgFailed, setImgFailed] = useState(false)
 
   if (!media) {
     return <span style={{ color: '#94A3B8' }}>—</span>
@@ -58,9 +60,9 @@ export default function ContentPreviewCell({ record, onPreview }: Props) {
 
   const handleClick = () => onPreview(record)
 
-  // 文本素材, 或图片素材无预览时回退到文本展示
+  // 文本素材, 或图片素材无预览/图片加载失败时回退到文本展示
   const textSummary = summarizeText(record.text_body)
-  if (media === 'text' || (media === 'image' && !previewUrl)) {
+  if (media === 'text' || (media === 'image' && (!previewUrl || imgFailed))) {
     return (
       <span
         role="button"
@@ -109,6 +111,7 @@ export default function ContentPreviewCell({ record, onPreview }: Props) {
         <img
           src={previewUrl ?? undefined}
           alt="缩略图"
+          onError={() => setImgFailed(true)}
           style={{
             width: THUMB_SIZE,
             height: THUMB_SIZE,

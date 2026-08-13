@@ -411,6 +411,17 @@ async def _run_image_llm_detection(
                 None,
             )
 
+    # 多模态图片审核耗时较长 (LLM 需 OCR + 推理), 用更长超时重建 client
+    from app.services.llm import MaaSClient
+
+    old_client = client
+    client = MaaSClient(
+        base_url=getattr(old_client, "_base_url", None),
+        api_key=getattr(old_client, "_api_key", None),
+        model=getattr(old_client, "_model", None),
+        timeout=180,  # 图片多模态审核 180s (默认 60s 不够)
+    )
+
     # 构造多模态 prompt (审核维度 + 图片)
     # 策略无 image 审核点时, 注入通用内容合规审核维度, 确保 LLM 有判断依据
     DEFAULT_IMAGE_POINTS = [
@@ -430,12 +441,15 @@ async def _run_image_llm_detection(
         "你是内容合规审核引擎, 基于中国《网络安全法》《广告法》等法规, 严格判断输入图片是否违规。"
         "重点识别: 涉政(国家领导人/政治敏感人物/政治标语)、暴恐、色情、违法标识等高风险内容。"
         "画面中出现政治人物肖像、国家领导人形象、政治标语、反动言论均判为高风险违规。"
+        "请先仔细观察并描述图片内容(含可见文字、人物、场景), 再逐条核对审核维度判断。"
         "输出必须是严格 JSON, 严禁复述违规原文。"
     )
     user_text = (
         f"审核维度:\n{points_block}\n\n"
-        "请逐条核对每个维度, 判断图片是否违规。"
-        "请输出 JSON: {\"hit_points\":[{\"label\":\"对应维度label\","
+        "请按以下步骤审核:\n"
+        "1. 先描述图片内容(画面、文字、人物等)\n"
+        "2. 逐条核对每个审核维度, 判断图片是否违规\n"
+        "请输出 JSON: {\"description\":\"图片内容描述\",\"hit_points\":[{\"label\":\"对应维度label\","
         "\"risk\":\"高风险|中风险|低风险\",\"evidence\":\"画面中的违规元素描述\"}],"
         "\"summary\":\"类别化摘要\"}\n"
         "命中任一维度即输出 hit_points; 未命中则 hit_points=[]。直接以 { 开头。"

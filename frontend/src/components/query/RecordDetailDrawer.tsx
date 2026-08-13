@@ -1,5 +1,6 @@
 import { Button, Drawer, Empty, Space, Tag, message } from 'antd'
 import { CopyOutlined } from '@ant-design/icons'
+import { useState } from 'react'
 import type { MachineHit, MachineReviewRecord, ReviewRecord } from '@/types/domain'
 import { MACHINE_DECISION_OPTIONS } from '@/types/domain'
 
@@ -48,8 +49,32 @@ function FilePreview({ record }: { record: DetailRecord }) {
   const r = record as MachineReviewRecord
   const media = r.content_media
   const url = previewUrlFor(record)
+  const [imgFailed, setImgFailed] = useState(false)
 
   if (!media) return <Empty description="无素材信息" />
+
+  // 图片素材但无有效预览 URL 或加载失败 → 回退到文本展示
+  if (media === 'image' && (!url || imgFailed)) {
+    const body = (r.text_body ?? '').trim()
+    return (
+      <div
+        style={{
+          padding: 16,
+          background: '#F8FAFC',
+          border: '1px solid #E2E8F0',
+          borderRadius: 6,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          maxHeight: '70vh',
+          overflowY: 'auto',
+          fontSize: 14,
+          lineHeight: 1.7,
+        }}
+      >
+        {body || '图片素材（在线审核，无预览）'}
+      </div>
+    )
+  }
 
   if (media === 'text') {
     const body = (r.text_body ?? '').trim()
@@ -82,6 +107,7 @@ function FilePreview({ record }: { record: DetailRecord }) {
         <img
           src={url}
           alt="素材"
+          onError={() => setImgFailed(true)}
           style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain', borderRadius: 4 }}
         />
       </div>
