@@ -501,6 +501,29 @@ async def _run_image_llm_detection(
             })
         return hits, model_name, None, correlation_id
     except Exception as exc:
+        err_msg = str(exc)
+        # 网关输入图片内容审查拦截 (data_inspection_failed): 说明图片本身含违规内容
+        # → 转成高风险命中, 而非降级为合规
+        if "data_inspection_failed" in err_msg or "Input image data may contain inappropriate" in err_msg:
+            log.info(
+                "online-review image blocked by gateway input inspection corr=%s (treated as hit)",
+                correlation_id,
+            )
+            gateway_hit = {
+                "service_code": "llm",
+                "service_name": "内容安全网关",
+                "label": "gateway_blocked",
+                "label_cn": "涉政/违规内容(网关拦截)",
+                "score": 1.0,
+                "quote": "图片被内容安全网关判定为含不当内容, 已拦截",
+                "bbox": None,
+                "page": None,
+                "timestamp_ms": None,
+                "sensitive_grade": "S3",
+                "risk": RiskLevel.HIGH.value,
+                "source": "llm",
+            }
+            return [gateway_hit], model_name, None, correlation_id
         log.warning(
             "online-review image llm detection failed corr=%s: %s", correlation_id, exc
         )
