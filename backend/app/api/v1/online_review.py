@@ -512,9 +512,8 @@ async def _run_image_llm_detection(
                 continue
             label = (hp.get("label") or "").strip()
             evidence = hp.get("evidence") or ""
-            # 图文文字命中: evidence 含"图片中文字"时, label_cn 加"图文:"前缀
-            is_text_hit = "图片中文字" in evidence or "文字" in evidence and has_text_audit
-            display_label = f"图文:{label}" if is_text_hit and label else (label or "图片违规")
+            # 图文文字命中: evidence 含"图片中文字"时, label_cn 不加前缀(级联由 audit_item/point 补全)
+            display_label = label or "图片违规"
             hits.append({
                 "service_code": "llm",
                 "service_name": "多模态大模型",
@@ -740,9 +739,6 @@ async def _enrich_hits_with_label_path(db: AsyncSession, hits: List[Dict[str, An
         # 智能体命中的 label_cn 是 "智能体名/标签" 格式, 取 / 后面的标签部分
         if "/" in lbl:
             lbl = lbl.rsplit("/", 1)[-1].strip()
-        # 图文命中的 label_cn 是 "图文:标签" 格式, 去掉 "图文:" 前缀
-        if lbl.startswith("图文:"):
-            lbl = lbl[3:].strip()
         if lbl:
             labels_to_find[lbl] = None
     if not labels_to_find:
@@ -785,8 +781,6 @@ async def _enrich_hits_with_label_path(db: AsyncSession, hits: List[Dict[str, An
         lbl = (h.get("label_cn") or h.get("label") or "").strip()
         if "/" in lbl:
             lbl = lbl.rsplit("/", 1)[-1].strip()
-        if lbl.startswith("图文:"):
-            lbl = lbl[3:].strip()
         ap = ap_map.get(lbl)
         if not ap:
             continue
