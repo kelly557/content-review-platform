@@ -40,7 +40,8 @@ export const tokenStore = {
 
 export const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30_000,
+  // 大模型审核/文档解析等调用可达 30-60s, 30s 太短会误判超时.
+  timeout: 120_000,
 })
 
 api.interceptors.request.use((config) => {

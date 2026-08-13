@@ -105,10 +105,13 @@ export async function runParseDoc(
       points: data.points ?? [],
     }
   } catch (e) {
-    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+    const err = e as { response?: { data?: { detail?: string } }; code?: string; message?: string }
+    const detail = err?.response?.data?.detail
+    // 超时 (大模型推理较慢) 给明确提示, 避免笼统的"解析失败"
+    const isTimeout = err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message ?? '')
     return {
       status: 'failed',
-      message: detail ?? '解析失败，请稍后重试',
+      message: detail ?? (isTimeout ? '解析超时，大模型响应较慢，请稍后重试或缩短文档' : '解析失败，请稍后重试'),
       durationMs: Date.now() - startedAt,
     }
   }
