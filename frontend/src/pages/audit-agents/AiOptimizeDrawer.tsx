@@ -47,7 +47,6 @@ interface AiOptimizeDrawerProps {
   open: boolean
   onClose: () => void
   onAddConfig: (cfg: { label: string; desc: string }) => void
-  onAddPoints?: (points: { label: string; desc: string }[]) => void
   initialOriginal?: string
   rowsCount: number
 }
@@ -84,7 +83,6 @@ export default function AiOptimizeDrawer({
   open,
   onClose,
   onAddConfig,
-  onAddPoints,
   initialOriginal,
   rowsCount,
 }: AiOptimizeDrawerProps) {
@@ -226,10 +224,6 @@ export default function AiOptimizeDrawer({
   }
 
   const handleOptimize = async () => {
-    if (!direction.trim()) {
-      message.warning('请填写「补充优化方向」')
-      return
-    }
     setGenerating(true)
     const successDocs = documents.filter((d) => d.status === 'success')
     const docsContext = successDocs
@@ -336,7 +330,8 @@ export default function AiOptimizeDrawer({
 
         <div style={{ marginBottom: 16 }}>
           <div style={{ marginBottom: 6 }}>
-            <Text type="danger">*</Text> <Text strong>补充优化方向(必填)</Text>
+            <Text strong>补充优化方向</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>（选填）</Text>
           </div>
           <TextArea
             value={direction}
@@ -388,7 +383,6 @@ export default function AiOptimizeDrawer({
                       onRemove={handleRemoveDoc}
                       onDownload={handleDownloadDoc}
                       onView={(doc) => setViewingDoc(doc)}
-                      onAddPoints={onAddPoints}
                     />
                   ) : (
                     <TextArea
@@ -521,6 +515,37 @@ export default function AiOptimizeDrawer({
                 { title: '审核描述', dataIndex: 'desc' },
               ]}
             />
+          </div>
+        )}
+
+        {documents.filter((d) => d.status === 'success' && d.points && d.points.length > 0).length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <Card
+              size="small"
+              title={<Text strong>AI 解析审核点</Text>}
+              styles={{ body: { padding: 16 } }}
+            >
+              {documents
+                .filter((d) => d.status === 'success' && d.points && d.points.length > 0)
+                .map((doc) => (
+                  <div key={doc.id} style={{ marginBottom: 16 }}>
+                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+                      {doc.name}（{doc.points?.length ?? 0} 条）
+                    </Text>
+                    <Table
+                      size="small"
+                      pagination={false}
+                      rowKey={(r, i) => `${doc.id}-${r.label}-${i}`}
+                      dataSource={doc.points ?? []}
+                      columns={[
+                        { title: '审核标签', dataIndex: 'label', width: '30%' },
+                        { title: '审核描述', dataIndex: 'desc' },
+                      ]}
+                      scroll={{ y: 200 }}
+                    />
+                  </div>
+                ))}
+            </Card>
           </div>
         )}
       </div>

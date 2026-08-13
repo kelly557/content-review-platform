@@ -1,4 +1,4 @@
-import { Button, Popconfirm, Progress, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd'
+import { Button, Popconfirm, Progress, Space, Tag, Tooltip, Typography, Upload } from 'antd'
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -7,7 +7,6 @@ import {
   EyeOutlined,
   InboxOutlined,
   LoadingOutlined,
-  PlusOutlined,
   RedoOutlined,
 } from '@ant-design/icons'
 import {
@@ -36,8 +35,6 @@ interface AgentParsePanelProps {
   onRemove: (docId: string) => void
   onDownload: (doc: AgentParseDocument) => void
   onView: (doc: AgentParseDocument) => void
-  /** 把解析出的审核点批量加入配置表 (可选) */
-  onAddPoints?: (points: { label: string; desc: string }[]) => void
 }
 
 export default function AgentParsePanel({
@@ -47,7 +44,6 @@ export default function AgentParsePanel({
   onRemove,
   onDownload,
   onView,
-  onAddPoints,
 }: AgentParsePanelProps) {
   const stats = {
     success: documents.filter((d) => d.status === 'success').length,
@@ -199,44 +195,6 @@ export default function AgentParsePanel({
                     )}
                   </Space>
                 </Space>
-
-                {doc.status === 'success' && doc.points && doc.points.length > 0 && (
-                  <div style={{ marginTop: 10 }}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: 6,
-                      }}
-                    >
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        AI 解析审核点（{doc.points.length} 条）
-                      </Text>
-                      {onAddPoints && (
-                        <Button
-                          size="small"
-                          type="link"
-                          icon={<PlusOutlined />}
-                          onClick={() => onAddPoints(doc.points ?? [])}
-                        >
-                          全部加入配置
-                        </Button>
-                      )}
-                    </div>
-                    <Table
-                      size="small"
-                      pagination={false}
-                      rowKey={(r, i) => `${r.label}-${i}`}
-                      dataSource={doc.points}
-                      columns={[
-                        { title: '审核标签', dataIndex: 'label', width: '30%' },
-                        { title: '审核描述', dataIndex: 'desc' },
-                      ]}
-                      scroll={{ y: 200 }}
-                    />
-                  </div>
-                )}
               </div>
             ))}
           </div>
