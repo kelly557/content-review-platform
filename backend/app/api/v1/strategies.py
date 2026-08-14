@@ -585,12 +585,16 @@ async def _replace_enabled_points(
 
 
 async def _next_code(db: AsyncSession) -> str:
-    """Generate next sequential business code like '2016976'."""
-    result = await db.execute(select(func.max(Strategy.code)))
-    max_code = result.scalar_one_or_none()
-    if not max_code or not max_code.isdigit():
-        return "2000001"
-    return str(int(max_code) + 1)
+    """Generate next sequential business code like '11', '12', ...
+
+    Takes the max numeric code across all strategies (ignoring non-numeric
+    codes like 'DEFAULT') and increments by 1.
+    """
+    rows = await db.execute(select(Strategy.code))
+    codes = [r[0] for r in rows.all() if r[0] and r[0].isdigit()]
+    if not codes:
+        return "1"
+    return str(max(int(c) for c in codes) + 1)
 
 
 @router.get("", response_model=Page[StrategyOut])
@@ -751,7 +755,16 @@ async def create_strategy(
             },
         },
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        if "duplicate key" in str(exc).lower() and "code" in str(exc).lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"策略 code '{code}' 已存在，请更换",
+            ) from exc
+        raise
     return await _serialize_strategy(db, strategy)
 
 
