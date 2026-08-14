@@ -815,8 +815,12 @@ _PLACEHOLDER_TEMPLATE_CODE = "auto_only"
 async def _enrich_hits_with_reply(db: AsyncSession, hits: List[Dict[str, Any]]) -> None:
     """根据命中的审核点/审核项, 查关联的代答库, 给 hit 补上 reply (代答答案).
 
-    代答库通过 audit_point_libraries / audit_item_libraries 关联到审核点/项.
-    命中后取关联代答库的第一条 reply 作为代答答案.
+    规则:
+    1. 代答库必须通过 audit_point_libraries / audit_item_libraries 关联到命中的
+       审核点/项, 才会返回代答. 没关联就不返回 (不做"查所有代答库"兜底).
+    2. 如果代答库绑定了标签 (library_tags), 只有命中的标签与代答库的标签匹配
+       时才返回代答. 匹配规则: hit 的标签路径 (一级/二级/三级) 包含代答库
+       绑定的标签名. 代答库没绑定标签则不做标签过滤.
     """
     if not hits:
         return
@@ -824,8 +828,12 @@ async def _enrich_hits_with_reply(db: AsyncSession, hits: List[Dict[str, Any]]) 
     from app.models.audit_item_library import AuditItemLibrary
     from app.models.library import Library, LibraryType
     from app.models.library_item import LibraryItem
+    from app.models.library_tag import LibraryTag
+    from app.models.tag import Tag
+    from app.models.audit_point import AuditPoint
+    from app.models.audit_item import AuditItem
 
-    # 收集命中的审核点 id 和审核项 id
+    # ── 1. 收集命中的审核点 id 和审核项 id ──
     point_ids: set[int] = set()
     item_ids: set[int] = set()
     for h in hits:
@@ -837,9 +845,6 @@ async def _enrich_hits_with_reply(db: AsyncSession, hits: List[Dict[str, Any]]) 
             item_ids.add(iid)
 
     # 通过 audit_point_code 反查 point_id
-    from app.models.audit_point import AuditPoint
-    from app.models.audit_item import AuditItem
-
     codes = {h.get("audit_point_code") for h in hits if h.get("audit_point_code")}
     if codes:
         code_rows = await db.execute(
@@ -863,39 +868,11 @@ async def _enrich_hits_with_reply(db: AsyncSession, hits: List[Dict[str, Any]]) 
         )
         item_ids.update(r[0] for r in il_rows.all())
 
+    # 没有任何审核点/项关联 → 不返回代答 (策略没关联代答库)
     if not point_ids and not item_ids:
-        # 没有审核点关联信息时, 查所有 active 代答库 (兜底)
-        all_reply_libs = await db.execute(
-            select(Library.id).where(
-                Library.library_type == LibraryType.REPLY.value,
-                Library.is_active.is_(True),
-                Library.is_deleted.is_(False),
-            )
-        )
-        reply_lib_ids = {r[0] for r in all_reply_libs.all()}
-        if not reply_lib_ids:
-            return
-        item_rows = await db.execute(
-            select(LibraryItem.library_id, LibraryItem.reply)
-            .where(
-                LibraryItem.library_id.in_(list(reply_lib_ids)),
-                LibraryItem.is_deleted.is_(False),
-                LibraryItem.reply.isnot(None),
-            )
-            .order_by(LibraryItem.library_id, LibraryItem.id)
-        )
-        first_reply = None
-        for _lib_id, reply in item_rows.all():
-            if reply:
-                first_reply = reply
-                break
-        if first_reply:
-            for h in hits:
-                if not h.get("reply"):
-                    h["reply"] = first_reply
         return
 
-    # 查关联的代答库 id
+    # ── 2. 查关联的代答库 id (只从审核点/项关联的库里找, 不兜底) ──
     reply_lib_ids: set[int] = set()
     if point_ids:
         rows = await db.execute(
@@ -913,17 +890,9 @@ async def _enrich_hits_with_reply(db: AsyncSession, hits: List[Dict[str, Any]]) 
         reply_lib_ids.update(r[0] for r in rows.all())
 
     if not reply_lib_ids:
-        # 审核点关联的库里没有代答库 → 兜底: 查所有 active 代答库
-        all_reply_libs = await db.execute(
-            select(Library.id).where(
-                Library.library_type == LibraryType.REPLY.value,
-                Library.is_active.is_(True),
-                Library.is_deleted.is_(False),
-            )
-        )
-        reply_lib_ids = {r[0] for r in all_reply_libs.all()}
+        return
 
-    # 过滤出代答库
+    # 过滤出 active 代答库
     lib_rows = await db.execute(
         select(Library.id).where(
             Library.id.in_(list(reply_lib_ids)),
@@ -936,7 +905,7 @@ async def _enrich_hits_with_reply(db: AsyncSession, hits: List[Dict[str, Any]]) 
     if not reply_lib_ids:
         return
 
-    # 取每个代答库的第一条 reply
+    # ── 3. 取每个代答库的第一条 reply ──
     item_rows = await db.execute(
         select(LibraryItem.library_id, LibraryItem.reply)
         .where(
@@ -950,46 +919,58 @@ async def _enrich_hits_with_reply(db: AsyncSession, hits: List[Dict[str, Any]]) 
     for lib_id, reply in item_rows.all():
         if lib_id not in lib_reply and reply:
             lib_reply[lib_id] = reply
-
     if not lib_reply:
         return
 
-    # 回填每个 hit (取第一个匹配的代答库的 reply)
-    # 如果 hit 没有关联审核点/项, 直接用第一个代答库的 reply
-    first_reply = next(iter(lib_reply.values()), None)
+    # ── 4. 查每个代答库的标签绑定 ──
+    lt_rows = await db.execute(
+        select(LibraryTag.library_id, LibraryTag.tag_id).where(
+            LibraryTag.library_id.in_(list(reply_lib_ids))
+        )
+    )
+    lib_tag_ids: dict[int, list[str]] = {}  # lib_id → [tag_name, ...]
+    tag_ids_to_fetch: set[str] = set()
+    for lib_id, tag_id in lt_rows.all():
+        lib_tag_ids.setdefault(lib_id, []).append(tag_id)
+        tag_ids_to_fetch.add(tag_id)
+
+    # 批量取标签名
+    tag_name_map: dict[str, str] = {}  # tag_id → tag_name
+    if tag_ids_to_fetch:
+        tag_rows = await db.execute(
+            select(Tag.id, Tag.name).where(Tag.id.in_(list(tag_ids_to_fetch)))
+        )
+        tag_name_map = {row[0]: row[1] for row in tag_rows.all()}
+
+    # ── 5. 回填每个 hit: 按标签匹配选代答库 ──
     for h in hits:
         if h.get("reply"):
             continue
-        pid = h.get("audit_point_id")
-        iid = h.get("audit_item_id")
-        if not pid and not iid:
-            # 没有关联信息 → 直接用第一个代答
-            if first_reply:
-                h["reply"] = first_reply
-            continue
-        # 查该 hit 的审核点/项关联的代答库
-        matched_lib_ids: set[int] = set()
-        if pid:
-            rows = await db.execute(
-                select(AuditPointLibrary.library_id).where(
-                    AuditPointLibrary.audit_point_id == pid
-                )
-            )
-            matched_lib_ids.update(r[0] for r in rows.all())
-        if iid:
-            rows = await db.execute(
-                select(AuditItemLibrary.library_id).where(
-                    AuditItemLibrary.audit_item_id == iid
-                )
-            )
-            matched_lib_ids.update(r[0] for r in rows.all())
-        for lid in matched_lib_ids:
-            if lid in lib_reply:
-                h["reply"] = lib_reply[lid]
+        # 收集 hit 的标签路径 (一级/二级/三级)
+        hit_labels: set[str] = set()
+        for key in ("audit_item_label", "audit_point_label", "label_cn"):
+            v = h.get(key)
+            if v and isinstance(v, str):
+                # 智能体标签 "智能体名/标签" 取后半
+                if "/" in v:
+                    v = v.rsplit("/", 1)[-1].strip()
+                hit_labels.add(v)
+
+        for lib_id, reply in lib_reply.items():
+            bound_tag_names = [
+                tag_name_map.get(tid, "")
+                for tid in lib_tag_ids.get(lib_id, [])
+            ]
+            bound_tag_names = [t for t in bound_tag_names if t]
+
+            if not bound_tag_names:
+                # 代答库没绑标签 → 直接匹配
+                h["reply"] = reply
                 break
-        # 如果没匹配到, 也用第一个代答兜底
-        if not h.get("reply") and first_reply:
-            h["reply"] = first_reply
+            # 代答库绑了标签 → hit 的标签路径需包含代答库的标签名
+            if any(tn in hit_labels for tn in bound_tag_names):
+                h["reply"] = reply
+                break
 
 
 async def _persist_to_review_task(
