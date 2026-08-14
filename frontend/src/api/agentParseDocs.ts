@@ -100,6 +100,28 @@ async function _hashFile(file: File): Promise<string> {
 }
 
 /**
+ * 模拟进度条: 在 durationMs 内从 0 平滑递增到 100。
+ * 用于缓存命中场景 (后端无需调用, 但用户仍需看到解析过程)。
+ */
+function _simulateProgress(opts: RunParseOptions, durationMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const stepMs = 200
+    const steps = Math.max(1, Math.round(durationMs / stepMs))
+    let current = 0
+    const timer = setInterval(() => {
+      current += 1
+      const pct = Math.min(100, Math.round((current / steps) * 100))
+      opts.onProgress?.(pct)
+      if (current >= steps) {
+        clearInterval(timer)
+        opts.onProgress?.(100)
+        resolve()
+      }
+    }, stepMs)
+  })
+}
+
+/**
  * 调用后端文档解析端点，返回解析出的文本预览与审核点。
  * 同一文件内容 (SHA-256 相同) 会命中会话缓存, 不重复调 LLM。
  * onProgress 仅在开始/结束回调（后端一次性返回，无中间进度）。
@@ -112,11 +134,12 @@ export async function runParseDoc(
   opts.onProgress?.(0)
 
   // 1) 命中缓存: 同文件内容直接返回, 不调后端
+  //    但仍走一段快速进度模拟 (~1.5s), 让用户看到解析过程
   try {
     const hash = await _hashFile(doc.file)
     const cached = _parseCache.get(hash)
     if (cached) {
-      opts.onProgress?.(100)
+      await _simulateProgress(opts, 1500)
       return {
         status: 'success',
         preview: cached.preview,
