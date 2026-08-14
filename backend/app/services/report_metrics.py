@@ -1620,12 +1620,16 @@ async def top_risk_labels(
         ),
     )[:limit]
 
+    # 计算总命中数 (用于百分比)
+    total_hits = sum(d["count"] for _, d in ranked)
+
     items: List[dict] = [
         {
             "label": label,
             "count": data["count"],
             "risk_level": data["latest_risk_level"],
             "last_hit_at": data["last_hit_at"],
+            "percentage": round((data["count"] / total_hits * 100), 2) if total_hits > 0 else 0.0,
         }
         for label, data in ranked
     ]

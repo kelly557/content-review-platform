@@ -104,6 +104,7 @@ class TopRiskLabelItem(BaseModel):
     count: int = 0
     risk_level: str  # most recent risk_level observed for this label in window
     last_hit_at: datetime
+    percentage: float = 0.0  # count / total_hits * 100
 
 
 class TopRiskLabelsResponse(BaseModel):
