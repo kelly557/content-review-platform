@@ -79,8 +79,8 @@ interface LargeModelOption {
 const DEFAULT_ROWS: AgentPromptRow[] = [
   {
     id: 'row-1',
-    label: '医药专项',
-    desc: 'OTC药物发布需要绑定claims和evidence',
+    label: '',
+    desc: '',
   },
 ]
 
@@ -576,7 +576,7 @@ function FragmentRow({
           value={draft.label}
           onChange={(e) => setDraft({ ...draft, label: e.target.value })}
           maxLength={LABEL_MAX}
-          placeholder="请输入审核标签"
+          placeholder="如：品牌恶意差评"
         />
       </div>
       <div style={{ marginBottom: 12 }}>
@@ -585,7 +585,7 @@ function FragmentRow({
           value={draft.desc}
           onChange={(e) => setDraft({ ...draft, desc: e.target.value })}
           maxLength={DESC_MAX}
-          placeholder="请输入审核描述"
+          placeholder="如：针对xx品牌的无依据恶意拉踩、不实负面差评，或针对品牌创始人的虚假诋毁、造谣等刻意损害品牌或创始人形象的评论或表述。"
           autoSize={{ minRows: 4, maxRows: 8 }}
         />
       </div>
@@ -606,7 +606,7 @@ function FragmentRow({
         <TextArea
           value={row.label}
           onChange={(e) => onChange({ label: e.target.value })}
-          placeholder="请输入审核标签"
+          placeholder="如：品牌恶意差评"
           maxLength={LABEL_MAX}
           showCount
           autoSize={{ minRows: ROW_TEXT_AREA_ROWS, maxRows: ROW_TEXT_AREA_ROWS }}
@@ -617,7 +617,7 @@ function FragmentRow({
         <TextArea
           value={row.desc}
           onChange={(e) => onChange({ desc: e.target.value })}
-          placeholder="请输入审核描述"
+          placeholder="如：针对xx品牌的无依据恶意拉踩、不实负面差评，或针对品牌创始人的虚假诋毁、造谣等刻意损害品牌或创始人形象的评论或表述。"
           maxLength={DESC_MAX}
           showCount
           autoSize={{ minRows: ROW_TEXT_AREA_ROWS, maxRows: ROW_TEXT_AREA_ROWS }}
