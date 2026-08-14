@@ -109,7 +109,7 @@ export async function runParseDoc(
   opts: RunParseOptions = {},
 ): Promise<Pick<AgentParseDocument, 'status' | 'preview' | 'charCount' | 'durationMs' | 'message' | 'points'>> {
   const startedAt = Date.now()
-  opts.onProgress?.(30)
+  opts.onProgress?.(0)
 
   // 1) 命中缓存: 同文件内容直接返回, 不调后端
   try {
@@ -129,13 +129,20 @@ export async function runParseDoc(
     // hash 失败 (如 crypto 不可用) 降级为正常请求
   }
 
-  // 2) 未命中: 调后端解析
+  // 2) 未命中: 调后端解析, 同时模拟进度条递增 (上限 90%, 留 10% 给最终返回)
+  let simulatedProgress = 0
+  const progressTimer = setInterval(() => {
+    simulatedProgress = Math.min(90, simulatedProgress + Math.random() * 6 + 2)
+    opts.onProgress?.(Math.round(simulatedProgress))
+  }, 500)
+
   const fd = new FormData()
   fd.append('file', doc.file)
   try {
     const { data } = await api.post<ParseDocApiResponse>('/review-agents/parse-doc', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
+    clearInterval(progressTimer)
     opts.onProgress?.(100)
     const result = {
       status: 'success' as const,
@@ -157,6 +164,7 @@ export async function runParseDoc(
     }
     return result
   } catch (e) {
+    clearInterval(progressTimer)
     const err = e as { response?: { data?: { detail?: string } }; code?: string; message?: string }
     const detail = err?.response?.data?.detail
     // 超时 (大模型推理较慢) 给明确提示, 避免笼统的"解析失败"
